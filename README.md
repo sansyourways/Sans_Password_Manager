@@ -1,3 +1,5 @@
+![IMG_1113](https://github.com/user-attachments/assets/3108e84d-a612-49fc-945e-dd38c35e19ae)
+
 # Sans Password Manager (SPM)
 
 > Portable, terminal-based password manager in pure Bash + GPG,  
