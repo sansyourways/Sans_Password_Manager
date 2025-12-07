@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Sans Password Manager (SPM)
 
 > Portable, terminal-based password manager in pure Bash + GPG,  
