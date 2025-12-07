@@ -125,7 +125,7 @@ print_banner() {
 EOF
 	local year
 	year="$(date +%Y 2>/dev/null || echo "2025")"
-	printf "Sans Password Manager (SPM)  v%s  \u00a9 %s SansYourWays. All rights reserved.\n\n" "$VERSION" "$year"
+	printf "Sans Password Manager (SPM)  v%s  \u00a9 %s Sansyourways. All rights reserved.\n\n" "$VERSION" "$year"
 }
 
 pause_menu() {
