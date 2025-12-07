@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.0.0"
+VERSION="2.1.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -1874,82 +1874,2169 @@ cmd_doctor() {
 	fi
 }
 
-# ----- Help ------------------------------------------------------------------
+configure_firewall_for_web() {
+	local bind_addr="$1"
+	local bind_port="$2"
 
-cmd_help() {
-	print_banner
+	# Only care if binding to non-local address
+	if [ "$bind_addr" = "127.0.0.1" ] || [ "$bind_addr" = "localhost" ]; then
+		return 0
+	fi
+	[ -z "$bind_port" ] && return 0
 
-	if [ "$SPM_LANG" = "id" ]; then
-		cat <<EOF
-[ID] Panduan Singkat
-====================
-
-Sans Password Manager (SPM) v$VERSION
-
-Perintah utama:
-  ./spm.sh                 → Menu interaktif
-  ./spm.sh init            → Inisialisasi vault baru
-  ./spm.sh add             → Tambah entry password
-  ./spm.sh list            → List entry password
-  ./spm.sh get <id|pola>   → Lihat entry atau cari
-  ./spm.sh edit            → Edit vault mentah
-  ./spm.sh delete <id>     → Hapus entry password
-  ./spm.sh change-master   → Ganti kata sandi utama
-  ./spm.sh portable [nama] → Buat bundle portable
-  ./spm.sh save [nama]     → Buat SAVE bundle + hapus vault lokal
-  ./spm.sh update          → Cek update GitHub
-  ./spm.sh forgot          → Lupa kata sandi utama (pakai private key)
-  ./spm.sh doctor          → Health / integrity check
-  ./spm.sh help            → Bantuan
-
-Catatan Aman (Secure Notes):
-  ./spm.sh notes-add       → Tambah catatan aman
-  ./spm.sh notes-list      → List catatan aman
-  ./spm.sh notes-view <id> → Lihat isi catatan
-  ./spm.sh notes-delete <id>
-                           → Hapus catatan
-
-Format:
-  - Baris password: id<TAB>service<TAB>username<TAB>password<TAB>notes<TAB>created_at
-  - Baris note    : NOTE<TAB>note_id<TAB>title<TAB>base64_note<TAB>created_at<TAB>-
-  - Baris meta    : META_RECOVERY_PUBKEY...
-
-EOF
+	# Termux environment: usually behind NAT, no ufw/firewalld
+	# Use ${VAR-} so set -u doesn't explode if VAR is undefined
+	if [ -n "${TERMUX_VERSION-}" ] || printf '%s\n' "${PREFIX-}" | grep -qi 'termux'; then
+		if [ "$SPM_LANG" = "id" ]; then
+			echo
+			echo ">> Termux terdeteksi. Melewati konfigurasi firewall otomatis."
+			echo "   Pastikan jaringan kamu aman jika membuka port ${bind_port}/tcp."
+		else
+			echo
+			echo ">> Termux detected. Skipping automatic firewall configuration."
+			echo "   Ensure your network is safe if you expose port ${bind_port}/tcp."
+		fi
+		return 0
 	fi
 
-	cat <<EOF
-[EN] Quick Guide
-================
+	if [ "$SPM_LANG" = "id" ]; then
+		echo
+		echo ">> Mengatur firewall untuk port ${bind_port}/tcp (jika memungkinkan)..."
+	else
+		echo
+		echo ">> Configuring firewall for port ${bind_port}/tcp (if possible)..."
+	fi
 
-Main commands:
-  ./spm.sh                 → Interactive menu
-  ./spm.sh init            → Initialize a new vault
-  ./spm.sh add             → Add password entry
-  ./spm.sh list            → List password entries
-  ./spm.sh get <id|pattern>→ View entry or search
-  ./spm.sh edit            → Edit raw vault
-  ./spm.sh delete <id>     → Delete password entry
-  ./spm.sh change-master   → Change master password
-  ./spm.sh portable [name] → Create portable bundle
-  ./spm.sh save [name]     → Create SAVE bundle + wipe local vault
-  ./spm.sh update          → Check GitHub release
-  ./spm.sh forgot          → Forgot master password (use private key)
-  ./spm.sh doctor          → Health / integrity check
-  ./spm.sh help            → This help
+	_spm_try_install_pkg() {
+		local pkg="$1"
 
-Secure Notes:
-  ./spm.sh notes-add       → Add secure note
-  ./spm.sh notes-list      → List secure notes
-  ./spm.sh notes-view <id> → View note content
-  ./spm.sh notes-delete <id>
-                           → Delete secure note
+		if command -v apt-get >/dev/null 2>&1; then
+			sudo apt-get update -y >/dev/null 2>&1 && sudo apt-get install -y "$pkg" >/dev/null 2>&1
+			return $?
+		fi
+		if command -v dnf >/dev/null 2>&1; then
+			sudo dnf install -y "$pkg" >/dev/null 2>&1
+			return $?
+		fi
+		if command -v yum >/dev/null 2>&1; then
+			sudo yum install -y "$pkg" >/dev/null 2>&1
+			return $?
+		fi
+		if command -v pacman >/dev/null 2>&1; then
+			sudo pacman -Sy --noconfirm "$pkg" >/dev/null 2>&1
+			return $?
+		fi
+		if command -v zypper >/dev/null 2>&1; then
+			sudo zypper install -y "$pkg" >/dev/null 2>&1
+			return $?
+		fi
+		if command -v apk >/dev/null 2>&1; then
+			sudo apk add "$pkg" >/dev/null 2>&1
+			return $?
+		fi
+		return 1
+	}
 
-Clipboard:
-  - Auto-copy passwords and auto-clear clipboard (~15s).
-  - Shows "No clipboard helper available" / "Tidak ada helper clipboard tersedia"
-    when helper is missing (including from interactive menu).
+	# 1) ufw path
+	if ! command -v ufw >/dev/null 2>&1; then
+		if [ "$SPM_LANG" = "id" ]; then
+			echo "   - ufw tidak ditemukan. Mencoba menginstal ufw..."
+		else
+			echo "   - ufw not found. Trying to install ufw..."
+		fi
+		if _spm_try_install_pkg ufw; then
+			if [ "$SPM_LANG" = "id" ]; then
+				echo "   ✓ ufw berhasil diinstal."
+			else
+				echo "   ✓ ufw installed successfully."
+			fi
+		else
+			if [ "$SPM_LANG" = "id" ]; then
+				echo "   ⚠ Gagal menginstal ufw (mungkin butuh sudo / distro tidak mendukung)."
+			else
+				echo "   ⚠ Failed to install ufw (maybe needs sudo / unsupported distro)."
+			fi
+		fi
+	fi
 
-EOF
+	if command -v ufw >/dev/null 2>&1; then
+		if sudo ufw status >/dev/null 2>&1 | grep -qi "Status: inactive"; then
+			if [ "$SPM_LANG" = "id" ]; then
+				echo "   - Mengaktifkan ufw..."
+			else
+				echo "   - Enabling ufw..."
+			fi
+			sudo ufw enable >/dev/null 2>&1
+		fi
+
+		if [ "$SPM_LANG" = "id" ]; then
+			echo "   - Menambahkan rule ufw: allow ${bind_port}/tcp"
+		else
+			echo "   - Adding ufw rule: allow ${bind_port}/tcp"
+		fi
+		if sudo ufw allow "${bind_port}"/tcp >/dev/null 2>&1; then
+			if [ "$SPM_LANG" = "id" ]; then
+				echo "   ✓ Rule ufw ditambahkan (port ${bind_port}/tcp)."
+			else
+				echo "   ✓ ufw rule added (port ${bind_port}/tcp)."
+			fi
+		else
+			if [ "$SPM_LANG" = "id" ]; then
+				echo "   ⚠ Gagal menambahkan rule ufw. Cek 'sudo ufw status' secara manual."
+			else
+				echo "   ⚠ Failed to add ufw rule. Check 'sudo ufw status' manually."
+			fi
+		fi
+		return 0
+	fi
+
+	# 2) firewalld path
+	if ! command -v firewall-cmd >/dev/null 2>&1; then
+		if [ "$SPM_LANG" = "id" ]; then
+			echo "   - firewalld tidak ditemukan. Mencoba menginstal firewalld..."
+		else
+			echo "   - firewalld not found. Trying to install firewalld..."
+		fi
+		if _spm_try_install_pkg firewalld; then
+			if [ "$SPM_LANG" = "id" ]; then
+				echo "   ✓ firewalld berhasil diinstal."
+			else
+				echo "   ✓ firewalld installed successfully."
+			fi
+			sudo systemctl enable firewalld >/dev/null 2>&1
+			sudo systemctl start firewalld >/dev/null 2>&1
+		else
+			if [ "$SPM_LANG" = "id" ]; then
+				echo "   ⚠ Gagal menginstal firewalld."
+			else
+				echo "   ⚠ Failed to install firewalld."
+			fi
+		fi
+	fi
+
+	if command -v firewall-cmd >/dev/null 2>&1; then
+		if [ "$SPM_LANG" = "id" ]; then
+			echo "   - Menambahkan port permanen ${bind_port}/tcp pada firewalld."
+		else
+			echo "   - Adding permanent port ${bind_port}/tcp to firewalld."
+		fi
+		if sudo firewall-cmd --add-port="${bind_port}"/tcp --permanent >/dev/null 2>&1 && \
+		   sudo firewall-cmd --reload >/dev/null 2>&1; then
+			if [ "$SPM_LANG" = "id" ]; then
+				echo "   ✓ Rule firewalld ditambahkan dan direload."
+			else
+				echo "   ✓ firewalld rule added and reloaded."
+			fi
+		else
+			if [ "$SPM_LANG" = "id" ]; then
+				echo "   ⚠ Gagal mengatur firewalld. Cek 'sudo firewall-cmd --list-ports'."
+			else
+				echo "   ⚠ Failed to configure firewalld. Check 'sudo firewall-cmd --list-ports'."
+			fi
+		fi
+		return 0
+	fi
+
+	# 3) Fallback: iptables
+	if command -v iptables >/dev/null 2>&1; then
+		if [ "$SPM_LANG" = "id" ]; then
+			echo "   - Menggunakan iptables. Menambahkan rule sementara (non-persisten)."
+		else
+			echo "   - Using iptables. Adding temporary (non-persistent) rule."
+		fi
+		if sudo iptables -I INPUT -p tcp --dport "${bind_port}" -j ACCEPT >/dev/null 2>&1; then
+			if [ "$SPM_LANG" = "id" ]; then
+				echo "   ✓ Rule iptables ditambahkan (tidak persisten setelah reboot)."
+			else
+				echo "   ✓ iptables rule added (not persistent after reboot)."
+			fi
+		else
+			if [ "$SPM_LANG" = "id" ]; then
+				echo "   ⚠ Gagal menambahkan rule iptables. Atur firewall secara manual."
+			else
+				echo "   ⚠ Failed to add iptables rule. Configure firewall manually."
+			fi
+		fi
+		return 0
+	fi
+
+	if [ "$SPM_LANG" = "id" ]; then
+		echo "   ⚠ Tidak ada tool firewall yang dikenali (ufw / firewalld / iptables)."
+		echo "     Pastikan port ${bind_port}/tcp dibuka atau diamankan secara manual."
+	else
+		echo "   ⚠ No known firewall tool detected (ufw / firewalld / iptables)."
+		echo "     Please ensure port ${bind_port}/tcp is opened/secured manually."
+	fi
+}
+ensure_pm2_installed() {
+	# If already installed, done.
+	if command -v pm2 >/dev/null 2>&1; then
+		return 0
+	fi
+
+	if [ "${SPM_LANG:-en}" = "id" ]; then
+		echo "⚠️  PM2 belum terpasang. Mencoba menginstall otomatis..."
+	else
+		echo "⚠️  PM2 is not installed. Trying to install it automatically..."
+	fi
+
+	local pm2_ok=1
+
+	# Termux branch (Android)
+	if [ -n "${TERMUX_VERSION-}" ] && command -v pkg >/dev/null 2>&1; then
+		if [ "${SPM_LANG:-en}" = "id" ]; then
+			echo "→ Terdeteksi Termux. Menginstall nodejs..."
+		else
+			echo "→ Detected Termux. Installing nodejs..."
+		fi
+		pkg update -y || true
+		pkg install -y nodejs || true
+
+		if command -v npm >/dev/null 2>&1; then
+			npm install -g pm2 && pm2_ok=0
+		fi
+	else
+		# Generic Linux (Debian-like + npm)
+		if command -v npm >/dev/null 2>&1; then
+			npm install -g pm2 && pm2_ok=0
+		elif command -v apt-get >/dev/null 2>&1 || command -v apt >/dev/null 2>&1; then
+			if [ "${SPM_LANG:-en}" = "id" ]; then
+				echo "→ Mencoba menginstall nodejs & npm via apt..."
+			else
+				echo "→ Trying to install nodejs & npm via apt..."
+			fi
+
+			if command -v sudo >/dev/null 2>&1; then
+				sudo apt-get update || true
+				sudo apt-get install -y nodejs npm || true
+			else
+				apt-get update || true
+				apt-get install -y nodejs npm || true
+			fi
+
+			if command -v npm >/dev/null 2>&1; then
+				npm install -g pm2 && pm2_ok=0
+			fi
+		fi
+	fi
+
+	if [ $pm2_ok -ne 0 ]; then
+		if [ "${SPM_LANG:-en}" = "id" ]; then
+			echo "❌ Gagal menginstall PM2 secara otomatis."
+			echo "   Silakan install nodejs/npm dan pm2 secara manual lalu coba lagi."
+			read -r -p "Tekan Enter untuk kembali ke menu..." _
+		else
+			echo "❌ Failed to install PM2 automatically."
+			echo "   Please install nodejs/npm and pm2 manually, then try again."
+			read -r -p "Press Enter to return to menu..." _
+		fi
+		return 1
+	fi
+
+	if [ "${SPM_LANG:-en}" = "id" ]; then
+		echo "✅ PM2 berhasil diinstall."
+	else
+		echo "✅ PM2 installed successfully."
+	fi
+	return 0
+}
+
+
+start_web_mode() {
+	clear
+	echo "==========================================="
+	echo "  SPM Web Mode"
+	echo "==========================================="
+	echo
+
+	if [ "${SPM_LANG:-en}" = "id" ]; then
+		echo "Mode ini akan menjalankan HTTP server sehingga kamu"
+		echo "bisa mengakses vault lewat browser."
+		echo
+		echo "Pilih mode:"
+		echo "  1) Jalankan sementara (foreground, Ctrl+C untuk berhenti)"
+		echo "  2) Jalankan di background dengan PM2"
+		echo "  3) Hentikan web server background (PM2)"
+		echo "  0) Kembali"
+	else
+		echo "This will start an HTTP server so you can"
+		echo "access your vault from a browser."
+		echo
+		echo "Choose mode:"
+		echo "  1) Temporary (foreground, Ctrl+C to stop)"
+		echo "  2) Run in background using PM2"
+		echo "  3) Stop background web server (PM2)"
+		echo "  0) Back"
+	fi
+	echo
+
+	local mode
+	if [ "${SPM_LANG:-en}" = "id" ]; then
+		read -r -p "Pilihan: " mode
+	else
+		read -r -p "Choice: " mode
+	fi
+
+	case "$mode" in
+		0)
+			return
+			;;
+		3)
+			# Stop / delete PM2 process
+			if ! command -v pm2 >/dev/null 2>&1; then
+				if [ "${SPM_LANG:-en}" = "id" ]; then
+					echo "❌ PM2 tidak ditemukan. Tidak ada proses background untuk dihentikan."
+					read -r -p "Tekan Enter untuk kembali ke menu..." _
+				else
+					echo "❌ PM2 not found. No background process to stop."
+					read -r -p "Press Enter to return to menu..." _
+				fi
+				return
+			fi
+
+			if pm2 describe spm-web >/dev/null 2>&1; then
+				pm2 delete spm-web >/dev/null 2>&1 || true
+				if [ "${SPM_LANG:-en}" = "id" ]; then
+					echo "✅ Proses web SPM (spm-web) di PM2 telah dihentikan dan dihapus."
+					read -r -p "Tekan Enter untuk kembali ke menu..." _
+				else
+					echo "✅ SPM web process (spm-web) in PM2 has been stopped and deleted."
+					read -r -p "Press Enter to return to menu..." _
+				fi
+			else
+				if [ "${SPM_LANG:-en}" = "id" ]; then
+					echo "ℹ️ Tidak ada proses spm-web di PM2."
+					read -r -p "Tekan Enter untuk kembali ke menu..." _
+				else
+					echo "ℹ️ No spm-web process found in PM2."
+					read -r -p "Press Enter to return to menu..." _
+				fi
+			fi
+			return
+			;;
+		1|2)
+			# continue
+			;;
+		*)
+			if [ "${SPM_LANG:-en}" = "id" ]; then
+				echo "Pilihan tidak valid."
+				read -r -p "Tekan Enter untuk kembali ke menu..." _
+			else
+				echo "Invalid choice."
+				read -r -p "Press Enter to return to menu..." _
+			fi
+			return
+			;;
+	esac
+
+	# Check vault file
+	if [ ! -f "$VAULT_FILE" ]; then
+		if [ "${SPM_LANG:-en}" = "id" ]; then
+			echo "❌ File vault tidak ditemukan: $VAULT_FILE"
+			echo "   Buat atau buka vault terlebih dahulu."
+			read -r -p "Tekan Enter untuk kembali ke menu..." _
+		else
+			echo "❌ Vault file not found: $VAULT_FILE"
+			echo "   Create or unlock your vault first."
+			read -r -p "Press Enter to return to menu..." _
+		fi
+		return
+	fi
+
+	# Check python3
+	if ! command -v python3 >/dev/null 2>&1; then
+		if [ "${SPM_LANG:-en}" = "id" ]; then
+			echo "❌ python3 diperlukan untuk mode web tetapi tidak ditemukan."
+			echo "   Install python3 lalu coba lagi."
+			read -r -p "Tekan Enter untuk kembali ke menu..." _
+		else
+			echo "❌ python3 is required for web mode but not found."
+			echo "   Install python3 and retry."
+			read -r -p "Press Enter to return to menu..." _
+		fi
+		return
+	fi
+
+	# Ask bind address & port
+	echo
+	local bind_addr bind_port
+	if [ "${SPM_LANG:-en}" = "id" ]; then
+		read -r -p "Bind address [127.0.0.1 lokal, 0.0.0.0 VPS]: " bind_addr
+	else
+		read -r -p "Bind address [127.0.0.1 for local, 0.0.0.0 for VPS]: " bind_addr
+	fi
+	[ -z "$bind_addr" ] && bind_addr="127.0.0.1"
+
+	if [ "${SPM_LANG:-en}" = "id" ]; then
+		read -r -p "Port [8080]: " bind_port
+	else
+		read -r -p "Port [8080]: " bind_port
+	fi
+	[ -z "$bind_port" ] && bind_port="8080"
+
+	# Figure out which host to show to user
+	local display_host
+	if [ "$bind_addr" = "127.0.0.1" ] || [ "$bind_addr" = "localhost" ]; then
+		display_host="127.0.0.1"
+	elif [ "$bind_addr" = "0.0.0.0" ]; then
+		display_host="$(get_external_ip)"
+		[ -z "$display_host" ] && display_host="YOUR_SERVER_IP"
+		[ "$display_host" = "UNKNOWN_IP" ] && display_host="YOUR_SERVER_IP"
+	else
+		display_host="$bind_addr"
+	fi
+
+	# Try to configure firewall automatically if binding to non-local
+	configure_firewall_for_web "$bind_addr" "$bind_port"
+
+	# Ensure Python web script exists (and updated)
+	local spm_web_script
+	spm_web_script="$(write_spm_web_script)" || {
+		if [ "${SPM_LANG:-en}" = "id" ]; then
+			echo "❌ Gagal menulis script web Python."
+			read -r -p "Tekan Enter untuk kembali ke menu..." _
+		else
+			echo "❌ Failed to write Python web script."
+			read -r -p "Press Enter to return to menu..." _
+		fi
+		return
+	}
+
+	if [ "$mode" = "2" ]; then
+		# Background mode via PM2
+		ensure_pm2_installed || return
+
+		if [ "${SPM_LANG:-en}" = "id" ]; then
+			echo
+			echo "Menjalankan SPM web server di background (PM2, nama proses: spm-web)..."
+			echo "Akses via browser:"
+			echo "  → http://${display_host}:${bind_port}/"
+			echo
+			echo "Gunakan menu ini lagi (opsi 3) untuk menghentikan proses background."
+		else
+			echo
+			echo "Starting SPM web server in background (PM2, process name: spm-web)..."
+			echo "Access it from your browser:"
+			echo "  → http://${display_host}:${bind_port}/"
+			echo
+			echo "Use this menu again (option 3) to stop the background process."
+		fi
+
+		# Use env wrapper so PM2 runs with correct variables
+		SPM_VAULT_PATH="$VAULT_FILE" \
+		SPM_WEB_BIND="$bind_addr" \
+		SPM_WEB_PORT="$bind_port" \
+		pm2 start "$spm_web_script" \
+			--name "spm-web" \
+			--interpreter python3 >/dev/null 2>&1 || true
+
+		if [ "${SPM_LANG:-en}" = "id" ]; then
+			read -r -p "Tekan Enter untuk kembali ke menu..." _
+		else
+			read -r -p "Press Enter to return to menu..." _
+		fi
+		return
+	fi
+
+	# Foreground / temporary mode
+	echo
+	if [ "${SPM_LANG:-en}" = "id" ]; then
+		echo "Menjalankan SPM web server pada ${bind_addr}:${bind_port}..."
+		echo "Buka di browser kamu:"
+		echo "  → http://${display_host}:${bind_port}/"
+		echo
+		echo "Tekan Ctrl + C di sini untuk menghentikan server."
+	else
+		echo "Starting SPM web server on ${bind_addr}:${bind_port}..."
+		echo "Open this in your browser:"
+		echo "  → http://${display_host}:${bind_port}/"
+		echo
+		echo "Press Ctrl + C here to stop the server."
+	fi
+	echo
+
+	SPM_VAULT_PATH="$VAULT_FILE" \
+	SPM_WEB_BIND="$bind_addr" \
+	SPM_WEB_PORT="$bind_port" \
+	python3 "$spm_web_script"
+
+	echo
+	if [ "${SPM_LANG:-en}" = "id" ]; then
+		echo "SPM web server dihentikan."
+		read -r -p "Tekan Enter untuk kembali ke menu..." _
+	else
+		echo "SPM web server stopped."
+		read -r -p "Press Enter to return to menu..." _
+	fi
+}
+
+write_spm_web_script() {
+	# Where to store the Python web server script
+	local base_dir
+	base_dir="${SPM_WEB_SCRIPT_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/spm}"
+	mkdir -p "$base_dir" || return 1
+
+	local script_path="${base_dir}/spm_web_server.py"
+
+	cat >"$script_path" <<'PY'
+import http.server
+import socketserver
+import urllib.parse
+import subprocess
+import os
+import secrets
+import html
+import sys
+import time
+import base64
+
+VAULT_PATH = os.environ.get("SPM_VAULT_PATH")
+BIND_ADDR  = os.environ.get("SPM_WEB_BIND", "127.0.0.1")
+PORT       = int(os.environ.get("SPM_WEB_PORT", "8080"))
+
+if not VAULT_PATH or not os.path.isfile(VAULT_PATH):
+    raise SystemExit(f"Vault file not found: {VAULT_PATH!r}")
+
+# ---------- HTML templates (liquid glass, icons, auto-lock) ------------------
+
+AUTOLOCK_SCRIPT = """
+<script>
+  (function() {
+    let t;
+    function reset() {
+      if (t) clearTimeout(t);
+      t = setTimeout(function() {
+        window.location.href = "/logout";
+      }, 30000);
+    }
+    ["click","keydown","mousemove","touchstart","scroll"].forEach(function(ev) {
+      window.addEventListener(ev, reset, { passive: true });
+    });
+    reset();
+  })();
+</script>
+"""
+
+LOGIN_HTML = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SPM Web Login</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background:
+        radial-gradient(circle at top, #202438 0, #05060a 40%, #020308 100%);
+      color: #eee;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      min-height:100vh;
+      margin:0;
+      padding:16px;
+      animation: bgShift 18s ease-in-out infinite alternate;
+    }
+    @keyframes bgShift {
+      0% { background-position: 0% 0%; }
+      50% { background-position: 50% 50%; }
+      100% { background-position: 100% 0%; }
+    }
+    .glass {
+      position: relative;
+      padding: 24px 22px 20px;
+      width: min(380px, 100%);
+      border-radius: 20px;
+      background: linear-gradient(145deg, rgba(255,255,255,0.16), rgba(5,5,9,0.9));
+      box-shadow:
+        0 22px 50px rgba(0,0,0,0.9),
+        0 0 0 1px rgba(255,255,255,0.04);
+      backdrop-filter: blur(26px) saturate(180%);
+      -webkit-backdrop-filter: blur(26px) saturate(180%);
+      border: 1px solid rgba(255,255,255,0.18);
+      animation: floatIn 0.5s ease-out, floatLoop 8s ease-in-out infinite alternate;
+      transform-origin: center;
+    }
+    @keyframes floatIn {
+      from { opacity:0; transform: translateY(18px) scale(0.98); }
+      to   { opacity:1; transform: translateY(0) scale(1); }
+    }
+    @keyframes floatLoop {
+      0% { transform: translateY(0) scale(1); }
+      100% { transform: translateY(-4px) scale(1.01); }
+    }
+    h1 {
+      margin: 0 0 4px 0;
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-align:center;
+    }
+    .subtitle {
+      text-align:center;
+      font-size: 12px;
+      color:#aaa;
+      margin-bottom: 18px;
+    }
+    label {
+      font-size: 13px;
+      color:#ccc;
+      display:block;
+      margin-bottom:6px;
+    }
+    input[type=password] {
+      width:100%;
+      padding:11px 12px;
+      margin-bottom:14px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,0.18);
+      background:rgba(5,5,7,0.9);
+      color:#f5f5f5;
+      outline:none;
+      font-size:13px;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
+    input[type=password]:focus {
+      border-color:rgba(140,190,255,0.9);
+      box-shadow:0 0 0 1px rgba(120,180,255,0.5);
+      background:rgba(2,2,5,1);
+    }
+    input[type=submit] {
+      width:100%;
+      padding:10px;
+      border:none;
+      border-radius:999px;
+      background:linear-gradient(135deg,#0f9bff,#5f5fff);
+      color:#fff;
+      cursor:pointer;
+      font-size:13px;
+      font-weight:500;
+      letter-spacing:0.09em;
+      text-transform:uppercase;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+    }
+    input[type=submit]:hover {
+      filter:brightness(1.08);
+      box-shadow:0 10px 24px rgba(15,155,255,0.35);
+      transform: translateY(-1px);
+    }
+    input[type=submit]:active {
+      transform: translateY(0);
+      box-shadow:none;
+    }
+    .msg {
+      margin-top:10px;
+      font-size:12px;
+      color:#ff7b7b;
+      text-align:center;
+      animation: fadeIn 0.25s ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity:0; transform: translateY(4px); }
+      to   { opacity:1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="glass">
+    <h1>Sans Password Manager</h1>
+    <div class="subtitle">Web access · encrypted with GnuPG</div>
+    <form method="post" action="/login">
+      <label>Master Password</label>
+      <input type="password" name="password" autocomplete="current-password" autofocus>
+      <input type="submit" value="Unlock">
+    </form>
+    __MESSAGE__
+  </div>
+</body>
+</html>
+"""
+
+MAIN_HTML = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Sans Password Manager – Web</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      color-scheme: dark;
+      --accent: #0f9bff;
+      --accent-soft: rgba(15,155,255,0.24);
+      --danger: #ff4d6a;
+      --danger-soft: rgba(255,77,106,0.14);
+    }
+    * { box-sizing:border-box; }
+    body {
+      margin:0;
+      padding:0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background:
+        radial-gradient(circle at top left, #2a2a36 0, #050509 45%, #000 100%);
+      color:#f5f5f7;
+      min-height:100vh;
+      display:flex;
+      flex-direction:column;
+      animation:bgShift 24s ease-in-out infinite alternate;
+    }
+    @keyframes bgShift {
+      0% { background-position: 0% 0%; }
+      50% { background-position: 60% 40%; }
+      100% { background-position: 100% 0%; }
+    }
+    header {
+      position:sticky;
+      top:0;
+      z-index:10;
+      padding:10px 16px;
+      background:linear-gradient(to bottom, rgba(5,5,8,0.96), rgba(5,5,8,0.7), transparent);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border-bottom:1px solid rgba(255,255,255,0.06);
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+    }
+    .title {
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
+    .title h1 {
+      margin:0;
+      font-size:17px;
+      letter-spacing:0.12em;
+      text-transform:uppercase;
+    }
+    .title .sub {
+      font-size:11px;
+      color:#9fa3b4;
+    }
+    .right-header {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-width:0;
+    }
+    .vault-badge {
+      font-size:11px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.16);
+      background:radial-gradient(circle at top left, rgba(255,255,255,0.14), rgba(0,0,0,0.9));
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      color:#d0d4e0;
+      max-width:220px;
+      text-overflow:ellipsis;
+      overflow:hidden;
+      white-space:nowrap;
+      display:flex;
+      align-items:center;
+      gap:4px;
+      animation: floatHeader 9s ease-in-out infinite alternate;
+    }
+    @keyframes floatHeader {
+      0% { transform: translateY(0); }
+      100% { transform: translateY(-2px); }
+    }
+    .vault-badge span.label {
+      opacity:0.7;
+    }
+    .logout {
+      font-size:11px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.18);
+      background:linear-gradient(to bottom right, rgba(255,255,255,0.05), rgba(0,0,0,0.9));
+      color:#ff9b9b;
+      text-decoration:none;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      white-space:nowrap;
+    }
+    .logout:hover {
+      background:linear-gradient(to bottom right, rgba(255,120,120,0.18), rgba(0,0,0,0.9));
+      box-shadow:0 8px 24px rgba(255,120,120,0.4);
+      transform: translateY(-1px);
+    }
+    .layout {
+      flex:1;
+      display:flex;
+      padding:16px;
+      gap:16px;
+      flex-wrap:wrap;
+    }
+    .panel {
+      flex: 3 1 280px;
+      border-radius:22px;
+      background:radial-gradient(circle at top left, rgba(255,255,255,0.1), rgba(5,5,10,0.95));
+      backdrop-filter: blur(26px) saturate(180%);
+      -webkit-backdrop-filter: blur(26px) saturate(180%);
+      border:1px solid rgba(255,255,255,0.15);
+      box-shadow:
+        0 24px 45px rgba(0,0,0,0.85),
+        0 0 0 1px rgba(255,255,255,0.03);
+      padding:14px 16px 10px;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      animation: fadeUp 0.4s ease-out;
+    }
+    .panel-header {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding:4px 4px 6px;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .panel-header h2 {
+      margin:0;
+      font-size:13px;
+      text-transform:uppercase;
+      letter-spacing:0.18em;
+      color:#d4d7e5;
+    }
+    .chip {
+      display:inline-flex;
+      align-items:center;
+      padding:3px 9px;
+      border-radius:999px;
+      font-size:10px;
+      border:1px solid rgba(255,255,255,0.18);
+      background:radial-gradient(circle at top, rgba(255,255,255,0.08), rgba(0,0,0,0.9));
+      color:#cfd3e8;
+      gap:6px;
+      margin-left:8px;
+    }
+    .chip-dot {
+      width:7px;
+      height:7px;
+      border-radius:999px;
+      background:radial-gradient(circle, #54e37d, #1d9c55);
+      box-shadow:0 0 9px rgba(84,227,125,0.9);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.9); opacity:0.9; }
+      50% { transform: scale(1.15); opacity:1; }
+      100% { transform: scale(0.9); opacity:0.9; }
+    }
+    .btn-primary {
+      border-radius:999px;
+      border:none;
+      padding:7px 13px;
+      font-size:11px;
+      font-weight:500;
+      letter-spacing:0.08em;
+      text-transform:uppercase;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      text-decoration:none;
+      background:linear-gradient(135deg,#0f9bff,#5f5fff);
+      color:#fff;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+    }
+    .btn-primary.small {
+      padding:6px 11px;
+      font-size:10px;
+    }
+    .btn-primary:hover {
+      filter:brightness(1.08);
+      box-shadow:0 10px 25px rgba(15,155,255,0.5);
+      transform: translateY(-1px);
+    }
+    .table-wrapper {
+      margin-top:8px;
+      border-radius:18px;
+      border:1px solid rgba(255,255,255,0.12);
+      background:linear-gradient(145deg, rgba(2,2,5,0.98), rgba(12,12,20,0.95));
+      overflow:auto;
+      max-height:60vh;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(120,120,140,0.7) transparent;
+    }
+    .table-wrapper::-webkit-scrollbar {
+      height:6px;
+      width:6px;
+    }
+    .table-wrapper::-webkit-scrollbar-thumb {
+      background:rgba(140,140,170,0.7);
+      border-radius:999px;
+    }
+    table {
+      width:100%;
+      border-collapse:collapse;
+      min-width:380px;
+    }
+    th, td {
+      padding:8px 10px;
+      font-size:12px;
+      border-bottom:1px solid rgba(255,255,255,0.06);
+    }
+    th {
+      text-align:left;
+      background:linear-gradient(to right, rgba(255,255,255,0.06), transparent);
+      font-weight:500;
+      color:#cfd3e8;
+      position:sticky;
+      top:0;
+      z-index:1;
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
+    tr:last-child td {
+      border-bottom:none;
+    }
+    tr:hover td {
+      background:radial-gradient(circle at left, rgba(255,255,255,0.05), transparent);
+    }
+    td.actions {
+      text-align:right;
+      white-space:nowrap;
+      min-width:90px;
+    }
+    .icon-row {
+      display:inline-flex;
+      gap:4px;
+    }
+    .icon-btn {
+      width:26px;
+      height:26px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.25);
+      background:rgba(5,5,8,0.96);
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-size:14px;
+      color:#e5e7f5;
+      text-decoration:none;
+      cursor:pointer;
+      padding:0;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+    }
+    .icon-btn:hover {
+      background:rgba(15,15,22,1);
+      box-shadow:0 6px 18px rgba(0,0,0,0.7);
+      transform: translateY(-1px);
+    }
+    .icon-btn.danger {
+      border-color:rgba(255,77,106,0.7);
+      color:#ffd0d8;
+      background:rgba(60,10,20,0.98);
+    }
+    .icon-btn.danger:hover {
+      box-shadow:0 8px 22px rgba(255,77,106,0.6);
+    }
+    .badge-empty {
+      padding:16px;
+      text-align:center;
+      font-size:12px;
+      color:#9fa3b4;
+    }
+    .side {
+      flex: 2 1 260px;
+      display:flex;
+      flex-direction:column;
+      gap:16px;
+    }
+    .card {
+      border-radius:20px;
+      padding:14px 14px 12px;
+      background:radial-gradient(circle at top left, rgba(255,255,255,0.1), rgba(10,10,18,0.96));
+      border:1px solid rgba(255,255,255,0.16);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      box-shadow:0 18px 35px rgba(0,0,0,0.85);
+      animation: fadeUp 0.5s ease-out;
+    }
+    .card h3 {
+      margin:0 0 6px;
+      font-size:13px;
+      letter-spacing:0.12em;
+      text-transform:uppercase;
+      color:#d4d7e5;
+    }
+    .card p {
+      margin:0 0 8px;
+      font-size:11px;
+      color:#a4a9c0;
+    }
+    .notes-table-wrapper {
+      margin-top:6px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,0.12);
+      background:linear-gradient(145deg, rgba(2,2,5,0.98), rgba(12,12,20,0.95));
+      overflow:auto;
+      max-height:220px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(120,120,140,0.7) transparent;
+    }
+    .notes-table-wrapper::-webkit-scrollbar {
+      height:6px;
+      width:6px;
+    }
+    .notes-table-wrapper::-webkit-scrollbar-thumb {
+      background:rgba(140,140,170,0.7);
+      border-radius:999px;
+    }
+    table.notes-table {
+      width:100%;
+      border-collapse:collapse;
+      min-width:260px;
+    }
+    table.notes-table th,
+    table.notes-table td {
+      padding:6px 8px;
+      font-size:11px;
+      border-bottom:1px solid rgba(255,255,255,0.06);
+    }
+    table.notes-table tr:last-child td {
+      border-bottom:none;
+    }
+    table.notes-table td.actions {
+      min-width:70px;
+    }
+    form.inline {
+      display:inline;
+      margin:0;
+      padding:0;
+    }
+    @keyframes fadeUp {
+      from { opacity:0; transform: translateY(10px); }
+      to   { opacity:1; transform: translateY(0); }
+    }
+
+    @media (max-width: 720px) {
+      header {
+        flex-direction:column;
+        align-items:flex-start;
+      }
+      .right-header {
+        width:100%;
+        justify-content:space-between;
+      }
+      .layout {
+        padding:12px;
+      }
+      table {
+        min-width:100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">
+      <h1>Sans Password Manager</h1>
+      <div class="sub">Liquid-glass web interface · GPG encrypted</div>
+    </div>
+    <div class="right-header">
+      <div class="vault-badge">
+        <span class="label">Vault</span> <span>__VAULT_PATH__</span>
+      </div>
+      <a href="/logout" class="logout">Logout</a>
+    </div>
+  </header>
+  <div class="layout">
+    <section class="panel">
+      <div class="panel-header">
+        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
+          <h2>Passwords</h2>
+          <div class="chip"><span class="chip-dot"></span><span>Online · read / write</span></div>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <a href="/add" class="btn-primary">+ Add Entry</a>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <tr><th style="width:52px;">ID</th><th>Name</th><th>Username</th><th style="width:110px; text-align:right;">Actions</th></tr>
+          __ROWS__
+        </table>
+      </div>
+      <div style="padding:8px 10px 4px; font-size:11px; color:#888ea6;">
+        Passwords are never sent anywhere else – all crypto stays on this host with GnuPG.
+      </div>
+    </section>
+    <section class="side">
+      <div class="card">
+        <h3>Secure Notes</h3>
+        <p>Encrypted notes stored inside the same vault.</p>
+        <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
+          <a href="/notes-add" class="btn-primary small">+ Add Note</a>
+        </div>
+        <div class="notes-table-wrapper">
+          <table class="notes-table">
+            <tr><th style="width:40px;">ID</th><th>Title</th><th style="width:70px; text-align:right;">Actions</th></tr>
+            __NOTES_ROWS__
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Web Session</h3>
+        <p>Protected by your master password. The interface auto-locks after 30 seconds of inactivity and logs you out.</p>
+      </div>
+    </section>
+  </div>
+  """ + AUTOLOCK_SCRIPT + """
+</body>
+</html>
+"""
+
+ENTRY_FORM_HTML = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SPM Web – __TITLE__</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing:border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
+      color:#f5f5f7;
+      margin:0;
+      padding:16px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      min-height:100vh;
+      animation:bgShift 20s ease-in-out infinite alternate;
+    }
+    @keyframes bgShift {
+      0% { background-position: 0% 0%; }
+      100% { background-position: 80% 40%; }
+    }
+    .glass {
+      width:min(480px, 100%);
+      padding:22px 22px 18px;
+      border-radius:24px;
+      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
+      border:1px solid rgba(255,255,255,0.16);
+      backdrop-filter: blur(26px);
+      -webkit-backdrop-filter: blur(26px);
+      box-shadow:
+        0 22px 42px rgba(0,0,0,0.9),
+        0 0 0 1px rgba(255,255,255,0.04);
+      animation: fadeUp 0.4s ease-out;
+    }
+    @keyframes fadeUp {
+      from { opacity:0; transform: translateY(10px); }
+      to   { opacity:1; transform: translateY(0); }
+    }
+    h1 {
+      margin:0 0 4px;
+      font-size:18px;
+      letter-spacing:0.1em;
+      text-transform:uppercase;
+    }
+    .sub {
+      margin:0 0 16px;
+      font-size:11px;
+      color:#a4a9c0;
+    }
+    label {
+      display:block;
+      font-size:12px;
+      margin-bottom:4px;
+      color:#d0d4e0;
+    }
+    input[type=text], input[type=password], textarea {
+      width:100%;
+      padding:9px 10px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,0.18);
+      background:rgba(3,3,5,0.94);
+      color:#f5f5f7;
+      font-size:13px;
+      margin-bottom:10px;
+      outline:none;
+      transition:border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    input[type=text]:focus, input[type=password]:focus, textarea:focus {
+      border-color:rgba(120,180,255,0.85);
+      box-shadow:0 0 0 1px rgba(120,180,255,0.5);
+    }
+    textarea {
+      resize:vertical;
+      min-height:80px;
+    }
+    .actions {
+      margin-top:10px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .btn-primary {
+      border-radius:999px;
+      border:none;
+      padding:8px 16px;
+      font-size:12px;
+      font-weight:500;
+      letter-spacing:0.08em;
+      text-transform:uppercase;
+      cursor:pointer;
+      background:linear-gradient(135deg,#0f9bff,#5f5fff);
+      color:#fff;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+    }
+    .btn-primary:hover {
+      filter:brightness(1.08);
+      box-shadow:0 10px 25px rgba(15,155,255,0.5);
+      transform: translateY(-1px);
+    }
+    .link {
+      font-size:12px;
+      color:#9fa3f0;
+      text-decoration:none;
+    }
+    .link:hover {
+      text-decoration:underline;
+    }
+    .msg {
+      margin-top:6px;
+      font-size:11px;
+      color:#ff9f9f;
+      animation: fadeUp 0.2s ease-out;
+    }
+  </style>
+</head>
+<body>
+  <div class="glass">
+    <h1>__TITLE__</h1>
+    <p class="sub">Vault: __VAULT_PATH__</p>
+    <form method="post" action="__ACTION__">
+      __BODY__
+      <div class="actions">
+        <a href="/" class="link">← Back to list</a>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+    __MESSAGE__
+  </div>
+  """ + AUTOLOCK_SCRIPT + """
+</body>
+</html>
+"""
+
+VIEW_HTML = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SPM Web – View Entry</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing:border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
+      color:#f5f5f7;
+      margin:0;
+      padding:16px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      min-height:100vh;
+      animation:bgShift 20s ease-in-out infinite alternate;
+    }
+    @keyframes bgShift {
+      0% { background-position: 0% 0%; }
+      100% { background-position: 80% 40%; }
+    }
+    .glass {
+      width:min(460px, 100%);
+      padding:22px 22px 18px;
+      border-radius:24px;
+      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
+      border:1px solid rgba(255,255,255,0.16);
+      backdrop-filter: blur(26px);
+      -webkit-backdrop-filter: blur(26px);
+      box-shadow:
+        0 22px 42px rgba(0,0,0,0.9),
+        0 0 0 1px rgba(255,255,255,0.04);
+      animation: fadeUp 0.35s ease-out;
+    }
+    @keyframes fadeUp {
+      from { opacity:0; transform: translateY(10px); }
+      to   { opacity:1; transform: translateY(0); }
+    }
+    h1 {
+      margin:0 0 4px;
+      font-size:18px;
+      letter-spacing:0.1em;
+      text-transform:uppercase;
+    }
+    .sub {
+      margin:0 0 16px;
+      font-size:11px;
+      color:#a4a9c0;
+    }
+    .field {
+      margin-bottom:10px;
+      font-size:13px;
+    }
+    .label {
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:0.12em;
+      color:#a4a9c0;
+      margin-bottom:2px;
+    }
+    .value {
+      font-size:13px;
+    }
+    .mono {
+      font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+    .actions {
+      margin-top:12px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      font-size:12px;
+      flex-wrap:wrap;
+    }
+    .btn-soft, .btn-danger {
+      border-radius:999px;
+      border:none;
+      padding:7px 13px;
+      font-size:11px;
+      font-weight:500;
+      letter-spacing:0.08em;
+      text-transform:uppercase;
+      cursor:pointer;
+      background:rgba(255,255,255,0.06);
+      color:#e1e3f0;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .btn-soft:hover {
+      box-shadow:0 8px 20px rgba(255,255,255,0.18);
+      transform: translateY(-1px);
+    }
+    .btn-danger {
+      background:rgba(255,77,106,0.16);
+      color:#ffd0d8;
+    }
+    .btn-danger:hover {
+      box-shadow:0 8px 20px rgba(255,77,106,0.4);
+      transform: translateY(-1px);
+    }
+    .link {
+      font-size:12px;
+      color:#9fa3f0;
+      text-decoration:none;
+    }
+    .link:hover {
+      text-decoration:underline;
+    }
+  </style>
+  <script>
+    function togglePassword() {
+      const el = document.getElementById('pw');
+      const btn = document.getElementById('pwbtn');
+      if (!el) return;
+      const hidden = el.getAttribute('data-hidden') === '1';
+      if (hidden) {
+        el.textContent = el.getAttribute('data-real');
+        el.setAttribute('data-hidden', '0');
+        btn.textContent = 'Hide';
+      } else {
+        el.textContent = '••••••••';
+        el.setAttribute('data-hidden', '1');
+        btn.textContent = 'Show';
+      }
+    }
+  </script>
+</head>
+<body>
+  <div class="glass">
+    <h1>View Entry</h1>
+    <p class="sub">Vault: __VAULT_PATH__ · ID __ID__</p>
+
+    <div class="field">
+      <div class="label">Name</div>
+      <div class="value mono">__NAME__</div>
+    </div>
+    <div class="field">
+      <div class="label">Username</div>
+      <div class="value mono">__USER__</div>
+    </div>
+    <div class="field">
+      <div class="label">Password</div>
+      <div class="value mono" id="pw" data-hidden="1" data-real="__PASS__">••••••••</div>
+      <button id="pwbtn" class="btn-soft" type="button" onclick="togglePassword()">Show</button>
+    </div>
+    <div class="field">
+      <div class="label">Notes</div>
+      <div class="value mono">__NOTES__</div>
+    </div>
+    <div class="field">
+      <div class="label">Created at</div>
+      <div class="value mono">__CREATED__</div>
+    </div>
+
+    <div class="actions">
+      <a href="/" class="link">← Back to list</a>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        <form method="get" action="/edit" style="display:inline;">
+          <input type="hidden" name="id" value="__ID__">
+          <button type="submit" class="btn-soft">Edit</button>
+        </form>
+        <form method="post" action="/delete" style="display:inline;" onsubmit="return confirm('Delete this entry?');">
+          <input type="hidden" name="id" value="__ID__">
+          <button type="submit" class="btn-danger">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  """ + AUTOLOCK_SCRIPT + """
+</body>
+</html>
+"""
+
+NOTES_VIEW_HTML = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SPM Web – View Note</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing:border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
+      color:#f5f5f7;
+      margin:0;
+      padding:16px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      min-height:100vh;
+      animation:bgShift 20s ease-in-out infinite alternate;
+    }
+    @keyframes bgShift {
+      0% { background-position: 0% 0%; }
+      100% { background-position: 80% 40%; }
+    }
+    .glass {
+      width:min(460px, 100%);
+      padding:22px 22px 18px;
+      border-radius:24px;
+      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
+      border:1px solid rgba(255,255,255,0.16);
+      backdrop-filter: blur(26px);
+      -webkit-backdrop-filter: blur(26px);
+      box-shadow:
+        0 22px 42px rgba(0,0,0,0.9),
+        0 0 0 1px rgba(255,255,255,0.04);
+      animation: fadeUp 0.35s ease-out;
+    }
+    @keyframes fadeUp {
+      from { opacity:0; transform: translateY(10px); }
+      to   { opacity:1; transform: translateY(0); }
+    }
+    h1 {
+      margin:0 0 4px;
+      font-size:18px;
+      letter-spacing:0.1em;
+      text-transform:uppercase;
+    }
+    .sub {
+      margin:0 0 16px;
+      font-size:11px;
+      color:#a4a9c0;
+    }
+    .field {
+      margin-bottom:10px;
+      font-size:13px;
+    }
+    .label {
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:0.12em;
+      color:#a4a9c0;
+      margin-bottom:2px;
+    }
+    .value {
+      font-size:13px;
+    }
+    .mono {
+      font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      white-space:pre-wrap;
+    }
+    .actions {
+      margin-top:12px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      font-size:12px;
+      flex-wrap:wrap;
+    }
+    .btn-danger {
+      border-radius:999px;
+      border:none;
+      padding:7px 13px;
+      font-size:11px;
+      font-weight:500;
+      letter-spacing:0.08em;
+      text-transform:uppercase;
+      cursor:pointer;
+      background:rgba(255,77,106,0.16);
+      color:#ffd0d8;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .btn-danger:hover {
+      box-shadow:0 8px 20px rgba(255,77,106,0.4);
+      transform: translateY(-1px);
+    }
+    .link {
+      font-size:12px;
+      color:#9fa3f0;
+      text-decoration:none;
+    }
+    .link:hover {
+      text-decoration:underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="glass">
+    <h1>Secure Note</h1>
+    <p class="sub">Vault: __VAULT_PATH__ · Note ID __ID__</p>
+
+    <div class="field">
+      <div class="label">Title</div>
+      <div class="value mono">__TITLE__</div>
+    </div>
+    <div class="field">
+      <div class="label">Content</div>
+      <div class="value mono">__CONTENT__</div>
+    </div>
+    <div class="field">
+      <div class="label">Created at</div>
+      <div class="value mono">__CREATED__</div>
+    </div>
+
+    <div class="actions">
+      <a href="/" class="link">← Back to list</a>
+      <form method="post" action="/notes-delete" onsubmit="return confirm('Delete this note?');">
+        <input type="hidden" name="id" value="__ID__">
+        <button type="submit" class="btn-danger">Delete</button>
+      </form>
+    </div>
+  </div>
+  """ + AUTOLOCK_SCRIPT + """
+</body>
+</html>
+"""
+
+# ---------- Helpers ----------------------------------------------------------
+
+def decrypt_vault(master: str) -> str:
+    return subprocess.check_output(
+        ["gpg", "--batch", "--yes", "--passphrase", master, "-d", VAULT_PATH],
+        stderr=subprocess.DEVNULL,
+    ).decode("utf-8", errors="ignore")
+
+def encrypt_vault(master: str, plaintext: str) -> None:
+    tmp_path = VAULT_PATH + ".webtmp"
+    p = subprocess.Popen(
+        ["gpg", "--batch", "--yes", "--passphrase", master, "-c", "-o", tmp_path],
+        stdin=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    p.communicate(input=plaintext.encode("utf-8"))
+    if p.returncode != 0:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise RuntimeError("Failed to encrypt vault")
+    os.replace(tmp_path, VAULT_PATH)
+
+def parse_entries(plaintext: str):
+    """Password entries."""
+    lines = plaintext.splitlines()
+    entries = []
+    for idx, line in enumerate(lines):
+        if not line or line.startswith("#") or line.startswith("META_") or line.startswith("NOTE\t"):
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 6:
+            entries.append((idx, parts))
+    return lines, entries
+
+def parse_notes(plaintext: str):
+    """Secure notes with prefix NOTE."""
+    lines = plaintext.splitlines()
+    notes = []
+    for idx, line in enumerate(lines):
+        if not line.startswith("NOTE\t"):
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 6:
+            notes.append((idx, parts))
+    return lines, notes
+
+def build_rows_html(entries):
+    if not entries:
+        return "<tr><td colspan='4' class='badge-empty'><i>No entries yet. Use “Add Entry” to create one.</i></td></tr>"
+    rows = []
+    for _, parts in entries:
+        entry_id = html.escape(parts[0])
+        name     = html.escape(parts[1])
+        user     = html.escape(parts[2])
+        row = (
+            "<tr>"
+            f"<td>{entry_id}</td>"
+            f"<td>{name}</td>"
+            f"<td>{user}</td>"
+            "<td class='actions'><div class='icon-row'>"
+            f"<a class='icon-btn' href='/view?id={entry_id}' title='View'><span>👁</span></a>"
+            f"<a class='icon-btn' href='/edit?id={entry_id}' title='Edit'><span>✏</span></a>"
+            "<form class='inline' method='post' action='/delete' "
+            "onsubmit=\"return confirm('Delete this entry?');\">"
+            f"<input type='hidden' name='id' value='{entry_id}'>"
+            "<button type='submit' class='icon-btn danger' title='Delete'><span>🗑</span></button>"
+            "</form>"
+            "</div></td>"
+            "</tr>"
+        )
+        rows.append(row)
+    return "".join(rows)
+
+def build_notes_rows_html(notes):
+    if not notes:
+        return "<tr><td colspan='3' class='badge-empty'><i>No secure notes yet.</i></td></tr>"
+    rows = []
+    for _, parts in notes:
+        note_id = html.escape(parts[1])
+        title   = html.escape(parts[2])
+        row = (
+            "<tr>"
+            f"<td>{note_id}</td>"
+            f"<td>{title}</td>"
+            "<td class='actions'><div class='icon-row'>"
+            f"<a class='icon-btn' href='/notes-view?id={note_id}' title='View'><span>👁</span></a>"
+            "<form class='inline' method='post' action='/notes-delete' "
+            "onsubmit=\"return confirm('Delete this note?');\">"
+            f"<input type='hidden' name='id' value='{note_id}'>"
+            "<button type='submit' class='icon-btn danger' title='Delete'><span>🗑</span></button>"
+            "</form>"
+            "</div></td>"
+            "</tr>"
+        )
+        rows.append(row)
+    return "".join(rows)
+
+def build_entry_form(title, vault_path, action, values=None, message=""):
+    values = values or {}
+    def v(k): return html.escape(values.get(k, "") or "")
+    body = (
+        "<label>Service / Name</label>"
+        f"<input type='text' name='name' value='{v('name')}' required>"
+        "<label>Username</label>"
+        f"<input type='text' name='user' value='{v('user')}'>"
+        "<label>Password</label>"
+        f"<input type='password' name='password' value='{v('password')}'>"
+        "<label>Notes</label>"
+        f"<textarea name='notes'>{v('notes')}</textarea>"
+    )
+    page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
+    page = page.replace("__VAULT_PATH__", html.escape(vault_path))
+    page = page.replace("__ACTION__", action)
+    page = page.replace("__BODY__", body)
+    page = page.replace("__MESSAGE__", message)
+    return page
+
+def build_note_form(title, vault_path, action, values=None, message=""):
+    values = values or {}
+    def v(k): return html.escape(values.get(k, "") or "")
+    body = (
+        "<label>Title</label>"
+        f"<input type='text' name='title' value='{v('title')}' required>"
+        "<label>Content</label>"
+        f"<textarea name='content'>{v('content')}</textarea>"
+    )
+    page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
+    page = page.replace("__VAULT_PATH__", html.escape(vault_path))
+    page = page.replace("__ACTION__", action)
+    page = page.replace("__BODY__", body)
+    page = page.replace("__MESSAGE__", message)
+    return page
+
+# ---------- HTTP server ------------------------------------------------------
+
+class SPMServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sessions = {}  # token -> master password
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        sys.stderr.write("[SPM Web] " + fmt % args + "\n")
+
+    def _send_html(self, code, body):
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(body.encode("utf-8"))
+
+    def _get_cookie_session(self):
+        cookie = self.headers.get("Cookie", "")
+        token = None
+        for part in cookie.split(";"):
+            part = part.strip()
+            if part.startswith("spm_session="):
+                token = part.split("=", 1)[1].strip()
+                break
+        if not token:
+            return None
+        return self.server.sessions.get(token)
+
+    def _require_login(self):
+        master = self._get_cookie_session()
+        if not master:
+            page = LOGIN_HTML.replace("__MESSAGE__", "")
+            self._send_html(200, page)
+            return None
+        return master
+
+    # ---- Handlers -----------------------------------------------------------
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path or "/"
+
+        if path.startswith("/logout"):
+            self.send_response(302)
+            self.send_header("Set-Cookie", "spm_session=deleted; Max-Age=0; HttpOnly; Path=/")
+            self.send_header("Location", "/login")
+            self.end_headers()
+            return
+
+        if path == "/login":
+            page = LOGIN_HTML.replace("__MESSAGE__", "")
+            self._send_html(200, page)
+            return
+
+        master = self._require_login()
+        if master is None:
+            return
+
+        if path == "/":
+            try:
+                plaintext = decrypt_vault(master)
+            except Exception:
+                self.send_response(302)
+                self.send_header("Set-Cookie", "spm_session=deleted; Max-Age=0; HttpOnly; Path=/")
+                self.send_header("Location", "/login")
+                self.end_headers()
+                return
+
+            _, entries = parse_entries(plaintext)
+            _, notes = parse_notes(plaintext)
+            rows_html = build_rows_html(entries)
+            notes_html = build_notes_rows_html(notes)
+            body = MAIN_HTML.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
+            body = body.replace("__ROWS__", rows_html)
+            body = body.replace("__NOTES_ROWS__", notes_html)
+            self._send_html(200, body)
+            return
+
+        query = urllib.parse.parse_qs(parsed.query)
+
+        if path == "/add":
+            page = build_entry_form(
+                title="Add Entry",
+                vault_path=VAULT_PATH,
+                action="/add",
+                values={},
+                message=""
+            )
+            self._send_html(200, page)
+            return
+
+        if path == "/edit":
+            entry_id = (query.get("id") or [""])[0]
+            if not entry_id:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = decrypt_vault(master)
+            lines, entries = parse_entries(plaintext)
+            found = None
+            for idx, parts in entries:
+                if parts[0] == entry_id:
+                    found = parts
+                    break
+            if not found:
+                self.send_error(404, "Entry not found")
+                return
+
+            values = {
+                "name": found[1],
+                "user": found[2],
+                "password": found[3],
+                "notes": found[4],
+            }
+            page = build_entry_form(
+                title=f"Edit Entry #{entry_id}",
+                vault_path=VAULT_PATH,
+                action="/edit?id=" + urllib.parse.quote(entry_id),
+                values=values,
+                message=""
+            )
+            self._send_html(200, page)
+            return
+
+        if path == "/view":
+            entry_id = (query.get("id") or [""])[0]
+            if not entry_id:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = decrypt_vault(master)
+            _, entries = parse_entries(plaintext)
+            found = None
+            for _, parts in entries:
+                if parts[0] == entry_id:
+                    found = parts
+                    break
+            if not found:
+                self.send_error(404, "Entry not found")
+                return
+
+            page = VIEW_HTML
+            page = page.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
+            page = page.replace("__ID__", html.escape(found[0]))
+            page = page.replace("__NAME__", html.escape(found[1]))
+            page = page.replace("__USER__", html.escape(found[2]))
+            page = page.replace("__PASS__", html.escape(found[3]))
+            page = page.replace("__NOTES__", html.escape(found[4]))
+            page = page.replace("__CREATED__", html.escape(found[5]))
+            self._send_html(200, page)
+            return
+
+        if path == "/notes-add":
+            page = build_note_form(
+                title="Add Secure Note",
+                vault_path=VAULT_PATH,
+                action="/notes-add",
+                values={},
+                message=""
+            )
+            self._send_html(200, page)
+            return
+
+        if path == "/notes-view":
+            note_id = (query.get("id") or [""])[0]
+            if not note_id:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = decrypt_vault(master)
+            _, notes = parse_notes(plaintext)
+            found = None
+            for _, parts in notes:
+                if parts[1] == note_id:
+                    found = parts
+                    break
+            if not found:
+                self.send_error(404, "Note not found")
+                return
+            title = found[2]
+            try:
+                content = base64.b64decode(found[3].encode("ascii")).decode("utf-8", errors="replace")
+            except Exception:
+                content = "[Decode error]"
+            created = found[4]
+
+            page = NOTES_VIEW_HTML
+            page = page.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
+            page = page.replace("__ID__", html.escape(note_id))
+            page = page.replace("__TITLE__", html.escape(title))
+            page = page.replace("__CONTENT__", html.escape(content))
+            page = page.replace("__CREATED__", html.escape(created))
+            self._send_html(200, page)
+            return
+
+        self.send_error(404, "Not found")
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path or "/"
+
+        if path == "/login":
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length).decode("utf-8", errors="ignore")
+            data = urllib.parse.parse_qs(body)
+            password = data.get("password", [""])[0]
+
+            if not password:
+                page = LOGIN_HTML.replace("__MESSAGE__", "<div class='msg'>Password required.</div>")
+                self._send_html(200, page)
+                return
+
+            try:
+                decrypt_vault(password)
+            except subprocess.CalledProcessError:
+                page = LOGIN_HTML.replace("__MESSAGE__", "<div class='msg'>Invalid master password.</div>")
+                self._send_html(200, page)
+                return
+
+            token = secrets.token_hex(32)
+            self.server.sessions[token] = password
+            self.send_response(302)
+            self.send_header("Set-Cookie", f"spm_session={token}; HttpOnly; Path=/")
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        master = self._get_cookie_session()
+        if not master:
+            page = LOGIN_HTML.replace("__MESSAGE__", "")
+            self._send_html(200, page)
+            return
+
+        length = int(self.headers.get("Content-Length", "0"))
+        raw_body = self.rfile.read(length).decode("utf-8", errors="ignore")
+        data = urllib.parse.parse_qs(raw_body)
+
+        if path == "/add":
+            name = (data.get("name") or [""])[0].strip()
+            user = (data.get("user") or [""])[0].strip()
+            password = (data.get("password") or [""])[0]
+            notes = (data.get("notes") or [""])[0]
+
+            if not name:
+                page = build_entry_form(
+                    title="Add Entry",
+                    vault_path=VAULT_PATH,
+                    action="/add",
+                    values={"name": name, "user": user, "password": password, "notes": notes},
+                    message="<div class='msg'>Name / service is required.</div>",
+                )
+                self._send_html(200, page)
+                return
+
+            plaintext = decrypt_vault(master)
+            lines, entries = parse_entries(plaintext)
+            max_id = 0
+            for _, parts in entries:
+                try:
+                    max_id = max(max_id, int(parts[0]))
+                except ValueError:
+                    continue
+            new_id = max_id + 1
+            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            new_line = "\t".join([
+                str(new_id),
+                name.replace("\t", " "),
+                user.replace("\t", " "),
+                password.replace("\t", " "),
+                notes.replace("\t", " "),
+                now,
+            ])
+            lines.append(new_line)
+            new_plain = "\n".join(lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/edit":
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            entry_id = (query.get("id") or [""])[0]
+            if not entry_id:
+                self.send_error(400, "Missing id")
+                return
+
+            name = (data.get("name") or [""])[0].strip()
+            user = (data.get("user") or [""])[0].strip()
+            password = (data.get("password") or [""])[0]
+            notes = (data.get("notes") or [""])[0]
+
+            plaintext = decrypt_vault(master)
+            lines, entries = parse_entries(plaintext)
+
+            idx_to_update = None
+            old_created = ""
+            for idx, parts in entries:
+                if parts[0] == entry_id:
+                    idx_to_update = idx
+                    if len(parts) >= 6:
+                        old_created = parts[5]
+                    break
+
+            if idx_to_update is None:
+                self.send_error(404, "Entry not found")
+                return
+
+            if not name:
+                values = {
+                    "name": name,
+                    "user": user,
+                    "password": password,
+                    "notes": notes,
+                }
+                page = build_entry_form(
+                    title=f"Edit Entry #{entry_id}",
+                    vault_path=VAULT_PATH,
+                    action="/edit?id=" + urllib.parse.quote(entry_id),
+                    values=values,
+                    message="<div class='msg'>Name / service is required.</div>",
+                )
+                self._send_html(200, page)
+                return
+
+            new_line = "\t".join([
+                entry_id,
+                name.replace("\t", " "),
+                user.replace("\t", " "),
+                password.replace("\t", " "),
+                notes.replace("\t", " "),
+                old_created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            ])
+            lines[idx_to_update] = new_line
+            new_plain = "\n".join(lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/delete":
+            entry_id = (data.get("id") or [""])[0]
+            if not entry_id:
+                self.send_error(400, "Missing id")
+                return
+
+            plaintext = decrypt_vault(master)
+            lines, _ = parse_entries(plaintext)
+
+            ids_to_remove = {entry_id}
+            new_lines = []
+            for line in lines:
+                if not line or line.startswith("#") or line.startswith("META_") or line.startswith("NOTE\t"):
+                    new_lines.append(line)
+                    continue
+                parts = line.split("\t")
+                if parts and parts[0] in ids_to_remove:
+                    continue
+                new_lines.append(line)
+
+            new_plain = "\n".join(new_lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/notes-add":
+            title = (data.get("title") or [""])[0].strip()
+            content = (data.get("content") or [""])[0]
+
+            if not title:
+                page = build_note_form(
+                    title="Add Secure Note",
+                    vault_path=VAULT_PATH,
+                    action="/notes-add",
+                    values={"title": title, "content": content},
+                    message="<div class='msg'>Title is required.</div>",
+                )
+                self._send_html(200, page)
+                return
+
+            plaintext = decrypt_vault(master)
+            lines, notes = parse_notes(plaintext)
+            lines = plaintext.splitlines()
+
+            max_id = 0
+            for _, parts in notes:
+                try:
+                    max_id = max(max_id, int(parts[1]))
+                except ValueError:
+                    continue
+            new_id = max_id + 1
+            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+            new_line = "\t".join([
+                "NOTE",
+                str(new_id),
+                title.replace("\t", " "),
+                encoded,
+                now,
+                "-",
+            ])
+            lines.append(new_line)
+            new_plain = "\n".join(lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/notes-delete":
+            note_id = (data.get("id") or [""])[0]
+            if not note_id:
+                self.send_error(400, "Missing id")
+                return
+
+            plaintext = decrypt_vault(master)
+            lines = plaintext.splitlines()
+            new_lines = []
+            for line in lines:
+                if line.startswith("NOTE\t"):
+                    parts = line.split("\t")
+                    if len(parts) >= 2 and parts[1] == note_id:
+                        continue
+                new_lines.append(line)
+            new_plain = "\n".join(new_lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        self.send_error(404, "Not found")
+
+def run():
+    with SPMServer((BIND_ADDR, PORT), Handler) as httpd:
+        print(f"[SPM Web] Serving on http://{BIND_ADDR}:{PORT}/")
+        print("[SPM Web] Press Ctrl+C to stop.")
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\n[SPM Web] Shutting down...")
+
+if __name__ == "__main__":
+    run()
+PY
+
+	echo "$script_path"
+}
+
+get_external_ip() {
+    curl -s ifconfig.me || curl -s ipinfo.io/ip || echo "UNKNOWN_IP"
 }
 
 # ----- Interactive menu ------------------------------------------------------
@@ -2055,6 +4142,7 @@ interactive_menu() {
 			printf " 11) Lupa / Reset kata sandi utama (pemulihan)\n"
 			printf " 12) Catatan aman (secure notes)\n"
 			printf " 13) Doctor / Health check\n"
+			printf " 14) Mode web\n"
 			printf "  0) Keluar\n\n"
 			printf "Pilih menu: "
 		else
@@ -2079,6 +4167,7 @@ interactive_menu() {
 			printf " 11) Forgot / Reset master (use private key)\n"
 			printf " 12) Secure notes\n"
 			printf " 13) Doctor / Health check\n"
+			printf " 14) Web mode\n"
 			printf "  0) Exit\n\n"
 			printf "Choose an option: "
 		fi
@@ -2161,6 +4250,7 @@ interactive_menu() {
 			11) clear; cmd_forgot || true; pause_menu ;;
 			12) interactive_menu_notes ;;
 			13) clear; cmd_doctor || true; pause_menu ;;
+			14) clear; start_web_mode || true ;;  # ← Web Mode (experimental)
 			0)
 				if [ "$SPM_LANG" = "id" ]; then
 					printf "Keluar...\n"
@@ -2212,6 +4302,7 @@ main() {
 		notes-list)       cmd_notes_list "$@" ;;
 		notes-view)       cmd_notes_view "$@" ;;
 		notes-delete)     cmd_notes_delete "$@" ;;
+		web|web-mode)     start_web_mode "$@" ;;  # ← CLI access for Web Mode
 		help|-h|--help)   cmd_help ;;
 		*)
 			printf "Unknown command: %s\n\n" "$cmd" >&2
