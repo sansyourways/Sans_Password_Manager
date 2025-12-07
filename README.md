@@ -1,4 +1,8 @@
 ![IMG_1113](https://github.com/user-attachments/assets/3108e84d-a612-49fc-945e-dd38c35e19ae)
+![IMG_1122](https://github.com/user-attachments/assets/37a78d2f-f3a8-4b7a-97aa-c80b6ff24642)
+![IMG_1114](https://github.com/user-attachments/assets/acc62927-fc23-41b2-9664-35c40f22ecf6)
+
+
 
 # Sans Password Manager (SPM)
 
