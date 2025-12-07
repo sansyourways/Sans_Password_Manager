@@ -302,13 +302,13 @@ Creates bundle then wipes vault+backup locally.
 
 Version: **2.0.0**  
 - Semantic versioning  
-- See `CHANGELOG.md`  
+- See [CHANGELOG.md](CHANGELOG.md)  
 
 ---
 
 ## Security Policy
 
-See `SECURITY.md`.
+See [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -317,4 +317,4 @@ See `SECURITY.md`.
 **Proprietary – All Rights Reserved**  
 © 2025 SansYourWays.
 
-See `LICENSE` for details.
+See [LICENSE](LICENSE) for details.
