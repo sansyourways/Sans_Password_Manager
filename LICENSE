@@ -1,82 +1,84 @@
-Sans Password Manager (SPM)
-Proprietary License
-© 2025 sansyourways. All rights reserved.
+Sans Password Manager – Private License
+Version 1.0 — © 2025 Sansyourways. All Rights Reserved.
 
 1. Ownership
-   The Sans Password Manager (“SPM”), including all source code, scripts,
-   vault formats, documentation, and associated files (collectively,
-   the “Software”), is the exclusive property of sansyourways.
-   No ownership or intellectual property rights are transferred
-   to the user by downloading, copying, or using the Software.
+This software (“Sans Password Manager”, “SPM”, “the Software”) is the exclusive property of Sansyourways.
+All rights not expressly granted in this License are reserved.
+You do not obtain any ownership rights to the Software or any part thereof.
 
-2. Grant of Permission
-   You are granted a personal, non-transferable, revocable license to:
-     - use the Software for your own personal or internal use,
-     - modify the Software privately (modifications may not be shared),
-     - create encrypted vaults for personal data management.
-
-   This permission does NOT grant any rights to:
-     - redistribute,
-     - publish,
-     - sublicense,
-     - or commercially exploit the Software.
-   
-   Any rights not explicitly granted remain reserved by the author.
+2. Grant of Use
+You are granted a personal, non-transferable, non-exclusive, revocable license to:
+- Download and run the Software on your own devices.
+- Use it for personal or internal purposes only.
+- Create encrypted vaults and use all included functionality.
+No other rights are granted.
 
 3. Restrictions
-   You may NOT:
-     - share, upload, mirror, or redistribute the Software or any part of it,
-     - publish modified or unmodified versions,
-     - resell or license the Software to others,
-     - use the Software as part of a commercial product or service,
-     - remove, obscure, or alter copyright or attribution notices,
-     - reverse engineer, disassemble, or extract cryptographic components
-       for use in another product.
+You must NOT, under any circumstances:
+- Redistribute, publish, or upload the Software to other repositories.
+- Share, sell, rent, lease, sublicense, or otherwise transfer the Software to others.
+- Modify, adapt, translate, reverse engineer, decompile, or create derivative works.
+- Remove or alter copyright notices, credits, or internal identifiers.
+- Use the Software for commercial services without written permission from Sansyourways.
+- Include the Software or its components in other projects or toolkits.
+- Train AI models or datasets using this code or its generated vaults.
+Any violation terminates your right to use the Software immediately.
 
-   Any unauthorized redistribution or commercialization is a violation of
-   this license and may result in termination of your rights to use the Software.
+4. No Warranty
+The Software is provided “AS IS”, without warranty of any kind, express or implied, including but not limited to:
+- merchantability,
+- fitness for a particular purpose,
+- data loss protection,
+- security or cryptographic robustness,
+- error-free or uninterrupted operation.
+You use the Software at your own risk.
 
-4. Security Notice
-   This Software handles sensitive data (passwords, secure notes, recovery keys).
-   Security depends on correct usage and environment configuration.
-   You are solely responsible for:
-     - safeguarding your master password,
-     - protecting all private keys and recovery files,
-     - keeping your operating system and dependencies up to date,
-     - ensuring the device you run the Software on is not compromised.
+5. Limitation of Liability
+Under no circumstances shall Sansyourways be liable for:
+- loss of data (including vaults, passwords, or keys),
+- corruption of files,
+- security breaches,
+- unauthorized access,
+- financial losses,
+- or any direct, indirect, incidental, consequential, or special damages.
+Your sole remedy is to discontinue use of the Software.
 
-   The author is not responsible for data loss or exposure caused by user
-   negligence, misuse, or system compromise.
+6. Data Responsibility
+All data stored using SPM, including:
+- passwords,
+- secure notes,
+- master password,
+- vault files,
+- recovery keys,
+- backups and portable bundles,
+are solely your responsibility.
+You must manage and protect your own keys, backups, and vault files.
+Loss of your master password or private recovery key may result in permanent data loss, and the author bears no responsibility.
 
-5. No Warranty
-   THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,
-   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
-   YOU ASSUME ALL RISKS ASSOCIATED WITH USING THE SOFTWARE.
+7. Allowed Distribution
+You may create portable bundles or SAVE backup ZIPs for your own usage only.
+You are NOT permitted to:
+- distribute your portable bundle to others,
+- upload the bundle publicly,
+- use the bundle as a software package for third parties.
 
-6. Limitation of Liability
-   IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
-   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES, INCLUDING BUT NOT LIMITED TO:
-     - data loss,
-     - security breaches,
-     - unauthorized access resulting from improper storage or configuration,
-     - or damages arising from the inability to use the Software.
+8. Updates & Modification Rights
+Sansyourways may:
+- update, change, or discontinue the Software at any time;
+- revoke or alter your right to use the Software;
+- change terms of this License without prior notice.
+Continued use indicates your agreement to any updated terms.
 
-   Your sole remedy for dissatisfaction with the Software is to stop using it.
+9. Termination
+This License terminates automatically if you violate any term.
+Upon termination:
+- You must stop using the Software immediately.
+- You must delete all copies of the Software remaining on your systems.
 
-7. Contributions
-   Unless explicitly agreed to in writing, any suggested improvements, bug
-   reports, or pull requests do not grant the contributor any rights to the
-   Software. All contributions, if accepted, become the property of the author.
+10. Jurisdiction
+This License is governed by the laws of Indonesia.
+Any disputes must be resolved exclusively in Indonesian courts.
 
-8. Updates and License Changes
-   The author reserves the right to modify this license and publish updated
-   versions at any time. Continued use of the Software after any update
-   constitutes acceptance of the revised license.
-
-9. Jurisdiction
-   This license is governed by the applicable laws in the author’s jurisdiction,
-   unless restricted by mandatory local laws.
-
-For questions or licensing requests, contact:  
-sansyourways
+© 2025 Sansyourways — All Rights Reserved.
+For permissions or commercial licensing inquiries:
+Email: sansyourways@duck.com
