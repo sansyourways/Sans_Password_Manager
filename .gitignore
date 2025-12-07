@@ -1,0 +1,35 @@
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Python / build (if you ever add tooling)
+__pycache__/
+*.pyc
+
+# SPM sensitive files – DO NOT COMMIT REAL DATA
+spm_vault.gpg
+*.gpg
+*.recovery
+spm_recovery_private.pem
+spm_recovery_private*.pem
+spm_backup_*.gpg
+
+# Any save / portable bundles
+spm_save_*/
+spm_save_*.zip
+spm_portable_*/
+spm_portable_*.zip
+*.tar.gz
+*.zip
+
+# Temp files
+/tmp/
+spm.*.tmp
+*.tmp
+*.bak
+*~

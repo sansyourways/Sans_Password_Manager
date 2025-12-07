@@ -1,0 +1,82 @@
+Sans Password Manager (SPM)
+Proprietary License
+© 2025 sansyourways. All rights reserved.
+
+1. Ownership
+   The Sans Password Manager (“SPM”), including all source code, scripts,
+   vault formats, documentation, and associated files (collectively,
+   the “Software”), is the exclusive property of sansyourways.
+   No ownership or intellectual property rights are transferred
+   to the user by downloading, copying, or using the Software.
+
+2. Grant of Permission
+   You are granted a personal, non-transferable, revocable license to:
+     - use the Software for your own personal or internal use,
+     - modify the Software privately (modifications may not be shared),
+     - create encrypted vaults for personal data management.
+
+   This permission does NOT grant any rights to:
+     - redistribute,
+     - publish,
+     - sublicense,
+     - or commercially exploit the Software.
+   
+   Any rights not explicitly granted remain reserved by the author.
+
+3. Restrictions
+   You may NOT:
+     - share, upload, mirror, or redistribute the Software or any part of it,
+     - publish modified or unmodified versions,
+     - resell or license the Software to others,
+     - use the Software as part of a commercial product or service,
+     - remove, obscure, or alter copyright or attribution notices,
+     - reverse engineer, disassemble, or extract cryptographic components
+       for use in another product.
+
+   Any unauthorized redistribution or commercialization is a violation of
+   this license and may result in termination of your rights to use the Software.
+
+4. Security Notice
+   This Software handles sensitive data (passwords, secure notes, recovery keys).
+   Security depends on correct usage and environment configuration.
+   You are solely responsible for:
+     - safeguarding your master password,
+     - protecting all private keys and recovery files,
+     - keeping your operating system and dependencies up to date,
+     - ensuring the device you run the Software on is not compromised.
+
+   The author is not responsible for data loss or exposure caused by user
+   negligence, misuse, or system compromise.
+
+5. No Warranty
+   THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+   YOU ASSUME ALL RISKS ASSOCIATED WITH USING THE SOFTWARE.
+
+6. Limitation of Liability
+   IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES, INCLUDING BUT NOT LIMITED TO:
+     - data loss,
+     - security breaches,
+     - unauthorized access resulting from improper storage or configuration,
+     - or damages arising from the inability to use the Software.
+
+   Your sole remedy for dissatisfaction with the Software is to stop using it.
+
+7. Contributions
+   Unless explicitly agreed to in writing, any suggested improvements, bug
+   reports, or pull requests do not grant the contributor any rights to the
+   Software. All contributions, if accepted, become the property of the author.
+
+8. Updates and License Changes
+   The author reserves the right to modify this license and publish updated
+   versions at any time. Continued use of the Software after any update
+   constitutes acceptance of the revised license.
+
+9. Jurisdiction
+   This license is governed by the applicable laws in the author’s jurisdiction,
+   unless restricted by mandatory local laws.
+
+For questions or licensing requests, contact:  
+sansyourways
