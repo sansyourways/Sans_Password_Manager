@@ -7,6 +7,28 @@ Keep-a-Changelog style format.
 
 ---
 
+## [2.2.0] — 2025-12-10
+### Added
+- Mandatory **Terms & Conditions + Privacy Policy Consent** flow on first run.
+- Persistent consent tracking stored in `~/.spm_consent`.
+- Blocking logic: SPM cannot be used until the user agrees.
+- Full support for **English & Indonesian** consent interface.
+- Integrated policy URLs:
+  - **Terms & Conditions:**  
+    https://github.com/sansyourways/Sans_Password_Manager/blob/main/docs/TERMS_AND_CONDITIONS.md
+  - **Privacy Policy:**  
+    https://github.com/sansyourways/Sans_Password_Manager/blob/main/docs/PRIVACY_POLICY.md
+
+### Improved
+- Streamlined onboarding flow for first-time users.
+- More secure startup-by-design: no menu access until consent is given.
+
+### Notes
+- Vault format remains fully compatible with all 2.x versions.
+- Users from previous versions will be prompted once and remembered afterward.
+
+---
+
 ## [2.1.0] – Web Mode, Secure Notes UI & PM2 Integration
 
 ### Added

@@ -397,6 +397,107 @@ choose_language() {
 	esac
 }
 
+# ----- Terms & Privacy Consent ----------------------------------------------
+
+ensure_policy_consent() {
+	# You can change this to be per-project if you want, but HOME-based is simple & portable
+	SPM_CONSENT_FILE="${HOME}/.spm_spm_consent"
+
+	# If already accepted, just return
+	if [ -f "$SPM_CONSENT_FILE" ]; then
+		if grep -q '^ACCEPTED=1' "$SPM_CONSENT_FILE" 2>/dev/null; then
+			return
+		fi
+	fi
+
+	clear
+	print_banner
+
+	if [ "$SPM_LANG" = "id" ]; then
+		cat <<'EOF'
+[PERJANJIAN PENGGUNA]
+
+Sebelum menggunakan Sans Password Manager (SPM), kamu harus
+menyetujui:
+
+  • Syarat & Ketentuan Layanan (Terms & Conditions)
+  • Kebijakan Privasi (Privacy Policy)
+
+Dokumen resmi:
+  • TERMS & CONDITIONS:
+    https://github.com/sansyourways/Sans_Password_Manager/blob/main/docs/TERMS_AND_CONDITIONS.md
+
+  • PRIVACY POLICY:
+    https://github.com/sansyourways/Sans_Password_Manager/blob/main/docs/PRIVACY_POLICY.md
+
+Silakan baca dokumen tersebut di browser kamu.
+
+Tanpa persetujuan, kamu tidak dapat menggunakan aplikasi ini.
+
+Apakah kamu sudah membaca dan SETUJU dengan
+Syarat & Ketentuan + Kebijakan Privasi di atas?
+Ketik: yes / y / ya untuk menyetujui.
+EOF
+		printf "\nJawaban (yes/ya/y atau lainnya untuk TIDAK): "
+	else
+		cat <<'EOF'
+[USER AGREEMENT]
+
+Before using Sans Password Manager (SPM), you must agree to:
+
+  • Terms & Conditions of Service
+  • Privacy Policy
+
+Official documents:
+  • TERMS & CONDITIONS:
+    https://github.com/sansyourways/Sans_Password_Manager/blob/main/docs/TERMS_AND_CONDITIONS.md
+
+  • PRIVACY POLICY:
+    https://github.com/sansyourways/Sans_Password_Manager/blob/main/docs/PRIVACY_POLICY.md
+
+Please open and read these documents in your browser.
+
+Without your consent, you cannot use this application.
+
+Have you read and do you AGREE to the Terms & Conditions
+and Privacy Policy above?
+Type: yes / y to accept.
+EOF
+		printf "\nAnswer (yes/y to accept, anything else to decline): "
+	fi
+
+	read -r ans || ans=""
+
+	# Normalize to lowercase
+	ans_lc=$(printf '%s' "$ans" | tr 'A-Z' 'a-z')
+
+	if [ "$ans_lc" = "yes" ] || [ "$ans_lc" = "y" ] || [ "$ans_lc" = "ya" ]; then
+		# Record consent
+		{
+			printf 'ACCEPTED=1\n'
+			printf 'DATE_UTC=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date)"
+			printf 'VERSION=%s\n' "$VERSION"
+			printf 'LANG=%s\n' "$SPM_LANG"
+		} > "$SPM_CONSENT_FILE" 2>/dev/null || true
+
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "\nTerima kasih. Persetujuan tersimpan. Melanjutkan...\n"
+		else
+			printf "\nThank you. Consent recorded. Continuing...\n"
+		fi
+		sleep 1
+	else
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "\nKamu tidak menyetujui Terms & Privacy.\n"
+			printf "Aplikasi tidak dapat digunakan tanpa persetujuan.\n"
+		else
+			printf "\nYou did not accept the Terms & Privacy.\n"
+			printf "The application cannot be used without consent.\n"
+		fi
+		exit 1
+	fi
+}
+
 # ----- Master password handling ----------------------------------------------
 
 prompt_master_password() {
@@ -4276,6 +4377,7 @@ interactive_menu() {
 main() {
 	ensure_requirements
 	choose_language
+	ensure_policy_consent
 
 	if [ $# -eq 0 ]; then
 		interactive_menu
