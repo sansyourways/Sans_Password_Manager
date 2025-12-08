@@ -7,6 +7,13 @@ Keep-a-Changelog style format.
 
 ---
 
+## 2.2.1 – 2025-12-08
+
+### Fixed
+- Restored and updated `cmd_help` to match all current features (web mode, secure notes, doctor, clipboard coaching, etc.).
+
+---
+
 ## [2.2.0] — 2025-12-10
 ### Added
 - Mandatory **Terms & Conditions + Privacy Policy Consent** flow on first run.

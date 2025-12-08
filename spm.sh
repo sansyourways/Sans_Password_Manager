@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.2.0"
+VERSION="2.2.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -1972,6 +1972,142 @@ cmd_doctor() {
 		printf "\n[DOCTOR] Pemeriksaan selesai.\n"
 	else
 		printf "\n[DOCTOR] Health check finished.\n"
+	fi
+}
+
+cmd_help() {
+	print_banner
+
+	if [ "$SPM_LANG" = "id" ]; then
+		cat <<EOF
+[ID] Panduan Singkat
+====================
+
+Sans Password Manager (SPM) v$VERSION
+
+Perintah utama (CLI):
+  ./spm.sh                 → Menu interaktif (TUI)
+  ./spm.sh init            → Inisialisasi vault baru + buat pasangan kunci pemulihan
+  ./spm.sh add             → Tambah entry password
+  ./spm.sh list            → List semua entry password
+  ./spm.sh get <id|pola>   → Lihat entry / cari (dengan helper clipboard + auto-bersihkan)
+  ./spm.sh edit            → Edit vault mentah dengan editor teks
+  ./spm.sh delete <id>     → Hapus entry password
+  ./spm.sh change-master   → Ganti kata sandi utama (re-encrypt vault)
+  ./spm.sh portable [nama] → Buat bundle portable (script + vault + file pemulihan)
+  ./spm.sh save [nama]     → Buat bundle portable lalu hapus vault lokal
+  ./spm.sh update          → Cek update rilis GitHub
+  ./spm.sh forgot          → Reset kata sandi utama dengan private key
+  ./spm.sh doctor          → Health / integrity check vault
+  ./spm.sh web             → Mode web (pilih sementara / background via pm2)
+  ./spm.sh help            → Tampilkan bantuan ini
+
+Catatan Aman (Secure Notes):
+  ./spm.sh notes-add       → Tambah catatan aman
+  ./spm.sh notes-list      → List catatan aman
+  ./spm.sh notes-view <id> → Lihat isi catatan aman
+  ./spm.sh notes-delete <id>
+                           → Hapus catatan aman
+
+Mode Web:
+  - Menjalankan HTTP server ringan untuk melihat vault lewat browser.
+  - Login memakai kata sandi utama.
+  - Pilihan mode:
+      • Mode sementara (jalan di foreground, stop dengan Ctrl + C)
+      • Mode background (menggunakan pm2; akan di-install otomatis jika memungkinkan)
+  - Antarmuka:
+      • Tabel password (ID, service, username – password tidak ditampilkan)
+      • Bagian Secure Notes (lihat / tambah / edit / hapus catatan)
+  - Sesi web otomatis terkunci jika tidak ada aktivitas ~30 detik.
+
+Clipboard & Coaching Password:
+  - Saat password disalin, clipboard akan dibersihkan otomatis setelah beberapa detik:
+      • macOS  : pbcopy < /dev/null
+      • Linux  : xclip /dev/null
+      • Termux : termux-clipboard-set ""
+  - Jika helper clipboard tidak tersedia, akan menampilkan:
+        "Tidak ada helper clipboard tersedia"
+    (termasuk saat memakai menu interaktif).
+  - Saat membuat password, SPM menampilkan:
+      • estimasi entropy
+      • estimasi waktu tebak (guess time)
+      • analisis jenis karakter (huruf kecil/besar, angka, simbol)
+      • saran penguatan password dengan penjelasan Indonesia + Inggris.
+
+Format internal vault:
+  - Baris password:
+      id<TAB>service<TAB>username<TAB>password<TAB>notes<TAB>created_at
+  - Baris note:
+      NOTE<TAB>note_id<TAB>title<TAB>base64_note<TAB>created_at<TAB>-
+  - Baris meta:
+      META_RECOVERY_PUBKEY=...   (kunci publik pemulihan disimpan di vault)
+
+EOF
+	else
+		cat <<EOF
+[EN] Quick Guide
+================
+
+Sans Password Manager (SPM) v$VERSION
+
+Main commands (CLI):
+  ./spm.sh                 → Interactive TUI menu
+  ./spm.sh init            → Initialize a new vault + generate recovery key pair
+  ./spm.sh add             → Add a password entry
+  ./spm.sh list            → List password entries
+  ./spm.sh get <id|pattern>→ View entry / search (with clipboard helper + auto wipe)
+  ./spm.sh edit            → Edit raw vault with your editor
+  ./spm.sh delete <id>     → Delete a password entry
+  ./spm.sh change-master   → Change master password (re-encrypt vault)
+  ./spm.sh portable [name] → Create portable bundle (script + vault + recovery files)
+  ./spm.sh save [name]     → Create portable bundle and wipe local vault
+  ./spm.sh update          → Check latest GitHub release
+  ./spm.sh forgot          → Reset master password using the private key
+  ./spm.sh doctor          → Vault health / integrity check
+  ./spm.sh web             → Web mode (foreground or pm2 background)
+  ./spm.sh help            → Show this help
+
+Secure Notes:
+  ./spm.sh notes-add       → Add secure note
+  ./spm.sh notes-list      → List secure notes
+  ./spm.sh notes-view <id> → View secure note content
+  ./spm.sh notes-delete <id>
+                           → Delete secure note
+
+Web Mode:
+  - Runs a lightweight HTTP server so you can inspect your vault from a browser.
+  - Protected by your master password.
+  - Modes:
+      • temporary (foreground, stop with Ctrl + C)
+      • background (managed by pm2; installed automatically when possible)
+  - UI:
+      • Password entries table (ID, service, username – passwords are not shown)
+      • Secure notes section (view / add / edit / delete)
+  - Web session auto-locks after ~30 seconds of inactivity.
+
+Clipboard & Password Coaching:
+  - When copying a password, clipboard is auto-cleared after a short delay:
+      • macOS  : pbcopy < /dev/null
+      • Linux  : xclip /dev/null
+      • Termux : termux-clipboard-set ""
+  - If no clipboard helper is available, you will see:
+        "No clipboard helper available"
+    (including when using the interactive menu).
+  - When creating a password, SPM shows:
+      • entropy estimate
+      • guess time estimate
+      • character type analysis (lower/upper/digits/symbols)
+      • strengthening suggestions with both English + Indonesian explanation.
+
+Internal vault format:
+  - Password line:
+      id<TAB>service<TAB>username<TAB>password<TAB>notes<TAB>created_at
+  - Note line:
+      NOTE<TAB>note_id<TAB>title<TAB>base64_note<TAB>created_at<TAB>-
+  - Meta line:
+      META_RECOVERY_PUBKEY=...   (recovery public key stored inside the vault)
+
+EOF
 	fi
 }
 
