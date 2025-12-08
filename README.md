@@ -3,24 +3,26 @@
 ![IMG_1114](https://github.com/user-attachments/assets/acc62927-fc23-41b2-9664-35c40f22ecf6)
 
 
-
 # Sans Password Manager (SPM)
 
-> Portable, terminal-based password manager in pure Bash + GPG,  
-> designed to be **minimal**, **portable**, and **security-first**.
+> A fully offline, portable, terminal-based password manager  
+> built in pure Bash + GnuPG, designed for **security-first**,  
+> **minimalism**, and **complete user control**.
 
 ---
 
 ## Table of Contents
-
 - [Overview](#overview)
-- [Fitur Utama (ID)](#fitur-utama-id)
-- [Key Features (EN)](#key-features-en)
-- [Security Model](#security-model)
+- [Philosophy](#philosophy)
+- [Features](#features)
+  - [Fitur Utama (ID)](#fitur-utama-id)
+  - [Key Features (EN)](#key-features-en)
+- [Architecture & Security Model](#architecture--security-model)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Usage](#usage)
   - [Interactive Menu](#interactive-menu)
+  - [Web Mode (Local Only)](#web-mode-local-only)
   - [CLI Commands](#cli-commands)
   - [Secure Notes](#secure-notes)
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
@@ -29,137 +31,129 @@
 - [Clipboard Auto-Clean](#clipboard-auto-clean)
 - [Portable & Save Bundles](#portable--save-bundles)
 - [Development & Versioning](#development--versioning)
-- [Security Policy](#security-policy)
+- [Documentation & Legal](#documentation--legal)
 - [License](#license)
 
 ---
 
 ## Overview
 
-**SPM** (Sans Password Manager) is a **single Bash script** password manager that:
+**SPM (Sans Password Manager)** is a **single-file**, **portable**,  
+**offline-only**, **encrypted password manager** powered by:
 
-- Encrypts your vault using **GPG (AES-256)**.
-- Runs on **Linux, macOS, Termux** (Android) and most POSIX shells.
-- Supports **portable bundles** so you can carry your vault between machines.
-- Uses an **RSA key pair** for **“forgot master password”** recovery.
+- **GnuPG (AES-256, symmetric)**  
+- **OpenSSL (RSA)** for optional recovery  
+- **Pure Bash**, requiring no internet access
 
-> ⚠️ This is a security-sensitive tool.  
-> Use at your own risk and **never commit your real vault or private keys**.
+SPM is designed for users who want:
 
----
+- full ownership of their vault  
+- no cloud storage  
+- no telemetry  
+- no tracking  
+- a clean UI (terminal + optional local web mode)
 
-## Fitur Utama (ID)
-
-- 🔐 **Vault terenkripsi** dengan GPG (AES256, symmetric).
-- 🌐 **Lintas platform**: Linux, macOS, Termux (Android).
-- 🗂️ **Menu interaktif** dengan pilihan bahasa **Indonesia / English**.
-- 📦 **Portable bundle**: ZIP dengan script + vault + file recovery.
-- 💾 **SAVE bundle**: backup terenkripsi lalu hapus vault lokal (opsional).
-- 🧠 **Password strength coaching**:
-  - Entropy (bit)
-  - Perkiraan waktu brute-force
-  - Analisis jenis karakter
-  - Saran (Bahasa Indonesia + Inggris)
-- 📋 **Auto copy + auto clean clipboard** (15 detik) jika helper tersedia.
-- 📝 **Secure notes**: catatan teks aman di dalam vault yang sama.
-- 🔑 **Lupa password utama**: reset via **private key RSA** yang kamu simpan.
-- 🩺 **`doctor` / health check**:
-  - Cek format vault
-  - Cek duplikasi ID
-  - Validasi meta recovery key
-  - Verifikasi pasangan recovery file + private key
+> ✔ SPM never transmits any data.  
+> ✔ Fully offline.  
+> ✔ You are the **sole data controller** (GDPR compliant).  
+> ❗ The developer cannot recover your vault if you lose your master password.
 
 ---
 
-## Key Features (EN)
-
-- 🔐 **Encrypted vault** using GPG (AES256, symmetric mode).
-- 🌐 **Cross-platform**: Linux, macOS, Termux (Android).
-- 🗂️ **Interactive menu** with language selection (EN / ID).
-- 📦 **Portable bundles**: ZIP with script + vault + recovery file.
-- 💾 **SAVE bundles**: backup + wipe local vault (optional).
-- 🧠 **Password strength coaching**:
-  - Entropy (bits)
-  - Rough crack-time estimate
-  - Character type analysis
-  - Suggestions (English + Indonesian)
-- 📋 **Auto-copy & auto-clear clipboard** in ~15 seconds (if helper available).
-- 📝 **Secure notes** stored inside the same encrypted vault.
-- 🔑 **Forgot master password** flow using RSA private key + recovery file.
-- 🩺 **`doctor` health check**:
-  - Vault decryption check
-  - Duplicate ID check
-  - Recovery pubkey metadata validation
-  - Recovery file + private key pairing test
+## Philosophy
+- **Privacy First:** No analytics, no logs, no tracking.  
+- **Offline Forever:** Everything stored locally; no servers.  
+- **Portable:** Carry your encrypted vault anywhere.  
+- **Simplicity:** A single Bash script.  
+- **Transparency:** Encryption handled by GnuPG/OpenSSL directly.  
+- **User Ownership:** You control your keys, vaults, and backups.
 
 ---
 
-## Security Model
+## Features
 
-### What SPM Does
+### Fitur Utama (ID)
 
-- Uses **GPG symmetric encryption** (`AES256`) to protect your vault.
-- Stores:
-  - Password entries as tab-separated lines.
-  - Secure notes as base64-encoded bodies inside vault.
-  - Recovery public key metadata inside vault (`META_RECOVERY_PUBKEY`).
-- Generates **RSA key pair** on `init`:
-  - Private key: `spm_recovery_private.pem` (stored where you run `spm.sh`).
-  - Public key: embedded into vault metadata + used to build recovery file.
+- 🔐 **Vault terenkripsi GPG (AES-256)**  
+- 📟 **UI interaktif** (EN/ID)  
+- 🖥️ **Web Mode (Localhost)** — dashboard modern *offline-only*  
+- 📦 **Portable bundle** (script + vault + recovery)  
+- 💾 **SAVE bundle** (backup + wipe vault lokal)  
+- 🧠 **Password Strength Coaching**  
+- 📝 **Secure Notes**  
+- 🔑 **Lupa password** via RSA private key  
+- 🩺 **Doctor mode** (diagnostik integritas vault & recovery)  
+- 🧽 **Clear clipboard otomatis** (~15 detik)
 
-### What SPM Assumes
+---
 
-- Your machine is **not compromised** (no malware / keylogger).
-- You keep:
-  - **Master password** secret.
-  - **Private key** (`spm_recovery_private.pem`) in a **safe location** (ideally offline).
-- GPG & OpenSSL are correctly installed and not tampered with.
+### Key Features (EN)
 
-### What SPM Does Not Protect Against
+- 🔐 Encrypted vault (GPG AES-256)  
+- 🗂️ Clean interactive menu  
+- 🌐 Local Web Mode (browser UI, offline only)  
+- 📦 Portable bundle (ZIP)  
+- 💾 SAVE bundle (backup + wipe local)  
+- 🧠 Password strength analysis & coaching  
+- 📝 Secure notes  
+- 🔑 RSA-based recovery  
+- 🩺 Doctor diagnostics  
+- 🧽 Clipboard auto-clean  
+- 🚫 No cloud, no telemetry, no data collection
 
-- Attackers with **root/admin** on your system while you are using SPM.
-- Physical attacks on unencrypted disks or RAM dump.
-- Mistakes like:
-  - Pushing real vault / keys to GitHub.
-  - Sharing recovery private key unintentionally.
+---
 
-For more details, see `SECURITY.md`.
+## Architecture & Security Model
+
+### Encryption
+- **Vault:** GnuPG symmetric AES-256  
+- **Recovery:** RSA-2048 private/public key  
+- **Notes:** Base64 + encrypted  
+- **Metadata:** Stored inside encrypted vault
+
+### Recovery Design
+- `spm_recovery_private.pem` → your private key (store offline)  
+- `<vault>.recovery` → recovery capsule encrypted with RSA public key
+
+### SPM Assumes
+- Host machine is secure  
+- User protects master password & private key  
+- GnuPG/OpenSSL are trusted binaries
+
+### SPM Does NOT Resist
+- Keyloggers / malware  
+- Root attackers  
+- RAM extraction  
+- OS-level compromise  
+- User mistakes (uploading vault, losing private key)
+
+For more details, see [`SECURITY.md`](docs/SECURITY.md).
 
 ---
 
 ## Requirements
+SPM automatically checks / installs:
 
-SPM automatically checks & tries to install:
-
-- `bash`
-- `gpg`
-- `openssl`
-- `curl`
-- `zip`
-- Clipboard helpers (where possible):
-  - Termux: `termux-clipboard-set`
-  - Linux: `xclip` or `wl-copy`
-  - macOS: `pbcopy` (built-in)
-
-You may be asked for `sudo` when installing dependencies.
+- bash  
+- gpg  
+- openssl  
+- curl  
+- zip  
+- Clipboard helpers:
+  - pbcopy (macOS)  
+  - xclip / wl-copy (Linux)  
+  - termux-clipboard-set (Termux)
 
 ---
 
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USER/YOUR_REPO.git
-cd YOUR_REPO
+git clone https://github.com/sansyourways/Sans_Password_Manager.git
+cd Sans_Password_Manager
 chmod +x spm.sh
 ./spm.sh
 ```
-
-SPM will:
-
-1. Detect your environment (Linux / macOS / Termux).
-2. Check & install required tools.
-3. Show a **language selection page** (EN / ID).
-4. Present the interactive menu.
 
 ---
 
@@ -167,38 +161,58 @@ SPM will:
 
 ### Interactive Menu
 
-Run:
-
 ```bash
 ./spm.sh
 ```
 
-Menu includes:
+Includes:
 
-- List entries  
-- Add entry  
-- Get entry  
-- Delete entry  
+- Add / list / get / delete entry  
 - Edit vault  
 - Change master password  
 - Portable bundle  
-- Save bundle  
+- SAVE bundle  
 - Secure notes  
-- Forgot password  
-- Doctor / health check  
+- Recovery  
+- Doctor diagnostics  
 
-### CLI Examples
+---
+
+### Web Mode (Local Only)
+
+```bash
+./spm.sh web
+```
+
+- Runs on localhost only  
+- Vault stays encrypted locally  
+- Master password required  
+- Features:
+  - View entries  
+  - View notes  
+  - Edit entries  
+  - Local copy-to-clipboard  
+
+---
+
+### CLI Commands
 
 ```bash
 ./spm.sh init
 ./spm.sh add
 ./spm.sh list
-./spm.sh get 2
-./spm.sh delete 4
+./spm.sh get <id>
+./spm.sh delete <id>
 ./spm.sh change-master
-./spm.sh update
+./spm.sh portable
+./spm.sh save
 ./spm.sh forgot
+./spm.sh notes-add
+./spm.sh notes-list
+./spm.sh notes-view <id>
+./spm.sh notes-delete <id>
 ./spm.sh doctor
+./spm.sh web
 ```
 
 ---
@@ -212,27 +226,29 @@ Menu includes:
 ./spm.sh notes-delete 1
 ```
 
+Stored inside encrypted vault.
+
 ---
 
 ## Recovery: Forgot Master Password
 
-SPM generates:
+Generated files:
 
-- `spm_recovery_private.pem` → **YOU must store safely**
-- `<vault>.recovery` → included in portable/save bundles
+- `spm_recovery_private.pem`  
+- `<vault>.recovery`
 
-Reset:
+To reset:
 
 ```bash
 ./spm.sh forgot
 ```
 
-SPM will:
+Process:
 
-1. Decrypt recovery file using your private key  
+1. Decrypt recovery capsule  
 2. Retrieve old master password  
-3. Allow setting new master password  
-4. Rebuild vault and recovery files  
+3. Set new master password  
+4. Rebuild vault + recovery files  
 
 ---
 
@@ -242,39 +258,36 @@ SPM will:
 ./spm.sh doctor
 ```
 
-Checks:
+Validates:
 
-- Vault format  
+- Vault structure  
+- GPG/AES decryption  
 - Duplicate IDs  
+- Secure notes integrity  
 - Recovery metadata  
-- Matching private key  
-- Secure notes structure  
+- RSA key pairing  
 
 ---
 
 ## Password Strength Coaching
-
-SPM shows:
+SPM analyzes:
 
 - Entropy  
-- Crack time estimates  
-- Character class analysis  
-- Suggestions (EN + ID)  
+- Crack-time estimates  
+- Character class distribution  
+- Repetition patterns  
+- Suggestions (EN + ID)
 
 ---
 
 ## Clipboard Auto-Clean
+Auto-clears clipboard in ~15 seconds using:
 
-Auto-clears clipboard after ~15 seconds using:
+- pbcopy (macOS)  
+- xclip / wl-copy (Linux)  
+- termux-clipboard-set (Termux)
 
-- macOS: `pbcopy`  
-- Linux: `xclip` / `wl-copy`  
-- Termux: `termux-clipboard-set`  
-
-If none available:
-
-- EN: `No clipboard helper available.`  
-- ID: `Tidak ada helper clipboard tersedia.`  
+If unavailable → fallback warning only.
 
 ---
 
@@ -286,41 +299,50 @@ If none available:
 ./spm.sh portable
 ```
 
-Includes:
+Bundle includes:
 
-- `spm.sh`
-- `spm_vault.gpg`
-- `spm_vault.gpg.recovery`
-- `spm_recovery_private.pem` (if present)
-- Language-based README
+- spm.sh  
+- spm_vault.gpg  
+- spm_vault.gpg.recovery  
+- spm_recovery_private.pem (optional)  
+- Auto README file  
 
-### Save (Backup + Wipe Local)
+### SAVE
 
 ```bash
 ./spm.sh save
 ```
 
-Creates bundle then wipes vault+backup locally.
+Creates encrypted backup, wipes local vault.
 
 ---
 
 ## Development & Versioning
 
-Version: **2.0.0**  
-- Semantic versioning  
-- See [CHANGELOG.md](CHANGELOG.md)  
+Version: **2.1.0**  
+Uses **semantic versioning**.  
+See `CHANGELOG.md` for details.
 
 ---
 
-## Security Policy
+## Documentation & Legal
 
-See [SECURITY.md](SECURITY.md).
+SPM is closed-source and licensed under a **Private License**.
+
+Refer to:
+
+- [`LICENSE`](LICENSE)
+- [`docs/PRIVACY_POLICY.md`](docs/PRIVACY_POLICY.md)
+- [`docs/GDPR_PRIVACY_NOTICE.md`](docs/GDPR_PRIVACY_NOTICE.md)
+- [`docs/TERMS_AND_CONDITIONS.md`](docs/TERMS_AND_CONDITIONS.md)
+- [`docs/CODE_OF_CONDUCT.md`](docs/CODE_OF_CONDUCT.md)
+- [`docs/SECURITY.md`](docs/SECURITY.md)
 
 ---
 
 ## License
 
-**Proprietary – All Rights Reserved**  
-© 2025 SansYourWays.
+**Sans Password Manager — Private License**  
+© 2025 Sansyourways. All Rights Reserved.
 
-See [LICENSE](LICENSE) for details.
+See [`LICENSE`](LICENSE) for full terms.
