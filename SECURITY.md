@@ -1,49 +1,132 @@
-# Security Policy
+# Security Policy for Sans Password Manager (SPM)
+Version 2.0 — © 2025 Sansyourways  
+Last Updated: January 2025
 
-## Supported Versions
+SPM (Sans Password Manager) is a privacy-focused, offline, fully client-side encrypted application.  
+This document contains the security policy for vulnerability reporting, responsible disclosure, and usage expectations.
 
-This project is experimental and under active development.  
-There is no formal LTS policy yet, but generally the **latest release / tag**
-is considered the most secure version.
+---
 
-## Reporting a Vulnerability
+## 1. Security Philosophy
+SPM is designed around the following core principles:
 
-If you find a security issue (logic bug, crypto misuse, info leak, etc.):
+- **Offline-first** — no servers, no cloud sync, no telemetry.  
+- **Zero data collection** — all vault data stays on the user's device.  
+- **Strong encryption** — GnuPG (OpenPGP) or AES-256-GCM protects all stored data.  
+- **User-controlled keys** — the user is the sole owner of all keys and passwords.  
+- **No recovery mechanisms** — master password or private key cannot be recovered by the developer.  
 
-- **Do NOT** open a public GitHub issue with sensitive details.
-- Contact the maintainer privately:
+SPM is intentionally built without remote dependencies to minimize risk.
 
-  - Email: `sansyourways@proton.me`
-  - GitHub DM: via your GitHub profile (if enabled)
+---
 
-Please include:
+## 2. Supported Versions
+Because SPM is distributed under a **Private License**, only the latest stable release is officially supported.
 
-- A short description of the issue
-- Reproduction steps if possible
-- Your environment (OS, shell, GPG/openssl version)
+| Version | Status |
+|--------|--------|
+| Latest stable (current release) | Supported |
+| Any modified, altered, or redistributed build | **Not supported** |
+| Older versions | Not supported |
 
-You will get:
+---
 
-- Acknowledgment of the report
-- A plan (fix, mitigation, or explanation) if it’s a real issue
+## 3. Reporting a Vulnerability (Responsible Disclosure)
+If you discover a potential security issue, follow these rules:
 
-## Do Not Submit
+### ✔️ DO:
+- Report it privately and directly.
+- Provide steps to reproduce.
+- Provide your environment details (OS, version, architecture).
+- Wait for confirmation before sharing further details.
 
-- Your real vault files (`*.gpg`, `*.recovery`)
-- Your real `spm_recovery_private.pem`
-- Real passwords or master passwords
-- Screenshots/logs that reveal secrets
+### ❌ DO NOT:
+- Publicly disclose the vulnerability.
+- Post the issue in GitHub issues.
+- Share vaults, passwords, or private keys.
+- Upload sensitive data for testing.
+- Attempt to reverse engineer or bypass protections (violates license).
 
-## Threat Model (High Level)
+### 📩 **Report via Email (only):**
+**security@sansyourways.xyz**
 
-Sans Password Manager (SPM) assumes:
+You will receive acknowledgment within a reasonable timeframe.
 
-- The host machine is **not compromised** (no active malware / keylogger).
-- The user keeps the **master password** and **private key** secret.
-- GPG and OpenSSL are correctly installed and not backdoored.
+---
 
-SPM **does NOT** protect against:
+## 4. What Information to Include
+When reporting, attach:
 
-- Someone with full root access on your device while you are using SPM.
-- Physical attacks on unencrypted disks / memory.
-- Users who commit their vault or keys to GitHub by mistake.
+- A clear description of the issue  
+- Steps to reproduce  
+- SPM version  
+- Your OS and setup  
+- Expected behavior vs actual behavior  
+- Logs *only if safe* (no sensitive data)
+
+Do **not** send:
+
+- Real vaults  
+- Real passwords  
+- Master password  
+- Private keys  
+- Screenshots containing sensitive entries  
+
+---
+
+## 5. Scope of Security Support
+The following are considered in-scope for reporting:
+
+- Encryption implementation bugs  
+- File corruption or integrity failures  
+- Web mode security concerns  
+- Local process access vulnerabilities  
+- Cryptographic misuse  
+- Privilege escalation inside SPM  
+- Bundle/backup handling vulnerabilities  
+
+The following are **out of scope**:
+
+- Lost master passwords  
+- User-caused key loss  
+- Device compromise (malware/virus/root)  
+- Modified or tampered versions of SPM  
+- Vault recovery requests  
+- Cloud leakage (SPM never uploads data)  
+- Brute-forcing encrypted vaults  
+- Unofficial extensions or scripts  
+
+---
+
+## 6. Handling of Reports
+All valid security reports will be:
+
+- Acknowledged
+- Investigated privately
+- Resolved in a future update where applicable
+- Credited (if you wish)
+- Kept confidential until fixed
+
+Reports violating the Private License (reverse engineering, decompiling, etc.) may result in termination of your license.
+
+---
+
+## 7. User Security Responsibility
+Users are fully responsible for:
+
+- Protecting their master password  
+- Storing backups securely  
+- Managing encryption keys  
+- Protecting their device from malware  
+- Securing their filesystem permissions  
+
+Because SPM does not collect data or hold keys, **the developer cannot restore lost vaults**.
+
+---
+
+## 8. Contact Information
+Security issues: **security@sansyourways.xyz**  
+General support: **support@sansyourways.xyz**  
+Commercial licensing: **business@sansyourways.xyz**
+
+© 2025 Sansyourways. All Rights Reserved.
