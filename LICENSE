@@ -1,84 +1,123 @@
-Sans Password Manager – Private License
-Version 1.0 — © 2025 Sansyourways. All Rights Reserved.
+# Sans Password Manager – Private License  
+Version 1.1 — © 2025 Sansyourways  
+All Rights Reserved.
 
-1. Ownership
-This software (“Sans Password Manager”, “SPM”, “the Software”) is the exclusive property of Sansyourways.
-All rights not expressly granted in this License are reserved.
-You do not obtain any ownership rights to the Software or any part thereof.
+This Private License ("License") governs your use of the software known as “Sans Password Manager” (“SPM”, “the Software”).  
+By downloading, accessing, or using SPM, you agree to the terms below.
 
-2. Grant of Use
-You are granted a personal, non-transferable, non-exclusive, revocable license to:
-- Download and run the Software on your own devices.
-- Use it for personal or internal purposes only.
+---
+
+## 1. Ownership
+SPM is the exclusive property of Sansyourways.  
+All rights not expressly granted to you in this License are reserved.  
+You do not obtain any ownership rights to the Software.
+
+---
+
+## 2. Grant of Use
+You are granted a **personal, non-transferable, non-exclusive, revocable** license to:
+
+- Install and run the Software on your own devices.  
+- Use the Software for personal or internal purposes.  
 - Create encrypted vaults and use all included functionality.
+
 No other rights are granted.
 
-3. Restrictions
-You must NOT, under any circumstances:
-- Redistribute, publish, or upload the Software to other repositories.
-- Share, sell, rent, lease, sublicense, or otherwise transfer the Software to others.
-- Modify, adapt, translate, reverse engineer, decompile, or create derivative works.
-- Remove or alter copyright notices, credits, or internal identifiers.
-- Use the Software for commercial services without written permission from Sansyourways.
-- Include the Software or its components in other projects or toolkits.
-- Train AI models or datasets using this code or its generated vaults.
-Any violation terminates your right to use the Software immediately.
+---
 
-4. No Warranty
-The Software is provided “AS IS”, without warranty of any kind, express or implied, including but not limited to:
-- merchantability,
-- fitness for a particular purpose,
-- data loss protection,
-- security or cryptographic robustness,
-- error-free or uninterrupted operation.
-You use the Software at your own risk.
+## 3. Restrictions
+You must NOT:
 
-5. Limitation of Liability
-Under no circumstances shall Sansyourways be liable for:
-- loss of data (including vaults, passwords, or keys),
-- corruption of files,
-- security breaches,
-- unauthorized access,
-- financial losses,
-- or any direct, indirect, incidental, consequential, or special damages.
-Your sole remedy is to discontinue use of the Software.
+- Redistribute, publish, upload, or share the Software.  
+- Sell, rent, lease, sublicense, lend, or transfer the Software.  
+- Modify, adapt, patch, or create derivative works.  
+- Reverse engineer, decompile, or attempt to reveal internal mechanisms.  
+- Remove or change copyright notices.  
+- Use SPM commercially without written permission.  
+- Include SPM in toolkits, bundles, or other projects.  
+- Train AI models or datasets using the Software or its output.  
 
-6. Data Responsibility
-All data stored using SPM, including:
-- passwords,
-- secure notes,
-- master password,
-- vault files,
-- recovery keys,
-- backups and portable bundles,
-are solely your responsibility.
-You must manage and protect your own keys, backups, and vault files.
-Loss of your master password or private recovery key may result in permanent data loss, and the author bears no responsibility.
+Violation results in **immediate termination** of your License.
 
-7. Allowed Distribution
-You may create portable bundles or SAVE backup ZIPs for your own usage only.
-You are NOT permitted to:
-- distribute your portable bundle to others,
-- upload the bundle publicly,
-- use the bundle as a software package for third parties.
+---
 
-8. Updates & Modification Rights
+## 4. No Warranty
+The Software is provided **“AS IS”**, without warranty of any kind, including:
+
+- merchantability  
+- fitness for a particular purpose  
+- data or encryption integrity  
+- uninterrupted or error-free operation  
+
+You use SPM at your own risk.
+
+---
+
+## 5. Limitation of Liability
+Sansyourways is **not liable** for:
+
+- data loss  
+- forgotten master passwords  
+- corrupted vaults  
+- security breaches  
+- unauthorized access  
+- financial damages  
+- direct or indirect losses  
+
+Your sole remedy is to stop using the Software.
+
+---
+
+## 6. Data Responsibility
+All data stored in SPM—including:
+
+- passwords  
+- secure notes  
+- master passwords  
+- recovery keys  
+- vault files  
+- backups  
+
+—is **solely your responsibility**.  
+The developer cannot recover your data.
+
+---
+
+## 7. Allowed Distribution
+You may create **personal backup bundles** (e.g., ZIP, portable vault), but:
+
+- They are for your own use only.  
+- You may not share or publish them.  
+- You may not use them as a distribution package for others.
+
+---
+
+## 8. Updates & Modification Rights
 Sansyourways may:
-- update, change, or discontinue the Software at any time;
-- revoke or alter your right to use the Software;
-- change terms of this License without prior notice.
-Continued use indicates your agreement to any updated terms.
 
-9. Termination
-This License terminates automatically if you violate any term.
-Upon termination:
-- You must stop using the Software immediately.
-- You must delete all copies of the Software remaining on your systems.
+- Update, change, or discontinue SPM  
+- Modify or revoke your License  
+- Change these terms at any time  
 
-10. Jurisdiction
-This License is governed by the laws of Indonesia.
+Continued use indicates acceptance of updated terms.
+
+---
+
+## 9. Termination
+This License terminates immediately if you violate any provision.  
+Upon termination, you must delete all copies of SPM.
+
+---
+
+## 10. Jurisdiction
+This License is governed by the laws of **Indonesia**.  
 Any disputes must be resolved exclusively in Indonesian courts.
 
+---
+
+## 11. Contact
+For permissions, commercial licensing, or legal inquiries:
+
+**Email:** support@sansyourways.xyz
+
 © 2025 Sansyourways — All Rights Reserved.
-For permissions or commercial licensing inquiries:
-Email: sansyourways@duck.com
