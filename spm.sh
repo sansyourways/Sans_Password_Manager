@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.2.1"
+VERSION="2.3.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -201,6 +201,7 @@ install_tool() {
 		xclip) candidates="xclip" ;;
 		wl-copy) candidates="wl-clipboard" ;;
 		termux-clipboard-set) candidates="termux-api" ;;
+		python3) candidates="python3 python" ;;
 	esac
 
 	set +e
