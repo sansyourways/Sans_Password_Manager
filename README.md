@@ -81,6 +81,7 @@ SPM is designed for users who want:
 - 💾 **SAVE bundle** (backup + wipe vault lokal)  
 - 🧠 **Password Strength Coaching**  
 - 📝 **Secure Notes**  
+- 📜 Kode Backup
 - 🔑 **Lupa password** via RSA private key  
 - 🩺 **Doctor mode** (diagnostik integritas vault & recovery)  
 - 🧽 **Clear clipboard otomatis** (~15 detik)
@@ -95,7 +96,8 @@ SPM is designed for users who want:
 - 📦 Portable bundle (ZIP)  
 - 💾 SAVE bundle (backup + wipe local)  
 - 🧠 Password strength analysis & coaching  
-- 📝 Secure notes  
+- 📝 Secure notes
+- 📜 Backup codes  
 - 🔑 RSA-based recovery  
 - 🩺 Doctor diagnostics  
 - 🧽 Clipboard auto-clean  
@@ -211,6 +213,10 @@ Includes:
 ./spm.sh notes-list
 ./spm.sh notes-view <id>
 ./spm.sh notes-delete <id>
+./spm.sh backup-codes-add
+./spm.sh backup-codes-list
+./spm.sh backup-codes-view <id>
+./spm.sh backup-codes-delete <id>
 ./spm.sh doctor
 ./spm.sh web
 ```
@@ -227,6 +233,19 @@ Includes:
 ```
 
 Stored inside encrypted vault.
+
+---
+
+## Backup Codes
+
+```bash
+./spm.sh backup-codes-add
+./spm.sh backup-codes-list
+./spm.sh backup-codes-view 1
+./spm.sh backup-codes-delete 1
+```
+
+Stored inside encrypted vault. Viewing requires master password re-verification.
 
 ---
 
@@ -319,7 +338,7 @@ Creates encrypted backup, wipes local vault.
 
 ## Development & Versioning
 
-Version: **2.1.0**  
+Version: **2.3.0**  
 Uses **semantic versioning**.  
 See `CHANGELOG.md` for details.
 

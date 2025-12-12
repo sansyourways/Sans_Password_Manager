@@ -546,6 +546,30 @@ ensure_master_password_loaded() {
 	fi
 }
 
+re_verify_master_password() {
+	local entered_pw
+	if [ "$SPM_LANG" = "id" ]; then
+		printf 'Masukkan kata sandi utama untuk verifikasi: '
+	else
+		printf 'Enter master password for verification: '
+	fi
+	stty -echo
+	IFS= read -r entered_pw
+	stty echo
+	printf '\n'
+
+	if [ "$entered_pw" != "$MASTER_PW" ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			die "Verifikasi kata sandi utama gagal."
+		else
+			die "Master password verification failed."
+		fi
+	fi
+	# Securely wipe the entered password from local variable
+	entered_pw="$(printf '%*s' "${#entered_pw}" '' | tr ' ' 'X')"
+	unset entered_pw 2>/dev/null || true
+}
+
 # ----- GPG encrypt / decrypt wrapper -----------------------------------------
 
 decrypt_vault_to_file() {
@@ -622,6 +646,23 @@ next_note_id_from_vault() {
 	fi
 	awk -F '\t' '
 		$1=="NOTE" && $2 ~ /^[0-9]+$/ {
+			if ($2 > max) max = $2
+		}
+		END {
+			if (max == 0) print 1;
+			else print max + 1;
+		}
+	' "$file"
+}
+
+next_backup_code_id_from_vault() {
+	local file="$1"
+	if [ ! -s "$file" ]; then
+		printf '1\n'
+		return
+	fi
+	awk -F '\t' '
+		$1=="BACKUP_CODE" && $2 ~ /^[0-9]+$/ {
 			if ($2 > max) max = $2
 		}
 		END {
@@ -1116,11 +1157,13 @@ cmd_edit() {
 		printf "Membuka vault di editor: %s\n" "$EDITOR_CMD"
 		printf "# Format password: id<TAB>service<TAB>username<TAB>password<TAB>notes<TAB>created_at\n" >&2
 		printf "# Format note    : NOTE<TAB>note_id<TAB>title<TAB>base64_note<TAB>created_at<TAB>-\n" >&2
+		printf "# Format backup code: BACKUP_CODE<TAB>id<TAB>label<TAB>base64_codes<TAB>created_at<TAB>-\n" >&2
 		printf "# Baris meta     : META_RECOVERY_PUBKEY...\n" >&2
 	else
 		printf "Opening vault in editor: %s\n" "$EDITOR_CMD"
 		printf "# Password rows: id<TAB>service<TAB>username<TAB>password<TAB>notes<TAB>created_at\n" >&2
 		printf "# Note rows    : NOTE<TAB>note_id<TAB>title<TAB>base64_note<TAB>created_at<TAB>-\n" >&2
+		printf "# Backup code rows: BACKUP_CODE<TAB>id<TAB>label<TAB>base64_codes<TAB>created_at<TAB>-\n" >&2
 		printf "# Meta row     : META_RECOVERY_PUBKEY...\n" >&2
 	fi
 
@@ -1379,7 +1422,184 @@ cmd_notes_delete() {
 	fi
 }
 
+# ----- Backup codes commands -------------------------------------------------
+
+cmd_backup_codes_add() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Label untuk kode backup (contoh: Google 2FA, GitHub Recovery): "
+	else
+		printf "Label for backup codes (e.g., Google 2FA, GitHub Recovery): "
+	fi
+	IFS= read -r label
+	[ -n "$label" ] || die "Label cannot be empty."
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "\nMasukkan kode backup, satu per baris. Akhiri dengan Ctrl+D di baris baru.\n\n"
+	else
+		printf "\nEnter backup codes, one per line. Finish with Ctrl+D on a new line.\n\n"
+	fi
+
+	local tmp_codes
+	tmp_codes="$(make_tmp)"
+	cat >"$tmp_codes"
+
+	local codes_b64
+	codes_b64="$(base64 <"$tmp_codes" | tr -d '\n')"
+	local bc_id created
+	bc_id="$(next_backup_code_id_from_vault "$tmp")"
+	created="$(now_iso)"
+
+	printf 'BACKUP_CODE\t%s\t%s\t%s\t%s\t-\n' "$bc_id" "$label" "$codes_b64" "$created" >>"$tmp"
+
+	encrypt_file_to_vault "$tmp"
+	secure_wipe "$tmp"
+	secure_wipe "$tmp_codes"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "\nKode backup ditambahkan dengan ID %s.\n" "$bc_id"
+	else
+		printf "\nBackup codes added with ID %s.\n" "$bc_id"
+	fi
+}
+
+cmd_backup_codes_list() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "%-5s  %-30s  %-20s\n" "ID" "Label" "Dibuat"
+	else
+		printf "%-5s  %-30s  %-20s\n" "ID" "Label" "Created"
+	fi
+	printf '%.0s-' $(seq 1 70)
+	printf '\n'
+
+	awk -F '\t' '
+		$1=="BACKUP_CODE" {
+			printf "%-5s  %-30s  %-20s\n", $2, $3, $5;
+		}
+	' "$tmp"
+
+	local count
+	count="$(awk -F '\t' '$1=="BACKUP_CODE"{n++} END{print n+0}' "$tmp")"
+
+	if [ "$count" -eq 0 ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "\nTidak ada kode backup.\n"
+		else
+			printf "\nNo backup codes.\n"
+		fi
+	fi
+
+	secure_wipe "$tmp"
+}
+
+cmd_backup_codes_view() {
+	[ $# -ge 1 ] || die "Usage: $0 backup-codes-view <id>"
+	local target="$1"
+
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	# Re-verify master password before viewing sensitive backup codes
+	re_verify_master_password
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	local line
+	line="$(awk -F '\t' -v target="$target" '$1=="BACKUP_CODE" && $2==target {print $0; exit}' "$tmp")" || true
+
+	if [ -z "$line" ]; then
+		secure_wipe "$tmp"
+		if [ "$SPM_LANG" = "id" ]; then
+			die "Tidak ada kode backup dengan ID $target."
+		else
+			die "No backup code found with ID $target."
+		fi
+	fi
+
+	local tag bc_id label codes_b64 created dummy
+	IFS=$'\t' read -r tag bc_id label codes_b64 created dummy <<EOF
+$line
+EOF
+
+	local tmp_codes
+	tmp_codes="$(make_tmp)"
+	if ! printf '%s' "$codes_b64" | base64 -d >"$tmp_codes" 2>/dev/null; then
+		secure_wipe "$tmp_codes"
+		secure_wipe "$tmp"
+		die "Failed to decode backup codes (base64)."
+	fi
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "ID:      %s\n" "$bc_id"
+		printf "Label:   %s\n" "$label"
+		printf "Dibuat:  %s\n" "$created"
+		printf "\nIsi kode backup:\n\n"
+	else
+		printf "ID:      %s\n" "$bc_id"
+		printf "Label:   %s\n" "$label"
+		printf "Created: %s\n" "$created"
+		printf "\nBackup codes content:\n\n"
+	fi
+
+	cat "$tmp_codes"
+
+	secure_wipe "$tmp_codes"
+	secure_wipe "$tmp"
+}
+
+cmd_backup_codes_delete() {
+	[ $# -ge 1 ] || die "Usage: $0 backup-codes-delete <id>"
+	local target="$1"
+
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	if ! awk -F '\t' -v target="$target" '$1=="BACKUP_CODE" && $2==target {found=1} END{exit(found?0:1)}' "$tmp"; then
+		secure_wipe "$tmp"
+		if [ "$SPM_LANG" = "id" ]; then
+			die "Tidak ada kode backup dengan ID $target."
+		else
+			die "No backup code found with ID $target."
+		fi
+	fi
+
+	local tmp2
+	tmp2="$(make_tmp)"
+	awk -F '\t' -v target="$target" '
+		!($1=="BACKUP_CODE" && $2==target) {print $0}
+	' "$tmp" >"$tmp2"
+
+	encrypt_file_to_vault "$tmp2"
+	secure_wipe "$tmp"
+	secure_wipe "$tmp2"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Kode backup dengan ID %s dihapus.\n" "$target"
+	else
+		printf "Backup code with ID %s deleted.\n" "$target"
+	fi
+}
+
+
 # ----- Portable & save bundles -----------------------------------------------
+
+
+
+
 
 cmd_portable() {
 	[ -f "$VAULT_FILE" ] || die "Vault not found at '$VAULT_FILE'. Nothing to export."
@@ -2010,6 +2230,13 @@ Catatan Aman (Secure Notes):
   ./spm.sh notes-delete <id>
                            → Hapus catatan aman
 
+Kode Backup (Backup Codes):
+  ./spm.sh backup-codes-add       → Tambah kode backup
+  ./spm.sh backup-codes-list      → List kode backup
+  ./spm.sh backup-codes-view <id> → Lihat kode backup
+  ./spm.sh backup-codes-delete <id>
+                                  → Hapus kode backup
+
 Mode Web:
   - Menjalankan HTTP server ringan untuk melihat vault lewat browser.
   - Login memakai kata sandi utama.
@@ -2074,6 +2301,13 @@ Secure Notes:
   ./spm.sh notes-view <id> → View secure note content
   ./spm.sh notes-delete <id>
                            → Delete secure note
+
+Backup Codes:
+  ./spm.sh backup-codes-add       → Add backup codes
+  ./spm.sh backup-codes-list      → List backup codes
+  ./spm.sh backup-codes-view <id> → View backup codes content
+  ./spm.sh backup-codes-delete <id>
+                                  → Delete backup codes
 
 Web Mode:
   - Runs a lightweight HTTP server so you can inspect your vault from a browser.
@@ -4354,6 +4588,82 @@ interactive_menu_notes() {
 	done
 }
 
+interactive_menu_backup_codes() {
+	while true; do
+		clear
+		print_banner
+		if [ "$SPM_LANG" = "id" ]; then
+			printf ">> MENU KODE BACKUP (BACKUP CODES)\n\n"
+			printf "  1) List kode backup\n"
+			printf "  2) Tambah kode backup\n"
+			printf "  3) Lihat kode backup\n"
+			printf "  4) Hapus kode backup\n"
+			printf "  0) Kembali\n\n"
+			printf "Pilih menu: "
+		else
+			printf ">> BACKUP CODES MENU\n\n"
+			printf "  1) List backup codes\n"
+			printf "  2) Add backup codes\n"
+			printf "  3) View backup codes\n"
+			printf "  4) Delete backup codes\n"
+			printf "  0) Back\n\n"
+			printf "Choose an option: "
+		fi
+
+		read -r c || true
+		case "$c" in
+			1)
+				clear
+				cmd_backup_codes_list || true
+				pause_menu
+				;;
+			2)
+				clear
+				cmd_backup_codes_add || true
+				pause_menu
+				;;
+			3)
+				clear
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Masukkan ID kode backup: "
+				else
+					printf "Enter backup code ID: "
+				fi
+				read -r bcid || true
+				if [ -n "$bcid" ]; then
+					cmd_backup_codes_view "$bcid" || true
+				fi
+				pause_menu
+				;;
+			4)
+				clear
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Masukkan ID kode backup yang akan dihapus: "
+				else
+					printf "Enter backup code ID to delete: "
+				fi
+				read -r bcid || true
+				if [ -n "$bcid" ]; then
+					cmd_backup_codes_delete "$bcid" || true
+				fi
+				pause_menu
+				;;
+			0)
+				break
+				;;
+			*)
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Menu tidak valid.\n"
+				else
+					printf "Invalid choice.\n"
+				fi
+				pause_menu
+				;;
+		esac
+	done
+}
+
+
 interactive_menu() {
 	while true; do
 		clear
@@ -4379,8 +4689,9 @@ interactive_menu() {
 			printf " 10) Cek update\n"
 			printf " 11) Lupa / Reset kata sandi utama (pemulihan)\n"
 			printf " 12) Catatan aman (secure notes)\n"
-			printf " 13) Doctor / Health check\n"
-			printf " 14) Mode web\n"
+			printf " 13) Kode backup\n"
+			printf " 14) Doctor / Health check\n"
+			printf " 15) Mode web\n"
 			printf "  0) Keluar\n\n"
 			printf "Pilih menu: "
 		else
@@ -4404,8 +4715,9 @@ interactive_menu() {
 			printf " 10) Check for updates\n"
 			printf " 11) Forgot / Reset master (use private key)\n"
 			printf " 12) Secure notes\n"
-			printf " 13) Doctor / Health check\n"
-			printf " 14) Web mode\n"
+			printf " 13) Backup codes\n"
+			printf " 14) Doctor / Health check\n"
+			printf " 15) Web mode\n"
 			printf "  0) Exit\n\n"
 			printf "Choose an option: "
 		fi
@@ -4487,8 +4799,9 @@ interactive_menu() {
 			10) clear; cmd_update || true; pause_menu ;;
 			11) clear; cmd_forgot || true; pause_menu ;;
 			12) interactive_menu_notes ;;
-			13) clear; cmd_doctor || true; pause_menu ;;
-			14) clear; start_web_mode || true ;;  # ← Web Mode (experimental)
+			13) interactive_menu_backup_codes ;;
+			14) clear; cmd_doctor || true; pause_menu ;;
+			15) clear; start_web_mode || true ;;  # ← Web Mode (experimental)
 			0)
 				if [ "$SPM_LANG" = "id" ]; then
 					printf "Keluar...\n"
@@ -4541,6 +4854,10 @@ main() {
 		notes-list)       cmd_notes_list "$@" ;;
 		notes-view)       cmd_notes_view "$@" ;;
 		notes-delete)     cmd_notes_delete "$@" ;;
+		backup-codes-add) cmd_backup_codes_add "$@" ;;
+		backup-codes-list) cmd_backup_codes_list "$@" ;;
+		backup-codes-view) cmd_backup_codes_view "$@" ;;
+		backup-codes-delete) cmd_backup_codes_delete "$@" ;;
 		web|web-mode)     start_web_mode "$@" ;;  # ← CLI access for Web Mode
 		help|-h|--help)   cmd_help ;;
 		*)
