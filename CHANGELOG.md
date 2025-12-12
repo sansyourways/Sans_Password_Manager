@@ -7,6 +7,28 @@ Keep-a-Changelog style format.
 
 ---
 
+## [2.3.0] - 2025-12-12
+
+### Added
+- **Backup Codes Management**
+  - New dedicated section in interactive menu (`13) Backup codes`).
+  - CLI commands for full CRUD operations:
+    - `./spm.sh backup-codes-add`: Add new backup codes with a user-defined label.
+    - `./spm.sh backup-codes-list`: List all stored backup code entries.
+    - `./spm.sh backup-codes-view <id>`: View the content of a specific backup code entry.
+    - `./spm.sh backup-codes-delete <id>`: Delete a backup code entry.
+  - Backup codes are stored securely within the encrypted vault, similar to secure notes.
+
+### Security
+- **Master Password Re-verification for Backup Codes View**
+  - When attempting to view backup codes (via `backup-codes-view` command or interactive menu), the user is now prompted to re-enter their master password for an additional layer of security.
+
+### Changed
+- **Interactive Menu & Help Updates**
+  - Main interactive menu options re-numbered to accommodate the new "Backup codes" feature.
+  - `cmd_help` output updated to document new backup code commands.
+  - `cmd_edit` vault format instructions updated to include `BACKUP_CODE` entry format.
+
 ## 2.2.1 – 2025-12-08
 
 ### Fixed

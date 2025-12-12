@@ -33,3 +33,7 @@ spm.*.tmp
 *.tmp
 *.bak
 *~
+
+# Gemini specific files
+.github/
+GEMINI.md
