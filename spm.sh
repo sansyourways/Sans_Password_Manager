@@ -6390,28 +6390,28 @@ def export_content(fmt: str, plaintext: str):
     if fmt == "ini":
         out=[]
         for r in rows:
-            sect = f\"{r.get('type','unknown')}_{r.get('id','')}\"
-            out.append(f\"[{sect}]\")
+            sect = f"{r.get('type','unknown')}_{r.get('id','')}"
+            out.append(f"[{sect}]")
             for k in fieldnames:
-                out.append(f\"{k}={r.get(k,'') or ''}\")
-            out.append(\"\")
-        return \"\\n\".join(out)
+                out.append(f"{k}={r.get(k,'') or ''}")
+            out.append("")
+        return "\n".join(out)
     if fmt == "psv":
         buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=fieldnames, delimiter=\"|\")
+        writer = csv.DictWriter(buf, fieldnames=fieldnames, delimiter="|")
         writer.writeheader(); writer.writerows(rows)
         return buf.getvalue()
     if fmt == "rst":
         widths={k:max(len(k), max(len(str((r.get(k,\"\") or \"\"))) for r in rows) if rows else 0) for k in fieldnames}
-        def sep(char=\"+\"):
-            return char + char.join(\"-\" * (widths[k]+2) for k in fieldnames) + char
+        def sep(char="+"):
+            return char + char.join("-" * (widths[k]+2) for k in fieldnames) + char
         def row(vals):
-            return \"|\" + \"|\".join(\" \" + v.ljust(widths[k]) + \" \" for k,v in vals) + \"|\"
-        out=[sep(), row([(k,k) for k in fieldnames]), sep(\"+\")]
+            return "|" + "|".join(" " + v.ljust(widths[k]) + " " for k,v in vals) + "|"
+        out=[sep(), row([(k,k) for k in fieldnames]), sep("+")]
         for r in rows:
-            out.append(row([(k, str(r.get(k,\"\") or \"\")).replace(\"\\n\",\" \") for k in fieldnames]))
+            out.append(row([(k, str(r.get(k,"") or "")).replace("\n"," ") for k in fieldnames]))
             out.append(sep())
-        return \"\\n\".join(out) + \"\\n\"
+        return "\n".join(out) + "\n"
     # default csv/txt
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=fieldnames, delimiter=",")
