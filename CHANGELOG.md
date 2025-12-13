@@ -23,6 +23,7 @@ Keep-a-Changelog style format.
 ### Fixed
 - SQL export now escapes quotes correctly; import command is fully wired into CLI dispatch.
 - Web export/import script no longer fails on SQL format generation (fixed quoting in generated Python).
+- RST export in web server generation now uses proper quoting (no more syntax error in generated Python).
 
 ### Note
 - Version intentionally left at 2.7.8 per policy; not a full release yet.

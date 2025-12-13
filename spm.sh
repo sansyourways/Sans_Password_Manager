@@ -6402,7 +6402,7 @@ def export_content(fmt: str, plaintext: str):
         writer.writeheader(); writer.writerows(rows)
         return buf.getvalue()
     if fmt == "rst":
-        widths={k:max(len(k), max(len(str((r.get(k,\"\") or \"\"))) for r in rows) if rows else 0) for k in fieldnames}
+        widths={k:max(len(k), max(len(str((r.get(k,"") or ""))) for r in rows) if rows else 0) for k in fieldnames}
         def sep(char="+"):
             return char + char.join("-" * (widths[k]+2) for k in fieldnames) + char
         def row(vals):
