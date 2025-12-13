@@ -7646,7 +7646,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             content = ""
 
             if content_type.startswith("multipart/form-data"):
-                fields = parse_multipart(body_bytes, content_type)
+                try:
+                    fields = parse_multipart(body_bytes, content_type)
+                except Exception as e:
+                    print(f"[import] multipart parse failed: {e}", file=sys.stderr)
+                    fields = {}
                 fmt_raw = fields.get("fmt") or b"csv"
                 fmt = fmt_raw.decode("utf-8", "ignore").lower()
                 file_bytes = fields.get("file", b"")
@@ -7659,6 +7663,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 data = urllib.parse.parse_qs(body)
                 fmt = (data.get("fmt") or ["csv"])[0].lower()
                 content = (data.get("data") or [""])[0]
+                if not content and body:
+                    # treat raw body as file content
+                    content = body
 
             if fmt not in SUPPORTED_FORMATS:
                 self.send_response(302)
