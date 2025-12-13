@@ -4196,7 +4196,8 @@ import json as jsonlib
 import urllib.request
 import re
 import io
-import cgi
+import email.parser
+import email.policy
 
 VAULT_PATH = os.environ.get("SPM_VAULT_PATH")
 BIND_ADDR  = os.environ.get("SPM_WEB_BIND", "127.0.0.1")
@@ -6584,6 +6585,25 @@ def _apply_import(fmt: str, content: str, plaintext: str) -> str:
 
     return "\\n".join(lines) + "\\n"
 
+def parse_multipart(body_bytes: bytes, content_type: str):
+    """
+    Minimal multipart/form-data parser using email.parser (avoids deprecated cgi).
+    Returns dict name -> raw bytes.
+    """
+    ctype = content_type or ""
+    if "multipart/form-data" not in ctype:
+        return {}
+    header = f"Content-Type: {ctype}\r\n\r\n".encode("utf-8", "ignore")
+    msg = email.parser.BytesParser(policy=email.policy.default).parsebytes(header + body_bytes)
+    out = {}
+    for part in msg.iter_parts():
+        name = part.get_param("name", header="content-disposition")
+        if not name:
+            continue
+        payload = part.get_payload(decode=True)
+        out[name] = payload if payload is not None else b""
+    return out
+
 def parse_entries(plaintext: str):
     """Password entries."""
     lines = plaintext.splitlines()
@@ -7611,26 +7631,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             content = ""
 
             if content_type.startswith("multipart/form-data"):
-                try:
-                    fs = cgi.FieldStorage(
-                        fp=io.BytesIO(body_bytes),
-                        headers=self.headers,
-                        environ={
-                            "REQUEST_METHOD": "POST",
-                            "CONTENT_TYPE": content_type,
-                            "CONTENT_LENGTH": str(length),
-                        },
-                        keep_blank_values=True,
-                    )
-                    fmt = (fs.getfirst("fmt") or "csv").lower()
-                    file_item = fs["file"] if "file" in fs else None
-                    if file_item is not None and getattr(file_item, "file", None):
-                        content = file_item.file.read().decode("utf-8", "ignore")
-                    else:
-                        content = fs.getfirst("data", "") or ""
-                except Exception:
-                    fmt = "csv"
-                    content = ""
+                fields = parse_multipart(body_bytes, content_type)
+                fmt = (fields.get("fmt", b"csv").decode("utf-8", "ignore") or "csv").lower()
+                if b"file" in fields and fields[b"file"]:
+                    content = fields[b"file"].decode("utf-8", "ignore")
+                else:
+                    content = fields.get("data", b"").decode("utf-8", "ignore")
             else:
                 body = body_bytes.decode("utf-8", errors="ignore")
                 data = urllib.parse.parse_qs(body)

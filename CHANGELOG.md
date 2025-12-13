@@ -20,6 +20,8 @@ Keep-a-Changelog style format.
 - Authenticators now support SHA1/SHA256/SHA512 selection (CLI + web), stored per entry and preserved across export/import.
 - Web mode adds an Export/Import card using the same formats; export downloads directly, import accepts pasted content and appends to the vault.
 - Web import supports direct file uploads (multipart) in addition to paste.
+### Fixed
+- Replaced deprecated `cgi` usage in the web server with `email.parser`-based multipart parsing to avoid deprecation issues on Python 3.13.
 
 ### Fixed
 - SQL export now escapes quotes correctly; import command is fully wired into CLI dispatch.
