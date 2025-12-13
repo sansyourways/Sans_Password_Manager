@@ -7633,8 +7633,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if content_type.startswith("multipart/form-data"):
                 fields = parse_multipart(body_bytes, content_type)
                 fmt = (fields.get("fmt", b"csv").decode("utf-8", "ignore") or "csv").lower()
-                if b"file" in fields and fields[b"file"]:
-                    content = fields[b"file"].decode("utf-8", "ignore")
+                file_bytes = fields.get("file", b"")
+                if file_bytes:
+                    content = file_bytes.decode("utf-8", "ignore")
                 else:
                     content = fields.get("data", b"").decode("utf-8", "ignore")
             else:
