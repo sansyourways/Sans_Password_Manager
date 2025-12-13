@@ -4196,6 +4196,7 @@ import json as jsonlib
 import urllib.request
 import re
 import io
+import cgi
 import email.parser
 import email.policy
 import warnings
