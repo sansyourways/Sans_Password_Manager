@@ -7626,8 +7626,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/import":
-            length = int(self.headers.get("Content-Length", "0"))
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except Exception:
+                length = 0
             content_type = self.headers.get("Content-Type", "")
+            if length <= 0:
+                self.send_response(302)
+                self.send_header("Location", "/?err=No+data+provided")
+                self.end_headers()
+                return
             if length > 5 * 1024 * 1024:
                 self.send_response(413)
                 self.send_header("Content-Type", "text/plain")
@@ -7640,7 +7648,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             content = ""
 
             if content_type.startswith("multipart/form-data"):
-                # Prefer cgi.FieldStorage for compatibility; silence deprecation warnings
                 try:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore", DeprecationWarning)
@@ -7660,21 +7667,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             content = file_item.file.read().decode("utf-8", "ignore")
                         else:
                             content = fs.getfirst("data", "") or ""
-                except Exception:
+                except Exception as e:
+                    print(f"[import] multipart parse failed: {e}", file=sys.stderr)
                     content = ""
-                if not content:
-                    # Fallback to lightweight parser
-                    try:
-                        fields = parse_multipart(body_bytes, content_type)
-                        fmt_raw = fields.get("fmt", b"csv") or b"csv"
-                        fmt = fmt_raw.decode("utf-8", "ignore").lower()
-                        file_bytes = fields.get("file", b"")
-                        if file_bytes:
-                            content = file_bytes.decode("utf-8", "ignore")
-                        else:
-                            content = fields.get("data", b"").decode("utf-8", "ignore")
-                    except Exception:
-                        content = ""
             else:
                 body = body_bytes.decode("utf-8", errors="ignore")
                 data = urllib.parse.parse_qs(body)
@@ -7700,6 +7695,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             except Exception as e:
+                print(f"[import] failed: {e}", file=sys.stderr)
                 self.send_response(302)
                 err = urllib.parse.quote(str(e) or "Import failed")
                 self.send_header("Location", f"/?err={err}")
