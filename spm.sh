@@ -4198,6 +4198,8 @@ import re
 import io
 import email.parser
 import email.policy
+import cgi
+import warnings
 
 VAULT_PATH = os.environ.get("SPM_VAULT_PATH")
 BIND_ADDR  = os.environ.get("SPM_WEB_BIND", "127.0.0.1")
@@ -7631,38 +7633,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
             content = ""
 
             if content_type.startswith("multipart/form-data"):
-                fields = parse_multipart(body_bytes, content_type)
-                fmt_raw = fields.get("fmt", b"csv") or b"csv"
-                fmt = fmt_raw.decode("utf-8", "ignore").lower()
-                file_bytes = fields.get("file", b"")
-                if file_bytes:
-                    content = file_bytes.decode("utf-8", "ignore")
-                else:
-                    content = fields.get("data", b"").decode("utf-8", "ignore")
+                # Prefer cgi.FieldStorage for compatibility; silence deprecation warnings
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", DeprecationWarning)
+                        fs = cgi.FieldStorage(
+                            fp=io.BytesIO(body_bytes),
+                            headers=self.headers,
+                            environ={
+                                "REQUEST_METHOD": "POST",
+                                "CONTENT_TYPE": content_type,
+                                "CONTENT_LENGTH": str(length),
+                            },
+                            keep_blank_values=True,
+                        )
+                        fmt = (fs.getfirst("fmt") or "csv").lower()
+                        file_item = fs["file"] if "file" in fs else None
+                        if file_item is not None and getattr(file_item, "file", None):
+                            content = file_item.file.read().decode("utf-8", "ignore")
+                        else:
+                            content = fs.getfirst("data", "") or ""
+                except Exception:
+                    content = ""
                 if not content:
-                    # Fallback to cgi.FieldStorage for compatibility
-                    try:
-                        import cgi, warnings
-                        with warnings.catch_warnings():
-                            warnings.simplefilter("ignore", DeprecationWarning)
-                            fs = cgi.FieldStorage(
-                                fp=io.BytesIO(body_bytes),
-                                headers=self.headers,
-                                environ={
-                                    "REQUEST_METHOD": "POST",
-                                    "CONTENT_TYPE": content_type,
-                                    "CONTENT_LENGTH": str(length),
-                                },
-                                keep_blank_values=True,
-                            )
-                            fmt = (fs.getfirst("fmt") or "csv").lower()
-                            file_item = fs["file"] if "file" in fs else None
-                            if file_item is not None and getattr(file_item, "file", None):
-                                content = file_item.file.read().decode("utf-8", "ignore")
-                            else:
-                                content = fs.getfirst("data", "") or ""
-                    except Exception:
-                        pass
+                    # Fallback to lightweight parser
+                    fields = parse_multipart(body_bytes, content_type)
+                    fmt_raw = fields.get("fmt", b"csv") or b"csv"
+                    fmt = fmt_raw.decode("utf-8", "ignore").lower()
+                    file_bytes = fields.get("file", b"")
+                    if file_bytes:
+                        content = file_bytes.decode("utf-8", "ignore")
+                    else:
+                        content = fields.get("data", b"").decode("utf-8", "ignore")
             else:
                 body = body_bytes.decode("utf-8", errors="ignore")
                 data = urllib.parse.parse_qs(body)
