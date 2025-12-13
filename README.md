@@ -86,7 +86,7 @@ SPM is designed for users who want:
 - ⚡ **Copy cepat** (tombol copy di tampilan kata sandi, catatan, passphrase, kode backup)  
 - 🔒 **Generator kata sandi** (mode mudah/aman, kata mudah diingat, panjang/slider, toggle huruf besar/kecil/angka/simbol, estimasi kekuatan)
 - 🎨 **Tema web** (Dark, AMOLED, Cyberpunk, Light) + cek update di header
-- 📤 **Export vault** ke CSV/JSON (password, catatan, passphrase, authenticator, kode backup)
+- 📤 **Export/Import vault** (CLI & Web) ke CSV/JSON + format lanjutan
 - 📜 Kode Backup
 - 🔑 **Lupa password** via RSA private key  
 - 🩺 **Doctor mode** (diagnostik integritas vault & recovery)  
@@ -108,7 +108,7 @@ SPM is designed for users who want:
 - ⚡ Fast copy buttons on password, notes, passphrase, backup views  
 - 🔒 Password generator (easy memorable words + secure random, slider length/words, toggles for upper/lower/digits/symbols, strength estimate)
 - 🎨 Web themes (Dark, AMOLED, Cyberpunk, Light) with header update check/version display  
-- 📤 Vault export to CSV/JSON (passwords, notes, passphrases, authenticators, backup codes)
+- 📤 Vault export/import (CLI & Web) to CSV/JSON + advanced formats
 - 📜 Backup codes  
 - 🔑 RSA-based recovery  
 - 🩺 Doctor diagnostics  
@@ -263,7 +263,7 @@ Stored inside encrypted vault.
 ./spm.sh export json
 ```
 
-Exports passwords, secure notes, passphrases, backup codes, and authenticators. Defaults to `spm_export_<timestamp>.csv` when no filename is provided; if you omit the extension on a custom name, it is auto-added. Advanced formats available: tsv, ndjson/jsonl, md, html, txt, yaml/yml, xml, sql, ini, psv, rst, toml, org, scsv, csv-noheader, jsonc.
+Exports passwords, secure notes, passphrases, backup codes, and authenticators. Defaults to `spm_export_<timestamp>.csv` when no filename is provided; if you omit the extension on a custom name, it is auto-added. Advanced formats available: tsv, ndjson/jsonl, md, html, txt, yaml/yml, xml, sql, ini, psv, rst, toml, org, scsv, csv-noheader, jsonc. Web mode also has an Export/Import card with the same formats.
 
 ---
 

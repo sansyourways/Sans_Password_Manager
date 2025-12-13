@@ -4898,6 +4898,20 @@ MAIN_HTML = """<!doctype html>
 .btn-primary { background: linear-gradient(135deg, rgba(95,95,255,0.18), rgba(95,95,255,0.32)) !important; color: var(--text) !important; border:1px solid var(--border) !important; }
     a, .link { color: var(--accent); }
     body.theme-light a, body.theme-light .link { color: #2563eb; }
+    .flash {
+      margin: 12px 16px 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 12px;
+      background: rgba(46, 204, 113, 0.14);
+      color: #b3f5c6;
+      border: 1px solid rgba(46, 204, 113, 0.25);
+    }
+    .flash.error {
+      background: rgba(255, 77, 106, 0.16);
+      color: #ffd0d8;
+      border-color: rgba(255,77,106,0.3);
+    }
   </style>
 </head>
 <body>
@@ -4923,6 +4937,7 @@ MAIN_HTML = """<!doctype html>
       </div>
     </div>
   </header>
+  __FLASH__
   <div class="layout">
     <section class="panel">
       <div class="panel-header">
@@ -4964,6 +4979,63 @@ MAIN_HTML = """<!doctype html>
         <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
           <a href="/generator" class="btn-primary small">Open Generator</a>
         </div>
+      </div>
+      <div class="card">
+        <h3>Export / Import</h3>
+        <p>Download or paste data (csv/json + extended formats).</p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+          <form method="get" action="/export" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; width:100%;">
+            <label style="font-size:12px;">Format</label>
+            <select name="fmt" style="flex:1; min-width:140px; padding:6px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text);">
+              <option value="csv">csv (default)</option>
+              <option value="json">json</option>
+              <option value="tsv">tsv</option>
+              <option value="ndjson">ndjson</option>
+              <option value="md">md</option>
+              <option value="html">html</option>
+              <option value="txt">txt</option>
+              <option value="yaml">yaml</option>
+              <option value="xml">xml</option>
+              <option value="sql">sql</option>
+              <option value="ini">ini</option>
+              <option value="psv">psv</option>
+              <option value="rst">rst</option>
+              <option value="toml">toml</option>
+              <option value="org">org</option>
+              <option value="scsv">scsv</option>
+              <option value="csv-noheader">csv-noheader</option>
+              <option value="jsonc">jsonc</option>
+            </select>
+            <button class="btn-primary small" type="submit">Download</button>
+          </form>
+        </div>
+        <form method="post" action="/import" style="display:flex; flex-direction:column; gap:8px;">
+          <label style="font-size:12px;">Import format</label>
+          <select name="fmt" style="padding:6px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text);">
+            <option value="csv">csv</option>
+            <option value="json">json</option>
+            <option value="tsv">tsv</option>
+            <option value="ndjson">ndjson/jsonl</option>
+            <option value="md">md/markdown</option>
+            <option value="html">html</option>
+            <option value="txt">txt</option>
+            <option value="yaml">yaml/yml</option>
+            <option value="xml">xml</option>
+            <option value="sql">sql</option>
+            <option value="ini">ini</option>
+            <option value="psv">psv</option>
+            <option value="rst">rst</option>
+            <option value="toml">toml</option>
+            <option value="org">org</option>
+            <option value="scsv">scsv</option>
+            <option value="csv-noheader">csv-noheader</option>
+            <option value="jsonc">jsonc</option>
+          </select>
+          <label style="font-size:12px;">Paste file contents</label>
+          <textarea name="data" rows="5" placeholder="Paste exported data here" style="width:100%; border-radius:12px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text); padding:8px;"></textarea>
+          <button class="btn-primary small" type="submit">Import</button>
+          <div style="font-size:11px; color:var(--muted);">Supports passwords, notes, passphrases, authenticators, backup codes.</div>
+        </form>
       </div>
       <div class="card">
         <h3>Passphrases</h3>
@@ -6169,6 +6241,345 @@ def totp_code(secret_b32: str, period: int = 30, algo: str = "sha1") -> str:
     code_int = struct.unpack(">I", h[offset:offset+4])[0] & 0x7fffffff
     return str(code_int % 10**6).zfill(6)
 
+SUPPORTED_FORMATS = ("csv","json","tsv","ndjson","jsonl","md","markdown","html","txt","yaml","yml","xml","sql","ini","psv","rst","toml","org","scsv","csv-noheader","jsonc")
+
+def _export_rows(plaintext: str):
+    import base64, html as htmlmod
+    rows = []
+    for line in plaintext.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        tag = parts[0]
+        if tag.isdigit():  # password
+            rows.append({
+                "type": "password",
+                "id": parts[0],
+                "label": parts[1] if len(parts) > 1 else "",
+                "username": parts[2] if len(parts) > 2 else "",
+                "secret": parts[3] if len(parts) > 3 else "",
+                "notes": parts[4] if len(parts) > 4 else "",
+                "created": parts[5] if len(parts) > 5 else "",
+                "extra": ""
+            })
+        elif tag == "NOTE":
+            rows.append({
+                "type": "note",
+                "id": parts[1] if len(parts) > 1 else "",
+                "label": parts[2] if len(parts) > 2 else "",
+                "username": "",
+                "secret": base64.b64decode(parts[3]).decode("utf-8", errors="replace") if len(parts) > 3 else "",
+                "notes": "",
+                "created": parts[4] if len(parts) > 4 else "",
+                "extra": ""
+            })
+        elif tag == "PASSPHRASE":
+            rows.append({
+                "type": "passphrase",
+                "id": parts[1] if len(parts) > 1 else "",
+                "label": parts[2] if len(parts) > 2 else "",
+                "username": "",
+                "secret": base64.b64decode(parts[3]).decode("utf-8", errors="replace") if len(parts) > 3 else "",
+                "notes": "",
+                "created": parts[4] if len(parts) > 4 else "",
+                "extra": ""
+            })
+        elif tag == "BACKUP_CODE":
+            rows.append({
+                "type": "backup_code",
+                "id": parts[1] if len(parts) > 1 else "",
+                "label": parts[2] if len(parts) > 2 else "",
+                "username": "",
+                "secret": base64.b64decode(parts[3]).decode("utf-8", errors="replace") if len(parts) > 3 else "",
+                "notes": "",
+                "created": parts[4] if len(parts) > 4 else "",
+                "extra": ""
+            })
+        elif tag == "AUTH":
+            rows.append({
+                "type": "authenticator",
+                "id": parts[1] if len(parts) > 1 else "",
+                "label": parts[2] if len(parts) > 2 else "",
+                "username": "",
+                "secret": parts[3] if len(parts) > 3 else "",
+                "notes": "",
+                "created": parts[5] if len(parts) > 5 else "",
+                "extra": f"period={parts[4] if len(parts)>4 else ''};algo={parts[6] if len(parts)>6 else 'sha1'}"
+            })
+    return rows
+
+def export_content(fmt: str, plaintext: str):
+    import csv, json, html as htmlmod, io
+    rows = _export_rows(plaintext)
+    fieldnames = ["type","id","label","username","secret","notes","created","extra"]
+    fmt = fmt.lower()
+    if fmt == "json":
+        return json.dumps(rows, ensure_ascii=False, indent=2)
+    if fmt in ("ndjson","jsonl"):
+        return "\n".join(json.dumps(r, ensure_ascii=False) for r in rows)
+    if fmt == "tsv":
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=fieldnames, delimiter="\t")
+        writer.writeheader(); writer.writerows(rows)
+        return buf.getvalue()
+    if fmt in ("md","markdown"):
+        out = ["| " + " | ".join(fieldnames) + " |", "|" + "|".join([" --- "]*len(fieldnames)) + "|"]
+        for r in rows:
+            out.append("| " + " | ".join((r.get(k,"") or "").replace("\n"," ") for k in fieldnames) + " |")
+        return "\n".join(out) + "\n"
+    if fmt == "html":
+        out = ["<table border='1' cellpadding='4' cellspacing='0'>", "<tr>" + "".join(f"<th>{htmlmod.escape(k)}</th>" for k in fieldnames) + "</tr>"]
+        for r in rows:
+            out.append("<tr>" + "".join(f"<td>{htmlmod.escape(str(r.get(k,'') or ''))}</td>" for k in fieldnames) + "</tr>")
+        out.append("</table>")
+        return "\n".join(out)
+    if fmt == "toml":
+        out=[]
+        for r in rows:
+            out.append("[[item]]")
+            for k in fieldnames:
+                val = str(r.get(k, "") or "").replace("\n","\\n").replace('"','\\"')
+                out.append(f'{k} = "{val}"')
+            out.append("")
+        return "\n".join(out)
+    if fmt == "org":
+        header = "| " + " | ".join(fieldnames) + " |"
+        sep = "|" + "+".join("-" * (len(k)+2) for k in fieldnames) + "|"
+        out = [header, sep]
+        for r in rows:
+            out.append("| " + " | ".join((str(r.get(k,"") or "")).replace("\n"," ") for k in fieldnames) + " |")
+        return "\n".join(out) + "\n"
+    if fmt == "scsv":
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=fieldnames, delimiter=";")
+        writer.writeheader(); writer.writerows(rows)
+        return buf.getvalue()
+    if fmt == "csv-noheader":
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=fieldnames, delimiter=",")
+        writer.writerows(rows)
+        return buf.getvalue()
+    if fmt == "jsonc":
+        import json
+        return json.dumps(rows, ensure_ascii=False)
+    if fmt in ("yaml","yml"):
+        out=[]
+        for r in rows:
+            out.append("-")
+            for k in fieldnames:
+                val = str(r.get(k, "") or "").replace("\n","\\n")
+                out.append(f"  {k}: \"{val}\"")
+        return "\n".join(out) + "\n"
+    if fmt == "xml":
+        out=["<?xml version=\"1.0\" encoding=\"UTF-8\"?>","<data>"]
+        for r in rows:
+            out.append("  <item>")
+            for k in fieldnames:
+                val = htmlmod.escape(str(r.get(k,"") or ""))
+                out.append(f"    <{k}>{val}</{k}>")
+            out.append("  </item>")
+        out.append("</data>")
+        return "\n".join(out)
+    if fmt == "sql":
+        out=["CREATE TABLE spm_export(type TEXT,id TEXT,label TEXT,username TEXT,secret TEXT,notes TEXT,created TEXT,extra TEXT);"]
+        for r in rows:
+            vals=[str(r.get(k,"") or "") for k in fieldnames]
+            safe=[v.replace(\"'\",\"''\") for v in vals]
+            out.append(\"INSERT INTO spm_export(type,id,label,username,secret,notes,created,extra) VALUES ('%s');\" % (\"','\".join(safe)))
+        return \"\\n\".join(out) + \"\\n\"
+    if fmt == "ini":
+        out=[]
+        for r in rows:
+            sect = f\"{r.get('type','unknown')}_{r.get('id','')}\"
+            out.append(f\"[{sect}]\")
+            for k in fieldnames:
+                out.append(f\"{k}={r.get(k,'') or ''}\")
+            out.append(\"\")
+        return \"\\n\".join(out)
+    if fmt == "psv":
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=fieldnames, delimiter=\"|\")
+        writer.writeheader(); writer.writerows(rows)
+        return buf.getvalue()
+    if fmt == "rst":
+        widths={k:max(len(k), max(len(str((r.get(k,\"\") or \"\"))) for r in rows) if rows else 0) for k in fieldnames}
+        def sep(char=\"+\"):
+            return char + char.join(\"-\" * (widths[k]+2) for k in fieldnames) + char
+        def row(vals):
+            return \"|\" + \"|\".join(\" \" + v.ljust(widths[k]) + \" \" for k,v in vals) + \"|\"
+        out=[sep(), row([(k,k) for k in fieldnames]), sep(\"+\")]
+        for r in rows:
+            out.append(row([(k, str(r.get(k,\"\") or \"\")).replace(\"\\n\",\" \") for k in fieldnames]))
+            out.append(sep())
+        return \"\\n\".join(out) + \"\\n\"
+    # default csv/txt
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, delimiter=",")
+    writer.writeheader(); writer.writerows(rows)
+    return buf.getvalue()
+
+def _parse_import_rows(fmt: str, content: str):
+    import csv, json
+    fmt = fmt.lower()
+    if fmt in ("json","jsonc"):
+        return json.loads(content)
+    if fmt in ("ndjson","jsonl"):
+        return [json.loads(line) for line in content.splitlines() if line.strip()]
+    delim = "," if fmt in ("csv","csv-noheader","jsonc") else ";" if fmt=="scsv" else "\\t" if fmt=="tsv" else "|"
+    rows=[]
+    if fmt=="csv-noheader":
+        reader = csv.reader(content.splitlines(), delimiter=delim)
+        for row in reader:
+            rows.append({
+                "type": row[0] if len(row)>0 else "",
+                "label": row[1] if len(row)>1 else "",
+                "username": row[2] if len(row)>2 else "",
+                "secret": row[3] if len(row)>3 else "",
+                "notes": row[4] if len(row)>4 else "",
+                "created": row[5] if len(row)>5 else "",
+                "extra": row[6] if len(row)>6 else "",
+            })
+        return rows
+    reader = csv.DictReader(content.splitlines(), delimiter=delim)
+    return list(reader)
+
+def _apply_import(fmt: str, content: str, plaintext: str) -> str:
+    import base64
+    fmt = fmt.lower()
+    if fmt not in SUPPORTED_FORMATS:
+        raise ValueError("Unsupported format")
+
+    def next_id(tag, lines):
+        max_id = 0
+        for ln in lines:
+            if not ln:
+                continue
+            parts = ln.split("\\t")
+            if tag == "PASS" and parts[0].isdigit():
+                max_id = max(max_id, int(parts[0]))
+            elif parts[0] == tag and len(parts) > 1 and parts[1].isdigit():
+                max_id = max(max_id, int(parts[1]))
+        return max_id + 1
+
+    lines = plaintext.splitlines()
+
+    def add_password(r):
+        pid = str(next_id("PASS", lines))
+        lines.append("\\t".join([
+            pid,
+            (r.get("label","") or "").replace("\\t"," "),
+            (r.get("username","") or "").replace("\\t"," "),
+            r.get("secret","") or "",
+            (r.get("notes","") or "").replace("\\t"," "),
+            r.get("created","") or ""
+        ]))
+
+    def add_note(r):
+        nid = str(next_id("NOTE", lines))
+        body_b64 = base64.b64encode((r.get("secret","") or "").encode("utf-8")).decode("ascii")
+        lines.append("\\t".join([
+            "NOTE",
+            nid,
+            (r.get("label","") or "").replace("\\t"," "),
+            body_b64,
+            r.get("created","") or "",
+            "-"
+        ]))
+
+    def add_passphrase(r):
+        pid = str(next_id("PASSPHRASE", lines))
+        secret_b64 = base64.b64encode((r.get("secret","") or "").encode("utf-8")).decode("ascii")
+        lines.append("\\t".join([
+            "PASSPHRASE",
+            pid,
+            (r.get("label","") or "").replace("\\t"," "),
+            secret_b64,
+            r.get("created","") or "",
+            "-"
+        ]))
+
+    def add_backup(r):
+        bid = str(next_id("BACKUP_CODE", lines))
+        codes_b64 = base64.b64encode((r.get("secret","") or "").encode("utf-8")).decode("ascii")
+        lines.append("\\t".join([
+            "BACKUP_CODE",
+            bid,
+            (r.get("label","") or "").replace("\\t"," "),
+            codes_b64,
+            r.get("created","") or "",
+            "-"
+        ]))
+
+    def add_auth(r):
+        aid = str(next_id("AUTH", lines))
+        extra = str(r.get("extra","") or "")
+        algo = "sha1"
+        if "algo=" in extra:
+            for part in extra.split(";"):
+                if part.startswith("algo="):
+                    algo = part.split("=",1)[1] or "sha1"
+        algo = (r.get("algorithm","") or algo or "sha1").lower()
+        if algo not in ("sha1","sha256","sha512"):
+            algo = "sha1"
+        period_val = ""
+        if "period=" in extra:
+            for part in extra.split(";"):
+                if part.startswith("period="):
+                    period_val = part.split("=",1)[1]
+        period_val = period_val or str(r.get("period","") or r.get("extra","")).replace("period=","") or "30"
+        lines.append("\\t".join([
+            "AUTH",
+            aid,
+            (r.get("label","") or "").replace("\\t"," "),
+            r.get("secret","") or "",
+            period_val or "30",
+            r.get("created","") or "",
+            algo
+        ]))
+
+    def parse_plain_table(text):
+        rows=[]
+        for ln in text.splitlines():
+            ln=ln.strip()
+            if not ln or ln.startswith("#") or ln.startswith("| ---"):
+                continue
+            if "|" in ln:
+                parts=[p.strip() for p in ln.strip("|").split("|")]
+            else:
+                parts=[p.strip() for p in ln.split()]
+            if len(parts) < 2:
+                continue
+            rows.append({
+                "type": parts[0],
+                "label": parts[1] if len(parts)>1 else "",
+                "username": parts[2] if len(parts)>2 else "",
+                "secret": parts[3] if len(parts)>3 else "",
+                "notes": parts[4] if len(parts)>4 else "",
+                "created": parts[5] if len(parts)>5 else "",
+                "extra": parts[6] if len(parts)>6 else "",
+            })
+        return rows
+
+    if fmt in ("json","jsonc","ndjson","jsonl","csv","csv-noheader","tsv","scsv"):
+        rows = _parse_import_rows(fmt, content)
+    else:
+        rows = parse_plain_table(content)
+
+    for row in rows:
+        t = (row.get("type","") or "").lower()
+        if t in ("password","pass",""):
+            add_password(row)
+        elif t in ("note","notes"):
+            add_note(row)
+        elif t in ("passphrase","phrase","secret"):
+            add_passphrase(row)
+        elif t in ("backup_code","backup","codes","backupcode"):
+            add_backup(row)
+        elif t in ("authenticator","auth"):
+            add_auth(row)
+
+    return "\\n".join(lines) + "\\n"
+
 def parse_entries(plaintext: str):
     """Password entries."""
     lines = plaintext.splitlines()
@@ -6532,6 +6943,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/":
+            flash = ""
+            note = (parsed.query or "")
+            params = urllib.parse.parse_qs(parsed.query)
+            msg = (params.get("msg") or [""])[0]
+            err = (params.get("err") or [""])[0]
+            if msg == "import-ok":
+                flash = "<div class='flash'>Import completed.</div>"
+            elif err:
+                flash = f"<div class='flash error'>{html.escape(err)}</div>"
             try:
                 plaintext = decrypt_vault(master)
             except Exception:
@@ -6552,6 +6972,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             backup_rows_html = build_backup_rows_html(backups)
             auth_rows_html = build_auth_rows_html(auths)
             body = MAIN_HTML.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
+            body = body.replace("__FLASH__", flash)
             body = body.replace("__ROWS__", rows_html)
             body = body.replace("__NOTES_ROWS__", notes_html)
             body = body.replace("__PASSPHRASE_ROWS__", pass_rows_html)
@@ -6919,6 +7340,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body.encode("utf-8"))
             return
 
+        if path == "/export":
+            fmt = (query.get("fmt") or ["csv"])[0].lower()
+            if fmt not in SUPPORTED_FORMATS:
+                self.send_error(400, "Unsupported format")
+                return
+            plaintext = decrypt_vault(master)
+            content = export_content(fmt, plaintext)
+            filename = f"spm_export_{time.strftime('%Y%m%d_%H%M%S')}.{fmt if fmt!='csv-noheader' else 'csv'}"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", f"attachment; filename=\"{filename}\"")
+            self.end_headers()
+            self.wfile.write(content.encode("utf-8"))
+            return
+
         self.send_error(404, "Not found")
 
     def do_POST(self):
@@ -7162,6 +7598,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Location", "/")
             self.end_headers()
             return
+
+        if path == "/import":
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length).decode("utf-8", errors="ignore")
+            data = urllib.parse.parse_qs(body)
+            fmt = (data.get("fmt") or ["csv"])[0].lower()
+            content = (data.get("data") or [""])[0]
+            if fmt not in SUPPORTED_FORMATS:
+                self.send_response(302)
+                self.send_header("Location", "/?err=Unsupported+format")
+                self.end_headers()
+                return
+            if not content.strip():
+                self.send_response(302)
+                self.send_header("Location", "/?err=No+data+provided")
+                self.end_headers()
+                return
+            plaintext = decrypt_vault(master)
+            try:
+                new_plain = _apply_import(fmt, content, plaintext)
+                encrypt_vault(master, new_plain)
+                self.send_response(302)
+                self.send_header("Location", "/?msg=import-ok")
+                self.end_headers()
+                return
+            except Exception as e:
+                self.send_response(302)
+                err = urllib.parse.quote(str(e) or "Import failed")
+                self.send_header("Location", f"/?err={err}")
+                self.end_headers()
+                return
 
         if path == "/passphrase-add":
             label = (data.get("label") or [""])[0].strip()
