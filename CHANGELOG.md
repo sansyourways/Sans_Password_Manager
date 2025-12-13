@@ -17,6 +17,7 @@ Keep-a-Changelog style format.
 
 ### Added
 - Import command (menu + CLI) supports all export formats (csv/json primary; advanced formats accepted: tsv, ndjson/jsonl, md, html, txt, yaml/yml, xml, sql, ini, psv, rst, toml, org, scsv, csv-noheader, jsonc). IDs auto-renumber; entries are appended to the existing vault.
+- Authenticators now support SHA1/SHA256/SHA512 selection (CLI + web), stored per entry and preserved across export/import.
 
 ### Fixed
 - SQL export now escapes quotes correctly; import command is fully wired into CLI dispatch.

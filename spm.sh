@@ -1329,7 +1329,7 @@ cmd_edit() {
 		printf "# Format note    : NOTE<TAB>note_id<TAB>title<TAB>base64_note<TAB>created_at<TAB>-\n" >&2
 		printf "# Format passphrase: PASSPHRASE<TAB>id<TAB>label<TAB>base64_passphrase<TAB>created_at<TAB>-\n" >&2
 		printf "# Format backup code: BACKUP_CODE<TAB>id<TAB>label<TAB>base64_codes<TAB>created_at<TAB>-\n" >&2
-		printf "# Format authenticator: AUTH<TAB>id<TAB>label<TAB>base32_secret<TAB>period<TAB>created_at\n" >&2
+		printf "# Format authenticator: AUTH<TAB>id<TAB>label<TAB>base32_secret<TAB>period<TAB>created_at<TAB>algorithm\n" >&2
 		printf "# Baris meta     : META_RECOVERY_PUBKEY...\n" >&2
 	else
 		printf "Opening vault in editor: %s\n" "$EDITOR_CMD"
@@ -1337,7 +1337,7 @@ cmd_edit() {
 		printf "# Note rows    : NOTE<TAB>note_id<TAB>title<TAB>base64_note<TAB>created_at<TAB>-\n" >&2
 		printf "# Passphrase rows: PASSPHRASE<TAB>id<TAB>label<TAB>base64_passphrase<TAB>created_at<TAB>-\n" >&2
 		printf "# Backup code rows: BACKUP_CODE<TAB>id<TAB>label<TAB>base64_codes<TAB>created_at<TAB>-\n" >&2
-		printf "# Authenticator rows: AUTH<TAB>id<TAB>label<TAB>base32_secret<TAB>period<TAB>created_at\n" >&2
+		printf "# Authenticator rows: AUTH<TAB>id<TAB>label<TAB>base32_secret<TAB>period<TAB>created_at<TAB>algorithm\n" >&2
 		printf "# Meta row     : META_RECOVERY_PUBKEY...\n" >&2
 	fi
 
@@ -1788,17 +1788,22 @@ cmd_passphrase_delete() {
 _spm_totp_code() {
 	local secret="$1"
 	local period="$2"
-	python3 - <<'PY' "$secret" "$period"
+	local algo="${3:-sha1}"
+	python3 - <<'PY' "$secret" "$period" "$algo"
 import base64, hashlib, hmac, struct, time, sys
 secret = sys.argv[1].replace(" ", "").upper()
 period = int(sys.argv[2]) if sys.argv[2].isdigit() and int(sys.argv[2]) > 0 else 30
+algo = sys.argv[3].lower()
+if algo not in ("sha1", "sha256", "sha512"):
+    algo = "sha1"
 try:
     key = base64.b32decode(secret + "=" * ((8 - len(secret) % 8) % 8), casefold=True)
 except Exception:
     sys.exit(1)
 counter = int(time.time() // period)
 msg = struct.pack(">Q", counter)
-h = hmac.new(key, msg, hashlib.sha1).digest()
+digest_mod = {"sha1": hashlib.sha1, "sha256": hashlib.sha256, "sha512": hashlib.sha512}[algo]
+h = hmac.new(key, msg, digest_mod).digest()
 offset = h[-1] & 0x0F
 code_int = struct.unpack(">I", h[offset:offset+4])[0] & 0x7fffffff
 code = str(code_int % 10**6).zfill(6)
@@ -1845,8 +1850,20 @@ cmd_authenticator_add() {
 	fi
 	[ "$period" -gt 0 ] 2>/dev/null || period="30"
 
+	local algo
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Algoritma (sha1/sha256/sha512) [sha1]: "
+	else
+		printf "Algorithm (sha1/sha256/sha512) [sha1]: "
+	fi
+	read -r algo || true
+	case "${algo,,}" in
+		sha1|sha256|sha512) ;;
+		*) algo="sha1" ;;
+	esac
+
 	# validate secret by generating code
-	if ! _spm_totp_code "$secret" "$period" >/dev/null 2>&1; then
+	if ! _spm_totp_code "$secret" "$period" "$algo" >/dev/null 2>&1; then
 		die "Invalid Base32 secret for TOTP."
 	fi
 
@@ -1856,7 +1873,7 @@ cmd_authenticator_add() {
 	local secret_b32
 	secret_b32="$(printf '%s' "$secret" | tr -d '\n' | tr 'a-z' 'A-Z')"
 
-	printf 'AUTH\t%s\t%s\t%s\t%s\t%s\n' "$auth_id" "$label" "$secret_b32" "$period" "$created" >>"$tmp"
+	printf 'AUTH\t%s\t%s\t%s\t%s\t%s\t%s\n' "$auth_id" "$label" "$secret_b32" "$period" "$created" "$algo" >>"$tmp"
 
 	encrypt_file_to_vault "$tmp"
 	secure_wipe "$tmp"
@@ -1876,16 +1893,19 @@ cmd_authenticator_list() {
 	decrypt_vault_to_file "$tmp"
 
 	if [ "$SPM_LANG" = "id" ]; then
-		printf "%-5s  %-28s  %-8s  %-20s\n" "ID" "Label" "Interval" "Dibuat"
+		printf "%-5s  %-24s  %-8s  %-8s  %-20s\n" "ID" "Label" "Interval" "Algo" "Dibuat"
 	else
-		printf "%-5s  %-28s  %-8s  %-20s\n" "ID" "Label" "Interval" "Created"
+		printf "%-5s  %-24s  %-8s  %-8s  %-20s\n" "ID" "Label" "Interval" "Algo" "Created"
 	fi
-	printf '%.0s-' $(seq 1 75)
+	printf '%.0s-' $(seq 1 85)
 	printf '\n'
 
 	awk -F '\t' '
 		$1=="AUTH" {
-			printf "%-5s  %-28s  %-8s  %-20s\n", $2, $3, $4, $5;
+			period=($5? $5 : $4);
+			created=($6? $6 : $5);
+			algo=($7? $7 : "sha1");
+			printf "%-5s  %-24s  %-8s  %-8s  %-20s\n", $2, $3, period, algo, created;
 		}
 	' "$tmp"
 
@@ -1925,8 +1945,8 @@ cmd_authenticator_view() {
 		fi
 	fi
 
-	local tag aid label secret_b32 period created
-	IFS=$'\t' read -r tag aid label secret_b32 period created <<EOF
+	local tag aid label secret_b32 period created algo
+	IFS=$'\t' read -r tag aid label secret_b32 period created algo <<EOF
 $line
 EOF
 
@@ -1937,12 +1957,14 @@ EOF
 		period_sec=30
 	fi
 	[ "$period_sec" -gt 0 ] 2>/dev/null || period_sec=30
+	[ -n "$algo" ] || algo="sha1"
 
 	if [ "$SPM_LANG" = "id" ]; then
 		printf "ID:       %s\n" "$aid"
 		printf "Label:    %s\n" "$label"
 		printf "Interval: %s detik\n" "$period_sec"
 		printf "Dibuat:   %s\n" "$created"
+		printf "Algoritma: %s\n" "$algo"
 		printf "Secret:   %s\n" "$secret_b32"
 		printf "Kode OTP (live, Ctrl+C untuk keluar):\n"
 	else
@@ -1950,6 +1972,7 @@ EOF
 		printf "Label:    %s\n" "$label"
 		printf "Interval: %s seconds\n" "$period_sec"
 		printf "Created:  %s\n" "$created"
+		printf "Algo:     %s\n" "$algo"
 		printf "Secret:   %s\n" "$secret_b32"
 		printf "OTP Code (live, Ctrl+C to stop):\n"
 	fi
@@ -1958,7 +1981,7 @@ EOF
 
 	while true; do
 		local code
-		code="$(_spm_totp_code "$secret_b32" "$period_sec" 2>/dev/null || true)"
+		code="$(_spm_totp_code "$secret_b32" "$period_sec" "$algo" 2>/dev/null || true)"
 		local now rem
 		now="$(date +%s)"
 		rem=$((period_sec - (now % period_sec)))
@@ -1991,10 +2014,11 @@ cmd_authenticator_edit() {
 		die "Authenticator not found."
 	fi
 
-	local tag aid label secret_b32 period created
-	IFS=$'\t' read -r tag aid label secret_b32 period created <<EOF
+	local tag aid label secret_b32 period created algo
+	IFS=$'\t' read -r tag aid label secret_b32 period created algo <<EOF
 $line
 EOF
+	[ -n "$algo" ] || algo="sha1"
 
 	if [ "$SPM_LANG" = "id" ]; then
 		printf "Label baru (kosong = tetap \"%s\"): " "$label"
@@ -2027,16 +2051,27 @@ EOF
 	fi
 	[ "$period" -gt 0 ] 2>/dev/null || period="30"
 
-	if ! _spm_totp_code "$secret_b32" "$period" >/dev/null 2>&1; then
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Algorithm (sha1/sha256/sha512, kosong = %s): " "$algo"
+	else
+		printf "Algorithm (sha1/sha256/sha512, blank = %s): " "$algo"
+	fi
+	read -r new_algo || true
+	case "${new_algo,,}" in
+		sha1|sha256|sha512) algo="$new_algo" ;;
+		*) ;;
+	esac
+
+	if ! _spm_totp_code "$secret_b32" "$period" "$algo" >/dev/null 2>&1; then
 		secure_wipe "$tmp"
 		die "Invalid secret or interval."
 	fi
 
 	local tmp2
 	tmp2="$(make_tmp)"
-	awk -F '\t' -v target="$target" -v label="$label" -v secret="$secret_b32" -v period="$period" -v created="$created" '
+	awk -F '\t' -v target="$target" -v label="$label" -v secret="$secret_b32" -v period="$period" -v created="$created" -v algo="$algo" '
 		$1=="AUTH" && $2==target {
-			printf "AUTH\t%s\t%s\t%s\t%s\t%s\n", $2, label, secret, period, created;
+			printf "AUTH\t%s\t%s\t%s\t%s\t%s\t%s\n", $2, label, secret, period, created, algo;
 			next
 		}
 		{print $0}
@@ -3107,7 +3142,10 @@ with open(vault_path, "r", encoding="utf-8", errors="ignore") as f:
                 "secret": parts[3] if len(parts) > 3 else "",
                 "notes": "",
                 "created": parts[5] if len(parts) > 5 else "",
-                "extra": f"period={parts[4]}" if len(parts) > 4 else ""
+                "extra": "period=%s;algo=%s" % (
+                    parts[4] if len(parts) > 4 else "",
+                    parts[6] if len(parts) > 6 else "sha1"
+                )
             })
 
 fieldnames = ["type","id","label","username","secret","notes","created","extra"]
@@ -3328,13 +3366,26 @@ def add_backup(r):
 
 def add_auth(r):
     aid = str(next_id("AUTH"))
+    def parse_extra(val):
+        out = {}
+        for part in str(val or "").split(";"):
+            if "=" in part:
+                k,v = part.split("=",1)
+                out[k.strip().lower()] = v.strip()
+        return out
+    extra_map = parse_extra(r.get("extra",""))
+    algo = (extra_map.get("algo") or r.get("algorithm","") or "sha1").lower()
+    if algo not in ("sha1","sha256","sha512"):
+        algo = "sha1"
+    period = extra_map.get("period") or r.get("extra","").replace("period=","") or "30"
     lines.append("\t".join([
         "AUTH",
         aid,
         r.get("label","").replace("\t"," "),
         r.get("secret",""),
-        r.get("extra","").replace("period=","") or "30",
-        r.get("created","")
+        period,
+        r.get("created",""),
+        algo
     ]))
 
 def parse_structured():
@@ -4935,7 +4986,7 @@ MAIN_HTML = """<!doctype html>
         </div>
         <div class="notes-table-wrapper">
           <table class="notes-table">
-            <tr><th style="width:40px;">ID</th><th>Label</th><th style="width:70px;">Every</th><th style="width:70px; text-align:right;">Actions</th></tr>
+            <tr><th style="width:40px;">ID</th><th>Label</th><th style="width:70px;">Every</th><th style="width:70px;">Algo</th><th style="width:90px; text-align:right;">Actions</th></tr>
             __AUTH_ROWS__
           </table>
         </div>
@@ -6016,6 +6067,7 @@ AUTH_VIEW_HTML = """<!doctype html>
     <p class="sub">Vault: __VAULT_PATH__ · ID __ID__</p>
     <div class="field"><div class="label">Label</div><div class="mono">__LABEL__</div></div>
     <div class="field"><div class="label">Interval</div><div class="mono">__PERIOD__ seconds</div></div>
+    <div class="field"><div class="label">Algorithm</div><div class="mono">__ALGO__</div></div>
     <div class="field"><div class="label">Created</div><div class="mono">__CREATED__</div></div>
     <div class="field"><div class="label">Base32 Secret</div><div class="mono">__SECRET__</div></div>
     <div class="field"><div class="label">Live Code</div><span id="code" class="code">••••••</span><div class="countdown" id="countdown"></div></div>
@@ -6101,7 +6153,7 @@ def encrypt_vault(master: str, plaintext: str) -> None:
         raise RuntimeError("Failed to encrypt vault")
     os.replace(tmp_path, VAULT_PATH)
 
-def totp_code(secret_b32: str, period: int = 30) -> str:
+def totp_code(secret_b32: str, period: int = 30, algo: str = "sha1") -> str:
     import hashlib, hmac, struct, base64
     secret = secret_b32.replace(" ", "").upper()
     if not secret:
@@ -6110,7 +6162,9 @@ def totp_code(secret_b32: str, period: int = 30) -> str:
     key = base64.b32decode(padded, casefold=True)
     counter = int(time.time() // max(period, 1))
     msg = struct.pack(">Q", counter)
-    h = hmac.new(key, msg, hashlib.sha1).digest()
+    algo = (algo or "sha1").lower()
+    digest_mod = {"sha1": hashlib.sha1, "sha256": hashlib.sha256, "sha512": hashlib.sha512}.get(algo, hashlib.sha1)
+    h = hmac.new(key, msg, digest_mod).digest()
     offset = h[-1] & 0x0F
     code_int = struct.unpack(">I", h[offset:offset+4])[0] & 0x7fffffff
     return str(code_int % 10**6).zfill(6)
@@ -6280,17 +6334,19 @@ def build_backup_rows_html(backups):
 
 def build_auth_rows_html(auths):
     if not auths:
-        return "<tr><td colspan='4' class='badge-empty'><i>No authenticators stored.</i></td></tr>"
+        return "<tr><td colspan='5' class='badge-empty'><i>No authenticators stored.</i></td></tr>"
     rows = []
     for _, parts in auths:
         aid = html.escape(parts[1])
         label = html.escape(parts[2])
-        interval = html.escape(parts[4])
+        interval = html.escape(parts[4] if len(parts) > 4 else "30")
+        algo = html.escape(parts[6] if len(parts) > 6 else "sha1")
         row = (
             "<tr>"
             f"<td>{aid}</td>"
             f"<td>{label}</td>"
             f"<td>{interval}s</td>"
+            f"<td>{algo.upper()}</td>"
             "<td class='actions'><div class='icon-row'>"
             f"<a class='icon-btn' href='/authenticator-view?id={aid}' title='View live'><span>👁</span></a>"
             f"<a class='icon-btn' href='/authenticator-edit?id={aid}' title='Edit'><span>✏</span></a>"
@@ -6376,6 +6432,9 @@ def build_backup_form(title, vault_path, action, values=None, message=""):
 def build_auth_form(title, vault_path, action, values=None, message=""):
     values = values or {}
     def v(k): return html.escape(values.get(k, "") or "")
+    algo = (values.get("algo") or "sha1").lower()
+    if algo not in ("sha1","sha256","sha512"):
+        algo = "sha1"
     body = (
         "<label>Label</label>"
         f"<input type='text' name='label' value='{v('label')}' required>"
@@ -6383,6 +6442,12 @@ def build_auth_form(title, vault_path, action, values=None, message=""):
         f"<input type='text' name='secret' value='{v('secret')}' placeholder='JBSWY3DPEHPK3PXP' required>"
         "<label>Refresh interval (seconds)</label>"
         f"<input type='number' name='period' min='5' max='120' value='{v('period') or '30'}'>"
+        "<label>Algorithm</label>"
+        "<select name='algo'>"
+        f"<option value='sha1'{' selected' if algo=='sha1' else ''}>SHA1 (default)</option>"
+        f"<option value='sha256'{' selected' if algo=='sha256' else ''}>SHA256</option>"
+        f"<option value='sha512'{' selected' if algo=='sha512' else ''}>SHA512</option>"
+        "</select>"
     )
     page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
     page = page.replace("__VAULT_PATH__", html.escape(vault_path))
@@ -6691,7 +6756,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 title="Add Authenticator",
                 vault_path=VAULT_PATH,
                 action="/authenticator-add",
-                values={"period": "30"},
+                values={"period": "30", "algo": "sha1"},
                 message=""
             )
             self._send_html(200, page)
@@ -6712,11 +6777,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not found:
                 self.send_error(404, "Authenticator not found")
                 return
+            algo = found[6] if len(found) > 6 else "sha1"
             page = build_auth_form(
                 title=f"Edit Authenticator #{aid}",
                 vault_path=VAULT_PATH,
                 action="/authenticator-edit?id=" + urllib.parse.quote(aid),
-                values={"label": found[2], "secret": found[3], "period": found[4]},
+                values={"label": found[2], "secret": found[3], "period": found[4], "algo": algo},
                 message=""
             )
             self._send_html(200, page)
@@ -6738,6 +6804,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Authenticator not found")
                 return
             created = found[5] if len(found) > 5 else ""
+            algo = (found[6] if len(found) > 6 else "sha1") or "sha1"
             page = AUTH_VIEW_HTML
             page = page.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
             page = page.replace("__ID__", html.escape(aid))
@@ -6745,6 +6812,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             page = page.replace("__SECRET__", html.escape(found[3]))
             page = page.replace("__PERIOD__", html.escape(found[4] or "30"))
             page = page.replace("__CREATED__", html.escape(created))
+            page = page.replace("__ALGO__", html.escape(algo.upper()))
             self._send_html(200, page)
             return
 
@@ -6835,14 +6903,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Authenticator not found")
                 return
             period = 30
+            algo = (found[6] if len(found) > 6 else "sha1") or "sha1"
             try:
                 period = int(found[4])
             except Exception:
                 period = 30
-            code = totp_code(found[3], period) or "------"
+            code = totp_code(found[3], period, algo) or "------"
             expires_in = period - int(time.time()) % max(period, 1)
             import json
-            body = jsonlib.dumps({"code": code, "expires_in": expires_in})
+            body = jsonlib.dumps({"code": code, "expires_in": expires_in, "algo": algo})
             self.send_response(200)
             self._add_cors()
             self.send_header("Content-Type", "application/json")
@@ -7222,13 +7291,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             label = (data.get("label") or [""])[0].strip()
             secret = (data.get("secret") or [""])[0].replace(" ", "")
             period = (data.get("period") or ["30"])[0]
+            algo_in = (data.get("algo") or [""])[0].lower()
+            algo_in = (data.get("algo") or [""])[0].lower()
+            algo = ((data.get("algo") or ["sha1"])[0] or "sha1").lower()
+            if algo not in ("sha1","sha256","sha512"):
+                algo = "sha1"
 
             if not label or not secret:
                 page = build_auth_form(
                     title="Add Authenticator",
                     vault_path=VAULT_PATH,
                     action="/authenticator-add",
-                    values={"label": label, "secret": secret, "period": period},
+                    values={"label": label, "secret": secret, "period": period, "algo": algo},
                     message="<div class='msg'>Label and secret are required.</div>",
                 )
                 self._send_html(200, page)
@@ -7242,13 +7316,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 period_int = 30
 
             try:
-                _ = totp_code(secret, period_int)
+                _ = totp_code(secret, period_int, algo)
             except Exception:
                 page = build_auth_form(
                     title="Add Authenticator",
                     vault_path=VAULT_PATH,
                     action="/authenticator-add",
-                    values={"label": label, "secret": secret, "period": period},
+                    values={"label": label, "secret": secret, "period": period, "algo": algo},
                     message="<div class='msg'>Invalid Base32 secret.</div>",
                 )
                 self._send_html(200, page)
@@ -7273,6 +7347,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 secret.replace("\t", ""),
                 str(period_int),
                 now,
+                algo,
             ])
             lines.append(new_line)
             new_plain = "\n".join(lines) + "\n"
@@ -7297,11 +7372,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             lines, auths = parse_authenticators(plaintext)
             idx_to_update = None
             created = ""
+            algo = "sha1"
             for idx, parts in auths:
                 if parts[1] == aid:
                     idx_to_update = idx
                     if len(parts) >= 6:
                         created = parts[5]
+                    if len(parts) >= 7 and parts[6]:
+                        algo = parts[6].lower()
                     if not label:
                         label = parts[2]
                     if not secret:
@@ -7312,6 +7390,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     except Exception:
                         pass
                     break
+
+            if algo_in in ("sha1","sha256","sha512"):
+                algo = algo_in
 
             if idx_to_update is None:
                 self.send_error(404, "Authenticator not found")
@@ -7325,13 +7406,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 period_int = 30
 
             try:
-                _ = totp_code(secret, period_int)
+                _ = totp_code(secret, period_int, algo)
             except Exception:
                 page = build_auth_form(
                     title=f"Edit Authenticator #{aid}",
                     vault_path=VAULT_PATH,
                     action="/authenticator-edit?id=" + urllib.parse.quote(aid),
-                    values={"label": label, "secret": secret, "period": period},
+                    values={"label": label, "secret": secret, "period": period, "algo": algo},
                     message="<div class='msg'>Invalid Base32 secret.</div>",
                 )
                 self._send_html(200, page)
@@ -7344,6 +7425,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 secret.replace("\t", ""),
                 str(period_int),
                 created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                algo,
             ])
             new_plain = "\n".join(lines) + "\n"
             encrypt_vault(master, new_plain)

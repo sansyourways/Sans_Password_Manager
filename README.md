@@ -82,7 +82,7 @@ SPM is designed for users who want:
 - 🧠 **Password Strength Coaching**  
 - 📝 **Secure Notes**  
 - 🔑 **Passphrase Vault** (simpan passphrase, verifikasi ulang saat melihat)  
-- 🔢 **Authenticator (TOTP)** dengan live code di web dan interval refresh kustom  
+- 🔢 **Authenticator (TOTP)** dengan live code di web, interval kustom, dan pilihan algoritma SHA1/SHA256/SHA512  
 - ⚡ **Copy cepat** (tombol copy di tampilan kata sandi, catatan, passphrase, kode backup)  
 - 🔒 **Generator kata sandi** (mode mudah/aman, kata mudah diingat, panjang/slider, toggle huruf besar/kecil/angka/simbol, estimasi kekuatan)
 - 🎨 **Tema web** (Dark, AMOLED, Cyberpunk, Light) + cek update di header
@@ -104,7 +104,7 @@ SPM is designed for users who want:
 - 🧠 Password strength analysis & coaching  
 - 📝 Secure notes
 - 🔑 Passphrase vault with re-verification on view  
-- 🔢 Authenticator (TOTP) with live codes and configurable refresh interval  
+- 🔢 Authenticator (TOTP) with live codes, configurable interval, and SHA1/SHA256/SHA512 algorithms  
 - ⚡ Fast copy buttons on password, notes, passphrase, backup views  
 - 🔒 Password generator (easy memorable words + secure random, slider length/words, toggles for upper/lower/digits/symbols, strength estimate)
 - 🎨 Web themes (Dark, AMOLED, Cyberpunk, Light) with header update check/version display  
