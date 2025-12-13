@@ -7646,7 +7646,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             fmt = "csv"
             content = ""
 
-            if content_type.startswith("multipart/form-data"):
+            if content_type.lower().startswith("multipart/form-data"):
                 try:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore", DeprecationWarning)
@@ -7663,7 +7663,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     fmt = (fs.getfirst("fmt") or "csv").lower()
                     file_item = fs["file"] if "file" in fs else None
                     if file_item is not None and getattr(file_item, "file", None):
-                        content = file_item.file.read().decode("utf-8", "ignore")
+                        up_bytes = file_item.file.read()
+                        if up_bytes:
+                            # Persist to a temp file for debugging/robustness
+                            import tempfile, os
+                            tmp_dir = os.path.join(tempfile.gettempdir(), "spm_web")
+                            os.makedirs(tmp_dir, exist_ok=True)
+                            with tempfile.NamedTemporaryFile(dir=tmp_dir, delete=False) as tmpf:
+                                tmpf.write(up_bytes)
+                                tmp_path = tmpf.name
+                            try:
+                                content = up_bytes.decode("utf-8", "ignore")
+                            finally:
+                                try:
+                                    os.remove(tmp_path)
+                                except Exception:
+                                    pass
                     else:
                         content = fs.getfirst("data", "") or ""
                 except Exception as e:
