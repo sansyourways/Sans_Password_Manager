@@ -4195,6 +4195,8 @@ import base64
 import json as jsonlib
 import urllib.request
 import re
+import io
+import cgi
 
 VAULT_PATH = os.environ.get("SPM_VAULT_PATH")
 BIND_ADDR  = os.environ.get("SPM_WEB_BIND", "127.0.0.1")
@@ -5009,7 +5011,7 @@ MAIN_HTML = """<!doctype html>
             <button class="btn-primary small" type="submit">Download</button>
           </form>
         </div>
-        <form method="post" action="/import" style="display:flex; flex-direction:column; gap:8px;">
+        <form method="post" action="/import" enctype="multipart/form-data" style="display:flex; flex-direction:column; gap:8px;">
           <label style="font-size:12px;">Import format</label>
           <select name="fmt" style="padding:6px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text);">
             <option value="csv">csv</option>
@@ -5031,7 +5033,9 @@ MAIN_HTML = """<!doctype html>
             <option value="csv-noheader">csv-noheader</option>
             <option value="jsonc">jsonc</option>
           </select>
-          <label style="font-size:12px;">Paste file contents</label>
+          <label style="font-size:12px;">Upload export file</label>
+          <input type="file" name="file" accept=".csv,.json,.tsv,.ndjson,.jsonl,.md,.markdown,.html,.txt,.yaml,.yml,.xml,.sql,.ini,.psv,.rst,.toml,.org,.scsv" style="color:var(--text);">
+          <label style="font-size:12px;">Or paste file contents</label>
           <textarea name="data" rows="5" placeholder="Paste exported data here" style="width:100%; border-radius:12px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text); padding:8px;"></textarea>
           <button class="btn-primary small" type="submit">Import</button>
           <div style="font-size:11px; color:var(--muted);">Supports passwords, notes, passphrases, authenticators, backup codes.</div>
@@ -7601,10 +7605,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if path == "/import":
             length = int(self.headers.get("Content-Length", "0"))
-            body = self.rfile.read(length).decode("utf-8", errors="ignore")
-            data = urllib.parse.parse_qs(body)
-            fmt = (data.get("fmt") or ["csv"])[0].lower()
-            content = (data.get("data") or [""])[0]
+            content_type = self.headers.get("Content-Type", "")
+            body_bytes = self.rfile.read(length)
+            fmt = "csv"
+            content = ""
+
+            if content_type.startswith("multipart/form-data"):
+                try:
+                    fs = cgi.FieldStorage(
+                        fp=io.BytesIO(body_bytes),
+                        headers=self.headers,
+                        environ={
+                            "REQUEST_METHOD": "POST",
+                            "CONTENT_TYPE": content_type,
+                            "CONTENT_LENGTH": str(length),
+                        },
+                        keep_blank_values=True,
+                    )
+                    fmt = (fs.getfirst("fmt") or "csv").lower()
+                    file_item = fs["file"] if "file" in fs else None
+                    if file_item is not None and getattr(file_item, "file", None):
+                        content = file_item.file.read().decode("utf-8", "ignore")
+                    else:
+                        content = fs.getfirst("data", "") or ""
+                except Exception:
+                    fmt = "csv"
+                    content = ""
+            else:
+                body = body_bytes.decode("utf-8", errors="ignore")
+                data = urllib.parse.parse_qs(body)
+                fmt = (data.get("fmt") or ["csv"])[0].lower()
+                content = (data.get("data") or [""])[0]
+
             if fmt not in SUPPORTED_FORMATS:
                 self.send_response(302)
                 self.send_header("Location", "/?err=Unsupported+format")
