@@ -38,3 +38,11 @@ spm.*.tmp
 .github/
 GEMINI.md
 release-2.3.0.md
+release-2.*.md
+
+# Local helper docs and temp scripts
+AGENTS.md
+scripts/
+spm.sh.*.bk
+test-*.csv
+test.md
