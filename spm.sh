@@ -7628,6 +7628,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/import":
             length = int(self.headers.get("Content-Length", "0"))
             content_type = self.headers.get("Content-Type", "")
+            if length > 5 * 1024 * 1024:
+                self.send_response(413)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"Payload too large (max 5MB).")
+                return
+
             body_bytes = self.rfile.read(length)
             fmt = "csv"
             content = ""
@@ -7657,14 +7664,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     content = ""
                 if not content:
                     # Fallback to lightweight parser
-                    fields = parse_multipart(body_bytes, content_type)
-                    fmt_raw = fields.get("fmt", b"csv") or b"csv"
-                    fmt = fmt_raw.decode("utf-8", "ignore").lower()
-                    file_bytes = fields.get("file", b"")
-                    if file_bytes:
-                        content = file_bytes.decode("utf-8", "ignore")
-                    else:
-                        content = fields.get("data", b"").decode("utf-8", "ignore")
+                    try:
+                        fields = parse_multipart(body_bytes, content_type)
+                        fmt_raw = fields.get("fmt", b"csv") or b"csv"
+                        fmt = fmt_raw.decode("utf-8", "ignore").lower()
+                        file_bytes = fields.get("file", b"")
+                        if file_bytes:
+                            content = file_bytes.decode("utf-8", "ignore")
+                        else:
+                            content = fields.get("data", b"").decode("utf-8", "ignore")
+                    except Exception:
+                        content = ""
             else:
                 body = body_bytes.decode("utf-8", errors="ignore")
                 data = urllib.parse.parse_qs(body)

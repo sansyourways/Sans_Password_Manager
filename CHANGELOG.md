@@ -23,6 +23,7 @@ Keep-a-Changelog style format.
 ### Fixed
 - Replaced deprecated `cgi` usage in the web server with `email.parser`-based multipart parsing to avoid deprecation issues on Python 3.13.
 - Web import file uploads now use the correct multipart key, preventing hangs/timeouts on upload.
+- Multipart import now short-circuits on >5MB payloads and falls back gracefully when parsing fails.
 - SQL export now escapes quotes correctly; import command is fully wired into CLI dispatch.
 - Web export/import script no longer fails on SQL format generation (fixed quoting in generated Python).
 - RST export in web server generation now uses proper quoting (no more syntax error in generated Python).
