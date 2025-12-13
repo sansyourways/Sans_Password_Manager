@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.3.0"
+VERSION="2.7.8"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -547,6 +547,12 @@ ensure_master_password_loaded() {
 }
 
 re_verify_master_password() {
+	# If master password is not yet loaded, capture it once (counts as verification)
+	if [ -z "${MASTER_PW:-}" ]; then
+		read_master_password_once
+		return
+	fi
+
 	local entered_pw
 	if [ "$SPM_LANG" = "id" ]; then
 		printf 'Masukkan kata sandi utama untuk verifikasi: '
@@ -663,6 +669,40 @@ next_backup_code_id_from_vault() {
 	fi
 	awk -F '\t' '
 		$1=="BACKUP_CODE" && $2 ~ /^[0-9]+$/ {
+			if ($2 > max) max = $2
+		}
+		END {
+			if (max == 0) print 1;
+			else print max + 1;
+		}
+	' "$file"
+}
+
+next_passphrase_id_from_vault() {
+	local file="$1"
+	if [ ! -s "$file" ]; then
+		printf '1\n'
+		return
+	fi
+	awk -F '\t' '
+		$1=="PASSPHRASE" && $2 ~ /^[0-9]+$/ {
+			if ($2 > max) max = $2
+		}
+		END {
+			if (max == 0) print 1;
+			else print max + 1;
+		}
+	' "$file"
+}
+
+next_authenticator_id_from_vault() {
+	local file="$1"
+	if [ ! -s "$file" ]; then
+		printf '1\n'
+		return
+	fi
+	awk -F '\t' '
+		$1=="AUTH" && $2 ~ /^[0-9]+$/ {
 			if ($2 > max) max = $2
 		}
 		END {
@@ -858,6 +898,136 @@ password_strength_report() {
 	printf "   - ID: Hindari kata asli, nama, atau pola yang mudah ditebak.\n"
 	printf "   - EN: Consider using a passphrase of random words.\n"
 	printf "   - ID: Pertimbangkan pakai passphrase dari beberapa kata acak.\n"
+}
+
+generate_password() {
+	local length="${1:-16}"
+	local mode="${2:-secure}"   # secure / easy / numeric
+	local include_symbols="${3:-1}"
+	local include_upper="${4:-1}"
+	local include_lower="${5:-1}"
+	local include_digits="${6:-1}"
+
+	# simple wordlist for memorable passwords
+	local WORDS=(
+		"sun" "moon" "star" "river" "ocean" "cloud" "stone" "tree" "leaf" "fern"
+		"fire" "ember" "storm" "wind" "breeze" "shadow" "light" "silver" "gold"
+		"amber" "flame" "nova" "comet" "aurora" "pulse" "echo" "vapor" "wave"
+		"mist" "dawn" "dusk" "zen" "sage" "whale" "lynx" "orca" "hawk" "raven"
+	)
+
+	if ! printf '%s' "$length" | grep -Eq '^[0-9]+$'; then
+		length=16
+	fi
+	if [ "$length" -lt 4 ]; then
+		length=4
+	elif [ "$length" -gt 128 ]; then
+		length=128
+	fi
+
+	if [ "$mode" = "easy" ]; then
+		local words_needed
+		words_needed="$length"
+		[ "$words_needed" -lt 2 ] && words_needed=2
+		[ "$words_needed" -gt 8 ] && words_needed=8
+		local parts=() idx word
+		for (( i=0; i<words_needed; i++ )); do
+			idx=$(( RANDOM % ${#WORDS[@]} ))
+			word="${WORDS[idx]}"
+			if [ "$include_upper" = "1" ] && [ "$include_lower" != "1" ]; then
+				word="$(printf '%s' "$word" | tr '[:lower:]' '[:upper:]')"
+			elif [ "$include_upper" = "1" ]; then
+				word="$(printf '%s' "$word" | sed 's/^./\U&/')"
+			elif [ "$include_lower" != "1" ]; then
+				word="$(printf '%s' "$word" | tr '[:lower:]' '[:upper:]')"
+			fi
+			parts+=("$word")
+		done
+		local pw
+		pw="$(IFS='-'; echo "${parts[*]}")"
+		if [ "$include_digits" = "1" ]; then
+			pw="${pw}-$(printf '%02d' $((RANDOM % 100)))"
+		fi
+		if [ "$include_symbols" = "1" ]; then
+			local syms="!@#$%^&*"
+			local s="${syms:$((RANDOM % ${#syms})):1}"
+			pw="${pw}${s}"
+		fi
+		printf '%s\n' "$pw"
+		return
+	fi
+
+	local charset=""
+	[ "$include_upper" = "1" ] && charset="${charset}ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	[ "$include_lower" = "1" ] && charset="${charset}abcdefghijklmnopqrstuvwxyz"
+	[ "$include_digits" = "1" ] && charset="${charset}0123456789"
+	[ "$include_symbols" = "1" ] && charset="${charset}!@#$%^&*()_-+=[]{}:;,.?/|~"
+
+	if [ -z "$charset" ]; then
+		charset="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	fi
+
+	local pw=""
+	local i idx ch set_len
+	set_len="${#charset}"
+
+	for (( i=0; i<length; i++ )); do
+		idx="$(( RANDOM % set_len ))"
+		ch="${charset:idx:1}"
+		pw+="$ch"
+	done
+
+	printf '%s\n' "$pw"
+}
+
+cmd_generate_password() {
+	local length=16
+	local mode="secure"
+	local symbols=1
+	local upper=1
+	local lower=1
+	local digits=1
+
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			-l|--length)
+				length="${2:-16}"
+				shift 2
+				;;
+			-m|--mode)
+				mode="${2:-secure}"
+				shift 2
+				;;
+			--no-symbols)
+				symbols=0
+				shift
+				;;
+			--no-upper)
+				upper=0
+				shift
+				;;
+			--no-lower)
+				lower=0
+				shift
+				;;
+			--no-digits)
+				digits=0
+				shift
+				;;
+			-h|--help)
+				echo "Usage: $0 generate [--length N] [--mode secure|easy|numeric] [--no-symbols] [--no-upper] [--no-lower] [--no-digits]"
+				return 0
+				;;
+			*)
+				break
+				;;
+		esac
+	done
+
+	local pw
+	pw="$(generate_password "$length" "$mode" "$symbols" "$upper" "$lower" "$digits")"
+	printf "%s\n\n" "$pw"
+	password_strength_report "$pw"
 }
 
 # ----- Clipboard + auto-clean -------------------------------------------------
@@ -1157,13 +1327,17 @@ cmd_edit() {
 		printf "Membuka vault di editor: %s\n" "$EDITOR_CMD"
 		printf "# Format password: id<TAB>service<TAB>username<TAB>password<TAB>notes<TAB>created_at\n" >&2
 		printf "# Format note    : NOTE<TAB>note_id<TAB>title<TAB>base64_note<TAB>created_at<TAB>-\n" >&2
+		printf "# Format passphrase: PASSPHRASE<TAB>id<TAB>label<TAB>base64_passphrase<TAB>created_at<TAB>-\n" >&2
 		printf "# Format backup code: BACKUP_CODE<TAB>id<TAB>label<TAB>base64_codes<TAB>created_at<TAB>-\n" >&2
+		printf "# Format authenticator: AUTH<TAB>id<TAB>label<TAB>base32_secret<TAB>period<TAB>created_at\n" >&2
 		printf "# Baris meta     : META_RECOVERY_PUBKEY...\n" >&2
 	else
 		printf "Opening vault in editor: %s\n" "$EDITOR_CMD"
 		printf "# Password rows: id<TAB>service<TAB>username<TAB>password<TAB>notes<TAB>created_at\n" >&2
 		printf "# Note rows    : NOTE<TAB>note_id<TAB>title<TAB>base64_note<TAB>created_at<TAB>-\n" >&2
+		printf "# Passphrase rows: PASSPHRASE<TAB>id<TAB>label<TAB>base64_passphrase<TAB>created_at<TAB>-\n" >&2
 		printf "# Backup code rows: BACKUP_CODE<TAB>id<TAB>label<TAB>base64_codes<TAB>created_at<TAB>-\n" >&2
+		printf "# Authenticator rows: AUTH<TAB>id<TAB>label<TAB>base32_secret<TAB>period<TAB>created_at\n" >&2
 		printf "# Meta row     : META_RECOVERY_PUBKEY...\n" >&2
 	fi
 
@@ -1419,6 +1593,494 @@ cmd_notes_delete() {
 		printf "Catatan dengan ID %s dihapus.\n" "$target"
 	else
 		printf "Note with ID %s deleted.\n" "$target"
+	fi
+}
+
+# ----- Passphrase commands ---------------------------------------------------
+
+cmd_passphrase_add() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Label passphrase: "
+	else
+		printf "Passphrase label: "
+	fi
+	IFS= read -r label
+	[ -n "$label" ] || die "Label cannot be empty."
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Passphrase (kosongkan untuk auto-generate 32 karakter): "
+	else
+		printf "Passphrase (blank to auto-generate 32 chars): "
+	fi
+	stty -echo
+	IFS= read -r secret
+	stty echo
+	printf '\n'
+
+	if [ -z "$secret" ]; then
+		if command -v openssl >/dev/null 2>&1; then
+			secret="$(openssl rand -base64 48 | tr -d '\n' | head -c 32)"
+		else
+			secret="$(tr -dc 'A-Za-z0-9!@#$%^&*()_+-=' </dev/urandom | head -c 32)"
+		fi
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "Passphrase dibuat otomatis.\n"
+		else
+			printf "Passphrase auto-generated.\n"
+		fi
+	fi
+
+	local pass_id created
+	pass_id="$(next_passphrase_id_from_vault "$tmp")"
+	created="$(now_iso)"
+	local secret_b64
+	secret_b64="$(printf '%s' "$secret" | base64 | tr -d '\n')"
+
+	printf 'PASSPHRASE\t%s\t%s\t%s\t%s\t-\n' "$pass_id" "$label" "$secret_b64" "$created" >>"$tmp"
+
+	encrypt_file_to_vault "$tmp"
+	secure_wipe "$tmp"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Passphrase ditambahkan dengan ID %s.\n" "$pass_id"
+	else
+		printf "Passphrase added with ID %s.\n" "$pass_id"
+	fi
+}
+
+cmd_passphrase_list() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "%-5s  %-30s  %-20s\n" "ID" "Label" "Dibuat"
+	else
+		printf "%-5s  %-30s  %-20s\n" "ID" "Label" "Created"
+	fi
+	printf '%.0s-' $(seq 1 70)
+	printf '\n'
+
+	awk -F '\t' '
+		$1=="PASSPHRASE" {
+			printf "%-5s  %-30s  %-20s\n", $2, $3, $5;
+		}
+	' "$tmp"
+
+	local count
+	count="$(awk -F '\t' '$1=="PASSPHRASE"{n++} END{print n+0}' "$tmp")"
+	if [ "$count" -eq 0 ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "\nTidak ada passphrase.\n"
+		else
+			printf "\nNo passphrases stored.\n"
+		fi
+	fi
+
+	secure_wipe "$tmp"
+}
+
+cmd_passphrase_view() {
+	[ $# -ge 1 ] || die "Usage: $0 passphrase-view <id>"
+	local target="$1"
+
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	# Require re-verification for sensitive viewing
+	re_verify_master_password
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	local line
+	line="$(awk -F '\t' -v target="$target" '$1=="PASSPHRASE" && $2==target {print $0; exit}' "$tmp")" || true
+	if [ -z "$line" ]; then
+		secure_wipe "$tmp"
+		if [ "$SPM_LANG" = "id" ]; then
+			die "Tidak ada passphrase dengan ID $target."
+		else
+			die "No passphrase found with ID $target."
+		fi
+	fi
+
+	local tag pid label secret_b64 created dummy
+	IFS=$'\t' read -r tag pid label secret_b64 created dummy <<EOF
+$line
+EOF
+
+	local tmp_secret
+	tmp_secret="$(make_tmp)"
+	if ! printf '%s' "$secret_b64" | base64 -d >"$tmp_secret" 2>/dev/null; then
+		secure_wipe "$tmp_secret"
+		secure_wipe "$tmp"
+		die "Failed to decode passphrase (base64)."
+	fi
+
+	local secret_value
+	secret_value="$(cat "$tmp_secret")"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "ID:        %s\n" "$pid"
+		printf "Label:     %s\n" "$label"
+		printf "Dibuat:    %s\n" "$created"
+		printf "Passphrase:%s\n" " "
+	else
+		printf "ID:        %s\n" "$pid"
+		printf "Label:     %s\n" "$label"
+		printf "Created:   %s\n" "$created"
+		printf "Passphrase:%s\n" " "
+	fi
+
+	printf "%s\n" "$secret_value"
+	copy_password_with_autoclear "$secret_value"
+
+	secure_wipe "$tmp_secret"
+	secure_wipe "$tmp"
+}
+
+cmd_passphrase_delete() {
+	[ $# -ge 1 ] || die "Usage: $0 passphrase-delete <id>"
+	local target="$1"
+
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	if ! awk -F '\t' -v target="$target" '$1=="PASSPHRASE" && $2==target {found=1} END{exit(found?0:1)}' "$tmp"; then
+		secure_wipe "$tmp"
+		if [ "$SPM_LANG" = "id" ]; then
+			die "Tidak ada passphrase dengan ID $target."
+		else
+			die "No passphrase found with ID $target."
+		fi
+	fi
+
+	local tmp2
+	tmp2="$(make_tmp)"
+	awk -F '\t' -v target="$target" '
+		!($1=="PASSPHRASE" && $2==target) {print $0}
+	' "$tmp" >"$tmp2"
+
+	encrypt_file_to_vault "$tmp2"
+	secure_wipe "$tmp"
+	secure_wipe "$tmp2"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Passphrase dengan ID %s dihapus.\n" "$target"
+	else
+		printf "Passphrase with ID %s deleted.\n" "$target"
+	fi
+}
+
+# ----- Authenticator (TOTP) commands ----------------------------------------
+
+_spm_totp_code() {
+	local secret="$1"
+	local period="$2"
+	python3 - <<'PY' "$secret" "$period"
+import base64, hashlib, hmac, struct, time, sys
+secret = sys.argv[1].replace(" ", "").upper()
+period = int(sys.argv[2]) if sys.argv[2].isdigit() and int(sys.argv[2]) > 0 else 30
+try:
+    key = base64.b32decode(secret + "=" * ((8 - len(secret) % 8) % 8), casefold=True)
+except Exception:
+    sys.exit(1)
+counter = int(time.time() // period)
+msg = struct.pack(">Q", counter)
+h = hmac.new(key, msg, hashlib.sha1).digest()
+offset = h[-1] & 0x0F
+code_int = struct.unpack(">I", h[offset:offset+4])[0] & 0x7fffffff
+code = str(code_int % 10**6).zfill(6)
+print(code)
+PY
+}
+
+cmd_authenticator_add() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Label authenticator: "
+	else
+		printf "Authenticator label: "
+	fi
+	IFS= read -r label
+	[ -n "$label" ] || die "Label cannot be empty."
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Secret (Base32, contoh: JBSWY3DPEHPK3PXP): "
+	else
+		printf "Secret (Base32, e.g., JBSWY3DPEHPK3PXP): "
+	fi
+	stty -echo
+	IFS= read -r secret
+	stty echo
+	printf '\n'
+	secret="${secret//[[:space:]]/}"
+	[ -n "$secret" ] || die "Secret cannot be empty."
+
+	local period
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Interval refresh (detik, default 30): "
+	else
+		printf "Refresh interval (seconds, default 30): "
+	fi
+	read -r period || true
+	if ! printf '%s' "$period" | grep -Eq '^[0-9]+$'; then
+		period="30"
+	fi
+	[ "$period" -gt 0 ] 2>/dev/null || period="30"
+
+	# validate secret by generating code
+	if ! _spm_totp_code "$secret" "$period" >/dev/null 2>&1; then
+		die "Invalid Base32 secret for TOTP."
+	fi
+
+	local auth_id created
+	auth_id="$(next_authenticator_id_from_vault "$tmp")"
+	created="$(now_iso)"
+	local secret_b32
+	secret_b32="$(printf '%s' "$secret" | tr -d '\n' | tr 'a-z' 'A-Z')"
+
+	printf 'AUTH\t%s\t%s\t%s\t%s\t%s\n' "$auth_id" "$label" "$secret_b32" "$period" "$created" >>"$tmp"
+
+	encrypt_file_to_vault "$tmp"
+	secure_wipe "$tmp"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Authenticator ditambahkan dengan ID %s.\n" "$auth_id"
+	else
+		printf "Authenticator added with ID %s.\n" "$auth_id"
+	fi
+}
+
+cmd_authenticator_list() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "%-5s  %-28s  %-8s  %-20s\n" "ID" "Label" "Interval" "Dibuat"
+	else
+		printf "%-5s  %-28s  %-8s  %-20s\n" "ID" "Label" "Interval" "Created"
+	fi
+	printf '%.0s-' $(seq 1 75)
+	printf '\n'
+
+	awk -F '\t' '
+		$1=="AUTH" {
+			printf "%-5s  %-28s  %-8s  %-20s\n", $2, $3, $4, $5;
+		}
+	' "$tmp"
+
+	local count
+	count="$(awk -F '\t' '$1=="AUTH"{n++} END{print n+0}' "$tmp")"
+	if [ "$count" -eq 0 ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "\nTidak ada authenticator.\n"
+		else
+			printf "\nNo authenticators stored.\n"
+		fi
+	fi
+
+	secure_wipe "$tmp"
+}
+
+cmd_authenticator_view() {
+	[ $# -ge 1 ] || die "Usage: $0 authenticator-view <id>"
+	local target="$1"
+
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	re_verify_master_password
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	local line
+	line="$(awk -F '\t' -v target="$target" '$1=="AUTH" && $2==target {print $0; exit}' "$tmp")" || true
+	if [ -z "$line" ]; then
+		secure_wipe "$tmp"
+		if [ "$SPM_LANG" = "id" ]; then
+			die "Tidak ada authenticator dengan ID $target."
+		else
+			die "No authenticator found with ID $target."
+		fi
+	fi
+
+	local tag aid label secret_b32 period created
+	IFS=$'\t' read -r tag aid label secret_b32 period created <<EOF
+$line
+EOF
+
+	local period_sec
+	if printf '%s' "$period" | grep -Eq '^[0-9]+$'; then
+		period_sec="$period"
+	else
+		period_sec=30
+	fi
+	[ "$period_sec" -gt 0 ] 2>/dev/null || period_sec=30
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "ID:       %s\n" "$aid"
+		printf "Label:    %s\n" "$label"
+		printf "Interval: %s detik\n" "$period_sec"
+		printf "Dibuat:   %s\n" "$created"
+		printf "Secret:   %s\n" "$secret_b32"
+		printf "Kode OTP (live, Ctrl+C untuk keluar):\n"
+	else
+		printf "ID:       %s\n" "$aid"
+		printf "Label:    %s\n" "$label"
+		printf "Interval: %s seconds\n" "$period_sec"
+		printf "Created:  %s\n" "$created"
+		printf "Secret:   %s\n" "$secret_b32"
+		printf "OTP Code (live, Ctrl+C to stop):\n"
+	fi
+
+	trap 'printf "\n"; secure_wipe "$tmp"; exit 0' INT TERM
+
+	while true; do
+		local code
+		code="$(_spm_totp_code "$secret_b32" "$period_sec" 2>/dev/null || true)"
+		local now rem
+		now="$(date +%s)"
+		rem=$((period_sec - (now % period_sec)))
+		if [ "$rem" -le 0 ]; then
+			rem="$period_sec"
+		fi
+
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "\rKode: %s  (refresh dalam %2ds)   " "${code:-"------"}" "$rem"
+		else
+			printf "\rCode: %s  (refresh in %2ds)   " "${code:-"------"}" "$rem"
+		fi
+		sleep 1
+	done
+}
+
+cmd_authenticator_edit() {
+	[ $# -ge 1 ] || die "Usage: $0 authenticator-edit <id>"
+	local target="$1"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	local line
+	line="$(awk -F '\t' -v target="$target" '$1=="AUTH" && $2==target {print $0; exit}' "$tmp")" || true
+	if [ -z "$line" ]; then
+		secure_wipe "$tmp"
+		die "Authenticator not found."
+	fi
+
+	local tag aid label secret_b32 period created
+	IFS=$'\t' read -r tag aid label secret_b32 period created <<EOF
+$line
+EOF
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Label baru (kosong = tetap \"%s\"): " "$label"
+	else
+		printf "New label (blank keeps \"%s\"): " "$label"
+	fi
+	IFS= read -r new_label
+	[ -n "$new_label" ] && label="$new_label"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Secret baru Base32 (kosong = tetap): "
+	else
+		printf "New Base32 secret (blank keeps current): "
+	fi
+	stty -echo
+	IFS= read -r new_secret
+	stty echo
+	printf '\n'
+	new_secret="${new_secret//[[:space:]]/}"
+	[ -n "$new_secret" ] && secret_b32="$new_secret"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Interval baru (detik, kosong = %s): " "$period"
+	else
+		printf "New interval (seconds, blank = %s): " "$period"
+	fi
+	read -r new_period || true
+	if printf '%s' "$new_period" | grep -Eq '^[0-9]+$'; then
+		period="$new_period"
+	fi
+	[ "$period" -gt 0 ] 2>/dev/null || period="30"
+
+	if ! _spm_totp_code "$secret_b32" "$period" >/dev/null 2>&1; then
+		secure_wipe "$tmp"
+		die "Invalid secret or interval."
+	fi
+
+	local tmp2
+	tmp2="$(make_tmp)"
+	awk -F '\t' -v target="$target" -v label="$label" -v secret="$secret_b32" -v period="$period" -v created="$created" '
+		$1=="AUTH" && $2==target {
+			printf "AUTH\t%s\t%s\t%s\t%s\t%s\n", $2, label, secret, period, created;
+			next
+		}
+		{print $0}
+	' "$tmp" >"$tmp2"
+
+	encrypt_file_to_vault "$tmp2"
+	secure_wipe "$tmp"
+	secure_wipe "$tmp2"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Authenticator ID %s diperbarui.\n" "$target"
+	else
+		printf "Authenticator ID %s updated.\n" "$target"
+	fi
+}
+
+cmd_authenticator_delete() {
+	[ $# -ge 1 ] || die "Usage: $0 authenticator-delete <id>"
+	local target="$1"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	if ! awk -F '\t' -v target="$target" '$1=="AUTH" && $2==target {found=1} END{exit(found?0:1)}' "$tmp"; then
+		secure_wipe "$tmp"
+		die "Authenticator not found."
+	fi
+
+	local tmp2
+	tmp2="$(make_tmp)"
+	awk -F '\t' -v target="$target" '
+		!($1=="AUTH" && $2==target) {print $0}
+	' "$tmp" >"$tmp2"
+
+	encrypt_file_to_vault "$tmp2"
+	secure_wipe "$tmp"
+	secure_wipe "$tmp2"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Authenticator ID %s dihapus.\n" "$target"
+	else
+		printf "Authenticator ID %s deleted.\n" "$target"
 	fi
 }
 
@@ -1899,6 +2561,12 @@ EOF
 
 cmd_update() {
 	require_cmd curl
+	local unzip_cmd=""
+	if command -v unzip >/dev/null 2>&1; then
+		unzip_cmd="unzip -q"
+	elif command -v bsdtar >/dev/null 2>&1; then
+		unzip_cmd="bsdtar -xf"
+	fi
 
 	if [ "$SPM_LANG" = "id" ]; then
 		printf "Memeriksa update...\n"
@@ -1937,22 +2605,130 @@ cmd_update() {
 		[ -n "$html_url" ] && printf "Release page   : %s\n" "$html_url"
 	fi
 
+	# Find first ZIP asset from the release payload
+	local asset_url
+	asset_url="$(printf '%s\n' "$json" | grep -E '"browser_download_url"' | grep -E '\\.zip"' | head -n1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')" || true
+
+	if [ -z "$asset_url" ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "Tidak menemukan asset ZIP di rilis. Update manual diperlukan.\n"
+		else
+			printf "Could not find ZIP asset in release. Manual update required.\n"
+		fi
+		return 1
+	fi
+
 	if [ "$latest_tag" = "$VERSION" ]; then
 		if [ "$SPM_LANG" = "id" ]; then
-			printf "\nSudah memakai versi terbaru.\n"
+			printf "\nSudah memakai versi terbaru. Reinstall? (yes/NO): "
 		else
-			printf "\nYou are already on the latest version.\n"
+			printf "\nAlready on latest version. Reinstall anyway? (yes/NO): "
 		fi
 	else
 		if [ "$SPM_LANG" = "id" ]; then
-			printf "\nAda versi baru tersedia.\n"
-			printf "Contoh cara update script ini:\n\n"
+			printf "\nAda versi baru tersedia. Instal otomatis sekarang? (yes/NO): "
 		else
-			printf "\nA newer version is available.\n"
-			printf "To update this script (example):\n\n"
+			printf "\nNew version available. Auto-install now? (yes/NO): "
 		fi
-		printf "  curl -L -o spm.sh \"https://raw.githubusercontent.com/%s/%s/%s/spm.sh\"\n" "$REPO_OWNER" "$REPO_NAME" "$latest_tag"
-		printf "  chmod +x spm.sh\n\n"
+	fi
+
+	local conf
+	read -r conf || conf="no"
+	if [ "$conf" != "yes" ] && [ "$conf" != "y" ]; then
+		return 0
+	fi
+
+	if [ -z "$unzip_cmd" ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "Perlu 'unzip' atau 'bsdtar' untuk mengekstrak ZIP. Instal dulu.\n"
+		else
+			printf "Need 'unzip' or 'bsdtar' to extract ZIP. Please install it first.\n"
+		fi
+		return 1
+	fi
+
+	local tmpdir
+	if ! tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/spm_update.XXXXXX" 2>/dev/null)"; then
+		tmpdir="${TMPDIR:-/tmp}/spm_update.$$"
+		mkdir -p "$tmpdir"
+	fi
+	local zip_path="$tmpdir/spm_latest.zip"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Mengunduh: %s\n" "$asset_url"
+	else
+		printf "Downloading: %s\n" "$asset_url"
+	fi
+	if ! curl -fL "$asset_url" -o "$zip_path"; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "Download gagal.\n"
+		else
+			printf "Download failed.\n"
+		fi
+		rm -rf "$tmpdir"
+		return 1
+	fi
+
+	local extract_dir="$tmpdir/extract"
+	mkdir -p "$extract_dir"
+	if [ "$unzip_cmd" = "unzip -q" ]; then
+		if ! unzip -q "$zip_path" -d "$extract_dir"; then
+			if [ "$SPM_LANG" = "id" ]; then
+				printf "Gagal mengekstrak ZIP.\n"
+			else
+				printf "Failed to extract ZIP.\n"
+			fi
+			rm -rf "$tmpdir"
+			return 1
+		fi
+	else
+		if ! bsdtar -xf "$zip_path" -C "$extract_dir"; then
+			if [ "$SPM_LANG" = "id" ]; then
+				printf "Gagal mengekstrak ZIP.\n"
+			else
+				printf "Failed to extract ZIP.\n"
+			fi
+			rm -rf "$tmpdir"
+			return 1
+		fi
+	fi
+
+	local new_spm
+	new_spm="$(find "$extract_dir" -name 'spm.sh' -type f | head -n1)"
+	if [ -z "$new_spm" ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "spm.sh tidak ditemukan di arsip.\n"
+		else
+			printf "spm.sh not found in archive.\n"
+		fi
+		rm -rf "$tmpdir"
+		return 1
+	fi
+
+	local target="/usr/local/bin/spm"
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Menginstal ke %s (mungkin butuh sudo)...\n" "$target"
+	else
+		printf "Installing to %s (sudo may be required)...\n" "$target"
+	fi
+
+	if command -v sudo >/dev/null 2>&1; then
+		if ! sudo cp "$new_spm" "$target"; then
+			rm -rf "$tmpdir"
+			return 1
+		fi
+		sudo chmod +x "$target" >/dev/null 2>&1 || true
+	else
+		cp "$new_spm" "$target"
+		chmod +x "$target" >/dev/null 2>&1 || true
+	fi
+
+	rm -rf "$tmpdir"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Update selesai. Jalankan 'spm' untuk versi terbaru.\n"
+	else
+		printf "Update complete. Run 'spm' for the latest version.\n"
 	fi
 }
 
@@ -2107,6 +2883,30 @@ cmd_doctor() {
 		printf "[✔] Secure notes count     : %s\n" "$note_count"
 	fi
 
+	local pass_count
+	pass_count="$(awk -F '\t' '$1=="PASSPHRASE"{n++} END{print n+0}' "$tmp")"
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "[✔] Jumlah passphrase      : %s\n" "$pass_count"
+	else
+		printf "[✔] Passphrases count      : %s\n" "$pass_count"
+	fi
+
+	local bc_count
+	bc_count="$(awk -F '\t' '$1=="BACKUP_CODE"{n++} END{print n+0}' "$tmp")"
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "[✔] Jumlah kode backup     : %s\n" "$bc_count"
+	else
+		printf "[✔] Backup codes count     : %s\n" "$bc_count"
+	fi
+
+	local auth_count
+	auth_count="$(awk -F '\t' '$1=="AUTH"{n++} END{print n+0}' "$tmp")"
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "[✔] Jumlah authenticator   : %s\n" "$auth_count"
+	else
+		printf "[✔] Authenticators count   : %s\n" "$auth_count"
+	fi
+
 	# Check recovery meta public key
 	local pub_b64
 	pub_b64="$(get_recovery_pub_b64_from_vault "$tmp")"
@@ -2196,6 +2996,442 @@ cmd_doctor() {
 	fi
 }
 
+cmd_export() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	require_cmd python3
+
+	local format="${1:-csv}"
+	format="$(printf '%s' "$format" | tr 'A-Z' 'a-z')"
+	local outfile="${2:-}"
+	case "$format" in
+		csv|json|tsv|ndjson|jsonl|md|markdown|html|txt|yaml|yml|xml|sql|ini|psv|rst|toml|org|scsv|csv-noheader|jsonc) ;;
+		*) die "Unsupported format '$format'. Use: csv, json, tsv, ndjson/jsonl, md, html, txt, yaml/yml, xml, sql, ini, psv, rst, toml, org, scsv, csv-noheader, or jsonc." ;;
+	esac
+
+	if [ -z "$outfile" ]; then
+		outfile="spm_export_$(date +%Y%m%d_%H%M%S).${format}"
+	else
+		case "$outfile" in
+			*."$format") ;;  # already has correct extension
+			*.csv|*.json|*.tsv|*.ndjson|*.jsonl|*.md|*.markdown|*.html|*.htm|*.txt|*.yaml|*.yml|*.xml|*.sql|*.ini|*.psv|*.rst|*.toml|*.org) ;;
+			md|markdown) outfile="export.md" ;;
+			html|htm) outfile="export.html" ;;
+			txt) outfile="export.txt" ;;
+			yaml|yml) outfile="export.yaml" ;;
+			xml) outfile="export.xml" ;;
+			sql) outfile="export.sql" ;;
+			ini) outfile="export.ini" ;;
+			psv) outfile="export.psv" ;;
+			scsv) outfile="export.scsv" ;;
+			toml) outfile="export.toml" ;;
+			org) outfile="export.org" ;;
+			"csv-noheader") outfile="export.csv" ;;
+			jsonc) outfile="export.json" ;;
+			rst) outfile="export.rst" ;;
+			*) outfile="${outfile}.${format}" ;;
+		esac
+	fi
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+if ! python3 - "$format" "$tmp" "$outfile" <<'PY'
+import sys, json, base64, csv, html, datetime
+fmt, vault_path, out_path = sys.argv[1:]
+
+def decode_b64(val):
+    try:
+        return base64.b64decode(val.encode("utf-8")).decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+rows = []
+with open(vault_path, "r", encoding="utf-8", errors="ignore") as f:
+    for line in f:
+        line = line.rstrip("\n")
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        tag = parts[0]
+        if tag.isdigit():  # password
+            rows.append({
+                "type": "password",
+                "id": parts[0],
+                "label": parts[1] if len(parts) > 1 else "",
+                "username": parts[2] if len(parts) > 2 else "",
+                "secret": parts[3] if len(parts) > 3 else "",
+                "notes": parts[4] if len(parts) > 4 else "",
+                "created": parts[5] if len(parts) > 5 else "",
+                "extra": ""
+            })
+        elif tag == "NOTE":
+            rows.append({
+                "type": "note",
+                "id": parts[1] if len(parts) > 1 else "",
+                "label": parts[2] if len(parts) > 2 else "",
+                "username": "",
+                "secret": decode_b64(parts[3]) if len(parts) > 3 else "",
+                "notes": "",
+                "created": parts[4] if len(parts) > 4 else "",
+                "extra": ""
+            })
+        elif tag == "PASSPHRASE":
+            rows.append({
+                "type": "passphrase",
+                "id": parts[1] if len(parts) > 1 else "",
+                "label": parts[2] if len(parts) > 2 else "",
+                "username": "",
+                "secret": decode_b64(parts[3]) if len(parts) > 3 else "",
+                "notes": "",
+                "created": parts[4] if len(parts) > 4 else "",
+                "extra": ""
+            })
+        elif tag == "BACKUP_CODE":
+            rows.append({
+                "type": "backup_code",
+                "id": parts[1] if len(parts) > 1 else "",
+                "label": parts[2] if len(parts) > 2 else "",
+                "username": "",
+                "secret": decode_b64(parts[3]) if len(parts) > 3 else "",
+                "notes": "",
+                "created": parts[4] if len(parts) > 4 else "",
+                "extra": ""
+            })
+        elif tag == "AUTH":
+            rows.append({
+                "type": "authenticator",
+                "id": parts[1] if len(parts) > 1 else "",
+                "label": parts[2] if len(parts) > 2 else "",
+                "username": "",
+                "secret": parts[3] if len(parts) > 3 else "",
+                "notes": "",
+                "created": parts[5] if len(parts) > 5 else "",
+                "extra": f"period={parts[4]}" if len(parts) > 4 else ""
+            })
+
+fieldnames = ["type","id","label","username","secret","notes","created","extra"]
+
+if fmt == "json":
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False, indent=2)
+elif fmt in ("ndjson", "jsonl"):
+    with open(out_path, "w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+elif fmt == "tsv":
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t")
+        writer.writeheader()
+        writer.writerows(rows)
+elif fmt in ("md", "markdown"):
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("| " + " | ".join(fieldnames) + " |\n")
+        f.write("|" + "|".join([" --- "]*len(fieldnames)) + "|\n")
+        for r in rows:
+            f.write("| " + " | ".join((r.get(k,"") or "").replace("\n"," ") for k in fieldnames) + " |\n")
+elif fmt == "html":
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("<table border='1' cellpadding='4' cellspacing='0'>\n")
+        f.write("<tr>" + "".join(f"<th>{html.escape(k)}</th>" for k in fieldnames) + "</tr>\n")
+        for r in rows:
+            f.write("<tr>" + "".join(f"<td>{html.escape((r.get(k,'') or ''))}</td>" for k in fieldnames) + "</tr>\n")
+        f.write("</table>\n")
+elif fmt == "toml":
+    with open(out_path, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write("[[item]]\n")
+            for k in fieldnames:
+                val = (r.get(k, "") or "").replace("\n", "\\n").replace('"', '\\"')
+                f.write(f'{k} = "{val}"\n')
+            f.write("\n")
+elif fmt == "org":
+    header = "| " + " | ".join(fieldnames) + " |\n"
+    sep = "|" + "+".join("-" * (len(k)+2) for k in fieldnames) + "|\n"
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(header)
+        f.write(sep)
+        for r in rows:
+            f.write("| " + " | ".join((r.get(k,"") or "").replace("\n"," ") for k in fieldnames) + " |\n")
+elif fmt == "scsv":
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=";")
+        writer.writeheader()
+        writer.writerows(rows)
+elif fmt == "csv-noheader":
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=",")
+        writer.writerows(rows)
+elif fmt == "jsonc":
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False)
+elif fmt in ("yaml", "yml"):
+    with open(out_path, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write("-\n")
+            for k in fieldnames:
+                val = r.get(k, "") or ""
+                val = val.replace("\n", "\\n")
+                f.write(f"  {k}: \"{val}\"\n")
+elif fmt == "xml":
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<data>\n")
+        for r in rows:
+            f.write("  <item>\n")
+            for k in fieldnames:
+                val = html.escape(r.get(k, "") or "")
+                f.write(f"    <{k}>{val}</{k}>\n")
+            f.write("  </item>\n")
+        f.write("</data>\n")
+elif fmt == "sql":
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("CREATE TABLE spm_export(type TEXT,id TEXT,label TEXT,username TEXT,secret TEXT,notes TEXT,created TEXT,extra TEXT);\n")
+        for r in rows:
+            vals = [r.get(k, "") or "" for k in fieldnames]
+            safe = [v.replace("'", "''") for v in vals]
+            f.write("INSERT INTO spm_export(type,id,label,username,secret,notes,created,extra) VALUES ('%s');\n" % ("','".join(safe)))
+elif fmt == "ini":
+    with open(out_path, "w", encoding="utf-8") as f:
+        for r in rows:
+            sect = f"{r.get('type','unknown')}_{r.get('id','')}"
+            f.write(f"[{sect}]\n")
+            for k in fieldnames:
+                f.write(f"{k}={r.get(k,'') or ''}\n")
+            f.write("\n")
+elif fmt == "psv":
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="|")
+        writer.writeheader()
+        writer.writerows(rows)
+elif fmt == "rst":
+    widths = {k: max(len(k), max(len((r.get(k,"") or "")) for r in rows) if rows else 0) for k in fieldnames}
+    def sep(char="+"):
+        return char + char.join("-" * (widths[k]+2) for k in fieldnames) + char + "\n"
+    def row(vals):
+        return "|" + "|".join(" " + v.ljust(widths[k]) + " " for k,v in vals) + "|\n"
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(sep())
+        f.write(row([(k,k) for k in fieldnames]))
+        f.write(sep("+"))
+        for r in rows:
+            f.write(row([(k, (r.get(k,"") or "").replace("\n"," ")) for k in fieldnames]))
+            f.write(sep())
+else:  # csv or txt fallback
+    delim = "," if fmt == "csv" else ","
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=delim)
+        writer.writeheader()
+        writer.writerows(rows)
+PY
+then
+		secure_wipe "$tmp"
+		die "Export failed."
+	fi
+
+	secure_wipe "$tmp"
+	chmod 600 "$outfile" 2>/dev/null || true
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Export selesai: %s (%s)\n" "$outfile" "$format"
+	else
+		printf "Export complete: %s (%s)\n" "$outfile" "$format"
+	fi
+}
+
+cmd_import() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	require_cmd python3
+
+	local format="${1:-csv}"
+	format="$(printf '%s' "$format" | tr 'A-Z' 'a-z')"
+	local infile="${2:-}"
+	[ -n "$infile" ] || die "Usage: $0 import <format> <file>"
+	[ -f "$infile" ] || die "Input file '$infile' not found."
+
+	case "$format" in
+		csv|json|tsv|ndjson|jsonl|md|markdown|html|txt|yaml|yml|xml|sql|ini|psv|rst|toml|org|scsv|csv-noheader|jsonc) ;;
+		*) die "Unsupported format '$format' for import." ;;
+	esac
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	if ! python3 - "$format" "$infile" "$tmp" <<'PY'
+import sys, json, csv, base64
+fmt, src_path, vault_path = sys.argv[1:]
+
+def load_vault_lines(path):
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        return [ln.rstrip("\n") for ln in f]
+
+lines = load_vault_lines(vault_path)
+
+def next_id(tag):
+    max_id = 0
+    for ln in lines:
+        if not ln:
+            continue
+        parts = ln.split("\t")
+        if tag == "PASS" and parts[0].isdigit():
+            max_id = max(max_id, int(parts[0]))
+        elif parts[0] == tag and len(parts) > 1 and parts[1].isdigit():
+            max_id = max(max_id, int(parts[1]))
+    return max_id + 1
+
+def add_password(r):
+    pid = str(next_id("PASS"))
+    lines.append("\t".join([
+        pid,
+        r.get("label","").replace("\t"," "),
+        r.get("username","").replace("\t"," "),
+        r.get("secret",""),
+        r.get("notes","").replace("\t"," "),
+        r.get("created","")
+    ]))
+
+def add_note(r):
+    nid = str(next_id("NOTE"))
+    body_b64 = base64.b64encode((r.get("secret","") or "").encode("utf-8")).decode("ascii")
+    lines.append("\t".join([
+        "NOTE",
+        nid,
+        r.get("label","").replace("\t"," "),
+        body_b64,
+        r.get("created",""),
+        "-"
+    ]))
+
+def add_passphrase(r):
+    pid = str(next_id("PASSPHRASE"))
+    secret_b64 = base64.b64encode((r.get("secret","") or "").encode("utf-8")).decode("ascii")
+    lines.append("\t".join([
+        "PASSPHRASE",
+        pid,
+        r.get("label","").replace("\t"," "),
+        secret_b64,
+        r.get("created",""),
+        "-"
+    ]))
+
+def add_backup(r):
+    bid = str(next_id("BACKUP_CODE"))
+    codes_b64 = base64.b64encode((r.get("secret","") or "").encode("utf-8")).decode("ascii")
+    lines.append("\t".join([
+        "BACKUP_CODE",
+        bid,
+        r.get("label","").replace("\t"," "),
+        codes_b64,
+        r.get("created",""),
+        "-"
+    ]))
+
+def add_auth(r):
+    aid = str(next_id("AUTH"))
+    lines.append("\t".join([
+        "AUTH",
+        aid,
+        r.get("label","").replace("\t"," "),
+        r.get("secret",""),
+        r.get("extra","").replace("period=","") or "30",
+        r.get("created","")
+    ]))
+
+def parse_structured():
+    with open(src_path, "r", encoding="utf-8", errors="ignore") as f:
+        return json.load(f)
+
+def parse_rows():
+    if fmt in ("json","jsonc"):
+        return parse_structured()
+    if fmt in ("ndjson","jsonl"):
+        out = []
+        with open(src_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line=line.strip()
+                if not line: continue
+                out.append(json.loads(line))
+        return out
+    delim = "," if fmt in ("csv","csv-noheader","jsonc") else ";" if fmt=="scsv" else "\t" if fmt=="tsv" else "|"
+    rows=[]
+    with open(src_path,"r",encoding="utf-8",errors="ignore",newline="") as f:
+        reader = csv.DictReader(f, delimiter=delim) if fmt!="csv-noheader" else csv.reader(f, delimiter=delim)
+        if fmt=="csv-noheader":
+            for row in reader:
+                rows.append({
+                    "type": row[0] if len(row)>0 else "",
+                    "label": row[1] if len(row)>1 else "",
+                    "username": row[2] if len(row)>2 else "",
+                    "secret": row[3] if len(row)>3 else "",
+                    "notes": row[4] if len(row)>4 else "",
+                    "created": row[5] if len(row)>5 else "",
+                    "extra": row[6] if len(row)>6 else "",
+                })
+        else:
+            rows = list(reader)
+    return rows
+
+def parse_plain_table():
+    rows = []
+    with open(src_path,"r",encoding="utf-8",errors="ignore") as f:
+        for ln in f:
+            ln=ln.strip()
+            if not ln or ln.startswith("#") or ln.startswith("| ---"): continue
+            if "|" in ln:
+                parts=[p.strip() for p in ln.strip("|").split("|")]
+            else:
+                parts=[p.strip() for p in ln.split()]
+            if len(parts) < 2:
+                continue
+            rows.append({
+                "type": parts[0],
+                "label": parts[1] if len(parts)>1 else "",
+                "username": parts[2] if len(parts)>2 else "",
+                "secret": parts[3] if len(parts)>3 else "",
+                "notes": parts[4] if len(parts)>4 else "",
+                "created": parts[5] if len(parts)>5 else "",
+                "extra": parts[6] if len(parts)>6 else "",
+            })
+    return rows
+
+def load_rows():
+    if fmt in ("json","jsonc","ndjson","jsonl","csv","csv-noheader","tsv","scsv"):
+        return parse_rows()
+    else:
+        return parse_plain_table()
+
+for row in load_rows():
+    t = (row.get("type","") or "").lower()
+    if t in ("password","pass"):
+        add_password(row)
+    elif t in ("note","notes"):
+        add_note(row)
+    elif t in ("passphrase","phrase","secret"):
+        add_passphrase(row)
+    elif t in ("backup_code","backup","codes","backupcode"):
+        add_backup(row)
+    elif t in ("authenticator","auth"):
+        add_auth(row)
+
+with open(vault_path, "w", encoding="utf-8") as f:
+    for ln in lines:
+        f.write(ln + "\n")
+PY
+	then
+		secure_wipe "$tmp"
+		die "Import failed."
+	fi
+
+	encrypt_file_to_vault "$tmp"
+	secure_wipe "$tmp"
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Import selesai dari %s (%s)\n" "$infile" "$format"
+	else
+		printf "Import complete from %s (%s)\n" "$infile" "$format"
+	fi
+}
+
 cmd_help() {
 	print_banner
 
@@ -2217,9 +3453,14 @@ Perintah utama (CLI):
   ./spm.sh change-master   → Ganti kata sandi utama (re-encrypt vault)
   ./spm.sh portable [nama] → Buat bundle portable (script + vault + file pemulihan)
   ./spm.sh save [nama]     → Buat bundle portable lalu hapus vault lokal
-  ./spm.sh update          → Cek update rilis GitHub
+  ./spm.sh export [fmt] [file]
+                            → Ekspor semua data (password/catatan/passphrase/authenticator/kode backup) ke csv/json
+  ./spm.sh import [fmt] <file>
+                            → Impor data (password/catatan/passphrase/authenticator/kode backup) dari csv/json dan format lain
+  ./spm.sh update          → Cek & auto-install rilis terbaru dari GitHub
   ./spm.sh forgot          → Reset kata sandi utama dengan private key
   ./spm.sh doctor          → Health / integrity check vault
+  ./spm.sh generate        → Generator kata sandi (panjang, mode mudah/aman/angka, simbol opsional)
   ./spm.sh web             → Mode web (pilih sementara / background via pm2)
   ./spm.sh help            → Tampilkan bantuan ini
 
@@ -2229,6 +3470,20 @@ Catatan Aman (Secure Notes):
   ./spm.sh notes-view <id> → Lihat isi catatan aman
   ./spm.sh notes-delete <id>
                            → Hapus catatan aman
+
+Passphrase:
+  ./spm.sh passphrase-add       → Tambah passphrase
+  ./spm.sh passphrase-list      → List passphrase
+  ./spm.sh passphrase-view <id> → Lihat passphrase (minta verifikasi master password)
+  ./spm.sh passphrase-delete <id>
+                                 → Hapus passphrase
+
+Authenticator (TOTP):
+  ./spm.sh authenticator-add        → Tambah kode authenticator (Base32 secret + interval)
+  ./spm.sh authenticator-list       → List authenticator
+  ./spm.sh authenticator-view <id>  → Lihat detail + kode OTP
+  ./spm.sh authenticator-edit <id>  → Edit label/secret/interval
+  ./spm.sh authenticator-delete <id>→ Hapus authenticator
 
 Kode Backup (Backup Codes):
   ./spm.sh backup-codes-add       → Tambah kode backup
@@ -2267,6 +3522,8 @@ Format internal vault:
       id<TAB>service<TAB>username<TAB>password<TAB>notes<TAB>created_at
   - Baris note:
       NOTE<TAB>note_id<TAB>title<TAB>base64_note<TAB>created_at<TAB>-
+  - Baris passphrase:
+      PASSPHRASE<TAB>id<TAB>label<TAB>base64_passphrase<TAB>created_at<TAB>-
   - Baris meta:
       META_RECOVERY_PUBKEY=...   (kunci publik pemulihan disimpan di vault)
 
@@ -2289,9 +3546,14 @@ Main commands (CLI):
   ./spm.sh change-master   → Change master password (re-encrypt vault)
   ./spm.sh portable [name] → Create portable bundle (script + vault + recovery files)
   ./spm.sh save [name]     → Create portable bundle and wipe local vault
-  ./spm.sh update          → Check latest GitHub release
+  ./spm.sh export [fmt] [file]
+                            → Export all data (passwords/notes/passphrases/authenticators/backup codes) to csv/json
+  ./spm.sh import [fmt] <file>
+                             → Import data (passwords/notes/passphrases/authenticators/backup codes) from csv/json and other supported formats
+  ./spm.sh update          → Check & auto-install latest GitHub release
   ./spm.sh forgot          → Reset master password using the private key
   ./spm.sh doctor          → Vault health / integrity check
+  ./spm.sh generate        → Password generator (length, easy/secure/numeric, optional symbols/upper/lower/digits)
   ./spm.sh web             → Web mode (foreground or pm2 background)
   ./spm.sh help            → Show this help
 
@@ -2301,6 +3563,20 @@ Secure Notes:
   ./spm.sh notes-view <id> → View secure note content
   ./spm.sh notes-delete <id>
                            → Delete secure note
+
+Passphrases:
+  ./spm.sh passphrase-add       → Add a passphrase
+  ./spm.sh passphrase-list      → List passphrases
+  ./spm.sh passphrase-view <id> → View passphrase (requires re-verification)
+  ./spm.sh passphrase-delete <id>
+                                 → Delete passphrase
+
+Authenticator (TOTP):
+  ./spm.sh authenticator-add        → Add an authenticator (Base32 secret + interval)
+  ./spm.sh authenticator-list       → List authenticators
+  ./spm.sh authenticator-view <id>  → View details + OTP code
+  ./spm.sh authenticator-edit <id>  → Edit label/secret/interval
+  ./spm.sh authenticator-delete <id>→ Delete an authenticator
 
 Backup Codes:
   ./spm.sh backup-codes-add       → Add backup codes
@@ -2339,6 +3615,8 @@ Internal vault format:
       id<TAB>service<TAB>username<TAB>password<TAB>notes<TAB>created_at
   - Note line:
       NOTE<TAB>note_id<TAB>title<TAB>base64_note<TAB>created_at<TAB>-
+  - Passphrase line:
+      PASSPHRASE<TAB>id<TAB>label<TAB>base64_passphrase<TAB>created_at<TAB>-
   - Meta line:
       META_RECOVERY_PUBKEY=...   (recovery public key stored inside the vault)
 
@@ -2798,6 +4076,7 @@ start_web_mode() {
 		SPM_VAULT_PATH="$VAULT_FILE" \
 		SPM_WEB_BIND="$bind_addr" \
 		SPM_WEB_PORT="$bind_port" \
+		SPM_VERSION="$VERSION" \
 		pm2 start "$spm_web_script" \
 			--name "spm-web" \
 			--interpreter python3 >/dev/null 2>&1 || true
@@ -2830,6 +4109,7 @@ start_web_mode() {
 	SPM_VAULT_PATH="$VAULT_FILE" \
 	SPM_WEB_BIND="$bind_addr" \
 	SPM_WEB_PORT="$bind_port" \
+	SPM_VERSION="$VERSION" \
 	python3 "$spm_web_script"
 
 	echo
@@ -2861,13 +4141,39 @@ import html
 import sys
 import time
 import base64
+import json as jsonlib
+import urllib.request
+import re
 
 VAULT_PATH = os.environ.get("SPM_VAULT_PATH")
 BIND_ADDR  = os.environ.get("SPM_WEB_BIND", "127.0.0.1")
 PORT       = int(os.environ.get("SPM_WEB_PORT", "8080"))
+VERSION    = os.environ.get("SPM_VERSION", "")
 
 if not VAULT_PATH or not os.path.isfile(VAULT_PATH):
     raise SystemExit(f"Vault file not found: {VAULT_PATH!r}")
+
+LATEST_CACHE = {"value": "", "ts": 0}
+
+def fetch_latest_version():
+    now = time.time()
+    if now - LATEST_CACHE.get("ts", 0) < 300 and LATEST_CACHE.get("value"):
+        return LATEST_CACHE["value"]
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/sansyourways/Sans_Password_Manager/releases/latest",
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "SPM"},
+        )
+        with urllib.request.urlopen(req, timeout=2.5) as resp:
+            data = resp.read().decode("utf-8", "ignore")
+        m = re.search(r'"tag_name"\\s*:\\s*"v?([^"]+)"', data)
+        if m:
+            LATEST_CACHE["value"] = m.group(1)
+            LATEST_CACHE["ts"] = now
+            return LATEST_CACHE["value"]
+    except Exception:
+        pass
+    return ""
 
 # ---------- HTML templates (liquid glass, icons, auto-lock) ------------------
 
@@ -2898,13 +4204,47 @@ LOGIN_HTML = """<!doctype html>
   <style>
     :root {
       color-scheme: dark;
+      --bg-image: radial-gradient(circle at top, #202438 0, #05060a 40%, #020308 100%);
+      --bg: #05060a;
+      --panel: rgba(10,10,14,0.9);
+      --card: rgba(10,10,14,0.9);
+      --text: #f5f5f7;
+      --muted: #888ea6;
+      --accent: #5f5fff;
+    }
+    body.theme-amoled {
+      --bg-image: #000;
+      --bg: #000;
+      --panel: rgba(0,0,0,0.92);
+      --card: rgba(0,0,0,0.92);
+      --text: #e9e9f0;
+      --muted: #7d8199;
+      --accent: #00d2ff;
+    }
+    body.theme-cyberpunk {
+      --bg-image: linear-gradient(135deg,#11001f 0%,#0a0014 100%);
+      --bg: #0a0014;
+      --panel: rgba(12,0,28,0.92);
+      --card: rgba(20,0,36,0.9);
+      --text: #f8e9ff;
+      --muted: #9b7fff;
+      --accent: #ff2fd1;
+    }
+    body.theme-light {
+      color-scheme: light;
+      --bg-image: linear-gradient(135deg,#f7f9fc 0%,#edf1f9 100%);
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --card: #f5f7fc;
+      --text: #0f172a;
+      --muted: #5b6475;
+      --accent: #2563eb;
     }
     * { box-sizing: border-box; }
     body {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      background:
-        radial-gradient(circle at top, #202438 0, #05060a 40%, #020308 100%);
-      color: #eee;
+      background: var(--bg-image);
+      color: var(--text);
       display:flex;
       align-items:center;
       justify-content:center;
@@ -3012,6 +4352,40 @@ LOGIN_HTML = """<!doctype html>
       to   { opacity:1; transform: translateY(0); }
     }
   </style>
+  <style>
+    body.theme-dark {
+      --bg:#05060a; --panel:rgba(10,10,14,0.9); --card:rgba(10,10,14,0.9); --text:#f5f5f7; --muted:#888ea6; --accent:#5f5fff;
+      background:var(--bg); color:var(--text);
+    }
+    body.theme-amoled {
+      --bg:#000; --panel:rgba(0,0,0,0.9); --card:rgba(0,0,0,0.9); --text:#e9e9f0; --muted:#7d8199; --accent:#00d2ff;
+      background:var(--bg); color:var(--text);
+    }
+    body.theme-cyberpunk {
+      --bg:#0a0014; --panel:rgba(12,0,28,0.9); --card:rgba(20,0,36,0.9); --text:#f8e9ff; --muted:#9b7fff; --accent:#ff2fd1;
+      background:var(--bg); color:var(--text);
+    }
+    body.theme-light {
+      --bg:#f6f7fb; --panel:#ffffff; --card:#f1f3f9; --text:#12131a; --muted:#5a5d70; --accent:#2563eb;
+      background:var(--bg); color:var(--text);
+    }
+    body[class*="theme-"] .panel,
+    body[class*="theme-"] .card,
+    body[class*="theme-"] .glass,
+    body[class*="theme-"] .vault-badge {
+      background:var(--panel) !important;
+      color:var(--text);
+    }
+    body[class*="theme-"] .sub,
+    body[class*="theme-"] .muted,
+    body[class*="theme-"] .vault-badge span,
+    body[class*="theme-"] th,
+    body[class*="theme-"] td {
+      color:var(--muted);
+    }
+    body[class*="theme-"] .btn-primary { background:linear-gradient(135deg,var(--accent),#9a7bff); }
+    body.theme-light a, body.theme-light .link { color:#2563eb; }
+  </style>
 </head>
 <body>
   <div class="glass">
@@ -3037,19 +4411,63 @@ MAIN_HTML = """<!doctype html>
   <style>
     :root {
       color-scheme: dark;
-      --accent: #0f9bff;
-      --accent-soft: rgba(15,155,255,0.24);
+      --bg-image: radial-gradient(circle at top left, #1a1a27 0, #050509 45%, #000 100%);
+      --bg: #05060a;
+      --panel: rgba(12,12,18,0.94);
+      --card: rgba(16,16,24,0.9);
+      --text: #f7f8fb;
+      --muted: #a3a7be;
+      --accent: #5f5fff;
+      --accent-2: #8d8dff;
       --danger: #ff4d6a;
       --danger-soft: rgba(255,77,106,0.14);
+      --table-alt: rgba(255,255,255,0.03);
+      --border: rgba(255,255,255,0.1);
+    }
+    body.theme-amoled {
+      --bg-image: #000;
+      --bg: #000;
+      --panel: #0b0b0b;
+      --card: #111;
+      --text: #ededf2;
+      --muted: #90909c;
+      --accent: #00c2ff;
+      --accent-2: #2ee1ff;
+      --table-alt: rgba(255,255,255,0.05);
+      --border: rgba(255,255,255,0.08);
+    }
+    body.theme-cyberpunk {
+      --bg-image: linear-gradient(135deg,#1a0030 0%,#0a0014 50%,#180020 100%);
+      --bg: #0a0014;
+      --panel: rgba(22,0,40,0.96);
+      --card: rgba(28,0,48,0.9);
+      --text: #fce9ff;
+      --muted: #caa8ff;
+      --accent: #ff2fd1;
+      --accent-2: #5cf4ff;
+      --table-alt: rgba(255,47,209,0.08);
+      --border: rgba(255,255,255,0.12);
+    }
+    body.theme-light {
+      color-scheme: light;
+      --bg-image: linear-gradient(135deg,#f8fafc 0%,#eef2f9 100%);
+      --bg: #f7f9fc;
+      --panel: #ffffffea;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #4b5563;
+      --accent: #2563eb;
+      --accent-2: #5f8dff;
+      --table-alt: #f3f4f7;
+      --border: rgba(17,24,39,0.08);
     }
     * { box-sizing:border-box; }
     body {
       margin:0;
       padding:0;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      background:
-        radial-gradient(circle at top left, #2a2a36 0, #050509 45%, #000 100%);
-      color:#f5f5f7;
+      background: var(--bg-image);
+      color: var(--text);
       min-height:100vh;
       display:flex;
       flex-direction:column;
@@ -3065,10 +4483,10 @@ MAIN_HTML = """<!doctype html>
       top:0;
       z-index:10;
       padding:10px 16px;
-      background:linear-gradient(to bottom, rgba(5,5,8,0.96), rgba(5,5,8,0.7), transparent);
+      background:linear-gradient(to bottom, rgba(0,0,0,0.35), transparent);
       backdrop-filter: blur(18px);
       -webkit-backdrop-filter: blur(18px);
-      border-bottom:1px solid rgba(255,255,255,0.06);
+      border-bottom:1px solid var(--border);
       display:flex;
       justify-content:space-between;
       align-items:center;
@@ -3087,7 +4505,7 @@ MAIN_HTML = """<!doctype html>
     }
     .title .sub {
       font-size:11px;
-      color:#9fa3b4;
+      color:var(--muted);
     }
     .right-header {
       display:flex;
@@ -3099,11 +4517,9 @@ MAIN_HTML = """<!doctype html>
       font-size:11px;
       padding:6px 10px;
       border-radius:999px;
-      border:1px solid rgba(255,255,255,0.16);
-      background:radial-gradient(circle at top left, rgba(255,255,255,0.14), rgba(0,0,0,0.9));
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      color:#d0d4e0;
+      border:1px solid rgba(255,255,255,0.12);
+      background:var(--panel);
+      color:var(--text);
       max-width:220px;
       text-overflow:ellipsis;
       overflow:hidden;
@@ -3146,13 +4562,11 @@ MAIN_HTML = """<!doctype html>
     .panel {
       flex: 3 1 280px;
       border-radius:22px;
-      background:radial-gradient(circle at top left, rgba(255,255,255,0.1), rgba(5,5,10,0.95));
+      background:var(--panel);
       backdrop-filter: blur(26px) saturate(180%);
       -webkit-backdrop-filter: blur(26px) saturate(180%);
-      border:1px solid rgba(255,255,255,0.15);
-      box-shadow:
-        0 24px 45px rgba(0,0,0,0.85),
-        0 0 0 1px rgba(255,255,255,0.03);
+      border:1px solid var(--border);
+      box-shadow:0 18px 40px rgba(0,0,0,0.28);
       padding:14px 16px 10px;
       display:flex;
       flex-direction:column;
@@ -3199,7 +4613,7 @@ MAIN_HTML = """<!doctype html>
       50% { transform: scale(1.15); opacity:1; }
       100% { transform: scale(0.9); opacity:0.9; }
     }
-    .btn-primary {
+.btn-primary {
       border-radius:999px;
       border:none;
       padding:7px 13px;
@@ -3212,8 +4626,10 @@ MAIN_HTML = """<!doctype html>
       align-items:center;
       gap:6px;
       text-decoration:none;
-      background:linear-gradient(135deg,#0f9bff,#5f5fff);
-      color:#fff;
+      background:linear-gradient(135deg, rgba(95,95,255,0.18), rgba(95,95,255,0.32));
+      color:var(--text);
+      border:1px solid var(--border);
+      box-shadow:0 6px 14px rgba(0,0,0,0.12);
       transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
     }
     .btn-primary.small {
@@ -3222,14 +4638,14 @@ MAIN_HTML = """<!doctype html>
     }
     .btn-primary:hover {
       filter:brightness(1.08);
-      box-shadow:0 10px 25px rgba(15,155,255,0.5);
+      box-shadow:0 8px 22px rgba(0,0,0,0.18);
       transform: translateY(-1px);
     }
     .table-wrapper {
       margin-top:8px;
       border-radius:18px;
-      border:1px solid rgba(255,255,255,0.12);
-      background:linear-gradient(145deg, rgba(2,2,5,0.98), rgba(12,12,20,0.95));
+      border:1px solid var(--border);
+      background:var(--card);
       overflow:auto;
       max-height:60vh;
       scrollbar-width: thin;
@@ -3247,28 +4663,36 @@ MAIN_HTML = """<!doctype html>
       width:100%;
       border-collapse:collapse;
       min-width:380px;
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:12px;
+      overflow:hidden;
     }
     th, td {
       padding:8px 10px;
       font-size:12px;
-      border-bottom:1px solid rgba(255,255,255,0.06);
+      border-bottom:1px solid var(--border);
+      color:var(--text);
     }
     th {
       text-align:left;
-      background:linear-gradient(to right, rgba(255,255,255,0.06), transparent);
-      font-weight:500;
-      color:#cfd3e8;
+      background:linear-gradient(to right, rgba(255,255,255,0.04), transparent);
+      font-weight:600;
+      color:var(--text);
       position:sticky;
       top:0;
       z-index:1;
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    tr:nth-child(even) td {
+      background:var(--table-alt);
     }
     tr:last-child td {
       border-bottom:none;
     }
     tr:hover td {
-      background:radial-gradient(circle at left, rgba(255,255,255,0.05), transparent);
+      background:linear-gradient(to right, rgba(255,255,255,0.07), transparent);
     }
     td.actions {
       text-align:right;
@@ -3323,11 +4747,11 @@ MAIN_HTML = """<!doctype html>
     .card {
       border-radius:20px;
       padding:14px 14px 12px;
-      background:radial-gradient(circle at top left, rgba(255,255,255,0.1), rgba(10,10,18,0.96));
-      border:1px solid rgba(255,255,255,0.16);
-      backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
-      box-shadow:0 18px 35px rgba(0,0,0,0.85);
+      background:var(--card);
+      border:1px solid var(--border);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      box-shadow:0 12px 26px rgba(0,0,0,0.16);
       animation: fadeUp 0.5s ease-out;
     }
     .card h3 {
@@ -3335,22 +4759,22 @@ MAIN_HTML = """<!doctype html>
       font-size:13px;
       letter-spacing:0.12em;
       text-transform:uppercase;
-      color:#d4d7e5;
+      color:var(--text);
     }
     .card p {
       margin:0 0 8px;
       font-size:11px;
-      color:#a4a9c0;
+      color:var(--muted);
     }
     .notes-table-wrapper {
       margin-top:6px;
       border-radius:14px;
-      border:1px solid rgba(255,255,255,0.12);
-      background:linear-gradient(145deg, rgba(2,2,5,0.98), rgba(12,12,20,0.95));
+      border:1px solid var(--border);
+      background:var(--card);
       overflow:auto;
       max-height:220px;
       scrollbar-width: thin;
-      scrollbar-color: rgba(120,120,140,0.7) transparent;
+      scrollbar-color: rgba(120,120,140,0.5) transparent;
     }
     .notes-table-wrapper::-webkit-scrollbar {
       height:6px;
@@ -3364,13 +4788,23 @@ MAIN_HTML = """<!doctype html>
       width:100%;
       border-collapse:collapse;
       min-width:260px;
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:12px;
+      overflow:hidden;
     }
     table.notes-table th,
     table.notes-table td {
       padding:6px 8px;
       font-size:11px;
-      border-bottom:1px solid rgba(255,255,255,0.06);
+      border-bottom:1px solid var(--border);
+      color:var(--text);
     }
+    table.notes-table th {
+      background:linear-gradient(to right, rgba(255,255,255,0.04), transparent);
+      font-weight:600;
+    }
+    table.notes-table tr:nth-child(even) td { background:var(--table-alt); }
     table.notes-table tr:last-child td {
       border-bottom:none;
     }
@@ -3403,6 +4837,16 @@ MAIN_HTML = """<!doctype html>
         min-width:100%;
       }
     }
+
+    /* Theme overrides */
+    body { background: var(--bg-image) !important; color: var(--text) !important; }
+    header { background: linear-gradient(to bottom, var(--panel), rgba(0,0,0,0.4), transparent) !important; }
+    .panel, .card, .glass, .vault-badge { background: var(--panel) !important; color: var(--text) !important; }
+    .panel, .card { border:1px solid rgba(255,255,255,0.08); }
+    .title .sub, .muted, .panel-header h2, .chip, th, td { color: var(--muted) !important; }
+.btn-primary { background: linear-gradient(135deg, rgba(95,95,255,0.18), rgba(95,95,255,0.32)) !important; color: var(--text) !important; border:1px solid var(--border) !important; }
+    a, .link { color: var(--accent); }
+    body.theme-light a, body.theme-light .link { color: #2563eb; }
   </style>
 </head>
 <body>
@@ -3415,7 +4859,17 @@ MAIN_HTML = """<!doctype html>
       <div class="vault-badge">
         <span class="label">Vault</span> <span>__VAULT_PATH__</span>
       </div>
-      <a href="/logout" class="logout">Logout</a>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <div style="font-size:11px; color:#888ea6;">v__VERSION__</div>
+        <button class="logout" style="padding:6px 10px; border-radius:10px;" onclick="checkUpdate(true)">Check update</button>
+        <select id="theme-picker" style="background:rgba(255,255,255,0.08); color:#f5f5f7; border:1px solid rgba(255,255,255,0.18); border-radius:10px; padding:6px; font-size:12px;">
+          <option value="dark">Dark</option>
+          <option value="amoled">AMOLED</option>
+          <option value="cyberpunk">Cyberpunk</option>
+          <option value="light">Light</option>
+        </select>
+        <a href="/logout" class="logout">Logout</a>
+      </div>
     </div>
   </header>
   <div class="layout">
@@ -3454,11 +4908,102 @@ MAIN_HTML = """<!doctype html>
         </div>
       </div>
       <div class="card">
+        <h3>Password Generator</h3>
+        <p>Create strong passwords with length, mode, and symbol toggles.</p>
+        <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
+          <a href="/generator" class="btn-primary small">Open Generator</a>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Passphrases</h3>
+        <p>Store API tokens or recovery phrases. View prompts master re-check.</p>
+        <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
+          <a href="/passphrase-add" class="btn-primary small">+ Add Passphrase</a>
+        </div>
+        <div class="notes-table-wrapper">
+          <table class="notes-table">
+            <tr><th style="width:40px;">ID</th><th>Label</th><th style="width:70px; text-align:right;">Actions</th></tr>
+            __PASSPHRASE_ROWS__
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Authenticators (TOTP)</h3>
+        <p>Store 2FA secrets and view live codes.</p>
+        <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
+          <a href="/authenticator-add" class="btn-primary small">+ Add Authenticator</a>
+        </div>
+        <div class="notes-table-wrapper">
+          <table class="notes-table">
+            <tr><th style="width:40px;">ID</th><th>Label</th><th style="width:70px;">Every</th><th style="width:70px; text-align:right;">Actions</th></tr>
+            __AUTH_ROWS__
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Backup Codes</h3>
+        <p>Store recovery codes (view shows full codes).</p>
+        <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
+          <a href="/backup-codes-add" class="btn-primary small">+ Add Backup Codes</a>
+        </div>
+        <div class="notes-table-wrapper">
+          <table class="notes-table">
+            <tr><th style="width:40px;">ID</th><th>Label</th><th style="width:70px; text-align:right;">Actions</th></tr>
+            __BACKUP_ROWS__
+          </table>
+        </div>
+      </div>
+      <div class="card">
         <h3>Web Session</h3>
         <p>Protected by your master password. The interface auto-locks after 30 seconds of inactivity and logs you out.</p>
       </div>
     </section>
   </div>
+  <div style="position:fixed; bottom:10px; right:12px; font-size:11px; color:#888ea6;">
+    © 2025 Sansyourways · v__VERSION__
+  </div>
+  <script>
+    const currentVersion = "__VERSION__";
+    async function fetchLatestVersion() {
+      try {
+        const resp = await fetch("https://api.github.com/repos/sansyourways/Sans_Password_Manager/releases/latest", { headers: { "Accept": "application/vnd.github+json" } });
+        const data = await resp.json();
+        const tag = (data.tag_name || "").replace(/^v/i, "");
+        return tag;
+      } catch (e) {
+        return "";
+      }
+    }
+    async function checkUpdate(showPopup) {
+      const latest = await fetchLatestVersion();
+      if (latest && latest !== currentVersion) {
+        if (showPopup) alert(`Update available: v${latest} (current v${currentVersion}).`);
+        const btn = document.querySelector(".right-header .logout");
+        if (btn) btn.textContent = `Update · v${latest}`;
+      } else if (showPopup) {
+        alert(`You are on the latest version (v${currentVersion}) or cannot reach update server.`);
+      }
+    }
+    function setTheme(theme) {
+      document.body.classList.remove("theme-dark","theme-amoled","theme-cyberpunk","theme-light");
+      document.body.classList.add("theme-" + theme);
+      localStorage.setItem("spm_theme", theme);
+    }
+    function initTheme() {
+      const saved = localStorage.getItem("spm_theme") || "dark";
+      setTheme(saved);
+      const picker = document.getElementById("theme-picker");
+      if (picker) {
+        picker.value = saved;
+        picker.addEventListener("change", () => setTheme(picker.value));
+      }
+    }
+    document.addEventListener("DOMContentLoaded", () => {
+      initTheme();
+      checkUpdate(false);
+    });
+
+  </script>
   """ + AUTOLOCK_SCRIPT + """
 </body>
 </html>
@@ -3715,8 +5260,41 @@ VIEW_HTML = """<!doctype html>
     .link:hover {
       text-decoration:underline;
     }
+    .btn-secondary {
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,0.15);
+      background:rgba(255,255,255,0.08);
+      color:#f5f5f7;
+      padding:6px 10px;
+      font-size:12px;
+      cursor:pointer;
+      margin-right:6px;
+    }
   </style>
   <script>
+    function copyToClipboard(text) {
+      if (!text) return Promise.resolve();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      return new Promise(function(resolve, reject) {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.top = '-1000px';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }
+
     function togglePassword() {
       const el = document.getElementById('pw');
       const btn = document.getElementById('pwbtn');
@@ -3732,6 +5310,12 @@ VIEW_HTML = """<!doctype html>
         btn.textContent = 'Show';
       }
     }
+    function copyText(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const text = el.getAttribute('data-real') || el.textContent || '';
+      copyToClipboard(text).catch(() => {});
+    }
   </script>
 </head>
 <body>
@@ -3745,16 +5329,21 @@ VIEW_HTML = """<!doctype html>
     </div>
     <div class="field">
       <div class="label">Username</div>
-      <div class="value mono">__USER__</div>
+      <div class="value mono" id="user-val">__USER__</div>
+      <button class="btn-secondary" type="button" onclick="copyText('user-val')">Copy Username</button>
     </div>
     <div class="field">
       <div class="label">Password</div>
       <div class="value mono" id="pw" data-hidden="1" data-real="__PASS__">••••••••</div>
-      <button id="pwbtn" class="btn-soft" type="button" onclick="togglePassword()">Show</button>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+        <button id="pwbtn" class="btn-soft" type="button" onclick="togglePassword()">Show</button>
+        <button class="btn-secondary" type="button" onclick="copyText('pw')">Copy Password</button>
+      </div>
     </div>
     <div class="field">
       <div class="label">Notes</div>
-      <div class="value mono">__NOTES__</div>
+      <div class="value mono" id="notes-val">__NOTES__</div>
+      <button class="btn-secondary" type="button" onclick="copyText('notes-val')">Copy Notes</button>
     </div>
     <div class="field">
       <div class="label">Created at</div>
@@ -3885,7 +5474,36 @@ NOTES_VIEW_HTML = """<!doctype html>
     .link:hover {
       text-decoration:underline;
     }
+    .btn-secondary { border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.08); color:#f5f5f7; padding:6px 10px; font-size:12px; cursor:pointer; margin-right:6px; }
   </style>
+  <script>
+    function copyToClipboard(text) {
+      if (!text) return Promise.resolve();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      return new Promise(function(resolve, reject) {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.top = '-1000px';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }
+    function copyText() {
+      const text = document.getElementById('note-content').textContent || '';
+      copyToClipboard(text).catch(() => {});
+    }
+  </script>
 </head>
 <body>
   <div class="glass">
@@ -3898,7 +5516,8 @@ NOTES_VIEW_HTML = """<!doctype html>
     </div>
     <div class="field">
       <div class="label">Content</div>
-      <div class="value mono">__CONTENT__</div>
+      <div class="value mono" id="note-content">__CONTENT__</div>
+      <button type="button" class="btn-secondary" onclick="copyText()">Copy Content</button>
     </div>
     <div class="field">
       <div class="label">Created at</div>
@@ -3913,6 +5532,548 @@ NOTES_VIEW_HTML = """<!doctype html>
       </form>
     </div>
   </div>
+  <script>
+    function copyText() {
+      const text = document.getElementById('note-content').textContent || '';
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+  </script>
+  """ + AUTOLOCK_SCRIPT + """
+</body>
+</html>
+"""
+
+PASSPHRASE_VIEW_HTML = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SPM Web – View Passphrase</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing:border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
+      color:#f5f5f7;
+      margin:0;
+      padding:16px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      min-height:100vh;
+    }
+    .glass {
+      width:min(460px, 100%);
+      padding:22px 22px 18px;
+      border-radius:24px;
+      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
+      border:1px solid rgba(255,255,255,0.16);
+      backdrop-filter: blur(26px);
+      -webkit-backdrop-filter: blur(26px);
+      box-shadow:0 22px 42px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.04);
+    }
+    h1 { margin:0 0 4px; font-size:18px; letter-spacing:0.1em; text-transform:uppercase; }
+    .sub { margin:0 0 16px; font-size:11px; color:#a4a9c0; }
+    .field { margin-bottom:10px; font-size:13px; }
+    .label { font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#a4a9c0; margin-bottom:2px; }
+    .mono { font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .actions { margin-top:12px; display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:12px; flex-wrap:wrap; }
+    .btn-soft, .btn-danger { border-radius:999px; border:none; padding:7px 13px; font-size:11px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; background:rgba(255,255,255,0.06); color:#e1e3f0; }
+    .btn-danger { background:rgba(255,77,106,0.16); color:#ffd0d8; }
+    .link { font-size:12px; color:#9fa3f0; text-decoration:none; }
+    .link:hover { text-decoration:underline; }
+    .btn-secondary { border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.08); color:#f5f5f7; padding:6px 10px; font-size:12px; cursor:pointer; margin-right:6px; }
+  </style>
+  <script>
+    function copyToClipboard(text) {
+      if (!text) return Promise.resolve();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      return new Promise(function(resolve, reject) {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.top = '-1000px';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }
+    function copySecret() {
+      const text = document.getElementById('pass-secret').textContent || '';
+      copyToClipboard(text).catch(() => {});
+    }
+  </script>
+</head>
+<body>
+  <div class="glass">
+    <h1>Passphrase</h1>
+    <p class="sub">Vault: __VAULT_PATH__ · ID __ID__</p>
+    <div class="field"><div class="label">Label</div><div class="mono">__LABEL__</div></div>
+    <div class="field"><div class="label">Created</div><div class="mono">__CREATED__</div></div>
+    <div class="field"><div class="label">Passphrase</div><div class="mono" id="pass-secret">__SECRET__</div><button class="btn-secondary" type="button" onclick="copySecret()">Copy</button></div>
+    <div class="actions">
+      <a href="/" class="link">← Back</a>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        <form method="get" action="/passphrase-edit" style="display:inline;">
+          <input type="hidden" name="id" value="__ID__">
+          <button type="submit" class="btn-soft">Edit</button>
+        </form>
+        <form method="post" action="/passphrase-delete" style="display:inline;" onsubmit="return confirm('Delete this passphrase?');">
+          <input type="hidden" name="id" value="__ID__">
+          <button type="submit" class="btn-danger">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <script>
+    function copySecret() {
+      const text = document.getElementById('pass-secret').textContent || '';
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+  </script>
+  """ + AUTOLOCK_SCRIPT + """
+</body>
+</html>
+"""
+
+BACKUP_VIEW_HTML = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SPM Web – Backup Codes</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing:border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
+      color:#f5f5f7;
+      margin:0;
+      padding:16px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      min-height:100vh;
+    }
+    .glass {
+      width:min(520px, 100%);
+      padding:22px 22px 18px;
+      border-radius:24px;
+      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
+      border:1px solid rgba(255,255,255,0.16);
+      backdrop-filter: blur(26px);
+      -webkit-backdrop-filter: blur(26px);
+      box-shadow:0 22px 42px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.04);
+    }
+    h1 { margin:0 0 4px; font-size:18px; letter-spacing:0.1em; text-transform:uppercase; }
+    .sub { margin:0 0 16px; font-size:11px; color:#a4a9c0; }
+    pre {
+      background:rgba(255,255,255,0.05);
+      padding:12px;
+      border-radius:10px;
+      font-size:12px;
+      overflow:auto;
+    }
+    .actions { margin-top:12px; display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:12px; flex-wrap:wrap; }
+    .btn-soft, .btn-danger { border-radius:999px; border:none; padding:7px 13px; font-size:11px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; background:rgba(255,255,255,0.06); color:#e1e3f0; }
+    .btn-danger { background:rgba(255,77,106,0.16); color:#ffd0d8; }
+    .link { font-size:12px; color:#9fa3f0; text-decoration:none; }
+    .link:hover { text-decoration:underline; }
+    .btn-secondary { border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.08); color:#f5f5f7; padding:6px 10px; font-size:12px; cursor:pointer; margin-right:6px; }
+  </style>
+  <script>
+    function copyToClipboard(text) {
+      if (!text) return Promise.resolve();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      return new Promise(function(resolve, reject) {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.top = '-1000px';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }
+    function copyCodes() {
+      const text = document.getElementById('backup-codes').textContent || '';
+      copyToClipboard(text).catch(() => {});
+    }
+  </script>
+</head>
+<body>
+  <div class="glass">
+    <h1>Backup Codes</h1>
+    <p class="sub">Vault: __VAULT_PATH__ · ID __ID__</p>
+    <div style="font-size:13px; margin-bottom:8px;">Label: <span class="mono">__LABEL__</span></div>
+    <div style="font-size:13px; margin-bottom:8px;">Created: <span class="mono">__CREATED__</span></div>
+    <pre id="backup-codes">__CODES__</pre>
+    <button class="btn-secondary" type="button" onclick="copyCodes()">Copy Codes</button>
+    <div class="actions">
+      <a href="/" class="link">← Back</a>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        <form method="get" action="/backup-codes-edit" style="display:inline;">
+          <input type="hidden" name="id" value="__ID__">
+          <button type="submit" class="btn-soft">Edit</button>
+        </form>
+        <form method="post" action="/backup-codes-delete" style="display:inline;" onsubmit="return confirm('Delete these backup codes?');">
+          <input type="hidden" name="id" value="__ID__">
+          <button type="submit" class="btn-danger">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <script>
+    function copyCodes() {
+      const text = document.getElementById('backup-codes').textContent || '';
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+  </script>
+  """ + AUTOLOCK_SCRIPT + """
+</body>
+</html>
+"""
+
+GENERATOR_HTML = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SPM Web – Password Generator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing:border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
+      color:#f5f5f7;
+      margin:0;
+      padding:16px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      min-height:100vh;
+    }
+    .glass {
+      width:min(520px, 100%);
+      padding:22px 22px 18px;
+      border-radius:24px;
+      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
+      border:1px solid rgba(255,255,255,0.16);
+      backdrop-filter: blur(26px);
+      -webkit-backdrop-filter: blur(26px);
+      box-shadow:0 22px 42px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.04);
+    }
+    h1 { margin:0 0 4px; font-size:18px; letter-spacing:0.1em; text-transform:uppercase; }
+    .sub { margin:0 0 16px; font-size:11px; color:#a4a9c0; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+    label { font-size:12px; color:#d0d4e0; }
+    input[type=range] { width:100%; }
+    .mono { font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .output { font-size:16px; padding:10px 12px; border-radius:12px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.16); word-break:break-all; }
+    .pill { border:1px solid rgba(255,255,255,0.14); padding:6px 10px; border-radius:12px; background:rgba(255,255,255,0.06); cursor:pointer; user-select:none; }
+    .pill.active { background:linear-gradient(135deg,#0f9bff,#5f5fff); border-color:transparent; }
+    .btn { border:none; padding:9px 14px; border-radius:14px; background:linear-gradient(135deg,#14c38e,#2f7cff); color:#fff; font-weight:600; letter-spacing:0.04em; cursor:pointer; }
+    .btn-secondary { border:1px solid rgba(255,255,255,0.14); padding:8px 12px; border-radius:12px; background:rgba(255,255,255,0.08); color:#f5f5f7; font-weight:500; }
+    .stats { font-size:12px; color:#c8cbe4; }
+  </style>
+</head>
+<body>
+  <div class="glass">
+    <h1>Password Generator</h1>
+    <p class="sub">Vault: __VAULT_PATH__</p>
+    <div class="row">
+      <label for="len">Length: <span id="len-label">16</span></label>
+      <input type="range" id="len" min="4" max="64" value="16">
+    </div>
+    <div class="row">
+      <span id="mode-secure" class="pill active" onclick="setMode('secure')">Secure</span>
+      <span id="mode-easy" class="pill" onclick="setMode('easy')">Easy / Memorable</span>
+    </div>
+    <div class="row" style="flex-wrap:wrap; gap:10px;">
+      <label><input type="checkbox" id="upper" checked> Uppercase</label>
+      <label><input type="checkbox" id="lower" checked> Lowercase</label>
+      <label><input type="checkbox" id="digits" checked> Numbers</label>
+      <label><input type="checkbox" id="symbols" checked> Symbols</label>
+    </div>
+    <div class="row" style="flex-direction:column; align-items:flex-start;">
+      <div class="output mono" id="pw-out">••••••</div>
+      <div class="stats" id="pw-stats">–</div>
+    </div>
+    <div class="row">
+      <button class="btn" onclick="regen()">Regenerate</button>
+      <button class="btn-secondary" onclick="copyPw()">Copy</button>
+      <a href="/" class="btn-secondary" style="text-decoration:none;">Back</a>
+    </div>
+  </div>
+  <script>
+    const WORDS = ["sun","moon","star","river","ocean","cloud","stone","tree","leaf","fern","fire","ember","storm","wind","breeze","shadow","light","silver","gold","amber","flame","nova","comet","aurora","pulse","echo","vapor","wave","mist","dawn","dusk","zen","sage","whale","lynx","orca","hawk","raven"];
+    function activeMode() {
+      if (document.getElementById('mode-easy').classList.contains('active')) return 'easy';
+      return 'secure';
+    }
+    function setMode(m) {
+      ['mode-secure','mode-easy'].forEach(id => document.getElementById(id).classList.remove('active'));
+      document.getElementById('mode-' + m).classList.add('active');
+      regen();
+    }
+    function charset(includeSymbols, includeUpper, includeLower, includeDigits) {
+      let base = "";
+      if (includeUpper) base += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      if (includeLower) base += "abcdefghijklmnopqrstuvwxyz";
+      if (includeDigits) base += "0123456789";
+      if (includeSymbols) base += "!@#$%^&*()_-+=[]{}:;,.?/|~";
+      if (!base) base = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+      return base;
+    }
+    function genSecure(len, opts) {
+      const chars = charset(opts.symbols, opts.upper, opts.lower, opts.digits);
+      let out = "";
+      for (let i = 0; i < len; i++) {
+        const idx = Math.floor(Math.random() * chars.length);
+        out += chars[idx];
+      }
+      return { pw: out, charsetSize: chars.length };
+    }
+    function genEasy(wordsCount, opts) {
+      let count = Math.min(8, Math.max(2, wordsCount));
+      const parts = [];
+      for (let i = 0; i < count; i++) {
+        const idx = Math.floor(Math.random() * WORDS.length);
+        let w = WORDS[idx];
+        if (opts.upper && !opts.lower) {
+          w = w.toUpperCase();
+        } else if (opts.upper) {
+          w = w.charAt(0).toUpperCase() + w.slice(1);
+        } else if (!opts.lower) {
+          w = w.toUpperCase();
+        }
+        parts.push(w);
+      }
+      let pw = parts.join("-");
+      if (opts.digits) {
+        pw += "-" + String(Math.floor(Math.random() * 100)).padStart(2, "0");
+      }
+      if (opts.symbols) {
+        const syms = "!@#$%^&*";
+        pw += syms[Math.floor(Math.random() * syms.length)];
+      }
+      // Rough charset size estimate for entropy
+      let charsetSize = 0;
+      if (opts.upper) charsetSize += 26;
+      if (opts.lower) charsetSize += 26;
+      if (opts.digits) charsetSize += 10;
+      if (opts.symbols) charsetSize += 10;
+      if (charsetSize === 0) charsetSize = 26;
+      return { pw, charsetSize };
+    }
+    function entropy(pw, chars) {
+      if (!pw || chars <= 1) return 0;
+      const L = pw.length;
+      return L * Math.log(chars) / Math.log(2);
+    }
+    function crackTime(bits) {
+      const guessesPerSec = 1e10; // offline fast attacker
+      const seconds = Math.pow(2, bits) / guessesPerSec;
+      const units = [
+        ["sec", 60],
+        ["min", 60],
+        ["hr", 24],
+        ["day", 365],
+        ["yr", 100],
+        ["century", 10]
+      ];
+      let t = seconds;
+      let label = "sec";
+      for (const [name, base] of units) {
+        if (t >= base) {
+          t /= base;
+          label = name;
+        } else {
+          break;
+        }
+      }
+      return t.toFixed(1) + " " + label;
+    }
+    function updateStats(pw, chars) {
+      const bits = entropy(pw, chars);
+      let strength = "Weak";
+      if (bits >= 100) strength = "Excellent";
+      else if (bits >= 80) strength = "Strong";
+      else if (bits >= 60) strength = "Moderate";
+      else if (bits >= 40) strength = "Weak";
+      else strength = "Very weak";
+      const time = crackTime(bits);
+      document.getElementById('pw-stats').textContent = `${strength} · ~${bits.toFixed(1)} bits · ~${time} to brute-force (est.)`;
+    }
+    function regen() {
+      let lenVal = parseInt(document.getElementById('len').value, 10) || 16;
+      const mode = activeMode();
+      const opts = {
+        symbols: document.getElementById('symbols').checked,
+        upper: document.getElementById('upper').checked,
+        lower: document.getElementById('lower').checked,
+        digits: document.getElementById('digits').checked
+      };
+      let result;
+      if (mode === 'easy') {
+        const wordsCount = Math.min(8, Math.max(2, Math.round(lenVal / 6)));
+        document.getElementById('len-label').textContent = `Words: ${wordsCount}`;
+        result = genEasy(wordsCount, opts);
+      } else {
+        if (lenVal < 4) lenVal = 4;
+        document.getElementById('len-label').textContent = lenVal;
+        result = genSecure(lenVal, opts);
+      }
+      document.getElementById('pw-out').textContent = result.pw;
+      updateStats(result.pw, result.charsetSize);
+    }
+    function copyPw() {
+      const pw = document.getElementById('pw-out').textContent || '';
+      navigator.clipboard.writeText(pw).catch(()=>{});
+    }
+    document.getElementById('len').addEventListener('input', regen);
+    regen();
+  </script>
+  """ + AUTOLOCK_SCRIPT + """
+</body>
+</html>
+"""
+
+AUTH_VIEW_HTML = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SPM Web – Authenticator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing:border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
+      color:#f5f5f7;
+      margin:0;
+      padding:16px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      min-height:100vh;
+    }
+    .glass {
+      width:min(520px, 100%);
+      padding:22px 22px 18px;
+      border-radius:24px;
+      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
+      border:1px solid rgba(255,255,255,0.16);
+      backdrop-filter: blur(26px);
+      -webkit-backdrop-filter: blur(26px);
+      box-shadow:0 22px 42px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.04);
+    }
+    h1 { margin:0 0 4px; font-size:18px; letter-spacing:0.1em; text-transform:uppercase; }
+    .sub { margin:0 0 16px; font-size:11px; color:#a4a9c0; }
+    .field { margin-bottom:10px; font-size:13px; }
+    .label { font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#a4a9c0; margin-bottom:2px; }
+    .mono { font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .code {
+      font-size:28px;
+      letter-spacing:6px;
+      font-weight:700;
+      margin:12px 0 6px;
+      display:block;
+    }
+    .countdown { font-size:12px; color:#9fa3f0; }
+    .actions { margin-top:12px; display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:12px; flex-wrap:wrap; }
+    .btn-soft, .btn-danger { border-radius:999px; border:none; padding:7px 13px; font-size:11px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; background:rgba(255,255,255,0.06); color:#e1e3f0; }
+    .btn-danger { background:rgba(255,77,106,0.16); color:#ffd0d8; }
+    .link { font-size:12px; color:#9fa3f0; text-decoration:none; }
+    .link:hover { text-decoration:underline; }
+  </style>
+</head>
+<body>
+  <div class="glass">
+    <h1>Authenticator</h1>
+    <p class="sub">Vault: __VAULT_PATH__ · ID __ID__</p>
+    <div class="field"><div class="label">Label</div><div class="mono">__LABEL__</div></div>
+    <div class="field"><div class="label">Interval</div><div class="mono">__PERIOD__ seconds</div></div>
+    <div class="field"><div class="label">Created</div><div class="mono">__CREATED__</div></div>
+    <div class="field"><div class="label">Base32 Secret</div><div class="mono">__SECRET__</div></div>
+    <div class="field"><div class="label">Live Code</div><span id="code" class="code">••••••</span><div class="countdown" id="countdown"></div></div>
+    <div class="actions">
+      <a href="/" class="link">← Back</a>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        <form method="get" action="/authenticator-edit" style="display:inline;">
+          <input type="hidden" name="id" value="__ID__">
+          <button type="submit" class="btn-soft">Edit</button>
+        </form>
+        <form method="post" action="/authenticator-delete" style="display:inline;" onsubmit="return confirm('Delete this authenticator?');">
+          <input type="hidden" name="id" value="__ID__">
+          <button type="submit" class="btn-danger">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function() {
+      const period = Number("__PERIOD__") || 30;
+      const id = "__ID__";
+      const codeEl = document.getElementById('code');
+      const cdEl = document.getElementById('countdown');
+      let countdownTimer, nextTimer;
+      function scheduleTick(ms) {
+        if (nextTimer) clearTimeout(nextTimer);
+        nextTimer = setTimeout(tick, ms);
+      }
+      function tick() {
+        if (nextTimer) {
+          clearTimeout(nextTimer);
+          nextTimer = null;
+        }
+        fetch('/authenticator-code?id=' + encodeURIComponent(id))
+          .then(r => r.json())
+          .then(d => {
+            codeEl.textContent = d.code || '------';
+            let remaining = d.expires_in || period;
+            cdEl.textContent = 'Refreshes in ' + remaining + 's';
+            if (countdownTimer) clearInterval(countdownTimer);
+            countdownTimer = setInterval(() => {
+              remaining -= 1;
+              if (remaining <= 0) {
+                cdEl.textContent = 'Refreshing...';
+                clearInterval(countdownTimer);
+                tick();
+              } else {
+                cdEl.textContent = 'Refreshes in ' + remaining + 's';
+              }
+            }, 1000);
+            const wait = Math.max(800, (remaining * 1000) - 250);
+            scheduleTick(wait);
+          })
+          .catch(() => scheduleTick(period * 1000));
+      }
+      tick();
+    })();
+  </script>
   """ + AUTOLOCK_SCRIPT + """
 </body>
 </html>
@@ -3940,12 +6101,28 @@ def encrypt_vault(master: str, plaintext: str) -> None:
         raise RuntimeError("Failed to encrypt vault")
     os.replace(tmp_path, VAULT_PATH)
 
+def totp_code(secret_b32: str, period: int = 30) -> str:
+    import hashlib, hmac, struct, base64
+    secret = secret_b32.replace(" ", "").upper()
+    if not secret:
+        return ""
+    padded = secret + "=" * ((8 - len(secret) % 8) % 8)
+    key = base64.b32decode(padded, casefold=True)
+    counter = int(time.time() // max(period, 1))
+    msg = struct.pack(">Q", counter)
+    h = hmac.new(key, msg, hashlib.sha1).digest()
+    offset = h[-1] & 0x0F
+    code_int = struct.unpack(">I", h[offset:offset+4])[0] & 0x7fffffff
+    return str(code_int % 10**6).zfill(6)
+
 def parse_entries(plaintext: str):
     """Password entries."""
     lines = plaintext.splitlines()
     entries = []
     for idx, line in enumerate(lines):
         if not line or line.startswith("#") or line.startswith("META_") or line.startswith("NOTE\t"):
+            continue
+        if line.startswith("PASSPHRASE\t") or line.startswith("BACKUP_CODE\t") or line.startswith("AUTH\t"):
             continue
         parts = line.split("\t")
         if len(parts) >= 6:
@@ -3963,6 +6140,42 @@ def parse_notes(plaintext: str):
         if len(parts) >= 6:
             notes.append((idx, parts))
     return lines, notes
+
+def parse_passphrases(plaintext: str):
+    """Passphrases stored as PASSPHRASE rows."""
+    lines = plaintext.splitlines()
+    items = []
+    for idx, line in enumerate(lines):
+        if not line.startswith("PASSPHRASE\t"):
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 6:
+            items.append((idx, parts))
+    return lines, items
+
+def parse_backup_codes(plaintext: str):
+    """Backup codes stored as BACKUP_CODE rows."""
+    lines = plaintext.splitlines()
+    items = []
+    for idx, line in enumerate(lines):
+        if not line.startswith("BACKUP_CODE\t"):
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 6:
+            items.append((idx, parts))
+    return lines, items
+
+def parse_authenticators(plaintext: str):
+    """Authenticators stored as AUTH rows (TOTP)."""
+    lines = plaintext.splitlines()
+    items = []
+    for idx, line in enumerate(lines):
+        if not line.startswith("AUTH\t"):
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 6:
+            items.append((idx, parts))
+    return lines, items
 
 def build_rows_html(entries):
     if not entries:
@@ -4015,6 +6228,83 @@ def build_notes_rows_html(notes):
         rows.append(row)
     return "".join(rows)
 
+def build_passphrase_rows_html(passphrases):
+    if not passphrases:
+        return "<tr><td colspan='3' class='badge-empty'><i>No passphrases stored.</i></td></tr>"
+    rows = []
+    for _, parts in passphrases:
+        pid = html.escape(parts[1])
+        label = html.escape(parts[2])
+        row = (
+            "<tr>"
+            f"<td>{pid}</td>"
+            f"<td>{label}</td>"
+            "<td class='actions'><div class='icon-row'>"
+            f"<a class='icon-btn' href='/passphrase-view?id={pid}' title='View'><span>👁</span></a>"
+            f"<a class='icon-btn' href='/passphrase-edit?id={pid}' title='Edit'><span>✏</span></a>"
+            "<form class='inline' method='post' action='/passphrase-delete' "
+            "onsubmit=\"return confirm('Delete this passphrase?');\">"
+            f"<input type='hidden' name='id' value='{pid}'>"
+            "<button type='submit' class='icon-btn danger' title='Delete'><span>🗑</span></button>"
+            "</form>"
+            "</div></td>"
+            "</tr>"
+        )
+        rows.append(row)
+    return "".join(rows)
+
+def build_backup_rows_html(backups):
+    if not backups:
+        return "<tr><td colspan='3' class='badge-empty'><i>No backup codes stored.</i></td></tr>"
+    rows = []
+    for _, parts in backups:
+        bid = html.escape(parts[1])
+        label = html.escape(parts[2])
+        row = (
+            "<tr>"
+            f"<td>{bid}</td>"
+            f"<td>{label}</td>"
+            "<td class='actions'><div class='icon-row'>"
+            f"<a class='icon-btn' href='/backup-codes-view?id={bid}' title='View'><span>👁</span></a>"
+            f"<a class='icon-btn' href='/backup-codes-edit?id={bid}' title='Edit'><span>✏</span></a>"
+            "<form class='inline' method='post' action='/backup-codes-delete' "
+            "onsubmit=\"return confirm('Delete these backup codes?');\">"
+            f"<input type='hidden' name='id' value='{bid}'>"
+            "<button type='submit' class='icon-btn danger' title='Delete'><span>🗑</span></button>"
+            "</form>"
+            "</div></td>"
+            "</tr>"
+        )
+        rows.append(row)
+    return "".join(rows)
+
+def build_auth_rows_html(auths):
+    if not auths:
+        return "<tr><td colspan='4' class='badge-empty'><i>No authenticators stored.</i></td></tr>"
+    rows = []
+    for _, parts in auths:
+        aid = html.escape(parts[1])
+        label = html.escape(parts[2])
+        interval = html.escape(parts[4])
+        row = (
+            "<tr>"
+            f"<td>{aid}</td>"
+            f"<td>{label}</td>"
+            f"<td>{interval}s</td>"
+            "<td class='actions'><div class='icon-row'>"
+            f"<a class='icon-btn' href='/authenticator-view?id={aid}' title='View live'><span>👁</span></a>"
+            f"<a class='icon-btn' href='/authenticator-edit?id={aid}' title='Edit'><span>✏</span></a>"
+            "<form class='inline' method='post' action='/authenticator-delete' "
+            "onsubmit=\"return confirm('Delete this authenticator?');\">"
+            f"<input type='hidden' name='id' value='{aid}'>"
+            "<button type='submit' class='icon-btn danger' title='Delete'><span>🗑</span></button>"
+            "</form>"
+            "</div></td>"
+            "</tr>"
+        )
+        rows.append(row)
+    return "".join(rows)
+
 def build_entry_form(title, vault_path, action, values=None, message=""):
     values = values or {}
     def v(k): return html.escape(values.get(k, "") or "")
@@ -4051,6 +6341,56 @@ def build_note_form(title, vault_path, action, values=None, message=""):
     page = page.replace("__MESSAGE__", message)
     return page
 
+def build_passphrase_form(title, vault_path, action, values=None, message=""):
+    values = values or {}
+    def v(k): return html.escape(values.get(k, "") or "")
+    body = (
+        "<label>Label</label>"
+        f"<input type='text' name='label' value='{v('label')}' required>"
+        "<label>Passphrase (leave blank to auto-generate)</label>"
+        f"<input type='text' name='secret' value='{v('secret')}'>"
+    )
+    page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
+    page = page.replace("__VAULT_PATH__", html.escape(vault_path))
+    page = page.replace("__ACTION__", action)
+    page = page.replace("__BODY__", body)
+    page = page.replace("__MESSAGE__", message)
+    return page
+
+def build_backup_form(title, vault_path, action, values=None, message=""):
+    values = values or {}
+    def v(k): return html.escape(values.get(k, "") or "")
+    body = (
+        "<label>Label</label>"
+        f"<input type='text' name='label' value='{v('label')}' required>"
+        "<label>Backup codes (one per line)</label>"
+        f"<textarea name='codes'>{v('codes')}</textarea>"
+    )
+    page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
+    page = page.replace("__VAULT_PATH__", html.escape(vault_path))
+    page = page.replace("__ACTION__", action)
+    page = page.replace("__BODY__", body)
+    page = page.replace("__MESSAGE__", message)
+    return page
+
+def build_auth_form(title, vault_path, action, values=None, message=""):
+    values = values or {}
+    def v(k): return html.escape(values.get(k, "") or "")
+    body = (
+        "<label>Label</label>"
+        f"<input type='text' name='label' value='{v('label')}' required>"
+        "<label>Base32 Secret</label>"
+        f"<input type='text' name='secret' value='{v('secret')}' placeholder='JBSWY3DPEHPK3PXP' required>"
+        "<label>Refresh interval (seconds)</label>"
+        f"<input type='number' name='period' min='5' max='120' value='{v('period') or '30'}'>"
+    )
+    page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
+    page = page.replace("__VAULT_PATH__", html.escape(vault_path))
+    page = page.replace("__ACTION__", action)
+    page = page.replace("__BODY__", body)
+    page = page.replace("__MESSAGE__", message)
+    return page
+
 # ---------- HTTP server ------------------------------------------------------
 
 class SPMServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
@@ -4065,9 +6405,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _send_html(self, code, body):
         self.send_response(code)
+        self._add_cors()
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
         self.wfile.write(body.encode("utf-8"))
+
+    def _add_cors(self):
+        origin = self.headers.get("Origin")
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Credentials", "true")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
 
     def _get_cookie_session(self):
         cookie = self.headers.get("Cookie", "")
@@ -4088,6 +6437,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_html(200, page)
             return None
         return master
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self._add_cors()
+        self.end_headers()
+        return
 
     # ---- Handlers -----------------------------------------------------------
 
@@ -4123,12 +6478,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             _, entries = parse_entries(plaintext)
             _, notes = parse_notes(plaintext)
+            _, passphrases = parse_passphrases(plaintext)
+            _, backups = parse_backup_codes(plaintext)
+            _, auths = parse_authenticators(plaintext)
             rows_html = build_rows_html(entries)
             notes_html = build_notes_rows_html(notes)
+            pass_rows_html = build_passphrase_rows_html(passphrases)
+            backup_rows_html = build_backup_rows_html(backups)
+            auth_rows_html = build_auth_rows_html(auths)
             body = MAIN_HTML.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
             body = body.replace("__ROWS__", rows_html)
             body = body.replace("__NOTES_ROWS__", notes_html)
+            body = body.replace("__PASSPHRASE_ROWS__", pass_rows_html)
+            body = body.replace("__BACKUP_ROWS__", backup_rows_html)
+            body = body.replace("__AUTH_ROWS__", auth_rows_html)
+            body = body.replace("__VERSION__", html.escape(VERSION))
             self._send_html(200, body)
+            return
+
+        if path == "/generator":
+            page = GENERATOR_HTML.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
+            self._send_html(200, page)
             return
 
         query = urllib.parse.parse_qs(parsed.query)
@@ -4245,6 +6615,241 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_html(200, page)
             return
 
+        if path == "/passphrase-add":
+            page = build_passphrase_form(
+                title="Add Passphrase",
+                vault_path=VAULT_PATH,
+                action="/passphrase-add",
+                values={},
+                message=""
+            )
+            self._send_html(200, page)
+            return
+
+        if path == "/passphrase-edit":
+            pid = (query.get("id") or [""])[0]
+            if not pid:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = decrypt_vault(master)
+            _, passphrases = parse_passphrases(plaintext)
+            found = None
+            for _, parts in passphrases:
+                if parts[1] == pid:
+                    found = parts
+                    break
+            if not found:
+                self.send_error(404, "Passphrase not found")
+                return
+            secret = ""
+            try:
+                secret = base64.b64decode(found[3].encode("ascii")).decode("utf-8", errors="replace")
+            except Exception:
+                secret = ""
+            page = build_passphrase_form(
+                title=f"Edit Passphrase #{pid}",
+                vault_path=VAULT_PATH,
+                action="/passphrase-edit?id=" + urllib.parse.quote(pid),
+                values={"label": found[2], "secret": secret},
+                message=""
+            )
+            self._send_html(200, page)
+            return
+
+        if path == "/passphrase-view":
+            pid = (query.get("id") or [""])[0]
+            if not pid:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = decrypt_vault(master)
+            _, passphrases = parse_passphrases(plaintext)
+            found = None
+            for _, parts in passphrases:
+                if parts[1] == pid:
+                    found = parts
+                    break
+            if not found:
+                self.send_error(404, "Passphrase not found")
+                return
+            secret = ""
+            try:
+                secret = base64.b64decode(found[3].encode("ascii")).decode("utf-8", errors="replace")
+            except Exception:
+                secret = "[Decode error]"
+            created = found[4]
+            page = PASSPHRASE_VIEW_HTML
+            page = page.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
+            page = page.replace("__ID__", html.escape(pid))
+            page = page.replace("__LABEL__", html.escape(found[2]))
+            page = page.replace("__CREATED__", html.escape(created))
+            page = page.replace("__SECRET__", html.escape(secret))
+            self._send_html(200, page)
+            return
+
+        if path == "/authenticator-add":
+            page = build_auth_form(
+                title="Add Authenticator",
+                vault_path=VAULT_PATH,
+                action="/authenticator-add",
+                values={"period": "30"},
+                message=""
+            )
+            self._send_html(200, page)
+            return
+
+        if path == "/authenticator-edit":
+            aid = (query.get("id") or [""])[0]
+            if not aid:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = decrypt_vault(master)
+            _, auths = parse_authenticators(plaintext)
+            found = None
+            for _, parts in auths:
+                if parts[1] == aid:
+                    found = parts
+                    break
+            if not found:
+                self.send_error(404, "Authenticator not found")
+                return
+            page = build_auth_form(
+                title=f"Edit Authenticator #{aid}",
+                vault_path=VAULT_PATH,
+                action="/authenticator-edit?id=" + urllib.parse.quote(aid),
+                values={"label": found[2], "secret": found[3], "period": found[4]},
+                message=""
+            )
+            self._send_html(200, page)
+            return
+
+        if path == "/authenticator-view":
+            aid = (query.get("id") or [""])[0]
+            if not aid:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = decrypt_vault(master)
+            _, auths = parse_authenticators(plaintext)
+            found = None
+            for _, parts in auths:
+                if parts[1] == aid:
+                    found = parts
+                    break
+            if not found:
+                self.send_error(404, "Authenticator not found")
+                return
+            created = found[5] if len(found) > 5 else ""
+            page = AUTH_VIEW_HTML
+            page = page.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
+            page = page.replace("__ID__", html.escape(aid))
+            page = page.replace("__LABEL__", html.escape(found[2]))
+            page = page.replace("__SECRET__", html.escape(found[3]))
+            page = page.replace("__PERIOD__", html.escape(found[4] or "30"))
+            page = page.replace("__CREATED__", html.escape(created))
+            self._send_html(200, page)
+            return
+
+        if path == "/backup-codes-add":
+            page = build_backup_form(
+                title="Add Backup Codes",
+                vault_path=VAULT_PATH,
+                action="/backup-codes-add",
+                values={},
+                message=""
+            )
+            self._send_html(200, page)
+            return
+
+        if path == "/backup-codes-edit":
+            bid = (query.get("id") or [""])[0]
+            if not bid:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = decrypt_vault(master)
+            _, backups = parse_backup_codes(plaintext)
+            found = None
+            for _, parts in backups:
+                if parts[1] == bid:
+                    found = parts
+                    break
+            if not found:
+                self.send_error(404, "Backup code not found")
+                return
+            codes = ""
+            try:
+                codes = base64.b64decode(found[3].encode("ascii")).decode("utf-8", errors="replace")
+            except Exception:
+                codes = ""
+            page = build_backup_form(
+                title=f"Edit Backup Codes #{bid}",
+                vault_path=VAULT_PATH,
+                action="/backup-codes-edit?id=" + urllib.parse.quote(bid),
+                values={"label": found[2], "codes": codes},
+                message=""
+            )
+            self._send_html(200, page)
+            return
+
+        if path == "/backup-codes-view":
+            bid = (query.get("id") or [""])[0]
+            if not bid:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = decrypt_vault(master)
+            _, backups = parse_backup_codes(plaintext)
+            found = None
+            for _, parts in backups:
+                if parts[1] == bid:
+                    found = parts
+                    break
+            if not found:
+                self.send_error(404, "Backup code not found")
+                return
+            codes = ""
+            try:
+                codes = base64.b64decode(found[3].encode("ascii")).decode("utf-8", errors="replace")
+            except Exception:
+                codes = "[Decode error]"
+            created = found[4]
+            page = BACKUP_VIEW_HTML
+            page = page.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
+            page = page.replace("__ID__", html.escape(bid))
+            page = page.replace("__LABEL__", html.escape(found[2]))
+            page = page.replace("__CREATED__", html.escape(created))
+            page = page.replace("__CODES__", html.escape(codes))
+            self._send_html(200, page)
+            return
+
+        if path == "/authenticator-code":
+            aid = (query.get("id") or [""])[0]
+            if not aid:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = decrypt_vault(master)
+            _, auths = parse_authenticators(plaintext)
+            found = None
+            for _, parts in auths:
+                if parts[1] == aid:
+                    found = parts
+                    break
+            if not found:
+                self.send_error(404, "Authenticator not found")
+                return
+            period = 30
+            try:
+                period = int(found[4])
+            except Exception:
+                period = 30
+            code = totp_code(found[3], period) or "------"
+            expires_in = period - int(time.time()) % max(period, 1)
+            import json
+            body = jsonlib.dumps({"code": code, "expires_in": expires_in})
+            self.send_response(200)
+            self._add_cors()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body.encode("utf-8"))
+            return
+
         self.send_error(404, "Not found")
 
     def do_POST(self):
@@ -4272,7 +6877,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             token = secrets.token_hex(32)
             self.server.sessions[token] = password
             self.send_response(302)
-            self.send_header("Set-Cookie", f"spm_session={token}; HttpOnly; Path=/")
+            self.send_header("Set-Cookie", f"spm_session={token}; HttpOnly; Path=/; SameSite=Lax")
             self.send_header("Location", "/")
             self.end_headers()
             return
@@ -4489,6 +7094,407 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
 
+        if path == "/passphrase-add":
+            label = (data.get("label") or [""])[0].strip()
+            secret = (data.get("secret") or [""])[0]
+
+            if not label:
+                page = build_passphrase_form(
+                    title="Add Passphrase",
+                    vault_path=VAULT_PATH,
+                    action="/passphrase-add",
+                    values={"label": label, "secret": secret},
+                    message="<div class='msg'>Label is required.</div>",
+                )
+                self._send_html(200, page)
+                return
+
+            plaintext = decrypt_vault(master)
+            lines, passphrases = parse_passphrases(plaintext)
+            lines = plaintext.splitlines()
+
+            max_id = 0
+            for _, parts in passphrases:
+                try:
+                    max_id = max(max_id, int(parts[1]))
+                except ValueError:
+                    continue
+            new_id = max_id + 1
+            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            if not secret:
+                secret = secrets.token_urlsafe(32)
+            encoded = base64.b64encode(secret.encode("utf-8")).decode("ascii")
+            new_line = "\t".join([
+                "PASSPHRASE",
+                str(new_id),
+                label.replace("\t", " "),
+                encoded,
+                now,
+                "-",
+            ])
+            lines.append(new_line)
+            new_plain = "\n".join(lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/passphrase-edit":
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            pid = (query.get("id") or [""])[0]
+            if not pid:
+                self.send_error(400, "Missing id")
+                return
+            label = (data.get("label") or [""])[0].strip()
+            secret = (data.get("secret") or [""])[0]
+
+            plaintext = decrypt_vault(master)
+            lines, passphrases = parse_passphrases(plaintext)
+            idx_to_update = None
+            created = ""
+            for idx, parts in passphrases:
+                if parts[1] == pid:
+                    idx_to_update = idx
+                    if len(parts) >= 5:
+                        created = parts[4]
+                    break
+            if idx_to_update is None:
+                self.send_error(404, "Passphrase not found")
+                return
+            if not label:
+                page = build_passphrase_form(
+                    title=f"Edit Passphrase #{pid}",
+                    vault_path=VAULT_PATH,
+                    action="/passphrase-edit?id=" + urllib.parse.quote(pid),
+                    values={"label": label, "secret": secret},
+                    message="<div class='msg'>Label is required.</div>",
+                )
+                self._send_html(200, page)
+                return
+            if not secret:
+                try:
+                    # reuse existing secret if not provided
+                    secret = base64.b64decode(passphrases[idx_to_update][1][3].encode("ascii")).decode("utf-8", errors="replace")
+                except Exception:
+                    secret = secrets.token_urlsafe(32)
+            encoded = base64.b64encode(secret.encode("utf-8")).decode("ascii")
+            lines[idx_to_update] = "\t".join([
+                "PASSPHRASE",
+                pid,
+                label.replace("\t", " "),
+                encoded,
+                created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "-",
+            ])
+            new_plain = "\n".join(lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/passphrase-delete":
+            pid = (data.get("id") or [""])[0]
+            if not pid:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = decrypt_vault(master)
+            lines = plaintext.splitlines()
+            new_lines = []
+            for line in lines:
+                if line.startswith("PASSPHRASE\t"):
+                    parts = line.split("\t")
+                    if len(parts) >= 2 and parts[1] == pid:
+                        continue
+                new_lines.append(line)
+            new_plain = "\n".join(new_lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/authenticator-add":
+            label = (data.get("label") or [""])[0].strip()
+            secret = (data.get("secret") or [""])[0].replace(" ", "")
+            period = (data.get("period") or ["30"])[0]
+
+            if not label or not secret:
+                page = build_auth_form(
+                    title="Add Authenticator",
+                    vault_path=VAULT_PATH,
+                    action="/authenticator-add",
+                    values={"label": label, "secret": secret, "period": period},
+                    message="<div class='msg'>Label and secret are required.</div>",
+                )
+                self._send_html(200, page)
+                return
+
+            try:
+                period_int = int(period)
+                if period_int <= 0:
+                    period_int = 30
+            except Exception:
+                period_int = 30
+
+            try:
+                _ = totp_code(secret, period_int)
+            except Exception:
+                page = build_auth_form(
+                    title="Add Authenticator",
+                    vault_path=VAULT_PATH,
+                    action="/authenticator-add",
+                    values={"label": label, "secret": secret, "period": period},
+                    message="<div class='msg'>Invalid Base32 secret.</div>",
+                )
+                self._send_html(200, page)
+                return
+
+            plaintext = decrypt_vault(master)
+            lines, auths = parse_authenticators(plaintext)
+            lines = plaintext.splitlines()
+
+            max_id = 0
+            for _, parts in auths:
+                try:
+                    max_id = max(max_id, int(parts[1]))
+                except ValueError:
+                    continue
+            new_id = max_id + 1
+            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            new_line = "\t".join([
+                "AUTH",
+                str(new_id),
+                label.replace("\t", " "),
+                secret.replace("\t", ""),
+                str(period_int),
+                now,
+            ])
+            lines.append(new_line)
+            new_plain = "\n".join(lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/authenticator-edit":
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            aid = (query.get("id") or [""])[0]
+            if not aid:
+                self.send_error(400, "Missing id")
+                return
+            label = (data.get("label") or [""])[0].strip()
+            secret = (data.get("secret") or [""])[0].replace(" ", "")
+            period = (data.get("period") or ["30"])[0]
+
+            plaintext = decrypt_vault(master)
+            lines, auths = parse_authenticators(plaintext)
+            idx_to_update = None
+            created = ""
+            for idx, parts in auths:
+                if parts[1] == aid:
+                    idx_to_update = idx
+                    if len(parts) >= 6:
+                        created = parts[5]
+                    if not label:
+                        label = parts[2]
+                    if not secret:
+                        secret = parts[3]
+                    try:
+                        if not period:
+                            period = parts[4]
+                    except Exception:
+                        pass
+                    break
+
+            if idx_to_update is None:
+                self.send_error(404, "Authenticator not found")
+                return
+
+            try:
+                period_int = int(period)
+                if period_int <= 0:
+                    period_int = 30
+            except Exception:
+                period_int = 30
+
+            try:
+                _ = totp_code(secret, period_int)
+            except Exception:
+                page = build_auth_form(
+                    title=f"Edit Authenticator #{aid}",
+                    vault_path=VAULT_PATH,
+                    action="/authenticator-edit?id=" + urllib.parse.quote(aid),
+                    values={"label": label, "secret": secret, "period": period},
+                    message="<div class='msg'>Invalid Base32 secret.</div>",
+                )
+                self._send_html(200, page)
+                return
+
+            lines[idx_to_update] = "\t".join([
+                "AUTH",
+                aid,
+                label.replace("\t", " "),
+                secret.replace("\t", ""),
+                str(period_int),
+                created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            ])
+            new_plain = "\n".join(lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/authenticator-delete":
+            aid = (data.get("id") or [""])[0]
+            if not aid:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = decrypt_vault(master)
+            lines = plaintext.splitlines()
+            new_lines = []
+            found = False
+            for line in lines:
+                if line.startswith("AUTH\t"):
+                    parts = line.split("\t")
+                    if len(parts) >= 2 and parts[1] == aid:
+                        found = True
+                        continue
+                new_lines.append(line)
+            if not found:
+                self.send_error(404, "Authenticator not found")
+                return
+            new_plain = "\n".join(new_lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/backup-codes-add":
+            label = (data.get("label") or [""])[0].strip()
+            codes = (data.get("codes") or [""])[0]
+            if not label:
+                page = build_backup_form(
+                    title="Add Backup Codes",
+                    vault_path=VAULT_PATH,
+                    action="/backup-codes-add",
+                    values={"label": label, "codes": codes},
+                    message="<div class='msg'>Label is required.</div>",
+                )
+                self._send_html(200, page)
+                return
+
+            plaintext = decrypt_vault(master)
+            lines, backups = parse_backup_codes(plaintext)
+            lines = plaintext.splitlines()
+
+            max_id = 0
+            for _, parts in backups:
+                try:
+                    max_id = max(max_id, int(parts[1]))
+                except ValueError:
+                    continue
+            new_id = max_id + 1
+            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            encoded = base64.b64encode(codes.encode("utf-8")).decode("ascii")
+            new_line = "\t".join([
+                "BACKUP_CODE",
+                str(new_id),
+                label.replace("\t", " "),
+                encoded,
+                now,
+                "-",
+            ])
+            lines.append(new_line)
+            new_plain = "\n".join(lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/backup-codes-edit":
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            bid = (query.get("id") or [""])[0]
+            if not bid:
+                self.send_error(400, "Missing id")
+                return
+            label = (data.get("label") or [""])[0].strip()
+            codes = (data.get("codes") or [""])[0]
+
+            plaintext = decrypt_vault(master)
+            lines, backups = parse_backup_codes(plaintext)
+            idx_to_update = None
+            created = ""
+            for idx, parts in backups:
+                if parts[1] == bid:
+                    idx_to_update = idx
+                    if len(parts) >= 5:
+                        created = parts[4]
+                    break
+            if idx_to_update is None:
+                self.send_error(404, "Backup code not found")
+                return
+            if not label:
+                page = build_backup_form(
+                    title=f"Edit Backup Codes #{bid}",
+                    vault_path=VAULT_PATH,
+                    action="/backup-codes-edit?id=" + urllib.parse.quote(bid),
+                    values={"label": label, "codes": codes},
+                    message="<div class='msg'>Label is required.</div>",
+                )
+                self._send_html(200, page)
+                return
+            encoded = base64.b64encode(codes.encode("utf-8")).decode("ascii")
+            lines[idx_to_update] = "\t".join([
+                "BACKUP_CODE",
+                bid,
+                label.replace("\t", " "),
+                encoded,
+                created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "-",
+            ])
+            new_plain = "\n".join(lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/backup-codes-delete":
+            bid = (data.get("id") or [""])[0]
+            if not bid:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = decrypt_vault(master)
+            lines = plaintext.splitlines()
+            new_lines = []
+            for line in lines:
+                if line.startswith("BACKUP_CODE\t"):
+                    parts = line.split("\t")
+                    if len(parts) >= 2 and parts[1] == bid:
+                        continue
+                new_lines.append(line)
+            new_plain = "\n".join(new_lines) + "\n"
+            encrypt_vault(master, new_plain)
+
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
         self.send_error(404, "Not found")
 
 def run():
@@ -4663,6 +7669,234 @@ interactive_menu_backup_codes() {
 	done
 }
 
+interactive_menu_passphrases() {
+	while true; do
+		clear
+		print_banner
+		if [ "$SPM_LANG" = "id" ]; then
+			printf ">> MENU PASSPHRASE\n\n"
+			printf "  1) List passphrase\n"
+			printf "  2) Tambah passphrase\n"
+			printf "  3) Lihat passphrase\n"
+			printf "  4) Hapus passphrase\n"
+			printf "  0) Kembali\n\n"
+			printf "Pilih menu: "
+		else
+			printf ">> PASSPHRASES MENU\n\n"
+			printf "  1) List passphrases\n"
+			printf "  2) Add passphrase\n"
+			printf "  3) View passphrase\n"
+			printf "  4) Delete passphrase\n"
+			printf "  0) Back\n\n"
+			printf "Choose an option: "
+		fi
+
+		read -r c || true
+		case "$c" in
+			1)
+				clear
+				cmd_passphrase_list || true
+				pause_menu
+				;;
+			2)
+				clear
+				cmd_passphrase_add || true
+				pause_menu
+				;;
+			3)
+				clear
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Masukkan ID passphrase: "
+				else
+					printf "Enter passphrase ID: "
+				fi
+				read -r pid || true
+				if [ -n "$pid" ]; then
+					cmd_passphrase_view "$pid" || true
+				fi
+				pause_menu
+				;;
+			4)
+				clear
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Masukkan ID passphrase yang akan dihapus: "
+				else
+					printf "Enter passphrase ID to delete: "
+				fi
+				read -r pid || true
+				if [ -n "$pid" ]; then
+					cmd_passphrase_delete "$pid" || true
+				fi
+				pause_menu
+				;;
+			0)
+				break
+				;;
+			*)
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Menu tidak valid.\n"
+				else
+					printf "Invalid choice.\n"
+				fi
+				pause_menu
+				;;
+		esac
+	done
+}
+
+interactive_menu_generator() {
+	while true; do
+		clear
+		print_banner
+		if [ "$SPM_LANG" = "id" ]; then
+			printf ">> GENERATOR KATA SANDI\n\n"
+			printf "  1) Buat password\n"
+			printf "  0) Kembali\n\n"
+			printf "Pilih menu: "
+		else
+			printf ">> PASSWORD GENERATOR\n\n"
+			printf "  1) Generate password\n"
+			printf "  0) Back\n\n"
+			printf "Choose an option: "
+		fi
+		read -r c || true
+		case "$c" in
+			1)
+				clear
+				local length mode symbols symbols_flag
+				symbols_flag=0
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Panjang password (4-128, default 16): "
+				else
+					printf "Password length (4-128, default 16): "
+				fi
+				read -r length || true
+				[ -z "$length" ] && length=16
+				if ! printf '%s' "$length" | grep -Eq '^[0-9]+$'; then
+					length=16
+				fi
+				if [ "$length" -lt 4 ]; then length=4; fi
+				if [ "$length" -gt 128 ]; then length=128; fi
+
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Mode (easy/secure/numeric) [secure]: "
+				else
+					printf "Mode (easy/secure/numeric) [secure]: "
+				fi
+				read -r mode || true
+				[ -z "$mode" ] && mode="secure"
+
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Tambahkan simbol? (y/N): "
+				else
+					printf "Include symbols? (y/N): "
+				fi
+				read -r symbols || true
+				if [ "$symbols" = "y" ] || [ "$symbols" = "Y" ]; then
+					symbols_flag=1
+				else
+					symbols_flag=0
+				fi
+
+				local pw
+				pw="$(generate_password "$length" "$mode" "$symbols_flag")"
+				printf "\n%s\n\n" "$pw"
+				password_strength_report "$pw"
+				pause_menu
+				;;
+			0) break ;;
+			*)
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Menu tidak valid.\n"
+				else
+					printf "Invalid choice.\n"
+				fi
+				pause_menu
+				;;
+		esac
+	done
+}
+
+interactive_menu_authenticators() {
+	while true; do
+		clear
+		print_banner
+		if [ "$SPM_LANG" = "id" ]; then
+			printf ">> MENU AUTHENTICATOR (TOTP)\n\n"
+			printf "  1) List authenticator\n"
+			printf "  2) Tambah authenticator\n"
+			printf "  3) Lihat authenticator\n"
+			printf "  4) Edit authenticator\n"
+			printf "  5) Hapus authenticator\n"
+			printf "  0) Kembali\n\n"
+			printf "Pilih menu: "
+		else
+			printf ">> AUTHENTICATORS MENU\n\n"
+			printf "  1) List authenticators\n"
+			printf "  2) Add authenticator\n"
+			printf "  3) View authenticator\n"
+			printf "  4) Edit authenticator\n"
+			printf "  5) Delete authenticator\n"
+			printf "  0) Back\n\n"
+			printf "Choose an option: "
+		fi
+
+		read -r c || true
+		case "$c" in
+			1) clear; cmd_authenticator_list || true; pause_menu ;;
+			2) clear; cmd_authenticator_add || true; pause_menu ;;
+			3)
+				clear
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Masukkan ID authenticator: "
+				else
+					printf "Enter authenticator ID: "
+				fi
+				read -r aid || true
+				if [ -n "$aid" ]; then
+					cmd_authenticator_view "$aid" || true
+				fi
+				pause_menu
+				;;
+			4)
+				clear
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Masukkan ID authenticator yang akan diedit: "
+				else
+					printf "Enter authenticator ID to edit: "
+				fi
+				read -r aid || true
+				if [ -n "$aid" ]; then
+					cmd_authenticator_edit "$aid" || true
+				fi
+				pause_menu
+				;;
+			5)
+				clear
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Masukkan ID authenticator yang akan dihapus: "
+				else
+					printf "Enter authenticator ID to delete: "
+				fi
+				read -r aid || true
+				if [ -n "$aid" ]; then
+					cmd_authenticator_delete "$aid" || true
+				fi
+				pause_menu
+				;;
+			0) break ;;
+			*)
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Menu tidak valid.\n"
+				else
+					printf "Invalid choice.\n"
+				fi
+				pause_menu
+				;;
+		esac
+	done
+}
+
 
 interactive_menu() {
 	while true; do
@@ -4685,13 +7919,18 @@ interactive_menu() {
 			printf "  6) Ganti kata sandi utama\n"
 			printf "  7) Buat bundle portable\n"
 			printf "  8) SAVE (bundle + hapus vault lokal)\n"
-			printf "  9) Help\n"
-			printf " 10) Cek update\n"
-			printf " 11) Lupa / Reset kata sandi utama (pemulihan)\n"
-			printf " 12) Catatan aman (secure notes)\n"
-			printf " 13) Kode backup\n"
-			printf " 14) Doctor / Health check\n"
-			printf " 15) Mode web\n"
+			printf "  9) Export (csv/json)\n"
+			printf " 10) Import (csv/json)\n"
+			printf " 11) Help\n"
+			printf " 12) Cek update\n"
+			printf " 13) Lupa / Reset kata sandi utama (pemulihan)\n"
+			printf " 14) Catatan aman (secure notes)\n"
+			printf " 15) Passphrase\n"
+			printf " 16) Authenticator (TOTP)\n"
+			printf " 17) Kode backup\n"
+			printf " 18) Generator password\n"
+			printf " 19) Doctor / Health check\n"
+			printf " 20) Mode web\n"
 			printf "  0) Keluar\n\n"
 			printf "Pilih menu: "
 		else
@@ -4711,13 +7950,18 @@ interactive_menu() {
 			printf "  6) Change master password\n"
 			printf "  7) Create portable bundle\n"
 			printf "  8) SAVE (bundle + wipe local vault)\n"
-			printf "  9) Help\n"
-			printf " 10) Check for updates\n"
-			printf " 11) Forgot / Reset master (use private key)\n"
-			printf " 12) Secure notes\n"
-			printf " 13) Backup codes\n"
-			printf " 14) Doctor / Health check\n"
-			printf " 15) Web mode\n"
+			printf "  9) Export (csv/json)\n"
+			printf " 10) Import (csv/json)\n"
+			printf " 11) Help\n"
+			printf " 12) Check for updates\n"
+			printf " 13) Forgot / Reset master (use private key)\n"
+			printf " 14) Secure notes\n"
+			printf " 15) Passphrases\n"
+			printf " 16) Authenticators (TOTP)\n"
+			printf " 17) Backup codes\n"
+			printf " 18) Password generator\n"
+			printf " 19) Doctor / Health check\n"
+			printf " 20) Web mode\n"
 			printf "  0) Exit\n\n"
 			printf "Choose an option: "
 		fi
@@ -4795,13 +8039,60 @@ interactive_menu() {
 				fi
 				pause_menu
 				;;
-			9)  clear; cmd_help; pause_menu ;;
-			10) clear; cmd_update || true; pause_menu ;;
-			11) clear; cmd_forgot || true; pause_menu ;;
-			12) interactive_menu_notes ;;
-			13) interactive_menu_backup_codes ;;
-			14) clear; cmd_doctor || true; pause_menu ;;
-			15) clear; start_web_mode || true ;;  # ← Web Mode (experimental)
+			9)
+				clear
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Format (csv/json) [csv]: "
+					printf "\nFormat lain tersedia: tsv, ndjson/jsonl, md, html, txt, yaml/yml, xml, sql, ini, psv, rst, toml, org, scsv, csv-noheader, jsonc\n\n"
+				else
+					printf "Format (csv/json) [csv]: "
+					printf "\nOther available: tsv, ndjson/jsonl, md, html, txt, yaml/yml, xml, sql, ini, psv, rst, toml, org, scsv, csv-noheader, jsonc\n\n"
+				fi
+				read -r fmt || fmt="csv"
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Nama file keluaran (kosong=auto): "
+				else
+					printf "Output filename (blank=auto): "
+				fi
+				read -r oname || true
+				if [ -n "$oname" ]; then
+					cmd_export "$fmt" "$oname" || true
+				else
+					cmd_export "$fmt" || true
+				fi
+				pause_menu
+				;;
+			10)
+				clear
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Format impor (csv/json) [csv]: "
+					printf "\nFormat lain tersedia: tsv, ndjson/jsonl, md, html, txt, yaml/yml, xml, sql, ini, psv, rst, toml, org, scsv, csv-noheader, jsonc\n\n"
+				else
+					printf "Import format (csv/json) [csv]: "
+					printf "\nOther available: tsv, ndjson/jsonl, md, html, txt, yaml/yml, xml, sql, ini, psv, rst, toml, org, scsv, csv-noheader, jsonc\n\n"
+				fi
+				read -r ifmt || ifmt="csv"
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "Path file sumber: "
+				else
+					printf "Source file path: "
+				fi
+				read -r ipath || true
+				if [ -n "$ipath" ]; then
+					cmd_import "$ifmt" "$ipath" || true
+				fi
+				pause_menu
+				;;
+			11) clear; cmd_help; pause_menu ;;
+			12) clear; cmd_update || true; pause_menu ;;
+			13) clear; cmd_forgot || true; pause_menu ;;
+			14) interactive_menu_notes ;;
+			15) interactive_menu_passphrases ;;
+			16) interactive_menu_authenticators ;;
+			17) interactive_menu_backup_codes ;;
+			18) interactive_menu_generator ;;
+			19) clear; cmd_doctor || true; pause_menu ;;
+			20) clear; start_web_mode || true ;;  # ← Web Mode (experimental)
 			0)
 				if [ "$SPM_LANG" = "id" ]; then
 					printf "Keluar...\n"
@@ -4850,10 +8141,22 @@ main() {
 		update)           cmd_update "$@" ;;
 		forgot|forgotten) cmd_forgot "$@" ;;
 		doctor)           cmd_doctor "$@" ;;
+		export)           cmd_export "$@" ;;
+		import)           cmd_import "$@" ;;
+		generate|password-generate) cmd_generate_password "$@" ;;
 		notes-add)        cmd_notes_add "$@" ;;
 		notes-list)       cmd_notes_list "$@" ;;
 		notes-view)       cmd_notes_view "$@" ;;
 		notes-delete)     cmd_notes_delete "$@" ;;
+		passphrase-add)   cmd_passphrase_add "$@" ;;
+		passphrase-list)  cmd_passphrase_list "$@" ;;
+		passphrase-view)  cmd_passphrase_view "$@" ;;
+		passphrase-delete) cmd_passphrase_delete "$@" ;;
+		authenticator-add) cmd_authenticator_add "$@" ;;
+		authenticator-list) cmd_authenticator_list "$@" ;;
+		authenticator-view) cmd_authenticator_view "$@" ;;
+		authenticator-edit) cmd_authenticator_edit "$@" ;;
+		authenticator-delete) cmd_authenticator_delete "$@" ;;
 		backup-codes-add) cmd_backup_codes_add "$@" ;;
 		backup-codes-list) cmd_backup_codes_list "$@" ;;
 		backup-codes-view) cmd_backup_codes_view "$@" ;;

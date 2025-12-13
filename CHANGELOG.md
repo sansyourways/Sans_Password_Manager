@@ -5,6 +5,264 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.7.8] - 2025-12-13
+
+### Added
+- Export gained 5 more formats: toml, org, scsv (semicolon), csv-noheader, and jsonc. The menu prompt now also lists all available formats for clarity while keeping csv/json as the primary suggestion.
+
+### Changed
+- Version bumped to 2.7.8.
+
+## [2.7.8-import-update] - Unreleased
+
+### Added
+- Import command (menu + CLI) supports all export formats (csv/json primary; advanced formats accepted: tsv, ndjson/jsonl, md, html, txt, yaml/yml, xml, sql, ini, psv, rst, toml, org, scsv, csv-noheader, jsonc). IDs auto-renumber; entries are appended to the existing vault.
+
+### Fixed
+- SQL export now escapes quotes correctly; import command is fully wired into CLI dispatch.
+
+### Note
+- Version intentionally left at 2.7.8 per policy; not a full release yet.
+
+## [2.7.7] - 2025-12-13
+
+### Added
+- Export supports 8 more formats (yaml/yml, xml, sql, ini, psv, rst, plus jsonl alias) while prompts still show csv/json for simplicity.
+
+### Changed
+- Version bumped to 2.7.7.
+
+## [2.7.6] - 2025-12-13
+
+### Added
+- Export now supports 5 additional formats: tsv, ndjson, markdown, html, and txt alongside csv/json. Interactive menu prompt updated.
+
+### Changed
+- Version bumped to 2.7.6.
+
+## [2.7.5] - 2025-12-13
+
+### Added
+- Export command (`./spm.sh export <csv|json> [file]`) to dump all data types (passwords, notes, passphrases, authenticators, backup codes) to CSV or JSON; interactive menu includes Export.
+
+### Changed
+- Version bumped to 2.7.5. Export now auto-appends the correct extension when you provide a name without `.csv` or `.json`.
+
+## [2.7.0] - 2025-12-13
+
+### Added
+- Web themes (Dark, AMOLED, Cyberpunk, Light) with a header picker; header now shows current version and auto-checks GitHub for updates on load.
+
+### Changed
+- Dashboard “Update” control now pairs with the version display and update check popup when a newer release is detected.
+
+---
+
+## [2.7.1] - 2025-12-13
+
+### Changed
+- Refined themes: AMOLED (solid/elegant black), Cyberpunk (neon palette), and Light (clean bright panels/cards). Theme variables now apply across the whole UI.
+- Removed periodic auto-reload; rely on 30s idle auto-lock instead to avoid refresh churn.
+
+---
+
+## [2.7.2] - 2025-12-13
+
+### Changed
+- Tables and lists now use theme-aware backgrounds, borders, and text for better readability; Light theme tables/cards/panels adopt softer whites/grays instead of dark backgrounds.
+
+---
+
+## [2.7.3] - 2025-12-13
+
+### Changed
+- Light theme text and tables refined for readability; table wrappers now follow theme borders/background, and card headings/text use theme colors.
+- Primary buttons softened (lighter shadow) to better match pastel tones.
+
+---
+
+## [2.7.4] - 2025-12-13
+
+### Changed
+- Primary/add buttons now use a pastel blue gradient with themed borders across password, passphrase, generator, TOTP, and backup sections, improving the light theme look.
+
+---
+
+## [2.7.4] - 2025-12-13
+
+### Changed
+- Primary/add buttons (password, passphrase, generator, TOTP, backup codes) now use a pastel blue gradient with themed borders to better fit the light palette.
+
+## [2.6.1] - 2025-12-13
+
+### Changed
+- Easy password generator now produces human-memorable word-based passwords; secure mode remains random.
+- Generator toggles cover uppercase, lowercase, numbers, and symbols for both CLI and web.
+
+---
+
+## [2.6.0] - 2025-12-13
+
+### Added
+- Password generator in CLI and web with mode toggles (secure/easy/numeric), optional symbols, length slider, and strength/crack-time estimate.
+
+### Changed
+- Main menu and web dashboard now link to the password generator; autofill bookmarklet remains removed.
+
+---
+
+## [2.5.7] - 2025-12-13
+
+### Changed
+- Removed the web autofill bookmarklet feature and related buttons/endpoints; copy helpers remain.
+
+---
+
+## [2.5.6] - 2025-12-13
+
+### Fixed
+- Session cookies now set both Lax and cross-site variants (SameSite=None; Secure) so bookmarklets can send credentials when accessed over HTTPS.
+
+---
+
+## [2.5.5] - 2025-12-13
+
+### Changed
+- Bookmarklet now targets broader username/email selectors (mail/email/account/identifier) and falls back to the first text field to improve autofill success.
+
+---
+
+## [2.5.4] - 2025-12-13
+
+### Fixed
+- Avoided shadowing the JSON module when serving autofill/authenticator JSON responses to resolve bookmarklet errors.
+
+---
+
+## [2.5.3] - 2025-12-13
+
+### Fixed
+- Added CORS headers and OPTIONS handling for JSON endpoints (autofill, authenticator codes) so bookmarklets work across sites when allowed by the browser.
+
+---
+
+## [2.5.2] - 2025-12-13
+
+### Fixed
+- Clipboard copy buttons now include fallback copying for browsers without `navigator.clipboard`, making bookmarklet and secret copies reliable.
+
+---
+
+## [2.5.1] - 2025-12-13
+
+### Added
+- Web autofill helper bookmarklet for password entries plus copy buttons on password, notes, passphrase, and backup views.
+
+### Changed
+- Web password view can copy username/password/notes and expose bookmarklet for quick form fill; backup/passphrase/note views now have copy helpers.
+
+---
+
+## [2.5.2] - 2025-12-13
+
+### Fixed
+- Clipboard copy buttons now include fallback copying for browsers without `navigator.clipboard`, making bookmarklet and secret copies reliable.
+
+---
+
+## [2.5.3] - 2025-12-13
+
+### Fixed
+- Added CORS headers and OPTIONS handling for JSON endpoints (autofill, authenticator codes) so bookmarklets work across sites when allowed by the browser.
+
+---
+
+## [2.5.4] - 2025-12-13
+
+### Fixed
+- Avoided shadowing the JSON module when serving autofill/authenticator JSON responses to resolve bookmarklet errors.
+
+---
+
+## [2.5.5] - 2025-12-13
+
+### Changed
+- Bookmarklet now targets broader username/email selectors (mail/email/account/identifier) and falls back to the first text field to improve autofill success.
+
+---
+
+## [2.5.6] - 2025-12-13
+
+### Fixed
+- Session cookies now set both Lax and cross-site variants (SameSite=None; Secure) so bookmarklets can send credentials when accessed over HTTPS.
+
+---
+
+## [2.5.7] - 2025-12-13
+
+### Changed
+- Removed the web autofill bookmarklet feature and related buttons/endpoints; copy helpers remain.
+
+---
+
+## [2.6.0] - 2025-12-13
+
+### Added
+- Password generator in CLI and web with mode toggles (secure/easy/numeric), optional symbols, length slider, and strength/crack-time estimate.
+
+### Changed
+- Main menu and web dashboard now link to the password generator; autofill bookmarklet remains removed.
+
+---
+
+## [2.6.1] - 2025-12-13
+
+### Changed
+- “Easy” generator now creates human-memorable word-based passwords; secure mode keeps full random.
+- Generator toggles now cover uppercase, lowercase, numbers, and symbols for both CLI and web, with word-count mapping on easy mode.
+
+---
+
+## [2.5.0] - 2025-12-13
+
+### Added
+- Authenticator (TOTP) vault entries with configurable refresh interval, CLI CRUD, and live code display in web mode.
+
+### Changed
+- Main menu and doctor report now include authenticators; web dashboard adds a dedicated authenticator card.
+- CLI authenticator view now streams live TOTP codes with a countdown.
+
+---
+
+## [2.4.1] - 2025-12-13
+
+### Fixed
+- Web dashboard now hides passphrases and backup codes from the password entries list, keeping each item type in its proper section.
+
+---
+
+## [2.4.0] - 2025-12-13
+
+### Added
+- **Passphrase Vault**
+  - New CLI and menu flow for storing passphrases (`passphrase-add/list/view/delete`) with base64 storage in the encrypted vault.
+  - Viewing a passphrase forces a master password prompt for re-verification.
+- **Auto Updater**
+  - `./spm.sh update` now downloads the latest GitHub ZIP release, extracts `spm.sh`, and installs it to `/usr/local/bin/spm` (uses `sudo` when available).
+- **Web Mode: Passphrases & Backup Codes**
+  - Web dashboard now lists passphrases and backup codes with add/edit/view/delete flows and base64 decoding for display.
+  - Footer copyright + version and a right-aligned “Update” (refresh) action added.
+  - Automatic page refresh every 5 seconds to avoid stale cached views.
+
+### Changed
+- Interactive menu now includes a dedicated Passphrases section and renumbered items.
+- Doctor now reports counts for passwords, notes, passphrases, and backup codes.
+- Help and editor format hints updated with the new `PASSPHRASE` row type.
+
+### Fixed
+- Master password re-verification now properly loads the cached master password before comparisons.
+- Web mode now receives the running version via env (`SPM_VERSION`) to avoid undefined version display.
+
 ---
 
 ## [2.3.0] - 2025-12-12

@@ -81,6 +81,12 @@ SPM is designed for users who want:
 - 💾 **SAVE bundle** (backup + wipe vault lokal)  
 - 🧠 **Password Strength Coaching**  
 - 📝 **Secure Notes**  
+- 🔑 **Passphrase Vault** (simpan passphrase, verifikasi ulang saat melihat)  
+- 🔢 **Authenticator (TOTP)** dengan live code di web dan interval refresh kustom  
+- ⚡ **Copy cepat** (tombol copy di tampilan kata sandi, catatan, passphrase, kode backup)  
+- 🔒 **Generator kata sandi** (mode mudah/aman, kata mudah diingat, panjang/slider, toggle huruf besar/kecil/angka/simbol, estimasi kekuatan)
+- 🎨 **Tema web** (Dark, AMOLED, Cyberpunk, Light) + cek update di header
+- 📤 **Export vault** ke CSV/JSON (password, catatan, passphrase, authenticator, kode backup)
 - 📜 Kode Backup
 - 🔑 **Lupa password** via RSA private key  
 - 🩺 **Doctor mode** (diagnostik integritas vault & recovery)  
@@ -97,6 +103,12 @@ SPM is designed for users who want:
 - 💾 SAVE bundle (backup + wipe local)  
 - 🧠 Password strength analysis & coaching  
 - 📝 Secure notes
+- 🔑 Passphrase vault with re-verification on view  
+- 🔢 Authenticator (TOTP) with live codes and configurable refresh interval  
+- ⚡ Fast copy buttons on password, notes, passphrase, backup views  
+- 🔒 Password generator (easy memorable words + secure random, slider length/words, toggles for upper/lower/digits/symbols, strength estimate)
+- 🎨 Web themes (Dark, AMOLED, Cyberpunk, Light) with header update check/version display  
+- 📤 Vault export to CSV/JSON (passwords, notes, passphrases, authenticators, backup codes)
 - 📜 Backup codes  
 - 🔑 RSA-based recovery  
 - 🩺 Doctor diagnostics  
@@ -192,6 +204,8 @@ Includes:
 - Features:
   - View entries  
   - View notes  
+  - View passphrases  
+  - View backup codes  
   - Edit entries  
   - Local copy-to-clipboard  
 
@@ -208,11 +222,17 @@ Includes:
 ./spm.sh change-master
 ./spm.sh portable
 ./spm.sh save
+./spm.sh export [csv|json] [output-file]
+./spm.sh import [csv|json] <input-file>
 ./spm.sh forgot
 ./spm.sh notes-add
 ./spm.sh notes-list
 ./spm.sh notes-view <id>
 ./spm.sh notes-delete <id>
+./spm.sh passphrase-add
+./spm.sh passphrase-list
+./spm.sh passphrase-view <id>
+./spm.sh passphrase-delete <id>
 ./spm.sh backup-codes-add
 ./spm.sh backup-codes-list
 ./spm.sh backup-codes-view <id>
@@ -233,6 +253,41 @@ Includes:
 ```
 
 Stored inside encrypted vault.
+
+---
+
+## Export
+
+```bash
+./spm.sh export csv spm_export.csv
+./spm.sh export json
+```
+
+Exports passwords, secure notes, passphrases, backup codes, and authenticators. Defaults to `spm_export_<timestamp>.csv` when no filename is provided; if you omit the extension on a custom name, it is auto-added. Advanced formats available: tsv, ndjson/jsonl, md, html, txt, yaml/yml, xml, sql, ini, psv, rst, toml, org, scsv, csv-noheader, jsonc.
+
+---
+
+## Import
+
+```bash
+./spm.sh import csv my_export.csv
+./spm.sh import json backup.json
+```
+
+Imports passwords, secure notes, passphrases, backup codes, and authenticators from supported export formats (csv/json primary; advanced formats accepted as listed above). Entries are appended and IDs auto-renumbered.
+
+---
+
+## Passphrases
+
+```bash
+./spm.sh passphrase-add
+./spm.sh passphrase-list
+./spm.sh passphrase-view 1
+./spm.sh passphrase-delete 1
+```
+
+Stored inside the encrypted vault. Viewing prompts a master password re-check.
 
 ---
 
@@ -338,8 +393,9 @@ Creates encrypted backup, wipes local vault.
 
 ## Development & Versioning
 
-Version: **2.3.0**  
+Version: **2.7.8**  
 Uses **semantic versioning**.  
+`./spm.sh update` fetches the latest GitHub ZIP and installs to `/usr/local/bin/spm` (sudo may be required).  
 See `CHANGELOG.md` for details.
 
 ---
