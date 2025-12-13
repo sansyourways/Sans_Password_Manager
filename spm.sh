@@ -6384,9 +6384,9 @@ def export_content(fmt: str, plaintext: str):
         out=["CREATE TABLE spm_export(type TEXT,id TEXT,label TEXT,username TEXT,secret TEXT,notes TEXT,created TEXT,extra TEXT);"]
         for r in rows:
             vals=[str(r.get(k,"") or "") for k in fieldnames]
-            safe=[v.replace(\"'\",\"''\") for v in vals]
-            out.append(\"INSERT INTO spm_export(type,id,label,username,secret,notes,created,extra) VALUES ('%s');\" % (\"','\".join(safe)))
-        return \"\\n\".join(out) + \"\\n\"
+            safe=[v.replace("'", "''") for v in vals]
+            out.append("INSERT INTO spm_export(type,id,label,username,secret,notes,created,extra) VALUES ('%s');" % ("','".join(safe)))
+        return "\n".join(out) + "\n"
     if fmt == "ini":
         out=[]
         for r in rows:
