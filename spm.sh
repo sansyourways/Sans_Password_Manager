@@ -7641,21 +7641,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(b"Payload too large (max 5MB).")
                 return
 
+            body_bytes = self.rfile.read(length)
             fmt = "csv"
             content = ""
 
             if content_type.startswith("multipart/form-data"):
                 try:
-                    fs = cgi.FieldStorage(
-                        fp=self.rfile,
-                        headers=self.headers,
-                        environ={
-                            "REQUEST_METHOD": "POST",
-                            "CONTENT_TYPE": content_type,
-                            "CONTENT_LENGTH": str(length),
-                        },
-                        keep_blank_values=True,
-                    )
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", DeprecationWarning)
+                        fs = cgi.FieldStorage(
+                            fp=io.BytesIO(body_bytes),
+                            headers=self.headers,
+                            environ={
+                                "REQUEST_METHOD": "POST",
+                                "CONTENT_TYPE": content_type,
+                                "CONTENT_LENGTH": str(length),
+                            },
+                            keep_blank_values=True,
+                        )
                     fmt = (fs.getfirst("fmt") or "csv").lower()
                     file_item = fs["file"] if "file" in fs else None
                     if file_item is not None and getattr(file_item, "file", None):
@@ -7665,8 +7668,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 except Exception as e:
                     print(f"[import] multipart parse failed: {e}", file=sys.stderr)
                     content = ""
+                if not content:
+                    # Fallback lightweight parser
+                    try:
+                        fields = parse_multipart(body_bytes, content_type)
+                        fmt_raw = fields.get("fmt") or b"csv"
+                        fmt = fmt_raw.decode("utf-8", "ignore").lower()
+                        file_bytes = fields.get("file", b"")
+                        if file_bytes:
+                            content = file_bytes.decode("utf-8", "ignore")
+                        else:
+                            content = fields.get("data", b"").decode("utf-8", "ignore")
+                    except Exception as e:
+                        print(f"[import] fallback multipart parse failed: {e}", file=sys.stderr)
+                        content = ""
             else:
-                body_bytes = self.rfile.read(length)
                 body = body_bytes.decode("utf-8", errors="ignore")
                 data = urllib.parse.parse_qs(body)
                 fmt = (data.get("fmt") or ["csv"])[0].lower()
