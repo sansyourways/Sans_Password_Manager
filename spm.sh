@@ -4198,6 +4198,7 @@ import re
 import io
 import email.parser
 import email.policy
+import warnings
 
 VAULT_PATH = os.environ.get("SPM_VAULT_PATH")
 BIND_ADDR  = os.environ.get("SPM_WEB_BIND", "127.0.0.1")
