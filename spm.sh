@@ -4196,10 +4196,8 @@ import json as jsonlib
 import urllib.request
 import re
 import io
-import cgi
 import email.parser
 import email.policy
-import warnings
 
 VAULT_PATH = os.environ.get("SPM_VAULT_PATH")
 BIND_ADDR  = os.environ.get("SPM_WEB_BIND", "127.0.0.1")
@@ -6588,23 +6586,27 @@ def _apply_import(fmt: str, content: str, plaintext: str) -> str:
     return "\\n".join(lines) + "\\n"
 
 def parse_multipart(body_bytes: bytes, content_type: str):
-    """
-    Minimal multipart/form-data parser using email.parser (avoids deprecated cgi).
-    Returns dict name -> raw bytes.
-    """
-    ctype = content_type or ""
-    if "multipart/form-data" not in ctype:
-        return {}
-    header = f"Content-Type: {ctype}\r\n\r\n".encode("utf-8", "ignore")
-    msg = email.parser.BytesParser(policy=email.policy.default).parsebytes(header + body_bytes)
-    out = {}
-    for part in msg.iter_parts():
-        name = part.get_param("name", header="content-disposition")
-        if not name:
-            continue
-        payload = part.get_payload(decode=True)
-        out[name] = payload if payload is not None else b""
-    return out
+	"""
+	Minimal multipart/form-data parser using email.parser (avoids deprecated cgi).
+	Returns dict name -> raw bytes.
+	"""
+	ctype = content_type or ""
+	if "multipart/form-data" not in ctype:
+		return {}
+	_, params = cgi.parse_header(ctype)
+	boundary = params.get("boundary")
+	if not boundary:
+		return {}
+	header = f"Content-Type: multipart/form-data; boundary={boundary}\r\n\r\n".encode("utf-8", "ignore")
+	msg = email.parser.BytesParser(policy=email.policy.default).parsebytes(header + body_bytes)
+	out = {}
+	for part in msg.iter_parts():
+		name = part.get_param("name", header="content-disposition")
+		if not name:
+			continue
+		payload = part.get_payload(decode=True)
+		out[name] = payload if payload is not None else b""
+	return out
 
 def parse_entries(plaintext: str):
     """Password entries."""
@@ -7649,56 +7651,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             if content_type.lower().startswith("multipart/form-data"):
                 try:
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore", DeprecationWarning)
-                        fs = cgi.FieldStorage(
-                            fp=io.BytesIO(body_bytes),
-                            headers=self.headers,
-                            environ={
-                                "REQUEST_METHOD": "POST",
-                                "CONTENT_TYPE": content_type,
-                                "CONTENT_LENGTH": str(length),
-                            },
-                            keep_blank_values=True,
-                        )
-                    fmt = (fs.getfirst("fmt") or "csv").lower()
-                    file_item = fs["file"] if "file" in fs else None
-                    if file_item is not None and getattr(file_item, "file", None):
-                        up_bytes = file_item.file.read()
-                        if up_bytes:
-                            # Persist to a temp file for debugging/robustness
-                            import tempfile, os
-                            tmp_dir = os.path.join(tempfile.gettempdir(), "spm_web")
-                            os.makedirs(tmp_dir, exist_ok=True)
-                            with tempfile.NamedTemporaryFile(dir=tmp_dir, delete=False) as tmpf:
-                                tmpf.write(up_bytes)
-                                tmp_path = tmpf.name
-                            try:
-                                content = up_bytes.decode("utf-8", "ignore")
-                            finally:
-                                try:
-                                    os.remove(tmp_path)
-                                except Exception:
-                                    pass
+                    fields = parse_multipart(body_bytes, content_type)
+                    fmt_raw = fields.get("fmt") or b"csv"
+                    fmt = fmt_raw.decode("utf-8", "ignore").lower()
+                    file_bytes = fields.get("file", b"")
+                    if file_bytes:
+                        content = file_bytes.decode("utf-8", "ignore")
                     else:
-                        content = fs.getfirst("data", "") or ""
+                        content = fields.get("data", b"").decode("utf-8", "ignore")
                 except Exception as e:
                     print(f"[import] multipart parse failed: {e}", file=sys.stderr)
                     content = ""
-                if not content:
-                    # Fallback lightweight parser
-                    try:
-                        fields = parse_multipart(body_bytes, content_type)
-                        fmt_raw = fields.get("fmt") or b"csv"
-                        fmt = fmt_raw.decode("utf-8", "ignore").lower()
-                        file_bytes = fields.get("file", b"")
-                        if file_bytes:
-                            content = file_bytes.decode("utf-8", "ignore")
-                        else:
-                            content = fields.get("data", b"").decode("utf-8", "ignore")
-                    except Exception as e:
-                        print(f"[import] fallback multipart parse failed: {e}", file=sys.stderr)
-                        content = ""
             else:
                 body = body_bytes.decode("utf-8", errors="ignore")
                 data = urllib.parse.parse_qs(body)

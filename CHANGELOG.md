@@ -26,6 +26,7 @@ Keep-a-Changelog style format.
 - Multipart import now short-circuits on >5MB payloads and falls back gracefully when parsing fails.
 - Fixed missing `cgi` import in the web server so multipart upload parsing works consistently.
 - Fixed missing `warnings` import in the web server, restoring multipart parsing path.
+- Boundary-aware multipart parsing now defaults to email parser only (removed FieldStorage dependency to reduce upload failures).
 - SQL export now escapes quotes correctly; import command is fully wired into CLI dispatch.
 - Web export/import script no longer fails on SQL format generation (fixed quoting in generated Python).
 - RST export in web server generation now uses proper quoting (no more syntax error in generated Python).
