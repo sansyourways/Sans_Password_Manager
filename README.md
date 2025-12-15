@@ -152,7 +152,8 @@ SPM automatically checks / installs:
 - gpg  
 - openssl  
 - curl  
-- zip  
+- zip
+- mktemp
 - Clipboard helpers:
   - pbcopy (macOS)  
   - xclip / wl-copy (Linux)  
@@ -393,7 +394,7 @@ Creates encrypted backup, wipes local vault.
 
 ## Development & Versioning
 
-Version: **2.7.8**  
+Version: **2.7.9**  
 Uses **semantic versioning**.  
 `./spm.sh update` fetches the latest GitHub ZIP and installs to `/usr/local/bin/spm` (sudo may be required).  
 See `CHANGELOG.md` for details.

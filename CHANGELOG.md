@@ -5,6 +5,14 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.7.9] - 2025-12-15
+
+### Security
+- **Hardened Update Command:** The `update` command now verifies the SHA-256 checksum of the downloaded release asset against a signed checksum file from the release. This prevents man-in-the-middle (MitM) attacks during the update process.
+- **Secure Temporary Files:** The `make_tmp` function now exclusively uses `mktemp` to create temporary files, eliminating a race condition vulnerability that could have exposed sensitive data. The script will now fail if `mktemp` is not available.
+- **TOTP Secret Protection:** The `_spm_totp_code` function no longer passes the TOTP secret as a command-line argument. It is now passed via standard input to the Python script, preventing it from being exposed in the system's process list.
+- **Web Mode Warning:** Added a prominent warning to the `web` command, alerting users to the security implications of running a local web server and advising them to only use it on trusted networks.
+
 ## [2.7.8] - 2025-12-13
 
 ### Added
