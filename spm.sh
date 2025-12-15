@@ -77,13 +77,9 @@ now_iso() {
 }
 
 make_tmp() {
+	require_cmd mktemp
 	local tmp
-	if command -v mktemp >/dev/null 2>&1; then
-		tmp="$(mktemp "${TMPDIR:-/tmp}/spm.XXXXXX")"
-	else
-		tmp="${TMPDIR:-/tmp}/spm.$RANDOM.$RANDOM.$$"
-		: >"$tmp"
-	fi
+	tmp="$(mktemp "${TMPDIR:-/tmp}/spm.XXXXXX")"
 	chmod 600 "$tmp" 2>/dev/null || true
 	printf '%s\n' "$tmp"
 }
@@ -1789,11 +1785,11 @@ _spm_totp_code() {
 	local secret="$1"
 	local period="$2"
 	local algo="${3:-sha1}"
-	python3 - <<'PY' "$secret" "$period" "$algo"
+	printf '%s' "$secret" | python3 - "$period" "$algo" <<'PY'
 import base64, hashlib, hmac, struct, time, sys
-secret = sys.argv[1].replace(" ", "").upper()
-period = int(sys.argv[2]) if sys.argv[2].isdigit() and int(sys.argv[2]) > 0 else 30
-algo = sys.argv[3].lower()
+secret = sys.stdin.read().replace(" ", "").upper()
+period = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() and int(sys.argv[1]) > 0 else 30
+algo = sys.argv[2].lower() if len(sys.argv) > 2 else "sha1"
 if algo not in ("sha1", "sha256", "sha512"):
     algo = "sha1"
 try:
@@ -2596,6 +2592,7 @@ EOF
 
 cmd_update() {
 	require_cmd curl
+	require_cmd sha256sum
 	local unzip_cmd=""
 	if command -v unzip >/dev/null 2>&1; then
 		unzip_cmd="unzip -q"
@@ -2653,6 +2650,18 @@ cmd_update() {
 		return 1
 	fi
 
+	local sha_url
+	sha_url="$(printf '%s\n' "$json" | grep -E '"browser_download_url"' | grep -E 'spm\\.sh\\.sha256"' | head -n1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')" || true
+
+	if [ -z "$sha_url" ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "File checksum tidak ditemukan di rilis. Update manual diperlukan.\n"
+		else
+			printf "Checksum file not found in release. Manual update required.\n"
+		fi
+		return 1
+	fi
+
 	if [ "$latest_tag" = "$VERSION" ]; then
 		if [ "$SPM_LANG" = "id" ]; then
 			printf "\nSudah memakai versi terbaru. Reinstall? (yes/NO): "
@@ -2688,6 +2697,7 @@ cmd_update() {
 		mkdir -p "$tmpdir"
 	fi
 	local zip_path="$tmpdir/spm_latest.zip"
+	local sha_path="$tmpdir/spm.sh.sha256"
 
 	if [ "$SPM_LANG" = "id" ]; then
 		printf "Mengunduh: %s\n" "$asset_url"
@@ -2702,6 +2712,42 @@ cmd_update() {
 		fi
 		rm -rf "$tmpdir"
 		return 1
+	fi
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Mengunduh checksum: %s\n" "$sha_url"
+	else
+		printf "Downloading checksum: %s\n" "$sha_url"
+	fi
+	if ! curl -fL "$sha_url" -o "$sha_path"; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "Download checksum gagal.\n"
+		else
+			printf "Download checksum failed.\n"
+		fi
+		rm -rf "$tmpdir"
+		return 1
+	fi
+
+	local expected_sha
+	expected_sha=$(cut -d' ' -f1 < "$sha_path")
+	local actual_sha
+	actual_sha=$(sha256sum "$zip_path" | cut -d' ' -f1)
+
+	if [ "$expected_sha" != "$actual_sha" ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "Verifikasi checksum GAGAL. File update mungkin rusak atau telah diubah.\n"
+		else
+			printf "Checksum verification FAILED. The update file may be corrupted or tampered with.\n"
+		fi
+		rm -rf "$tmpdir"
+		return 1
+	fi
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Verifikasi checksum berhasil.\n"
+	else
+		printf "Checksum verification successful.\n"
 	fi
 
 	local extract_dir="$tmpdir/extract"
@@ -3949,6 +3995,11 @@ start_web_mode() {
 	echo "  SPM Web Mode"
 	echo "==========================================="
 	echo
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "\n\033[0;31mPERINGATAN: Menjalankan mode web akan mengekspos vault Anda melalui server HTTP. Lanjutkan hanya jika Anda berada di jaringan yang terpercaya.\033[0m\n\n"
+	else
+		printf "\n\033[0;31mWARNING: Running the web mode will expose your vault over an HTTP server. Only proceed if you are on a trusted network.\033[0m\n\n"
+	fi
 
 	if [ "${SPM_LANG:-en}" = "id" ]; then
 		echo "Mode ini akan menjalankan HTTP server sehingga kamu"
