@@ -4251,8 +4251,6 @@ import email.parser
 import email.policy
 import cgi
 import warnings
-import cgi
-import warnings
 
 VAULT_PATH = os.environ.get("SPM_VAULT_PATH")
 BIND_ADDR  = os.environ.get("SPM_WEB_BIND", "127.0.0.1")
@@ -6269,6 +6267,7 @@ def decrypt_vault(master: str) -> str:
     return subprocess.check_output(
         ["gpg", "--batch", "--yes", "--passphrase", master, "-d", VAULT_PATH],
         stderr=subprocess.DEVNULL,
+        timeout=30,
     ).decode("utf-8", errors="ignore")
 
 def encrypt_vault(master: str, plaintext: str) -> None:
@@ -6278,12 +6277,18 @@ def encrypt_vault(master: str, plaintext: str) -> None:
         stdin=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
-    p.communicate(input=plaintext.encode("utf-8"))
-    if p.returncode != 0:
+    try:
+        stdout, stderr = p.communicate(input=plaintext.encode("utf-8"), timeout=30)
+        if p.returncode != 0:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise RuntimeError("Failed to encrypt vault")
+        os.replace(tmp_path, VAULT_PATH)
+    except subprocess.TimeoutExpired:
+        p.kill()
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-        raise RuntimeError("Failed to encrypt vault")
-    os.replace(tmp_path, VAULT_PATH)
+        raise RuntimeError("Vault encryption timed out")
 
 def totp_code(secret_b32: str, period: int = 30, algo: str = "sha1") -> str:
     import hashlib, hmac, struct, base64
@@ -7683,6 +7688,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/import":
+            master = self._require_login()
+            if not master:
+                return
+            
+            # Set a timeout for the entire import operation (2 minutes)
+            import signal
+            
+            def timeout_handler(signum, frame):
+                raise TimeoutError("Import operation timed out")
+            
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(120)  # 2 minutes
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except Exception:
@@ -7693,30 +7710,68 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_header("Location", "/?err=No+data+provided")
                 self.end_headers()
                 return
-            if length > 5 * 1024 * 1024:
+            if length > 10 * 1024 * 1024:
                 self.send_response(413)
                 self.send_header("Content-Type", "text/plain")
                 self.end_headers()
-                self.wfile.write(b"Payload too large (max 5MB).")
+                self.wfile.write(b"Payload too large (max 10MB).")
                 return
 
+            print(f"[import] Reading {length} bytes from request body...", file=sys.stderr)
             body_bytes = self.rfile.read(length)
             fmt = "csv"
             content = ""
+            print(f"[import] Content-Type: {content_type}", file=sys.stderr)
 
             if content_type.lower().startswith("multipart/form-data"):
+                # Primary: cgi.FieldStorage for reliable file handling
                 try:
-                    fields = parse_multipart(body_bytes, content_type)
-                    fmt_raw = fields.get("fmt") or b"csv"
-                    fmt = fmt_raw.decode("utf-8", "ignore").lower()
-                    file_bytes = fields.get("file", b"")
-                    if file_bytes:
-                        content = file_bytes.decode("utf-8", "ignore")
+                    fs = cgi.FieldStorage(
+                        fp=io.BytesIO(body_bytes),
+                        environ={
+                            "REQUEST_METHOD": "POST",
+                            "CONTENT_TYPE": content_type,
+                            "CONTENT_LENGTH": str(length),
+                        },
+                        keep_blank_values=True,
+                    )
+                    fmt = (fs.getfirst("fmt") or "csv").lower()
+                    file_item = fs["file"] if "file" in fs else None
+                    if file_item is not None and getattr(file_item, "file", None):
+                        print("[import] Processing file upload...", file=sys.stderr)
+                        # Limit file size to prevent DoS (10MB max)
+                        MAX_FILE_SIZE = 10 * 1024 * 1024
+                        up_bytes = file_item.file.read(MAX_FILE_SIZE)
+                        if len(up_bytes) == MAX_FILE_SIZE:
+                            print("[import] Warning: File size limit reached, content may be truncated", file=sys.stderr)
+                        content = up_bytes.decode("utf-8", "ignore") if up_bytes else ""
+                        print(f"[import] File content read: {len(content)} characters", file=sys.stderr)
                     else:
-                        content = fields.get("data", b"").decode("utf-8", "ignore")
+                        content = fs.getfirst("data", "") or ""
                 except Exception as e:
-                    print(f"[import] multipart parse failed: {e}", file=sys.stderr)
-                    content = ""
+                    print(f"[import] FieldStorage parse failed: {e}", file=sys.stderr)
+                    content = ""  # Parse failed
+
+                # Fallback: boundary-aware email parser
+                if not content:
+                    try:
+                        fields = parse_multipart(body_bytes, content_type)
+                        fmt_raw = fields.get("fmt") or b"csv"
+                        fmt = fmt_raw.decode("utf-8", "ignore").lower()
+                        # Validate format is supported
+                        if fmt not in SUPPORTED_FORMATS:
+                            print(f"[import] Unsupported format '{fmt}', defaulting to csv", file=sys.stderr)
+                            fmt = "csv"
+                        file_bytes = fields.get("file", b"")
+                        if file_bytes:
+                            content = file_bytes.decode("utf-8", "ignore")
+                        else:
+                            content = fields.get("data", b"").decode("utf-8", "ignore")
+                        print("[import] Fallback multipart parser succeeded", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[import] fallback multipart parse failed: {e}", file=sys.stderr)
+                        print("[import] No valid content found in either parser", file=sys.stderr)
+                        content = ""
             else:
                 body = body_bytes.decode("utf-8", errors="ignore")
                 data = urllib.parse.parse_qs(body)
@@ -7736,21 +7791,58 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_header("Location", "/?err=No+data+provided")
                 self.end_headers()
                 return
-            plaintext = decrypt_vault(master)
+            print("[import] Starting vault decryption...", file=sys.stderr)
             try:
+                plaintext = decrypt_vault(master)
+                print("[import] Vault decrypted successfully", file=sys.stderr)
+            except Exception as e:
+                print(f"[import] Vault decryption failed: {e}", file=sys.stderr)
+                self.send_response(302)
+                err = urllib.parse.quote(f"Vault decryption failed: {e}")
+                self.send_header("Location", f"/?err={err}")
+                self.end_headers()
+                return
+                
+            try:
+                print("[import] Applying import data...", file=sys.stderr)
                 new_plain = _apply_import(fmt, content, plaintext)
+                print("[import] Import applied successfully", file=sys.stderr)
+            except Exception as e:
+                print(f"[import] Data processing failed: {e}", file=sys.stderr)
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+                self.send_response(302)
+                err = urllib.parse.quote(f"Data processing failed: {e}")
+                self.send_header("Location", f"/?err={err}")
+                self.end_headers()
+                return
+                
+            try:
+                print("[import] Encrypting vault...", file=sys.stderr)
                 encrypt_vault(master, new_plain)
+                print("[import] Vault encrypted successfully", file=sys.stderr)
                 self.send_response(302)
                 self.send_header("Location", "/?msg=import-ok")
                 self.end_headers()
                 return
             except Exception as e:
-                print(f"[import] failed: {e}", file=sys.stderr)
+                print(f"[import] Vault encryption failed: {e}", file=sys.stderr)
                 self.send_response(302)
-                err = urllib.parse.quote(str(e) or "Import failed")
+                err = urllib.parse.quote(f"Vault encryption failed: {e}")
                 self.send_header("Location", f"/?err={err}")
                 self.end_headers()
                 return
+            
+            except TimeoutError as e:
+                print(f"[import] Operation timed out: {e}", file=sys.stderr)
+                self.send_response(302)
+                err = urllib.parse.quote("Import operation timed out (2 minutes)")
+                self.send_header("Location", f"/?err={err}")
+                self.end_headers()
+                return
+                
+            finally:
+                signal.alarm(0)  # Cancel the alarm
 
         if path == "/passphrase-add":
             label = (data.get("label") or [""])[0].strip()
