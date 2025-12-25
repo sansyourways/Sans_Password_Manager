@@ -77,7 +77,7 @@ SPM is designed for users who want:
 - 🔐 **Vault terenkripsi GPG (AES-256)**  
 - 📟 **UI interaktif** (EN/ID)  
 - 🖥️ **Web Mode (Localhost)** — dashboard modern *offline-only*  
-- 📦 **Portable bundle** (script + vault + recovery)  
+- 📦 **Portable bundle** (script + vault + recovery + private key when available)  
 - 💾 **SAVE bundle** (backup + wipe vault lokal, menyertakan private key jika tersedia)  
 - 🧠 **Password Strength Coaching**  
 - 📝 **Secure Notes**  
@@ -99,7 +99,7 @@ SPM is designed for users who want:
 - 🔐 Encrypted vault (GPG AES-256)  
 - 🗂️ Clean interactive menu  
 - 🌐 Local Web Mode (browser UI, offline only)  
-- 📦 Portable bundle (ZIP)  
+- 📦 Portable bundle (ZIP; includes recovery + private key when present)  
 - 💾 SAVE bundle (backup + wipe local; includes private key when present)  
 - 🧠 Password strength analysis & coaching  
 - 📝 Secure notes

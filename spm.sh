@@ -2300,6 +2300,7 @@ cmd_portable() {
 	local bundle_name="${1:-"spm_portable_$(date +%Y%m%d_%H%M%S)"}"
 	local workdir="./$bundle_name"
 	local has_recovery="no"
+	local has_priv="no"
 
 	if [ -e "$workdir" ]; then
 		die "Target directory '$workdir' already exists. Choose another name."
@@ -2324,6 +2325,12 @@ cmd_portable() {
 		has_recovery="yes"
 	fi
 
+	# Copy private key if present
+	if [ -f "$RECOVERY_PRIV_DEFAULT" ]; then
+		cp "$RECOVERY_PRIV_DEFAULT" "$workdir/spm_recovery_private.pem" || die "Failed to copy private key to bundle."
+		has_priv="yes"
+	fi
+
 	local created_on
 	created_on="$(now_iso)"
 
@@ -2344,6 +2351,8 @@ Included files:
   - spm_vault.gpg         : encrypted password vault
   - spm_vault.gpg.recovery (optional)
                           : recovery file used with your RSA private key
+  - spm_recovery_private.pem (optional)
+                          : RSA private key (if found beside the script)
   - README.txt            : this instructions file
 
 Usage:
@@ -2359,9 +2368,7 @@ Usage:
        - ask for your master password to open the vault.
 
 Security notes:
-  - This portable bundle does NOT include your RSA private key
-    (spm_recovery_private.pem). Keep that file stored safely in your own
-    secure location (offline or separate backup).
+  - If the private key (`spm_recovery_private.pem`) exists beside your script, it is included here—protect this archive carefully.
   - With the private key + this bundle’s recovery file, you can use
     the "forgot password" feature to reset your master password.
   - Anyone who gets both your private key AND this bundle may be able
@@ -2383,6 +2390,8 @@ File yang disertakan:
   - spm_vault.gpg         : vault kata sandi terenkripsi
   - spm_vault.gpg.recovery (opsional)
                           : file pemulihan yang digunakan bersama private key RSA
+  - spm_recovery_private.pem (opsional)
+                          : private key RSA bila ditemukan
   - README.txt            : file petunjuk ini
 
 Cara pakai:
@@ -2399,9 +2408,7 @@ Cara pakai:
        - menanyakan kata sandi utama (master password) untuk membuka vault.
 
 Catatan keamanan:
-  - Bundle portabel INI TIDAK berisi private key RSA
-    (spm_recovery_private.pem). Simpan file private key tersebut
-    di lokasi yang aman (offline atau backup terpisah).
+  - Jika `spm_recovery_private.pem` tersedia di samping script, file tersebut disertakan—lindungi bundle ini baik-baik.
   - Dengan private key + file pemulihan di bundle ini, kamu bisa
     menggunakan fitur "lupa password" untuk reset master password.
   - Jika orang lain mendapatkan bundle ini DAN private key-mu,
@@ -2437,6 +2444,9 @@ EOF
 	printf "  - %s/spm_vault.gpg\n" "$bundle_name"
 	if [ "$has_recovery" = "yes" ]; then
 		printf "  - %s/spm_vault.gpg.recovery\n" "$bundle_name"
+	fi
+	if [ "$has_priv" = "yes" ]; then
+		printf "  - %s/spm_recovery_private.pem\n" "$bundle_name"
 	fi
 	printf "  - %s/README.txt\n" "$bundle_name"
 }

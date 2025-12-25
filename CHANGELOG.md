@@ -10,6 +10,7 @@ Keep-a-Changelog style format.
 ### Added
 - All copy buttons across password, secure note, passphrase, backup code, and authenticator views now show device-friendly toast notifications so users immediately see when clipboard actions succeed (or fail) on desktop and mobile browsers alike.
 - Save bundles now include your RSA private key (when present) alongside the vault and recovery file, making off-device restores self-contained.
+- Portable bundles now copy the RSA private key as well whenever it sits beside the script, so both bundle types are self-contained.
 - New `./spm.sh restore` command + menu option detects when you run SPM from a portable/save folder and moves `spm_vault.gpg` (and its recovery file) back to `~/.spm_vault.gpg`.
 - Restore now retargets the running session to the relocated vault so subsequent actions operate on the restored data immediately.
 - Restored vaults are now always written as hidden dotfiles (`~/.spm_vault.gpg` + `.recovery`) so they match the normal layout after leaving a bundle folder.
