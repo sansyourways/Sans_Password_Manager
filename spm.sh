@@ -6858,6 +6858,9 @@ def _apply_import(fmt: str, content: str, plaintext: str) -> str:
     else:
         rows = parse_plain_table(content)
 
+    if not rows:
+        raise ValueError("No records detected in upload.")
+
     for row in rows:
         t = (row.get("type","") or "").lower()
         if t in ("password","pass",""):
