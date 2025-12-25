@@ -2662,18 +2662,21 @@ cmd_restore() {
 		fi
 	fi
 
+	VAULT_FILE="$dest_vault"
+	RECOVERY_FILE="$dest_recovery"
+
 	if [ "$SPM_LANG" = "id" ]; then
 		printf "Vault dipindahkan ke %s.\n" "$dest_vault"
 		if [ -f "$dest_recovery" ]; then
 			printf "File pemulihan dipindahkan ke %s.\n" "$dest_recovery"
 		fi
-		printf "Jalankan SPM dari lokasi biasa (mis. ~/.spm_vault.gpg) untuk melanjutkan.\n"
+		printf "Sesi ini sekarang menggunakan vault di lokasi default; kamu bisa menjalankan SPM seperti biasa dari sana.\n"
 	else
 		printf "Vault moved to %s.\n" "$dest_vault"
 		if [ -f "$dest_recovery" ]; then
 			printf "Recovery file moved to %s.\n" "$dest_recovery"
 		fi
-		printf "You can now run SPM normally (using the home vault path).\n"
+		printf "This session now points to the default vault; feel free to launch SPM normally from that location.\n"
 	fi
 }
 
