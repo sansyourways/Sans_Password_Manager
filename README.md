@@ -275,7 +275,7 @@ Exports passwords, secure notes, passphrases, backup codes, and authenticators. 
 ./spm.sh import json backup.json
 ```
 
-Imports passwords, secure notes, passphrases, backup codes, and authenticators from supported export formats (csv/json primary; advanced formats accepted as listed above). Entries are appended and IDs auto-renumbered. Web mode overlays the entire Export/Import card with a loader during uploads, validates that at least one record was parsed, and automatically reloads the dashboard on success so the new rows appear immediately (errors show inline without redirect).
+Imports passwords, secure notes, passphrases, backup codes, and authenticators from supported export formats (csv/json primary; advanced formats accepted as listed above). Entries are appended and IDs auto-renumbered. Web mode overlays the entire Export/Import card with a loader during uploads, validates that at least one record was parsed, reports how many rows of each type were added, and automatically reloads the dashboard on success so the new rows appear immediately (errors show inline without redirect).
 
 ---
 

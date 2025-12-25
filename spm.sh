@@ -6736,7 +6736,7 @@ def _parse_import_rows(fmt: str, content: str):
     reader = csv.DictReader(content.splitlines(), delimiter=delim)
     return list(reader)
 
-def _apply_import(fmt: str, content: str, plaintext: str) -> str:
+def _apply_import(fmt: str, content: str, plaintext: str):
     import base64
     fmt = fmt.lower()
     if fmt not in SUPPORTED_FORMATS:
@@ -6756,6 +6756,8 @@ def _apply_import(fmt: str, content: str, plaintext: str) -> str:
 
     lines = plaintext.splitlines()
 
+    stats = {"passwords": 0, "notes": 0, "passphrases": 0, "backups": 0, "authenticators": 0}
+
     def add_password(r):
         pid = str(next_id("PASS", lines))
         lines.append("\\t".join([
@@ -6766,6 +6768,7 @@ def _apply_import(fmt: str, content: str, plaintext: str) -> str:
             (r.get("notes","") or "").replace("\\t"," "),
             r.get("created","") or ""
         ]))
+        stats["passwords"] += 1
 
     def add_note(r):
         nid = str(next_id("NOTE", lines))
@@ -6778,6 +6781,7 @@ def _apply_import(fmt: str, content: str, plaintext: str) -> str:
             r.get("created","") or "",
             "-"
         ]))
+        stats["notes"] += 1
 
     def add_passphrase(r):
         pid = str(next_id("PASSPHRASE", lines))
@@ -6790,6 +6794,7 @@ def _apply_import(fmt: str, content: str, plaintext: str) -> str:
             r.get("created","") or "",
             "-"
         ]))
+        stats["passphrases"] += 1
 
     def add_backup(r):
         bid = str(next_id("BACKUP_CODE", lines))
@@ -6802,6 +6807,7 @@ def _apply_import(fmt: str, content: str, plaintext: str) -> str:
             r.get("created","") or "",
             "-"
         ]))
+        stats["backups"] += 1
 
     def add_auth(r):
         aid = str(next_id("AUTH", lines))
@@ -6829,6 +6835,7 @@ def _apply_import(fmt: str, content: str, plaintext: str) -> str:
             r.get("created","") or "",
             algo
         ]))
+        stats["authenticators"] += 1
 
     def parse_plain_table(text):
         rows=[]
@@ -6861,8 +6868,11 @@ def _apply_import(fmt: str, content: str, plaintext: str) -> str:
     if not rows:
         raise ValueError("No records detected in upload.")
 
+    types_seen = set()
     for row in rows:
         t = (row.get("type","") or "").lower()
+        if t:
+            types_seen.add(t)
         if t in ("password","pass",""):
             add_password(row)
         elif t in ("note","notes"):
@@ -6874,7 +6884,10 @@ def _apply_import(fmt: str, content: str, plaintext: str) -> str:
         elif t in ("authenticator","auth"):
             add_auth(row)
 
-    return "\\n".join(lines) + "\\n"
+    total_added = sum(stats.values())
+    if total_added == 0:
+        raise ValueError("No supported records found in upload.")
+    return "\\n".join(lines) + "\\n", stats
 
 def parse_multipart(body_bytes: bytes, content_type: str):
 	"""
@@ -8013,10 +8026,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 sys.stderr.write('[import] Applying import data...\n')
                 plaintext = decrypt_vault(master)
-                new_plain = _apply_import(fmt, content, plaintext)
+                new_plain, stats = _apply_import(fmt, content, plaintext)
                 encrypt_vault(master, new_plain)
-                sys.stderr.write('[import] Vault successfully updated.\n')
-                respond_success()
+                sys.stderr.write(f"[import] Vault successfully updated ({stats}).\n")
+                summary = ", ".join(f"{v} {k}" for k,v in stats.items() if v)
+                respond_success(f"Import complete: {summary}.")
             except Exception as e:
                 sys.stderr.write(f"[import] Import process failed: {e}\n")
                 __import__("traceback").print_exc(file=sys.stderr)

@@ -46,6 +46,7 @@ Keep-a-Changelog style format.
 - Fixed duplicate web import submissions triggered by both inline and scripted handlers, eliminating the phantom second upload that caused “load failed” UI states.
 - Import now validates that the uploaded file contains at least one record and surfaces a clear error instead of silently doing nothing.
 - Web import success now triggers an automatic page reload so newly imported entries are visible right away.
+- Success responses now include per-type counts (passwords, notes, passphrases, backups, authenticators) so the UI and logs confirm what was imported.
 
 ### Note
 - Version intentionally left at 2.7.8 per policy; not a full release yet.
