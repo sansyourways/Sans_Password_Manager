@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.7.8"
+VERSION="2.7.9"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -5633,8 +5633,57 @@ VIEW_HTML = """<!doctype html>
       cursor:pointer;
       margin-right:6px;
     }
+    .toast {
+      position:fixed;
+      top:18px;
+      right:18px;
+      background:rgba(7,9,20,0.92);
+      border:1px solid rgba(159,163,240,0.45);
+      border-radius:12px;
+      padding:10px 14px;
+      font-size:12px;
+      letter-spacing:0.04em;
+      color:#f5f5f7;
+      opacity:0;
+      transform:translateY(-6px);
+      transition:opacity 0.25s ease, transform 0.25s ease;
+      pointer-events:none;
+      box-shadow:0 12px 30px rgba(0,0,0,0.55);
+      z-index:99;
+    }
+    .toast.show {
+      opacity:1;
+      transform:translateY(0);
+    }
+    .toast.error {
+      border-color:rgba(255,155,155,0.6);
+      color:#ffd0d8;
+    }
   </style>
   <script>
+    let toastTimer = null;
+    function ensureToast() {
+      let toast = document.getElementById('spm-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'spm-toast';
+        toast.className = 'toast';
+        toast.setAttribute('role','status');
+        toast.setAttribute('aria-live','polite');
+        toast.setAttribute('aria-atomic','true');
+        document.body.appendChild(toast);
+      }
+      return toast;
+    }
+    function showToast(message, ok=true) {
+      const toast = ensureToast();
+      toast.textContent = message || (ok ? 'Copied to clipboard.' : 'Copy failed.');
+      toast.classList.remove('error');
+      if (!ok) toast.classList.add('error'); else toast.classList.remove('error');
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toast.classList.remove('show'); }, 2000);
+    }
     function copyToClipboard(text) {
       if (!text) return Promise.resolve();
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -5657,7 +5706,11 @@ VIEW_HTML = """<!doctype html>
         }
       });
     }
-
+    function handleCopy(textPromise, label) {
+      textPromise
+        .then(() => showToast(label ? `${label} copied.` : 'Copied.'))
+        .catch(() => showToast('Copy failed.', false));
+    }
     function togglePassword() {
       const el = document.getElementById('pw');
       const btn = document.getElementById('pwbtn');
@@ -5673,11 +5726,11 @@ VIEW_HTML = """<!doctype html>
         btn.textContent = 'Show';
       }
     }
-    function copyText(id) {
+    function copyText(id, label) {
       const el = document.getElementById(id);
       if (!el) return;
       const text = el.getAttribute('data-real') || el.textContent || '';
-      copyToClipboard(text).catch(() => {});
+      handleCopy(copyToClipboard(text), label);
     }
   </script>
 </head>
@@ -5693,20 +5746,20 @@ VIEW_HTML = """<!doctype html>
     <div class="field">
       <div class="label">Username</div>
       <div class="value mono" id="user-val">__USER__</div>
-      <button class="btn-secondary" type="button" onclick="copyText('user-val')">Copy Username</button>
+      <button class="btn-secondary" type="button" onclick="copyText('user-val','Username')">Copy Username</button>
     </div>
     <div class="field">
       <div class="label">Password</div>
       <div class="value mono" id="pw" data-hidden="1" data-real="__PASS__">••••••••</div>
       <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
         <button id="pwbtn" class="btn-soft" type="button" onclick="togglePassword()">Show</button>
-        <button class="btn-secondary" type="button" onclick="copyText('pw')">Copy Password</button>
+        <button class="btn-secondary" type="button" onclick="copyText('pw','Password')">Copy Password</button>
       </div>
     </div>
     <div class="field">
       <div class="label">Notes</div>
       <div class="value mono" id="notes-val">__NOTES__</div>
-      <button class="btn-secondary" type="button" onclick="copyText('notes-val')">Copy Notes</button>
+      <button class="btn-secondary" type="button" onclick="copyText('notes-val','Notes')">Copy Notes</button>
     </div>
     <div class="field">
       <div class="label">Created at</div>
@@ -5727,6 +5780,7 @@ VIEW_HTML = """<!doctype html>
       </div>
     </div>
   </div>
+  <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   """ + AUTOLOCK_SCRIPT + """
 </body>
 </html>
@@ -5838,8 +5892,50 @@ NOTES_VIEW_HTML = """<!doctype html>
       text-decoration:underline;
     }
     .btn-secondary { border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.08); color:#f5f5f7; padding:6px 10px; font-size:12px; cursor:pointer; margin-right:6px; }
+    .toast {
+      position:fixed;
+      top:18px;
+      right:18px;
+      background:rgba(7,9,20,0.92);
+      border:1px solid rgba(159,163,240,0.45);
+      border-radius:12px;
+      padding:10px 14px;
+      font-size:12px;
+      letter-spacing:0.04em;
+      color:#f5f5f7;
+      opacity:0;
+      transform:translateY(-6px);
+      transition:opacity 0.25s ease, transform 0.25s ease;
+      pointer-events:none;
+      box-shadow:0 12px 30px rgba(0,0,0,0.55);
+      z-index:99;
+    }
+    .toast.show { opacity:1; transform:translateY(0); }
+    .toast.error { border-color:rgba(255,155,155,0.6); color:#ffd0d8; }
   </style>
   <script>
+    let toastTimer = null;
+    function ensureToast() {
+      let toast = document.getElementById('spm-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'spm-toast';
+        toast.className = 'toast';
+        toast.setAttribute('role','status');
+        toast.setAttribute('aria-live','polite');
+        toast.setAttribute('aria-atomic','true');
+        document.body.appendChild(toast);
+      }
+      return toast;
+    }
+    function showToast(message, ok=true) {
+      const toast = ensureToast();
+      toast.textContent = message || (ok ? 'Copied to clipboard.' : 'Copy failed.');
+      toast.classList.toggle('error', !ok);
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
+    }
     function copyToClipboard(text) {
       if (!text) return Promise.resolve();
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -5864,7 +5960,9 @@ NOTES_VIEW_HTML = """<!doctype html>
     }
     function copyText() {
       const text = document.getElementById('note-content').textContent || '';
-      copyToClipboard(text).catch(() => {});
+      copyToClipboard(text)
+        .then(() => showToast('Note copied.'))
+        .catch(() => showToast('Copy failed.', false));
     }
   </script>
 </head>
@@ -5895,12 +5993,7 @@ NOTES_VIEW_HTML = """<!doctype html>
       </form>
     </div>
   </div>
-  <script>
-    function copyText() {
-      const text = document.getElementById('note-content').textContent || '';
-      navigator.clipboard.writeText(text).catch(() => {});
-    }
-  </script>
+  <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   """ + AUTOLOCK_SCRIPT + """
 </body>
 </html>
@@ -5947,8 +6040,50 @@ PASSPHRASE_VIEW_HTML = """<!doctype html>
     .link { font-size:12px; color:#9fa3f0; text-decoration:none; }
     .link:hover { text-decoration:underline; }
     .btn-secondary { border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.08); color:#f5f5f7; padding:6px 10px; font-size:12px; cursor:pointer; margin-right:6px; }
+    .toast {
+      position:fixed;
+      top:18px;
+      right:18px;
+      background:rgba(7,9,20,0.92);
+      border:1px solid rgba(159,163,240,0.45);
+      border-radius:12px;
+      padding:10px 14px;
+      font-size:12px;
+      letter-spacing:0.04em;
+      color:#f5f5f7;
+      opacity:0;
+      transform:translateY(-6px);
+      transition:opacity 0.25s ease, transform 0.25s ease;
+      pointer-events:none;
+      box-shadow:0 12px 30px rgba(0,0,0,0.55);
+      z-index:99;
+    }
+    .toast.show { opacity:1; transform:translateY(0); }
+    .toast.error { border-color:rgba(255,155,155,0.6); color:#ffd0d8; }
   </style>
   <script>
+    let toastTimer = null;
+    function ensureToast() {
+      let toast = document.getElementById('spm-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'spm-toast';
+        toast.className = 'toast';
+        toast.setAttribute('role','status');
+        toast.setAttribute('aria-live','polite');
+        toast.setAttribute('aria-atomic','true');
+        document.body.appendChild(toast);
+      }
+      return toast;
+    }
+    function showToast(message, ok=true) {
+      const toast = ensureToast();
+      toast.textContent = message || (ok ? 'Copied to clipboard.' : 'Copy failed.');
+      toast.classList.toggle('error', !ok);
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
+    }
     function copyToClipboard(text) {
       if (!text) return Promise.resolve();
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -5973,7 +6108,9 @@ PASSPHRASE_VIEW_HTML = """<!doctype html>
     }
     function copySecret() {
       const text = document.getElementById('pass-secret').textContent || '';
-      copyToClipboard(text).catch(() => {});
+      copyToClipboard(text)
+        .then(() => showToast('Passphrase copied.'))
+        .catch(() => showToast('Copy failed.', false));
     }
   </script>
 </head>
@@ -5998,12 +6135,7 @@ PASSPHRASE_VIEW_HTML = """<!doctype html>
       </div>
     </div>
   </div>
-  <script>
-    function copySecret() {
-      const text = document.getElementById('pass-secret').textContent || '';
-      navigator.clipboard.writeText(text).catch(() => {});
-    }
-  </script>
+  <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   """ + AUTOLOCK_SCRIPT + """
 </body>
 </html>
@@ -6054,8 +6186,50 @@ BACKUP_VIEW_HTML = """<!doctype html>
     .link { font-size:12px; color:#9fa3f0; text-decoration:none; }
     .link:hover { text-decoration:underline; }
     .btn-secondary { border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.08); color:#f5f5f7; padding:6px 10px; font-size:12px; cursor:pointer; margin-right:6px; }
+    .toast {
+      position:fixed;
+      top:18px;
+      right:18px;
+      background:rgba(7,9,20,0.92);
+      border:1px solid rgba(159,163,240,0.45);
+      border-radius:12px;
+      padding:10px 14px;
+      font-size:12px;
+      letter-spacing:0.04em;
+      color:#f5f5f7;
+      opacity:0;
+      transform:translateY(-6px);
+      transition:opacity 0.25s ease, transform 0.25s ease;
+      pointer-events:none;
+      box-shadow:0 12px 30px rgba(0,0,0,0.55);
+      z-index:99;
+    }
+    .toast.show { opacity:1; transform:translateY(0); }
+    .toast.error { border-color:rgba(255,155,155,0.6); color:#ffd0d8; }
   </style>
   <script>
+    let toastTimer = null;
+    function ensureToast() {
+      let toast = document.getElementById('spm-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'spm-toast';
+        toast.className = 'toast';
+        toast.setAttribute('role','status');
+        toast.setAttribute('aria-live','polite');
+        toast.setAttribute('aria-atomic','true');
+        document.body.appendChild(toast);
+      }
+      return toast;
+    }
+    function showToast(message, ok=true) {
+      const toast = ensureToast();
+      toast.textContent = message || (ok ? 'Copied to clipboard.' : 'Copy failed.');
+      toast.classList.toggle('error', !ok);
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
+    }
     function copyToClipboard(text) {
       if (!text) return Promise.resolve();
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -6080,7 +6254,9 @@ BACKUP_VIEW_HTML = """<!doctype html>
     }
     function copyCodes() {
       const text = document.getElementById('backup-codes').textContent || '';
-      copyToClipboard(text).catch(() => {});
+      copyToClipboard(text)
+        .then(() => showToast('Backup codes copied.'))
+        .catch(() => showToast('Copy failed.', false));
     }
   </script>
 </head>
@@ -6106,12 +6282,7 @@ BACKUP_VIEW_HTML = """<!doctype html>
       </div>
     </div>
   </div>
-  <script>
-    function copyCodes() {
-      const text = document.getElementById('backup-codes').textContent || '';
-      navigator.clipboard.writeText(text).catch(() => {});
-    }
-  </script>
+  <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   """ + AUTOLOCK_SCRIPT + """
 </body>
 </html>
@@ -6371,6 +6542,26 @@ AUTH_VIEW_HTML = """<!doctype html>
     .btn-danger { background:rgba(255,77,106,0.16); color:#ffd0d8; }
     .link { font-size:12px; color:#9fa3f0; text-decoration:none; }
     .link:hover { text-decoration:underline; }
+    .toast {
+      position:fixed;
+      top:18px;
+      right:18px;
+      background:rgba(7,9,20,0.92);
+      border:1px solid rgba(159,163,240,0.45);
+      border-radius:12px;
+      padding:10px 14px;
+      font-size:12px;
+      letter-spacing:0.04em;
+      color:#f5f5f7;
+      opacity:0;
+      transform:translateY(-6px);
+      transition:opacity 0.25s ease, transform 0.25s ease;
+      pointer-events:none;
+      box-shadow:0 12px 30px rgba(0,0,0,0.55);
+      z-index:99;
+    }
+    .toast.show { opacity:1; transform:translateY(0); }
+    .toast.error { border-color:rgba(255,155,155,0.6); color:#ffd0d8; }
   </style>
 </head>
 <body>
@@ -6405,7 +6596,18 @@ AUTH_VIEW_HTML = """<!doctype html>
       </div>
     </div>
   </div>
+  <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   <script>
+    let toastTimer = null;
+    function showToast(message, ok=true) {
+      const toast = document.getElementById('spm-toast');
+      if (!toast) return;
+      toast.textContent = message || (ok ? 'Copied to clipboard.' : 'Copy failed.');
+      toast.classList.toggle('error', !ok);
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
+    }
     (function() {
       const period = Number("__PERIOD__") || 30;
       const id = "__ID__";
@@ -6428,7 +6630,9 @@ AUTH_VIEW_HTML = """<!doctype html>
           return;
         }
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(currentCode).then(() => showStatus("Copied!")).catch(() => fallbackCopy());
+          navigator.clipboard.writeText(currentCode)
+            .then(() => { showStatus("Copied!"); showToast("Code copied."); })
+            .catch(() => fallbackCopy());
         } else {
           fallbackCopy();
         }
@@ -6442,8 +6646,10 @@ AUTH_VIEW_HTML = """<!doctype html>
           document.execCommand("copy");
           ta.remove();
           showStatus("Copied!");
+          showToast("Code copied.");
         } catch (e) {
           showStatus("Copy failed", false);
+          showToast("Copy failed.", false);
         }
       }
       if (copyBtn) {

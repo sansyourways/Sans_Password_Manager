@@ -83,7 +83,7 @@ SPM is designed for users who want:
 - 📝 **Secure Notes**  
 - 🔑 **Passphrase Vault** (simpan passphrase, verifikasi ulang saat melihat)  
 - 🔢 **Authenticator (TOTP)** dengan live code di web (plus tombol copy), interval kustom, dan pilihan algoritma SHA1/SHA256/SHA512  
-- ⚡ **Copy cepat** (tombol copy di tampilan kata sandi, catatan, passphrase, kode backup)  
+- ⚡ **Copy cepat** (tombol copy di tampilan kata sandi, catatan, passphrase, kode backup) dengan notifikasi pop-up sukses yang ramah perangkat  
 - 🔒 **Generator kata sandi** (mode mudah/aman, kata mudah diingat, panjang/slider, toggle huruf besar/kecil/angka/simbol, estimasi kekuatan)
 - 🎨 **Tema web** (Dark, AMOLED, Cyberpunk, Light) + cek update di header
 - 📤 **Export/Import vault** (CLI & Web) ke CSV/JSON + format lanjutan
@@ -105,7 +105,7 @@ SPM is designed for users who want:
 - 📝 Secure notes
 - 🔑 Passphrase vault with re-verification on view  
 - 🔢 Authenticator (TOTP) with live codes + copy button, configurable interval, and SHA1/SHA256/SHA512 algorithms  
-- ⚡ Fast copy buttons on password, notes, passphrase, backup views  
+- ⚡ Fast copy buttons on password, notes, passphrase, backup views with device-friendly toast confirmation  
 - 🔒 Password generator (easy memorable words + secure random, slider length/words, toggles for upper/lower/digits/symbols, strength estimate)
 - 🎨 Web themes (Dark, AMOLED, Cyberpunk, Light) with header update check/version display  
 - 📤 Vault export/import (CLI & Web) to CSV/JSON + advanced formats
@@ -208,7 +208,7 @@ Includes:
   - View passphrases  
   - View backup codes  
   - Edit entries  
-  - Local copy-to-clipboard  
+  - Local copy-to-clipboard with inline toast feedback  
 
 ---
 

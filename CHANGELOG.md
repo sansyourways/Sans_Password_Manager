@@ -7,6 +7,9 @@ Keep-a-Changelog style format.
 
 ## [2.7.9] - 2025-12-15
 
+### Added
+- All copy buttons across password, secure note, passphrase, backup code, and authenticator views now show device-friendly toast notifications so users immediately see when clipboard actions succeed (or fail) on desktop and mobile browsers alike.
+
 ### Security
 - **Hardened Update Command:** The `update` command now verifies the SHA-256 checksum of the downloaded release asset against a signed checksum file from the release. This prevents man-in-the-middle (MitM) attacks during the update process.
 - **Secure Temporary Files:** The `make_tmp` function now exclusively uses `mktemp` to create temporary files, eliminating a race condition vulnerability that could have exposed sensitive data. The script will now fail if `mktemp` is not available.
