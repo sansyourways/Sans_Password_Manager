@@ -9,6 +9,8 @@ Keep-a-Changelog style format.
 
 ### Added
 - All copy buttons across password, secure note, passphrase, backup code, and authenticator views now show device-friendly toast notifications so users immediately see when clipboard actions succeed (or fail) on desktop and mobile browsers alike.
+- Save bundles now include your RSA private key (when present) alongside the vault and recovery file, making off-device restores self-contained.
+- New `./spm.sh restore` command + menu option detects when you run SPM from a portable/save folder and moves `spm_vault.gpg` (and its recovery file) back to `~/.spm_vault.gpg`.
 
 ### Security
 - **Hardened Update Command:** The `update` command now verifies the SHA-256 checksum of the downloaded release asset against a signed checksum file from the release. This prevents man-in-the-middle (MitM) attacks during the update process.

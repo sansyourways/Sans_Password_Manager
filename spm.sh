@@ -2457,6 +2457,7 @@ cmd_save() {
 
 	local workdir="./$bundle_name"
 	local has_recovery="no"
+	local has_priv="no"
 	local archive_path=""
 
 	if [ -e "$workdir" ]; then
@@ -2482,6 +2483,12 @@ cmd_save() {
 		has_recovery="yes"
 	fi
 
+	# Copy private key if present so backup contains full recovery material
+	if [ -f "$RECOVERY_PRIV_DEFAULT" ]; then
+		cp "$RECOVERY_PRIV_DEFAULT" "$workdir/spm_recovery_private.pem" || die "Failed to copy private key."
+		has_priv="yes"
+	fi
+
 	local created_on
 	created_on="$(now_iso)"
 
@@ -2503,6 +2510,7 @@ Included files:
   - spm.sh                 : executable SPM script
   - spm_vault.gpg          : encrypted vault
   - spm_vault.gpg.recovery : (optional) recovery file
+  - spm_recovery_private.pem : (optional) RSA private key if found beside the script
   - README.txt             : instructions
 
 How to restore:
@@ -2514,17 +2522,18 @@ How to restore:
 
 Security notes:
   - Keep this backup offline (USB, encrypted disk, cloud with 2FA).
-  - Private key (spm_recovery_private.pem) is NOT in this archive.
-  - Without your private key, the recovery file cannot be used.
+  - If spm_recovery_private.pem was found, it is included in this archive—protect it carefully.
+  - Anyone with both this bundle and your private key could reset the vault password.
 
 ------------------------------------------------------------
 [ID]
 
 File yang disertakan:
-  - spm.sh                 : script SPM
-  - spm_vault.gpg          : vault terenkripsi
-  - spm_vault.gpg.recovery : (opsional) file pemulihan
-  - README.txt             : petunjuk
+  - spm.sh                   : script SPM
+  - spm_vault.gpg            : vault terenkripsi
+  - spm_vault.gpg.recovery   : (opsional) file pemulihan
+  - spm_recovery_private.pem : (opsional) private key RSA bila ditemukan
+  - README.txt               : petunjuk
 
 Cara mengembalikan:
   1. Pindahkan arsip ini ke perangkat tujuan.
@@ -2535,8 +2544,8 @@ Cara mengembalikan:
 
 Catatan keamanan:
   - Simpan backup di tempat aman (USB, disk terenkripsi, cloud dengan 2FA).
-  - Private key (spm_recovery_private.pem) TIDAK disertakan.
-  - Tanpa private key, file pemulihan tidak dapat digunakan.
+  - Jika spm_recovery_private.pem tersedia, file tersebut disertakan—lindungi arsip ini baik-baik.
+  - Jika orang lain mendapatkan bundle ini + private key, mereka bisa mereset master password.
 
 EOF
 
@@ -2584,8 +2593,88 @@ EOF
 	if [ "$has_recovery" = "yes" ]; then
 		printf "  - spm_vault.gpg.recovery\n"
 	fi
+	if [ "$has_priv" = "yes" ]; then
+		printf "  - spm_recovery_private.pem\n"
+	fi
 	printf "  - README.txt\n"
 	printf "Final archive: %s\n" "$archive_path"
+}
+
+# ----- Restore helper for portable/save bundles ------------------------------
+
+cmd_restore() {
+	local bundle_vault="./spm_vault.gpg"
+	local bundle_recovery="./spm_vault.gpg.recovery"
+	local dest_vault="$DEFAULT_VAULT_PATH"
+	local dest_recovery="${dest_vault}.recovery"
+
+	if [ "$VAULT_FILE" != "$bundle_vault" ] || [ ! -f "$bundle_vault" ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "Perintah restore harus dijalankan dari folder bundle (berisi spm_vault.gpg).\n"
+		else
+			printf "The restore command must be run inside a portable/save bundle (with spm_vault.gpg next to the script).\n"
+		fi
+		return 1
+	fi
+
+	if [ -f "$dest_vault" ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "Vault sudah ada di %s. Timpa? (yes/NO): " "$dest_vault"
+		else
+			printf "Vault already exists at %s. Overwrite? (yes/NO): " "$dest_vault"
+		fi
+		local ans
+		read -r ans || ans="no"
+		case "$ans" in
+			yes|y|YES|Y) ;;
+			*) printf "Restore dibatalkan.\n"; return 1 ;;
+		esac
+	fi
+
+	mkdir -p "$(dirname "$dest_vault")" || die "Failed to create destination directory."
+
+	if ! mv "$bundle_vault" "$dest_vault" 2>/dev/null; then
+		cp "$bundle_vault" "$dest_vault" || die "Failed to copy vault."
+		rm -f "$bundle_vault"
+	fi
+	chmod 600 "$dest_vault" 2>/dev/null || true
+
+	if [ -f "$bundle_recovery" ]; then
+		if [ -f "$dest_recovery" ]; then
+			if [ "$SPM_LANG" = "id" ]; then
+				printf "File pemulihan sudah ada di %s. Timpa? (yes/NO): " "$dest_recovery"
+			else
+				printf "Recovery file already exists at %s. Overwrite? (yes/NO): " "$dest_recovery"
+			fi
+			local ans2
+			read -r ans2 || ans2="no"
+			case "$ans2" in
+				yes|y|YES|Y) ;;
+				*) bundle_recovery="" ;;
+			esac
+		fi
+		if [ -n "$bundle_recovery" ] && [ -f "./spm_vault.gpg.recovery" ]; then
+			if ! mv "./spm_vault.gpg.recovery" "$dest_recovery" 2>/dev/null; then
+				cp "./spm_vault.gpg.recovery" "$dest_recovery" || die "Failed to copy recovery file."
+				rm -f "./spm_vault.gpg.recovery"
+			fi
+			chmod 600 "$dest_recovery" 2>/dev/null || true
+		fi
+	fi
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Vault dipindahkan ke %s.\n" "$dest_vault"
+		if [ -f "$dest_recovery" ]; then
+			printf "File pemulihan dipindahkan ke %s.\n" "$dest_recovery"
+		fi
+		printf "Jalankan SPM dari lokasi biasa (mis. ~/.spm_vault.gpg) untuk melanjutkan.\n"
+	else
+		printf "Vault moved to %s.\n" "$dest_vault"
+		if [ -f "$dest_recovery" ]; then
+			printf "Recovery file moved to %s.\n" "$dest_recovery"
+		fi
+		printf "You can now run SPM normally (using the home vault path).\n"
+	fi
 }
 
 # ----- Update / Forgot / Doctor ----------------------------------------------
@@ -3550,6 +3639,7 @@ Perintah utama (CLI):
   ./spm.sh change-master   → Ganti kata sandi utama (re-encrypt vault)
   ./spm.sh portable [nama] → Buat bundle portable (script + vault + file pemulihan)
   ./spm.sh save [nama]     → Buat bundle portable lalu hapus vault lokal
+  ./spm.sh restore         → Pindahkan vault bundle ke lokasi default (~/.spm_vault.gpg)
   ./spm.sh export [fmt] [file]
                             → Ekspor semua data (password/catatan/passphrase/authenticator/kode backup) ke csv/json
   ./spm.sh import [fmt] <file>
@@ -3643,6 +3733,7 @@ Main commands (CLI):
   ./spm.sh change-master   → Change master password (re-encrypt vault)
   ./spm.sh portable [name] → Create portable bundle (script + vault + recovery files)
   ./spm.sh save [name]     → Create portable bundle and wipe local vault
+  ./spm.sh restore         → Move bundle vault back to default location (~/.spm_vault.gpg)
   ./spm.sh export [fmt] [file]
                             → Export all data (passwords/notes/passphrases/authenticators/backup codes) to csv/json
   ./spm.sh import [fmt] <file>
@@ -9094,6 +9185,7 @@ interactive_menu() {
 			printf " 18) Generator password\n"
 			printf " 19) Doctor / Health check\n"
 			printf " 20) Mode web\n"
+			printf " 21) Restore vault dari bundle portable/save\n"
 			printf "  0) Keluar\n\n"
 			printf "Pilih menu: "
 		else
@@ -9125,6 +9217,7 @@ interactive_menu() {
 			printf " 18) Password generator\n"
 			printf " 19) Doctor / Health check\n"
 			printf " 20) Web mode\n"
+			printf " 21) Restore vault from bundle\n"
 			printf "  0) Exit\n\n"
 			printf "Choose an option: "
 		fi
@@ -9256,6 +9349,7 @@ interactive_menu() {
 			18) interactive_menu_generator ;;
 			19) clear; cmd_doctor || true; pause_menu ;;
 			20) clear; start_web_mode || true ;;  # ← Web Mode (experimental)
+			21) clear; cmd_restore || true; pause_menu ;;
 			0)
 				if [ "$SPM_LANG" = "id" ]; then
 					printf "Keluar...\n"
@@ -9301,6 +9395,7 @@ main() {
 		change-master)    cmd_change_master "$@" ;;
 		portable)         cmd_portable "$@" ;;
 		save)             cmd_save "$@" ;;
+		restore)          cmd_restore "$@" ;;
 		update)           cmd_update "$@" ;;
 		forgot|forgotten) cmd_forgot "$@" ;;
 		doctor)           cmd_doctor "$@" ;;

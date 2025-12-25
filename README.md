@@ -78,7 +78,7 @@ SPM is designed for users who want:
 - 📟 **UI interaktif** (EN/ID)  
 - 🖥️ **Web Mode (Localhost)** — dashboard modern *offline-only*  
 - 📦 **Portable bundle** (script + vault + recovery)  
-- 💾 **SAVE bundle** (backup + wipe vault lokal)  
+- 💾 **SAVE bundle** (backup + wipe vault lokal, menyertakan private key jika tersedia)  
 - 🧠 **Password Strength Coaching**  
 - 📝 **Secure Notes**  
 - 🔑 **Passphrase Vault** (simpan passphrase, verifikasi ulang saat melihat)  
@@ -100,7 +100,7 @@ SPM is designed for users who want:
 - 🗂️ Clean interactive menu  
 - 🌐 Local Web Mode (browser UI, offline only)  
 - 📦 Portable bundle (ZIP)  
-- 💾 SAVE bundle (backup + wipe local)  
+- 💾 SAVE bundle (backup + wipe local; includes private key when present)  
 - 🧠 Password strength analysis & coaching  
 - 📝 Secure notes
 - 🔑 Passphrase vault with re-verification on view  
@@ -223,6 +223,7 @@ Includes:
 ./spm.sh change-master
 ./spm.sh portable
 ./spm.sh save
+./spm.sh restore
 ./spm.sh export [csv|json] [output-file]
 ./spm.sh import [csv|json] <input-file>
 ./spm.sh forgot
