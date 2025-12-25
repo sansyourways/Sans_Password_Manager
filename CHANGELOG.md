@@ -12,6 +12,7 @@ Keep-a-Changelog style format.
 - Save bundles now include your RSA private key (when present) alongside the vault and recovery file, making off-device restores self-contained.
 - New `./spm.sh restore` command + menu option detects when you run SPM from a portable/save folder and moves `spm_vault.gpg` (and its recovery file) back to `~/.spm_vault.gpg`.
 - Restore now retargets the running session to the relocated vault so subsequent actions operate on the restored data immediately.
+- Restored vaults are now always written as hidden dotfiles (`~/.spm_vault.gpg` + `.recovery`) so they match the normal layout after leaving a bundle folder.
 
 ### Security
 - **Hardened Update Command:** The `update` command now verifies the SHA-256 checksum of the downloaded release asset against a signed checksum file from the release. This prevents man-in-the-middle (MitM) attacks during the update process.

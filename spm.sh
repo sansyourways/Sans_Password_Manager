@@ -2605,7 +2605,7 @@ EOF
 cmd_restore() {
 	local bundle_vault="./spm_vault.gpg"
 	local bundle_recovery="./spm_vault.gpg.recovery"
-	local dest_vault="$DEFAULT_VAULT_PATH"
+	local dest_vault="$HOME/.spm_vault.gpg"
 	local dest_recovery="${dest_vault}.recovery"
 
 	if [ "$VAULT_FILE" != "$bundle_vault" ] || [ ! -f "$bundle_vault" ]; then
