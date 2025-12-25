@@ -5341,7 +5341,7 @@ MAIN_HTML = """<!doctype html>
           setStatus(msg, true);
           form.reset();
           setOverlay("success", msg);
-          clearOverlayLater(1500);
+          setTimeout(() => { window.location.reload(); }, 800);
         })
         .catch((err) => {
           const msg = err.message || "Import failed.";
