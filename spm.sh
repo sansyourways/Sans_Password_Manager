@@ -6738,6 +6738,7 @@ def _parse_import_rows(fmt: str, content: str):
 
 def _apply_import(fmt: str, content: str, plaintext: str):
     import base64
+    tab = "\t"
     fmt = fmt.lower()
     if fmt not in SUPPORTED_FORMATS:
         raise ValueError("Unsupported format")
@@ -6747,7 +6748,7 @@ def _apply_import(fmt: str, content: str, plaintext: str):
         for ln in lines:
             if not ln:
                 continue
-            parts = ln.split("\\t")
+            parts = ln.split(tab)
             if tag == "PASS" and parts[0].isdigit():
                 max_id = max(max_id, int(parts[0]))
             elif parts[0] == tag and len(parts) > 1 and parts[1].isdigit():
@@ -6760,12 +6761,12 @@ def _apply_import(fmt: str, content: str, plaintext: str):
 
     def add_password(r):
         pid = str(next_id("PASS", lines))
-        lines.append("\\t".join([
+        lines.append(tab.join([
             pid,
-            (r.get("label","") or "").replace("\\t"," "),
-            (r.get("username","") or "").replace("\\t"," "),
+            (r.get("label","") or "").replace(tab," "),
+            (r.get("username","") or "").replace(tab," "),
             r.get("secret","") or "",
-            (r.get("notes","") or "").replace("\\t"," "),
+            (r.get("notes","") or "").replace(tab," "),
             r.get("created","") or ""
         ]))
         stats["passwords"] += 1
@@ -6773,10 +6774,10 @@ def _apply_import(fmt: str, content: str, plaintext: str):
     def add_note(r):
         nid = str(next_id("NOTE", lines))
         body_b64 = base64.b64encode((r.get("secret","") or "").encode("utf-8")).decode("ascii")
-        lines.append("\\t".join([
+        lines.append(tab.join([
             "NOTE",
             nid,
-            (r.get("label","") or "").replace("\\t"," "),
+            (r.get("label","") or "").replace(tab," "),
             body_b64,
             r.get("created","") or "",
             "-"
@@ -6786,10 +6787,10 @@ def _apply_import(fmt: str, content: str, plaintext: str):
     def add_passphrase(r):
         pid = str(next_id("PASSPHRASE", lines))
         secret_b64 = base64.b64encode((r.get("secret","") or "").encode("utf-8")).decode("ascii")
-        lines.append("\\t".join([
+        lines.append(tab.join([
             "PASSPHRASE",
             pid,
-            (r.get("label","") or "").replace("\\t"," "),
+            (r.get("label","") or "").replace(tab," "),
             secret_b64,
             r.get("created","") or "",
             "-"
@@ -6799,10 +6800,10 @@ def _apply_import(fmt: str, content: str, plaintext: str):
     def add_backup(r):
         bid = str(next_id("BACKUP_CODE", lines))
         codes_b64 = base64.b64encode((r.get("secret","") or "").encode("utf-8")).decode("ascii")
-        lines.append("\\t".join([
+        lines.append(tab.join([
             "BACKUP_CODE",
             bid,
-            (r.get("label","") or "").replace("\\t"," "),
+            (r.get("label","") or "").replace(tab," "),
             codes_b64,
             r.get("created","") or "",
             "-"
@@ -6826,10 +6827,10 @@ def _apply_import(fmt: str, content: str, plaintext: str):
                 if part.startswith("period="):
                     period_val = part.split("=",1)[1]
         period_val = period_val or str(r.get("period","") or r.get("extra","")).replace("period=","") or "30"
-        lines.append("\\t".join([
+        lines.append(tab.join([
             "AUTH",
             aid,
-            (r.get("label","") or "").replace("\\t"," "),
+            (r.get("label","") or "").replace(tab," "),
             r.get("secret","") or "",
             period_val or "30",
             r.get("created","") or "",
@@ -6887,7 +6888,7 @@ def _apply_import(fmt: str, content: str, plaintext: str):
     total_added = sum(stats.values())
     if total_added == 0:
         raise ValueError("No supported records found in upload.")
-    return "\\n".join(lines) + "\\n", stats
+    return "\n".join(lines) + "\n", stats
 
 def parse_multipart(body_bytes: bytes, content_type: str):
 	"""

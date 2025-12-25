@@ -47,6 +47,7 @@ Keep-a-Changelog style format.
 - Import now validates that the uploaded file contains at least one record and surfaces a clear error instead of silently doing nothing.
 - Web import success now triggers an automatic page reload so newly imported entries are visible right away.
 - Success responses now include per-type counts (passwords, notes, passphrases, backups, authenticators) so the UI and logs confirm what was imported.
+- Fixed the importer writing literal `\t`/`\n` sequences, so appended rows now use real tabs/newlines and show up in CLI + web lists immediately.
 
 ### Note
 - Version intentionally left at 2.7.8 per policy; not a full release yet.
