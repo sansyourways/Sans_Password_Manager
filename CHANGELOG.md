@@ -28,6 +28,9 @@ Keep-a-Changelog style format.
 - Authenticators now support SHA1/SHA256/SHA512 selection (CLI + web), stored per entry and preserved across export/import.
 - Web mode adds an Export/Import card using the same formats; export downloads directly, import accepts pasted content and appends to the vault.
 - Web import supports direct file uploads (multipart) in addition to paste.
+- Import form in web mode now submits asynchronously with a card-wide loading overlay and inline success/error message (no redirect or forced logout).
+- Removed the legacy `cgi` dependency in the web server; multipart uploads now use a boundary-aware email parser (no Python 3.13 warnings).
+- Authenticator live view in web mode now includes a clipboard button for the current OTP code.
 ### Fixed
 - Replaced deprecated `cgi` usage in the web server with `email.parser`-based multipart parsing to avoid deprecation issues on Python 3.13.
 - Web import file uploads now use the correct multipart key, preventing hangs/timeouts on upload.
@@ -39,6 +42,8 @@ Keep-a-Changelog style format.
 - Web export/import script no longer fails on SQL format generation (fixed quoting in generated Python).
 - RST export in web server generation now uses proper quoting (no more syntax error in generated Python).
 - Multipart import handler now prefers `cgi.FieldStorage` with warnings silenced and falls back to a lightweight parser, preventing hangs during uploads.
+- Import endpoint now reuses the already-read request body instead of trying to read the stream twice, so uploads no longer stall on “load failed”.
+- Fixed duplicate web import submissions triggered by both inline and scripted handlers, eliminating the phantom second upload that caused “load failed” UI states.
 
 ### Note
 - Version intentionally left at 2.7.8 per policy; not a full release yet.

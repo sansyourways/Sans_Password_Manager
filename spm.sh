@@ -4249,7 +4249,6 @@ import re
 import io
 import email.parser
 import email.policy
-import cgi
 import warnings
 
 VAULT_PATH = os.environ.get("SPM_VAULT_PATH")
@@ -4287,17 +4286,32 @@ def fetch_latest_version():
 AUTOLOCK_SCRIPT = """
 <script>
   (function() {
-    let t;
-    function reset() {
-      if (t) clearTimeout(t);
-      t = setTimeout(function() {
+    let autoTimer;
+    let paused = false;
+    function start() {
+      if (paused) return;
+      stop();
+      autoTimer = setTimeout(function() {
         window.location.href = "/logout";
       }, 30000);
     }
+    function stop() {
+      if (autoTimer) {
+        clearTimeout(autoTimer);
+        autoTimer = null;
+      }
+    }
+    window.SPM_AutoLock = {
+      pause: function() { paused = true; stop(); },
+      resume: function() { paused = false; start(); },
+      restart: function() { start(); }
+    };
     ["click","keydown","mousemove","touchstart","scroll"].forEach(function(ev) {
-      window.addEventListener(ev, reset, { passive: true });
+      window.addEventListener(ev, function() {
+        if (!paused) start();
+      }, { passive: true });
     });
-    reset();
+    start();
   })();
 </script>
 """
@@ -4861,6 +4875,64 @@ MAIN_HTML = """<!doctype html>
       box-shadow:0 12px 26px rgba(0,0,0,0.16);
       animation: fadeUp 0.5s ease-out;
     }
+    .import-card {
+      position:relative;
+      overflow:hidden;
+    }
+    .import-card[data-loading] > *:not(.import-overlay) {
+      filter:blur(1px);
+      pointer-events:none;
+      user-select:none;
+    }
+    .import-overlay {
+      position:absolute;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      background:rgba(3,5,18,0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      z-index:5;
+      text-align:center;
+      padding:18px;
+    }
+    .import-overlay.visible {
+      display:flex;
+    }
+    .import-card[data-loading] .import-overlay {
+      display:flex;
+    }
+    .import-overlay-inner {
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      align-items:center;
+    }
+    .import-spinner {
+      width:30px;
+      height:30px;
+      border-radius:50%;
+      border:3px solid rgba(255,255,255,0.2);
+      border-top-color:#9fa3f0;
+      animation:spin 1s linear infinite;
+    }
+    .import-overlay.success {
+      background:rgba(16,48,30,0.9);
+    }
+    .import-overlay.error {
+      background:rgba(70,16,24,0.92);
+    }
+    .import-overlay.success .import-spinner,
+    .import-overlay.error .import-spinner {
+      display:none;
+    }
+    .import-overlay-text {
+      font-size:12px;
+      color:#f5f5f7;
+      letter-spacing:0.04em;
+      text-transform:uppercase;
+    }
     .card h3 {
       margin:0 0 6px;
       font-size:13px;
@@ -4926,6 +4998,10 @@ MAIN_HTML = """<!doctype html>
     @keyframes fadeUp {
       from { opacity:0; transform: translateY(10px); }
       to   { opacity:1; transform: translateY(0); }
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
     }
 
     @media (max-width: 720px) {
@@ -5036,7 +5112,13 @@ MAIN_HTML = """<!doctype html>
           <a href="/generator" class="btn-primary small">Open Generator</a>
         </div>
       </div>
-      <div class="card">
+      <div class="card import-card" id="import-card">
+        <div class="import-overlay" id="import-overlay" aria-live="polite" aria-busy="true">
+          <div class="import-overlay-inner">
+            <div class="import-spinner" id="import-overlay-spinner"></div>
+            <div class="import-overlay-text" id="import-overlay-text">Uploading...</div>
+          </div>
+        </div>
         <h3>Export / Import</h3>
         <p>Download or paste data (csv/json + extended formats).</p>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
@@ -5065,7 +5147,7 @@ MAIN_HTML = """<!doctype html>
             <button class="btn-primary small" type="submit">Download</button>
           </form>
         </div>
-        <form method="post" action="/import" enctype="multipart/form-data" style="display:flex; flex-direction:column; gap:8px;">
+        <form id="import-form" method="post" action="/import" enctype="multipart/form-data" onsubmit="return window.SPM_handleImportSubmit ? window.SPM_handleImportSubmit(event, this) : true;" style="display:flex; flex-direction:column; gap:8px;">
           <label style="font-size:12px;">Import format</label>
           <select name="fmt" style="padding:6px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text);">
             <option value="csv">csv</option>
@@ -5091,7 +5173,8 @@ MAIN_HTML = """<!doctype html>
           <input type="file" name="file" accept=".csv,.json,.tsv,.ndjson,.jsonl,.md,.markdown,.html,.txt,.yaml,.yml,.xml,.sql,.ini,.psv,.rst,.toml,.org,.scsv" style="color:var(--text);">
           <label style="font-size:12px;">Or paste file contents</label>
           <textarea name="data" rows="5" placeholder="Paste exported data here" style="width:100%; border-radius:12px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text); padding:8px;"></textarea>
-          <button class="btn-primary small" type="submit">Import</button>
+          <button class="btn-primary small" type="submit" id="import-submit">Import</button>
+          <div id="import-status" style="font-size:11px; min-height:14px; color:var(--muted);"></div>
           <div style="font-size:11px; color:var(--muted);">Supports passwords, notes, passphrases, authenticators, backup codes.</div>
         </form>
       </div>
@@ -5179,6 +5262,105 @@ MAIN_HTML = """<!doctype html>
         picker.addEventListener("change", () => setTheme(picker.value));
       }
     }
+    window.SPM_handleImportSubmit = function(ev, form) {
+      if (ev) ev.preventDefault();
+      form = form || document.getElementById("import-form");
+      if (!form) return false;
+      const statusEl = document.getElementById("import-status");
+      const submitBtn = document.getElementById("import-submit") || form.querySelector("button[type=submit]");
+      const card = document.getElementById("import-card");
+      const overlay = document.getElementById("import-overlay");
+      const overlayText = document.getElementById("import-overlay-text");
+      const overlaySpinner = document.getElementById("import-overlay-spinner");
+      const defaultLabel = submitBtn ? submitBtn.textContent : "";
+      let overlayClearTimer = null;
+      const setStatus = (msg, ok=true) => {
+        if (!statusEl) return;
+        statusEl.textContent = msg || "";
+        statusEl.style.color = ok ? "#9fa3f0" : "#ff9b9b";
+      };
+      const setOverlay = (state, msg) => {
+        if (!card) return;
+        if (!overlay) {
+          if (state) {
+            card.dataset.loading = "1";
+            card.setAttribute("aria-busy", "true");
+          } else {
+            delete card.dataset.loading;
+            card.removeAttribute("aria-busy");
+          }
+          return;
+        }
+        if (!state) {
+          delete card.dataset.loading;
+          card.removeAttribute("aria-busy");
+          overlay.style.display = "none";
+          overlay.classList.remove("success","error");
+          if (overlaySpinner) overlaySpinner.style.display = "";
+          if (overlayText) overlayText.textContent = "";
+          return;
+        }
+        card.dataset.loading = "1";
+        card.setAttribute("aria-busy", "true");
+        overlay.style.display = "flex";
+        overlay.classList.remove("success","error");
+        if (state === "success") overlay.classList.add("success");
+        if (state === "error") overlay.classList.add("error");
+        if (overlaySpinner) overlaySpinner.style.display = state === "loading" ? "" : "none";
+        if (overlayText) overlayText.textContent = msg || "";
+      };
+      const clearOverlayLater = (delay) => {
+        if (overlayClearTimer) {
+          clearTimeout(overlayClearTimer);
+        }
+        overlayClearTimer = setTimeout(() => setOverlay(null), delay);
+      };
+      if (window.SPM_AutoLock) window.SPM_AutoLock.pause();
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Importing...";
+      }
+      setOverlay("loading", "Uploading...");
+      setStatus("Uploading...", true);
+      const fd = new FormData(form);
+      fetch("/import", {
+        method: "POST",
+        body: fd,
+        headers: { "X-Requested-With": "fetch" },
+      })
+        .then(async (resp) => {
+          let payload = {};
+          try { payload = await resp.json(); } catch (e) {}
+          if (!payload.ok) {
+            throw new Error((payload && payload.message) || "Import failed.");
+          }
+          return payload;
+        })
+        .then((payload) => {
+          const msg = payload.message || "Import complete.";
+          setStatus(msg, true);
+          form.reset();
+          setOverlay("success", msg);
+          clearOverlayLater(1500);
+        })
+        .catch((err) => {
+          const msg = err.message || "Import failed.";
+          setStatus(msg, false);
+          setOverlay("error", msg);
+          clearOverlayLater(2400);
+        })
+        .finally(() => {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = defaultLabel || "Import";
+          }
+          if (!overlay) {
+            if (card) delete card.dataset.loading;
+          }
+          if (window.SPM_AutoLock) window.SPM_AutoLock.resume();
+        });
+      return false;
+    };
     document.addEventListener("DOMContentLoaded", () => {
       initTheme();
       checkUpdate(false);
@@ -6200,7 +6382,15 @@ AUTH_VIEW_HTML = """<!doctype html>
     <div class="field"><div class="label">Algorithm</div><div class="mono">__ALGO__</div></div>
     <div class="field"><div class="label">Created</div><div class="mono">__CREATED__</div></div>
     <div class="field"><div class="label">Base32 Secret</div><div class="mono">__SECRET__</div></div>
-    <div class="field"><div class="label">Live Code</div><span id="code" class="code">••••••</span><div class="countdown" id="countdown"></div></div>
+    <div class="field">
+      <div class="label">Live Code</div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span id="code" class="code" style="margin:0;">••••••</span>
+        <button type="button" class="btn-soft" id="copy-btn" title="Copy code">📋 Copy</button>
+      </div>
+      <div class="countdown" id="countdown"></div>
+      <div id="copy-status" style="font-size:11px; color:#9fa3f0; min-height:14px;"></div>
+    </div>
     <div class="actions">
       <a href="/" class="link">← Back</a>
       <div style="display:flex; gap:6px; flex-wrap:wrap;">
@@ -6221,7 +6411,44 @@ AUTH_VIEW_HTML = """<!doctype html>
       const id = "__ID__";
       const codeEl = document.getElementById('code');
       const cdEl = document.getElementById('countdown');
-      let countdownTimer, nextTimer;
+      const copyBtn = document.getElementById('copy-btn');
+      const copyStatus = document.getElementById('copy-status');
+      let countdownTimer, nextTimer, currentCode = "";
+      function showStatus(msg, ok=true) {
+        if (!copyStatus) return;
+        copyStatus.textContent = msg || "";
+        copyStatus.style.color = ok ? "#9fa3f0" : "#ff9b9b";
+        if (msg) {
+          setTimeout(() => { copyStatus.textContent = ""; }, 2000);
+        }
+      }
+      function copyCode() {
+        if (!currentCode) {
+          showStatus("No code yet", false);
+          return;
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(currentCode).then(() => showStatus("Copied!")).catch(() => fallbackCopy());
+        } else {
+          fallbackCopy();
+        }
+      }
+      function fallbackCopy() {
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = currentCode;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+          showStatus("Copied!");
+        } catch (e) {
+          showStatus("Copy failed", false);
+        }
+      }
+      if (copyBtn) {
+        copyBtn.addEventListener("click", copyCode);
+      }
       function scheduleTick(ms) {
         if (nextTimer) clearTimeout(nextTimer);
         nextTimer = setTimeout(tick, ms);
@@ -6234,7 +6461,8 @@ AUTH_VIEW_HTML = """<!doctype html>
         fetch('/authenticator-code?id=' + encodeURIComponent(id))
           .then(r => r.json())
           .then(d => {
-            codeEl.textContent = d.code || '------';
+            currentCode = d.code || '';
+            codeEl.textContent = currentCode || '------';
             let remaining = d.expires_in || period;
             cdEl.textContent = 'Refreshes in ' + remaining + 's';
             if (countdownTimer) clearInterval(countdownTimer);
@@ -6267,7 +6495,7 @@ def decrypt_vault(master: str) -> str:
     return subprocess.check_output(
         ["gpg", "--batch", "--yes", "--passphrase", master, "-d", VAULT_PATH],
         stderr=subprocess.DEVNULL,
-        timeout=30,
+        timeout=15,
     ).decode("utf-8", errors="ignore")
 
 def encrypt_vault(master: str, plaintext: str) -> None:
@@ -6650,22 +6878,28 @@ def parse_multipart(body_bytes: bytes, content_type: str):
 	Minimal multipart/form-data parser using email.parser (avoids deprecated cgi).
 	Returns dict name -> raw bytes.
 	"""
-	ctype = content_type or ""
-	if "multipart/form-data" not in ctype:
+	ctype = (content_type or "")
+	if "multipart/form-data" not in ctype.lower():
 		return {}
-	_, params = cgi.parse_header(ctype)
-	boundary = params.get("boundary")
+	boundary = ""
+	for part in ctype.split(";"):
+		part = part.strip()
+		if part.lower().startswith("boundary="):
+			boundary = part.split("=", 1)[1].strip()
+			if boundary.startswith('"') and boundary.endswith('"'):
+				boundary = boundary[1:-1]
+			break
 	if not boundary:
 		return {}
 	header = f"Content-Type: multipart/form-data; boundary={boundary}\r\n\r\n".encode("utf-8", "ignore")
 	msg = email.parser.BytesParser(policy=email.policy.default).parsebytes(header + body_bytes)
 	out = {}
 	for part in msg.iter_parts():
-		name = part.get_param("name", header="content-disposition")
+		name = part.get_param("name", header="content-disposition") or ""
 		if not name:
 			continue
-		payload = part.get_payload(decode=True)
-		out[name] = payload if payload is not None else b""
+		payload = part.get_payload(decode=True) or b""
+		out[name] = payload
 	return out
 
 def parse_entries(plaintext: str):
@@ -7481,8 +7715,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_html(200, page)
             return
 
-        length = int(self.headers.get("Content-Length", "0"))
-        raw_body = self.rfile.read(length).decode("utf-8", errors="ignore")
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except (ValueError, TypeError):
+            length = 0
+        raw_body_bytes = self.rfile.read(length)
+        raw_body = raw_body_bytes.decode("utf-8", errors="ignore")
         data = urllib.parse.parse_qs(raw_body)
 
         if path == "/add":
@@ -7689,160 +7927,98 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if path == "/import":
             master = self._require_login()
-            if not master:
-                return
-            
-            # Set a timeout for the entire import operation (2 minutes)
-            import signal
-            
-            def timeout_handler(signum, frame):
-                raise TimeoutError("Import operation timed out")
-            
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(120)  # 2 minutes
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-            except Exception:
-                length = 0
-            content_type = self.headers.get("Content-Type", "")
-            if length <= 0:
-                self.send_response(302)
-                self.send_header("Location", "/?err=No+data+provided")
-                self.end_headers()
-                return
-            if length > 10 * 1024 * 1024:
-                self.send_response(413)
-                self.send_header("Content-Type", "text/plain")
-                self.end_headers()
-                self.wfile.write(b"Payload too large (max 10MB).")
+            if master is None:
                 return
 
-            print(f"[import] Reading {length} bytes from request body...", file=sys.stderr)
-            body_bytes = self.rfile.read(length)
+            is_async = self.headers.get("X-Requested-With", "").lower() == "fetch"
+
+            def respond_error(message, status=400):
+                if is_async:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(jsonlib.dumps({"ok": False, "message": message}).encode("utf-8"))
+                else:
+                    self.send_response(302)
+                    self.send_header("Location", f"/?err={urllib.parse.quote(message)}")
+                    self.end_headers()
+
+            def respond_success(message="Import complete."):
+                if is_async:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(jsonlib.dumps({"ok": True, "message": message}).encode("utf-8"))
+                else:
+                    self.send_response(302)
+                    self.send_header("Location", "/?msg=import-ok")
+                    self.end_headers()
+
+            content_type = (self.headers.get("Content-Type", "") or "")
+
+            body_bytes = raw_body_bytes or b""
+            body_len = len(body_bytes)
+
+            if body_len <= 0:
+                respond_error("No data provided.")
+                return
+
+            if body_len > 10 * 1024 * 1024:
+                respond_error("Payload too large (max 10MB).", status=413)
+                return
+
+            sys.stderr.write(f'[import] Reading {body_len} bytes from request body...\n')
+
             fmt = "csv"
             content = ""
-            print(f"[import] Content-Type: {content_type}", file=sys.stderr)
 
-            if content_type.lower().startswith("multipart/form-data"):
-                # Primary: cgi.FieldStorage for reliable file handling
+            if "multipart/form-data" in content_type.lower():
                 try:
-                    fs = cgi.FieldStorage(
-                        fp=io.BytesIO(body_bytes),
-                        environ={
-                            "REQUEST_METHOD": "POST",
-                            "CONTENT_TYPE": content_type,
-                            "CONTENT_LENGTH": str(length),
-                        },
-                        keep_blank_values=True,
-                    )
-                    fmt = (fs.getfirst("fmt") or "csv").lower()
-                    file_item = fs["file"] if "file" in fs else None
-                    if file_item is not None and getattr(file_item, "file", None):
-                        print("[import] Processing file upload...", file=sys.stderr)
-                        # Limit file size to prevent DoS (10MB max)
-                        MAX_FILE_SIZE = 10 * 1024 * 1024
-                        up_bytes = file_item.file.read(MAX_FILE_SIZE)
-                        if len(up_bytes) == MAX_FILE_SIZE:
-                            print("[import] Warning: File size limit reached, content may be truncated", file=sys.stderr)
-                        content = up_bytes.decode("utf-8", "ignore") if up_bytes else ""
-                        print(f"[import] File content read: {len(content)} characters", file=sys.stderr)
+                    fields = parse_multipart(body_bytes, content_type)
+                    fmt_raw = fields.get("fmt") or b"csv"
+                    fmt = fmt_raw.decode("utf-8", "ignore").lower()
+                    file_bytes = fields.get("file", b"")
+                    if file_bytes:
+                        content = file_bytes.decode("utf-8", "ignore")
+                        sys.stderr.write('[import] Processed file upload via multipart parser\n')
+                    elif fields.get("data"):
+                        content = fields.get("data", b"").decode("utf-8", "ignore")
+                        sys.stderr.write('[import] Processed pasted data via multipart parser\n')
                     else:
-                        content = fs.getfirst("data", "") or ""
+                        respond_error("Failed to parse upload.")
+                        return
                 except Exception as e:
-                    print(f"[import] FieldStorage parse failed: {e}", file=sys.stderr)
-                    content = ""  # Parse failed
-
-                # Fallback: boundary-aware email parser
-                if not content:
-                    try:
-                        fields = parse_multipart(body_bytes, content_type)
-                        fmt_raw = fields.get("fmt") or b"csv"
-                        fmt = fmt_raw.decode("utf-8", "ignore").lower()
-                        # Validate format is supported
-                        if fmt not in SUPPORTED_FORMATS:
-                            print(f"[import] Unsupported format '{fmt}', defaulting to csv", file=sys.stderr)
-                            fmt = "csv"
-                        file_bytes = fields.get("file", b"")
-                        if file_bytes:
-                            content = file_bytes.decode("utf-8", "ignore")
-                        else:
-                            content = fields.get("data", b"").decode("utf-8", "ignore")
-                        print("[import] Fallback multipart parser succeeded", file=sys.stderr)
-                    except Exception as e:
-                        print(f"[import] fallback multipart parse failed: {e}", file=sys.stderr)
-                        print("[import] No valid content found in either parser", file=sys.stderr)
-                        content = ""
+                    sys.stderr.write(f"[import] Multipart parse failed: {e}\n")
+                    respond_error("Failed to parse upload.")
+                    return
             else:
-                body = body_bytes.decode("utf-8", errors="ignore")
-                data = urllib.parse.parse_qs(body)
+                body_str = body_bytes.decode("utf-8", "ignore")
+                data = urllib.parse.parse_qs(body_str)
                 fmt = (data.get("fmt") or ["csv"])[0].lower()
                 content = (data.get("data") or [""])[0]
-                if not content and body:
-                    # treat raw body as file content
-                    content = body
+                if not content and body_str:
+                    content = body_str
 
             if fmt not in SUPPORTED_FORMATS:
-                self.send_response(302)
-                self.send_header("Location", "/?err=Unsupported+format")
-                self.end_headers()
+                respond_error(f"Unsupported format {fmt}")
                 return
+
             if not content.strip():
-                self.send_response(302)
-                self.send_header("Location", "/?err=No+data+provided")
-                self.end_headers()
+                respond_error("No content to import.")
                 return
-            print("[import] Starting vault decryption...", file=sys.stderr)
+
             try:
+                sys.stderr.write('[import] Applying import data...\n')
                 plaintext = decrypt_vault(master)
-                print("[import] Vault decrypted successfully", file=sys.stderr)
-            except Exception as e:
-                print(f"[import] Vault decryption failed: {e}", file=sys.stderr)
-                self.send_response(302)
-                err = urllib.parse.quote(f"Vault decryption failed: {e}")
-                self.send_header("Location", f"/?err={err}")
-                self.end_headers()
-                return
-                
-            try:
-                print("[import] Applying import data...", file=sys.stderr)
                 new_plain = _apply_import(fmt, content, plaintext)
-                print("[import] Import applied successfully", file=sys.stderr)
-            except Exception as e:
-                print(f"[import] Data processing failed: {e}", file=sys.stderr)
-                import traceback
-                traceback.print_exc(file=sys.stderr)
-                self.send_response(302)
-                err = urllib.parse.quote(f"Data processing failed: {e}")
-                self.send_header("Location", f"/?err={err}")
-                self.end_headers()
-                return
-                
-            try:
-                print("[import] Encrypting vault...", file=sys.stderr)
                 encrypt_vault(master, new_plain)
-                print("[import] Vault encrypted successfully", file=sys.stderr)
-                self.send_response(302)
-                self.send_header("Location", "/?msg=import-ok")
-                self.end_headers()
-                return
+                sys.stderr.write('[import] Vault successfully updated.\n')
+                respond_success()
             except Exception as e:
-                print(f"[import] Vault encryption failed: {e}", file=sys.stderr)
-                self.send_response(302)
-                err = urllib.parse.quote(f"Vault encryption failed: {e}")
-                self.send_header("Location", f"/?err={err}")
-                self.end_headers()
-                return
-            
-            except TimeoutError as e:
-                print(f"[import] Operation timed out: {e}", file=sys.stderr)
-                self.send_response(302)
-                err = urllib.parse.quote("Import operation timed out (2 minutes)")
-                self.send_header("Location", f"/?err={err}")
-                self.end_headers()
-                return
-                
-            finally:
-                signal.alarm(0)  # Cancel the alarm
+                sys.stderr.write(f"[import] Import process failed: {e}\n")
+                __import__("traceback").print_exc(file=sys.stderr)
+                respond_error(str(e) or "Import failed.")
+            return
 
         if path == "/passphrase-add":
             label = (data.get("label") or [""])[0].strip()
