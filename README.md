@@ -399,6 +399,7 @@ Creates encrypted backup, wipes local vault.
 ## Development & Versioning
 
 Version: **2.8.2**  
+Web session cookies use `HttpOnly`, `Secure`, and `SameSite=Strict` attributes. Keep non-loopback web deployments behind HTTPS or a TLS reverse proxy.
 Uses **semantic versioning**.  
 `./spm.sh update` fetches the latest GitHub ZIP and installs to `/usr/local/bin/spm` (sudo may be required).  
 See `CHANGELOG.md` for details.

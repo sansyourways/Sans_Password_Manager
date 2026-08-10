@@ -7,6 +7,11 @@ Keep-a-Changelog style format.
 
 ## [2.8.2] - 2025-12-16
 
+### Security and maintenance
+- Hardened web session cookies with `Secure` and `SameSite=Strict` attributes.
+- Removed unused recovery-check and record-parser variables.
+- Improved portable case normalization for user input and export/import formats.
+
 ### Added
 - Web-mode interactive prompt now lets you choose localhost, 0.0.0.0, or a custom bind IP after selecting temporary/background mode.
 

@@ -466,7 +466,7 @@ EOF
 	read -r ans || ans=""
 
 	# Normalize to lowercase
-	ans_lc=$(printf '%s' "$ans" | tr 'A-Z' 'a-z')
+	ans_lc=$(printf '%s' "$ans" | tr '[:upper:]' '[:lower:]')
 
 	if [ "$ans_lc" = "yes" ] || [ "$ans_lc" = "y" ] || [ "$ans_lc" = "ya" ]; then
 		# Record consent
@@ -1712,6 +1712,7 @@ cmd_passphrase_view() {
 	IFS=$'\t' read -r tag pid label secret_b64 created dummy <<EOF
 $line
 EOF
+	: "$tag" "$dummy"
 
 	local tmp_secret
 	tmp_secret="$(make_tmp)"
@@ -1867,7 +1868,7 @@ cmd_authenticator_add() {
 	auth_id="$(next_authenticator_id_from_vault "$tmp")"
 	created="$(now_iso)"
 	local secret_b32
-	secret_b32="$(printf '%s' "$secret" | tr -d '\n' | tr 'a-z' 'A-Z')"
+	secret_b32="$(printf '%s' "$secret" | tr -d '\n' | tr '[:lower:]' '[:upper:]')"
 
 	printf 'AUTH\t%s\t%s\t%s\t%s\t%s\t%s\n' "$auth_id" "$label" "$secret_b32" "$period" "$created" "$algo" >>"$tmp"
 
@@ -2014,6 +2015,7 @@ cmd_authenticator_edit() {
 	IFS=$'\t' read -r tag aid label secret_b32 period created algo <<EOF
 $line
 EOF
+	: "$tag"
 	[ -n "$algo" ] || algo="sha1"
 
 	if [ "$SPM_LANG" = "id" ]; then
@@ -2220,8 +2222,8 @@ cmd_backup_codes_view() {
 		fi
 	fi
 
-	local tag bc_id label codes_b64 created dummy
-	IFS=$'\t' read -r tag bc_id label codes_b64 created dummy <<EOF
+	local bc_id label codes_b64 created
+	IFS=$'\t' read -r _ bc_id label codes_b64 created _ <<EOF
 $line
 EOF
 
@@ -2368,7 +2370,7 @@ Usage:
        - ask for your master password to open the vault.
 
 Security notes:
-  - If the private key (`spm_recovery_private.pem`) exists beside your script, it is included here—protect this archive carefully.
+  - If the private key (spm_recovery_private.pem) exists beside your script, it is included here—protect this archive carefully.
   - With the private key + this bundle’s recovery file, you can use
     the "forgot password" feature to reset your master password.
   - Anyone who gets both your private key AND this bundle may be able
@@ -2408,7 +2410,7 @@ Cara pakai:
        - menanyakan kata sandi utama (master password) untuk membuka vault.
 
 Catatan keamanan:
-  - Jika `spm_recovery_private.pem` tersedia di samping script, file tersebut disertakan—lindungi bundle ini baik-baik.
+  - Jika spm_recovery_private.pem tersedia di samping script, file tersebut disertakan—lindungi bundle ini baik-baik.
   - Dengan private key + file pemulihan di bundle ini, kamu bisa
     menggunakan fitur "lupa password" untuk reset master password.
   - Jika orang lain mendapatkan bundle ini DAN private key-mu,
@@ -3013,7 +3015,7 @@ cmd_doctor() {
 	fi
 
 	# Check password rows & duplicates
-	local pw_count dup_ids empty_pw_count
+	local pw_count
 	pw_count="$(awk -F '\t' '
 		$1 ~ /^[0-9]+$/ { c++; if (length($4)==0) ep++; ids[$1]++ }
 		END {
@@ -3140,14 +3142,12 @@ cmd_doctor() {
 			else
 				printf "[ ] Testing PRIVATE KEY + recovery file pair...\n"
 			fi
-			local test_pw
-			if test_pw="$(openssl rsautl -decrypt -inkey "$RECOVERY_PRIV_DEFAULT" -in "$RECOVERY_FILE" 2>/dev/null)"; then
+			if openssl rsautl -decrypt -inkey "$RECOVERY_PRIV_DEFAULT" -in "$RECOVERY_FILE" >/dev/null 2>&1; then
 				if [ "$SPM_LANG" = "id" ]; then
 					printf "[✔] Private key dan file recovery cocok.\n"
 				else
 					printf "[✔] Private key and recovery file match.\n"
 				fi
-				test_pw=""
 			else
 				if [ "$SPM_LANG" = "id" ]; then
 					printf "[✖] Private key tidak cocok dengan file recovery.\n"
@@ -3184,7 +3184,7 @@ cmd_export() {
 	require_cmd python3
 
 	local format="${1:-csv}"
-	format="$(printf '%s' "$format" | tr 'A-Z' 'a-z')"
+	format="$(printf '%s' "$format" | tr '[:upper:]' '[:lower:]')"
 	local outfile="${2:-}"
 	case "$format" in
 		csv|json|tsv|ndjson|jsonl|md|markdown|html|txt|yaml|yml|xml|sql|ini|psv|rst|toml|org|scsv|csv-noheader|jsonc) ;;
@@ -3429,7 +3429,7 @@ cmd_import() {
 	require_cmd python3
 
 	local format="${1:-csv}"
-	format="$(printf '%s' "$format" | tr 'A-Z' 'a-z')"
+	format="$(printf '%s' "$format" | tr '[:upper:]' '[:lower:]')"
 	local infile="${2:-}"
 	[ -n "$infile" ] || die "Usage: $0 import <format> <file>"
 	[ -f "$infile" ] || die "Input file '$infile' not found."
@@ -8328,7 +8328,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if token:
                 self.server.sessions.pop(token, None)
             self.send_response(302)
-            self.send_header("Set-Cookie", "spm_session=deleted; Max-Age=0; HttpOnly; Path=/")
+            self.send_header("Set-Cookie", "spm_session=deleted; Max-Age=0; HttpOnly; Path=/; SameSite=Strict; Secure")
             self.send_header("Location", "/login")
             self.end_headers()
             return
@@ -8356,7 +8356,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 plaintext = decrypt_vault(master)
             except Exception:
                 self.send_response(302)
-                self.send_header("Set-Cookie", "spm_session=deleted; Max-Age=0; HttpOnly; Path=/")
+                self.send_header("Set-Cookie", "spm_session=deleted; Max-Age=0; HttpOnly; Path=/; SameSite=Strict; Secure")
                 self.send_header("Location", "/login")
                 self.end_headers()
                 return
@@ -8799,7 +8799,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             token = secrets.token_hex(32)
             self.server.sessions[token] = {"master": password, "created": time.time(), "last_seen": time.time()}
             self.send_response(302)
-            self.send_header("Set-Cookie", f"spm_session={token}; HttpOnly; Path=/; SameSite=Lax")
+            self.send_header("Set-Cookie", f"spm_session={token}; HttpOnly; Path=/; SameSite=Strict; Secure")
             self.send_header("Location", "/")
             self.end_headers()
             return
