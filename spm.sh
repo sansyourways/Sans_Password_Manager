@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.7.9"
+VERSION="2.8.2"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -1785,11 +1785,11 @@ _spm_totp_code() {
 	local secret="$1"
 	local period="$2"
 	local algo="${3:-sha1}"
-	printf '%s' "$secret" | python3 - "$period" "$algo" <<'PY'
+	python3 - "$secret" "$period" "$algo" <<'PY'
 import base64, hashlib, hmac, struct, time, sys
 secret = sys.stdin.read().replace(" ", "").upper()
-period = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() and int(sys.argv[1]) > 0 else 30
-algo = sys.argv[2].lower() if len(sys.argv) > 2 else "sha1"
+period = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() and int(sys.argv[2]) > 0 else 30
+algo = sys.argv[3].lower() if len(sys.argv) > 3 else "sha1"
 if algo not in ("sha1", "sha256", "sha512"):
     algo = "sha1"
 try:
@@ -3889,7 +3889,14 @@ configure_firewall_for_web() {
 	}
 
 	# 1) ufw path
-	if ! command -v ufw >/dev/null 2>&1; then
+	local ufw_cmd=""
+	if command -v ufw >/dev/null 2>&1; then
+		ufw_cmd="$(command -v ufw)"
+	elif [ -x /usr/sbin/ufw ]; then
+		ufw_cmd="/usr/sbin/ufw"
+	fi
+
+	if [ -z "$ufw_cmd" ]; then
 		if [ "$SPM_LANG" = "id" ]; then
 			echo "   - ufw tidak ditemukan. Mencoba menginstal ufw..."
 		else
@@ -3910,14 +3917,14 @@ configure_firewall_for_web() {
 		fi
 	fi
 
-	if command -v ufw >/dev/null 2>&1; then
-		if sudo ufw status >/dev/null 2>&1 | grep -qi "Status: inactive"; then
+	if [ -n "$ufw_cmd" ]; then
+		if sudo "$ufw_cmd" status 2>/dev/null | grep -qi "Status: inactive"; then
 			if [ "$SPM_LANG" = "id" ]; then
 				echo "   - Mengaktifkan ufw..."
 			else
 				echo "   - Enabling ufw..."
 			fi
-			sudo ufw enable >/dev/null 2>&1
+			sudo "$ufw_cmd" enable >/dev/null 2>&1
 		fi
 
 		if [ "$SPM_LANG" = "id" ]; then
@@ -3925,7 +3932,7 @@ configure_firewall_for_web() {
 		else
 			echo "   - Adding ufw rule: allow ${bind_port}/tcp"
 		fi
-		if sudo ufw allow "${bind_port}"/tcp >/dev/null 2>&1; then
+		if sudo "$ufw_cmd" allow "${bind_port}"/tcp >/dev/null 2>&1; then
 			if [ "$SPM_LANG" = "id" ]; then
 				echo "   ✓ Rule ufw ditambahkan (port ${bind_port}/tcp)."
 			else
@@ -3941,30 +3948,7 @@ configure_firewall_for_web() {
 		return 0
 	fi
 
-	# 2) firewalld path
-	if ! command -v firewall-cmd >/dev/null 2>&1; then
-		if [ "$SPM_LANG" = "id" ]; then
-			echo "   - firewalld tidak ditemukan. Mencoba menginstal firewalld..."
-		else
-			echo "   - firewalld not found. Trying to install firewalld..."
-		fi
-		if _spm_try_install_pkg firewalld; then
-			if [ "$SPM_LANG" = "id" ]; then
-				echo "   ✓ firewalld berhasil diinstal."
-			else
-				echo "   ✓ firewalld installed successfully."
-			fi
-			sudo systemctl enable firewalld >/dev/null 2>&1
-			sudo systemctl start firewalld >/dev/null 2>&1
-		else
-			if [ "$SPM_LANG" = "id" ]; then
-				echo "   ⚠ Gagal menginstal firewalld."
-			else
-				echo "   ⚠ Failed to install firewalld."
-			fi
-		fi
-	fi
-
+	# 2) firewalld path (configure only if already installed)
 	if command -v firewall-cmd >/dev/null 2>&1; then
 		if [ "$SPM_LANG" = "id" ]; then
 			echo "   - Menambahkan port permanen ${bind_port}/tcp pada firewalld."
@@ -4217,11 +4201,57 @@ start_web_mode() {
 	echo
 	local bind_addr bind_port
 	if [ "${SPM_LANG:-en}" = "id" ]; then
-		read -r -p "Bind address [127.0.0.1 lokal, 0.0.0.0 VPS]: " bind_addr
+		echo "Pilih alamat bind:"
+		echo "  1) Lokal (127.0.0.1)"
+		echo "  2) Global (0.0.0.0)"
+		echo "  3) Masukkan IP sendiri"
+		read -r -p "Pilihan [1]: " bind_addr
 	else
-		read -r -p "Bind address [127.0.0.1 for local, 0.0.0.0 for VPS]: " bind_addr
+		echo "Choose bind address:"
+		echo "  1) Localhost (127.0.0.1)"
+		echo "  2) Global (0.0.0.0)"
+		echo "  3) Enter custom IP"
+		read -r -p "Choice [1]: " bind_addr
 	fi
-	[ -z "$bind_addr" ] && bind_addr="127.0.0.1"
+	case "$bind_addr" in
+		""|1)
+			bind_addr="127.0.0.1"
+			;;
+		2)
+			bind_addr="0.0.0.0"
+			;;
+		3)
+			if [ "${SPM_LANG:-en}" = "id" ]; then
+				read -r -p "Masukkan IP bind: " bind_addr
+			else
+				read -r -p "Enter bind IP: " bind_addr
+			fi
+			;;
+		*)
+			# Preserve the previous direct-IP input behavior.
+			;;
+	esac
+	local valid_bind=0 octet
+	if [[ "$bind_addr" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+		valid_bind=1
+		IFS='.' read -r -a octets <<< "$bind_addr"
+		for octet in "${octets[@]}"; do
+			if [ "$octet" -gt 255 ]; then
+				valid_bind=0
+				break
+			fi
+		done
+	elif [[ "$bind_addr" = "0.0.0.0" || "$bind_addr" = "localhost" || "$bind_addr" =~ ^\[?[0-9A-Fa-f:]+\]?$ ]]; then
+		valid_bind=1
+	fi
+	if [ "$valid_bind" -ne 1 ]; then
+		if [ "${SPM_LANG:-en}" = "id" ]; then
+			echo "Alamat bind tidak valid, memakai 127.0.0.1."
+		else
+			echo "Invalid bind address, using 127.0.0.1."
+		fi
+		bind_addr="127.0.0.1"
+	fi
 
 	if [ "${SPM_LANG:-en}" = "id" ]; then
 		read -r -p "Port [8080]: " bind_port
@@ -4229,6 +4259,14 @@ start_web_mode() {
 		read -r -p "Port [8080]: " bind_port
 	fi
 	[ -z "$bind_port" ] && bind_port="8080"
+	if ! [[ "$bind_port" =~ ^[0-9]+$ ]] || [ "$bind_port" -lt 1 ] || [ "$bind_port" -gt 65535 ]; then
+		if [ "${SPM_LANG:-en}" = "id" ]; then
+			echo "Port tidak valid, memakai 8080."
+		else
+			echo "Invalid port, using 8080."
+		fi
+		bind_port="8080"
+	fi
 
 	# Figure out which host to show to user
 	local display_host
@@ -4365,6 +4403,15 @@ if not VAULT_PATH or not os.path.isfile(VAULT_PATH):
 
 LATEST_CACHE = {"value": "", "ts": 0}
 
+SUPPORTED_WEB_LANGS = {"en", "id", "ja"}
+DEFAULT_WEB_LANG = "en"
+
+def sanitize_lang(value):
+    value = (value or "").strip().lower()
+    if value in SUPPORTED_WEB_LANGS:
+        return value
+    return DEFAULT_WEB_LANG
+
 def fetch_latest_version():
     now = time.time()
     if now - LATEST_CACHE.get("ts", 0) < 300 and LATEST_CACHE.get("value"):
@@ -4417,6 +4464,516 @@ AUTOLOCK_SCRIPT = """
     });
     start();
   })();
+</script>
+"""
+
+I18N_SCRIPT = """
+<script>
+(function() {
+  const DICT = {
+    "en": {
+      "header.title": "Sans Password Manager",
+      "header.subtitle": "Liquid-glass web interface · GPG encrypted",
+      "header.check_update": "Check update",
+      "header.logout": "Logout",
+      "header.vault": "Vault",
+      "section.passwords": "Passwords",
+      "chip.online": "Online · read / write",
+      "btn.add_entry": "+ Add Entry",
+      "table.id": "ID",
+      "table.name": "Name",
+      "table.username": "Username",
+      "table.actions": "Actions",
+      "table.title": "Title",
+      "table.label": "Label",
+      "table.every": "Every",
+      "table.algo": "Algo",
+      "passwords.footer": "Passwords are never sent anywhere else – all crypto stays on this host with GnuPG.",
+      "section.secure_notes": "Secure Notes",
+      "section.secure_notes_desc": "Encrypted notes stored inside the same vault.",
+      "btn.add_note": "+ Add Note",
+      "section.generator": "Password Generator",
+      "section.generator_desc": "Create strong passwords with length, mode, and symbol toggles.",
+      "btn.open_generator": "Open Generator",
+      "import.title": "Export / Import",
+      "import.subtitle": "Download or paste data (csv/json + extended formats).",
+      "import.format_label": "Format",
+      "import.download": "Download",
+      "import.import_label": "Import format",
+      "import.upload_label": "Upload export file",
+      "import.paste_label": "Or paste file contents",
+      "import.placeholder": "Paste exported data here",
+      "import.submit": "Import",
+      "import.supports": "Supports passwords, notes, passphrases, authenticators, backup codes.",
+      "import.overlay_upload": "Uploading...",
+      "import.overlay_success": "Import complete.",
+      "import.overlay_error": "Import failed.",
+      "import.importing": "Importing...",
+      "import.status_uploading": "Uploading...",
+      "import.success_default": "Import complete.",
+      "import.error_default": "Import failed.",
+      "section.passphrases": "Passphrases",
+      "section.passphrases_desc": "Store API tokens or recovery phrases. View prompts master re-check.",
+      "btn.add_passphrase": "+ Add Passphrase",
+      "section.authenticators": "Authenticators (TOTP)",
+      "section.authenticators_desc": "Store 2FA secrets and view live codes.",
+      "btn.add_authenticator": "+ Add Authenticator",
+      "section.backups": "Backup Codes",
+      "section.backups_desc": "Store recovery codes (view shows full codes).",
+      "btn.add_backups": "+ Add Backup Codes",
+      "section.session": "Web Session",
+      "section.session_desc": "Protected by your master password. The interface auto-locks after 30 seconds of inactivity and logs you out.",
+      "form.vault": "Vault:",
+      "form.back_list": "\u2190 Back to list",
+      "form.save": "Save",
+      "link.back": "\u2190 Back",
+      "entry.field.service": "Service / Name",
+      "entry.field.username": "Username",
+      "entry.field.password": "Password",
+      "entry.field.notes": "Notes",
+      "note.field.title": "Title",
+      "note.field.content": "Content",
+      "pass.field.label": "Label",
+      "pass.field.secret_hint": "Passphrase (leave blank to auto-generate)",
+      "backup.field.label": "Label",
+      "backup.field.codes": "Backup codes (one per line)",
+      "auth.field.label": "Label",
+      "auth.field.secret": "Base32 Secret",
+      "auth.field.period": "Refresh interval (seconds)",
+      "auth.field.algorithm": "Algorithm",
+      "auth.option.sha1": "SHA1 (default)",
+      "auth.option.sha256": "SHA256",
+      "auth.option.sha512": "SHA512",
+      "view.title": "View Entry",
+      "view.label.name": "Name",
+      "view.label.username": "Username",
+      "view.label.password": "Password",
+      "view.label.notes": "Notes",
+      "view.label.created": "Created at",
+      "view.sub_prefix": "Vault:",
+      "btn.copy_username": "Copy Username",
+      "btn.copy_password": "Copy Password",
+      "btn.copy_notes": "Copy Notes",
+      "btn.copy_passphrase": "Copy",
+      "btn.copy_codes": "Copy Codes",
+      "btn.copy_code": "Copy Code",
+      "btn.show": "Show",
+      "btn.hide": "Hide",
+      "btn.edit": "Edit",
+      "btn.delete": "Delete",
+      "pass.view.title": "Passphrase",
+      "pass.view.label_field": "Label",
+      "pass.view.created": "Created",
+      "pass.view.secret": "Passphrase",
+      "backup.view.title": "Backup Codes",
+      "backup.view.label": "Label:",
+      "backup.view.created": "Created:",
+      "auth.view.title": "Authenticator",
+      "auth.view.label": "Label",
+      "auth.view.interval": "Interval",
+      "auth.view.algo": "Algorithm",
+      "auth.view.created": "Created",
+      "auth.view.secret": "Base32 Secret",
+      "auth.view.code": "Live Code",
+      "auth.view.seconds_label": "seconds",
+      "generator.title": "Password Generator",
+      "generator.length": "Length",
+      "generator.mode_secure": "Secure",
+      "generator.mode_easy": "Easy / Memorable",
+      "generator.opt.upper": "Uppercase",
+      "generator.opt.lower": "Lowercase",
+      "generator.opt.digits": "Numbers",
+      "generator.opt.symbols": "Symbols",
+      "generator.btn.regen": "Regenerate",
+      "generator.btn.copy": "Copy",
+      "generator.btn.back": "Back",
+      "generator.stats.placeholder": "\u2013",
+      "generator.stats.bits": "bits",
+      "generator.stats.suffix": "to brute-force (est.)",
+      "generator.words_prefix": "Words",
+      "generator.strength.very_weak": "Very weak",
+      "generator.strength.weak": "Weak",
+      "generator.strength.moderate": "Moderate",
+      "generator.strength.strong": "Strong",
+      "generator.strength.excellent": "Excellent",
+      "generator.unit.sec": "sec",
+      "generator.unit.min": "min",
+      "generator.unit.hr": "hr",
+      "generator.unit.day": "day",
+      "generator.unit.yr": "yr",
+      "generator.unit.century": "century",
+      "import.placeholder": "Paste exported data here",
+      "toast.copy_success": "Copied to clipboard.",
+      "toast.copy_fail": "Copy failed.",
+      "auth.countdown.refresh_in": "Refreshes in {n}s",
+      "auth.countdown.refreshing": "Refreshing...",
+      "auth.status.no_code": "No code yet",
+      "auth.status.copy_ok": "Copied!",
+      "auth.status.copy_fail": "Copy failed",
+      "confirm.delete_entry": "Delete this entry?",
+      "confirm.delete_passphrase": "Delete this passphrase?",
+      "confirm.delete_backup": "Delete these backup codes?",
+      "confirm.delete_authenticator": "Delete this authenticator?"
+    },
+    "id": {
+      "header.title": "Sans Password Manager",
+      "header.subtitle": "Antarmuka web liquid-glass · terenkripsi GPG",
+      "header.check_update": "Periksa pembaruan",
+      "header.logout": "Keluar",
+      "header.vault": "Brankas",
+      "section.passwords": "Kata Sandi",
+      "chip.online": "Online · baca / tulis",
+      "btn.add_entry": "+ Tambah Entri",
+      "table.id": "ID",
+      "table.name": "Nama",
+      "table.username": "Pengguna",
+      "table.actions": "Aksi",
+      "table.title": "Judul",
+      "table.label": "Label",
+      "table.every": "Interval",
+      "table.algo": "Algo",
+      "passwords.footer": "Kata sandi tidak pernah dikirim ke mana pun — seluruh kripto tetap di host ini dengan GnuPG.",
+      "section.secure_notes": "Catatan Aman",
+      "section.secure_notes_desc": "Catatan terenkripsi di dalam brankas yang sama.",
+      "btn.add_note": "+ Tambah Catatan",
+      "section.generator": "Pembuat Kata Sandi",
+      "section.generator_desc": "Buat kata sandi kuat dengan panjang, mode, dan simbol.",
+      "btn.open_generator": "Buka Generator",
+      "import.title": "Ekspor / Impor",
+      "import.subtitle": "Unduh atau tempel data (csv/json + format lainnya).",
+      "import.format_label": "Format",
+      "import.download": "Unduh",
+      "import.import_label": "Format impor",
+      "import.upload_label": "Unggah berkas ekspor",
+      "import.paste_label": "Atau tempel isi berkas",
+      "import.placeholder": "Tempel data hasil ekspor di sini",
+      "import.submit": "Impor",
+      "import.supports": "Mendukung kata sandi, catatan, frasa sandi, autentikator, kode cadangan.",
+      "import.overlay_upload": "Mengunggah...",
+      "import.overlay_success": "Impor selesai.",
+      "import.overlay_error": "Impor gagal.",
+      "import.importing": "Sedang mengimpor...",
+      "import.status_uploading": "Mengunggah...",
+      "import.success_default": "Impor selesai.",
+      "import.error_default": "Impor gagal.",
+      "section.passphrases": "Frasa Sandi",
+      "section.passphrases_desc": "Simpan token API atau frasa pemulihan. Tampilan meminta master lagi.",
+      "btn.add_passphrase": "+ Tambah Frasa Sandi",
+      "section.authenticators": "Autentikator (TOTP)",
+      "section.authenticators_desc": "Simpan rahasia 2FA dan lihat kode langsung.",
+      "btn.add_authenticator": "+ Tambah Autentikator",
+      "section.backups": "Kode Cadangan",
+      "section.backups_desc": "Simpan kode pemulihan (tampilan memperlihatkan penuh).",
+      "btn.add_backups": "+ Tambah Kode Cadangan",
+      "section.session": "Sesi Web",
+      "section.session_desc": "Dilindungi kata sandi master. Terkunci otomatis setelah 30 detik tidak aktif.",
+      "form.vault": "Brankas:",
+      "form.back_list": "\u2190 Kembali ke daftar",
+      "form.save": "Simpan",
+      "link.back": "\u2190 Kembali",
+      "entry.field.service": "Layanan / Nama",
+      "entry.field.username": "Pengguna",
+      "entry.field.password": "Kata sandi",
+      "entry.field.notes": "Catatan",
+      "note.field.title": "Judul",
+      "note.field.content": "Konten",
+      "pass.field.label": "Label",
+      "pass.field.secret_hint": "Frasa sandi (kosongkan untuk membuat otomatis)",
+      "backup.field.label": "Label",
+      "backup.field.codes": "Kode cadangan (satu per baris)",
+      "auth.field.label": "Label",
+      "auth.field.secret": "Rahasia Base32",
+      "auth.field.period": "Interval penyegaran (detik)",
+      "auth.field.algorithm": "Algoritma",
+      "auth.option.sha1": "SHA1 (default)",
+      "auth.option.sha256": "SHA256",
+      "auth.option.sha512": "SHA512",
+      "view.title": "Lihat Entri",
+      "view.label.name": "Nama",
+      "view.label.username": "Pengguna",
+      "view.label.password": "Kata sandi",
+      "view.label.notes": "Catatan",
+      "view.label.created": "Dibuat",
+      "view.sub_prefix": "Brankas:",
+      "btn.copy_username": "Salin pengguna",
+      "btn.copy_password": "Salin kata sandi",
+      "btn.copy_notes": "Salin catatan",
+      "btn.copy_passphrase": "Salin",
+      "btn.copy_codes": "Salin kode",
+      "btn.copy_code": "Salin kode",
+      "btn.show": "Tampilkan",
+      "btn.hide": "Sembunyikan",
+      "btn.edit": "Ubah",
+      "btn.delete": "Hapus",
+      "pass.view.title": "Frasa sandi",
+      "pass.view.label_field": "Label",
+      "pass.view.created": "Dibuat",
+      "pass.view.secret": "Frasa sandi",
+      "backup.view.title": "Kode Cadangan",
+      "backup.view.label": "Label:",
+      "backup.view.created": "Dibuat:",
+      "auth.view.title": "Autentikator",
+      "auth.view.label": "Label",
+      "auth.view.interval": "Interval",
+      "auth.view.algo": "Algoritma",
+      "auth.view.created": "Dibuat",
+      "auth.view.secret": "Rahasia Base32",
+      "auth.view.code": "Kode langsung",
+      "auth.view.seconds_label": "detik",
+      "generator.title": "Pembuat Kata Sandi",
+      "generator.length": "Panjang",
+      "generator.mode_secure": "Aman",
+      "generator.mode_easy": "Mudah / Mudah diingat",
+      "generator.opt.upper": "Huruf besar",
+      "generator.opt.lower": "Huruf kecil",
+      "generator.opt.digits": "Angka",
+      "generator.opt.symbols": "Simbol",
+      "generator.btn.regen": "Buat ulang",
+      "generator.btn.copy": "Salin",
+      "generator.btn.back": "Kembali",
+      "generator.stats.placeholder": "\u2013",
+      "generator.stats.bits": "bit",
+      "generator.stats.suffix": "untuk brute-force (perk.)",
+      "generator.words_prefix": "Kata",
+      "generator.strength.very_weak": "Sangat lemah",
+      "generator.strength.weak": "Lemah",
+      "generator.strength.moderate": "Sedang",
+      "generator.strength.strong": "Kuat",
+      "generator.strength.excellent": "Sangat kuat",
+      "generator.unit.sec": "detik",
+      "generator.unit.min": "menit",
+      "generator.unit.hr": "jam",
+      "generator.unit.day": "hari",
+      "generator.unit.yr": "tahun",
+      "generator.unit.century": "abad",
+      "import.placeholder": "Tempel data hasil ekspor di sini",
+      "toast.copy_success": "Disalin ke clipboard.",
+      "toast.copy_fail": "Gagal menyalin.",
+      "auth.countdown.refresh_in": "Segar ulang dalam {n}dtk",
+      "auth.countdown.refreshing": "Sedang menyegarkan...",
+      "auth.status.no_code": "Belum ada kode",
+      "auth.status.copy_ok": "Disalin!",
+      "auth.status.copy_fail": "Gagal menyalin",
+      "confirm.delete_entry": "Hapus entri ini?",
+      "confirm.delete_passphrase": "Hapus frasa sandi ini?",
+      "confirm.delete_backup": "Hapus kode cadangan ini?",
+      "confirm.delete_authenticator": "Hapus autentikator ini?"
+    },
+    "ja": {
+      "header.title": "Sans Password Manager",
+      "header.subtitle": "リキッドガラス風Webインターフェース · GPG暗号化",
+      "header.check_update": "アップデートを確認",
+      "header.logout": "ログアウト",
+      "header.vault": "ボールト",
+      "section.passwords": "パスワード",
+      "chip.online": "オンライン · 読み/書き",
+      "btn.add_entry": "+ エントリ追加",
+      "table.id": "ID",
+      "table.name": "名前",
+      "table.username": "ユーザー名",
+      "table.actions": "操作",
+      "table.title": "タイトル",
+      "table.label": "ラベル",
+      "table.every": "周期",
+      "table.algo": "方式",
+      "passwords.footer": "パスワードはどこにも送信されません。暗号化はすべてこのホスト上で完結します。",
+      "section.secure_notes": "セキュアノート",
+      "section.secure_notes_desc": "同じボールト内に暗号化して保存されます。",
+      "btn.add_note": "+ ノート追加",
+      "section.generator": "パスワード生成",
+      "section.generator_desc": "長さ・モード・記号を調整して強力なパスワードを生成。",
+      "btn.open_generator": "ジェネレーターを開く",
+      "import.title": "エクスポート / インポート",
+      "import.subtitle": "データをダウンロードまたは貼り付け（csv/json + 拡張フォーマット）。",
+      "import.format_label": "フォーマット",
+      "import.download": "ダウンロード",
+      "import.import_label": "インポート形式",
+      "import.upload_label": "エクスポートファイルをアップロード",
+      "import.paste_label": "または内容を貼り付け",
+      "import.placeholder": "ここにエクスポートデータを貼り付け",
+      "import.submit": "インポート",
+      "import.supports": "パスワード、ノート、パスフレーズ、認証器、バックアップコードに対応。",
+      "import.overlay_upload": "アップロード中...",
+      "import.overlay_success": "インポート完了。",
+      "import.overlay_error": "インポート失敗。",
+      "import.importing": "インポート中...",
+      "import.status_uploading": "アップロード中...",
+      "import.success_default": "インポート完了。",
+      "import.error_default": "インポート失敗。",
+      "section.passphrases": "パスフレーズ",
+      "section.passphrases_desc": "APIトークンや復旧フレーズを保存。閲覧時に再確認します。",
+      "btn.add_passphrase": "+ パスフレーズ追加",
+      "section.authenticators": "認証アプリ (TOTP)",
+      "section.authenticators_desc": "2FAシークレットを保存しライブコードを表示。",
+      "btn.add_authenticator": "+ 認証を追加",
+      "section.backups": "バックアップコード",
+      "section.backups_desc": "復旧コードを保存（表示時は全文表示）。",
+      "btn.add_backups": "+ コード追加",
+      "section.session": "Webセッション",
+      "section.session_desc": "マスターパスワードで保護。30秒間操作がないと自動ロックされます。",
+      "form.vault": "ボールト:",
+      "form.back_list": "\u2190 一覧に戻る",
+      "form.save": "保存",
+      "link.back": "\u2190 戻る",
+      "entry.field.service": "サービス / 名称",
+      "entry.field.username": "ユーザー名",
+      "entry.field.password": "パスワード",
+      "entry.field.notes": "メモ",
+      "note.field.title": "タイトル",
+      "note.field.content": "内容",
+      "pass.field.label": "ラベル",
+      "pass.field.secret_hint": "パスフレーズ（空欄で自動生成）",
+      "backup.field.label": "ラベル",
+      "backup.field.codes": "バックアップコード（1行1コード）",
+      "auth.field.label": "ラベル",
+      "auth.field.secret": "Base32シークレット",
+      "auth.field.period": "更新間隔（秒）",
+      "auth.field.algorithm": "アルゴリズム",
+      "auth.option.sha1": "SHA1（標準）",
+      "auth.option.sha256": "SHA256",
+      "auth.option.sha512": "SHA512",
+      "view.title": "エントリ表示",
+      "view.label.name": "名前",
+      "view.label.username": "ユーザー名",
+      "view.label.password": "パスワード",
+      "view.label.notes": "メモ",
+      "view.label.created": "作成日時",
+      "view.sub_prefix": "ボールト:",
+      "btn.copy_username": "ユーザー名をコピー",
+      "btn.copy_password": "パスワードをコピー",
+      "btn.copy_notes": "ノートをコピー",
+      "btn.copy_passphrase": "コピー",
+      "btn.copy_codes": "コードをコピー",
+      "btn.copy_code": "コードをコピー",
+      "btn.show": "表示",
+      "btn.hide": "非表示",
+      "btn.edit": "編集",
+      "btn.delete": "削除",
+      "pass.view.title": "パスフレーズ",
+      "pass.view.label_field": "ラベル",
+      "pass.view.created": "作成日",
+      "pass.view.secret": "パスフレーズ",
+      "backup.view.title": "バックアップコード",
+      "backup.view.label": "ラベル:",
+      "backup.view.created": "作成:",
+      "auth.view.title": "認証アプリ",
+      "auth.view.label": "ラベル",
+      "auth.view.interval": "間隔",
+      "auth.view.algo": "アルゴリズム",
+      "auth.view.created": "作成日",
+      "auth.view.secret": "Base32シークレット",
+      "auth.view.code": "ライブコード",
+      "auth.view.seconds_label": "秒",
+      "generator.title": "パスワード生成",
+      "generator.length": "長さ",
+      "generator.mode_secure": "強力",
+      "generator.mode_easy": "簡単 / 覚えやすい",
+      "generator.opt.upper": "大文字",
+      "generator.opt.lower": "小文字",
+      "generator.opt.digits": "数字",
+      "generator.opt.symbols": "記号",
+      "generator.btn.regen": "再生成",
+      "generator.btn.copy": "コピー",
+      "generator.btn.back": "戻る",
+      "generator.stats.placeholder": "\u2013",
+      "generator.stats.bits": "ビット",
+      "generator.stats.suffix": "推定総当たり時間",
+      "generator.words_prefix": "単語",
+      "generator.strength.very_weak": "とても弱い",
+      "generator.strength.weak": "弱い",
+      "generator.strength.moderate": "普通",
+      "generator.strength.strong": "強い",
+      "generator.strength.excellent": "最強",
+      "generator.unit.sec": "秒",
+      "generator.unit.min": "分",
+      "generator.unit.hr": "時間",
+      "generator.unit.day": "日",
+      "generator.unit.yr": "年",
+      "generator.unit.century": "世紀",
+      "import.placeholder": "ここにエクスポートデータを貼り付け",
+      "toast.copy_success": "クリップボードにコピーしました。",
+      "toast.copy_fail": "コピーに失敗しました。",
+      "auth.countdown.refresh_in": "{n}秒で更新",
+      "auth.countdown.refreshing": "更新中...",
+      "auth.status.no_code": "まだコードがありません",
+      "auth.status.copy_ok": "コピーしました",
+      "auth.status.copy_fail": "コピー失敗",
+      "confirm.delete_entry": "このエントリを削除しますか？",
+      "confirm.delete_passphrase": "このパスフレーズを削除しますか？",
+      "confirm.delete_backup": "これらのバックアップコードを削除しますか？",
+      "confirm.delete_authenticator": "この認証情報を削除しますか？"
+    }
+  };
+  const FALLBACK = "en";
+  const SUPPORTED = Object.keys(DICT);
+  function normalize(lang) {
+    lang = (lang || "").toLowerCase();
+    if (SUPPORTED.includes(lang)) return lang;
+    return FALLBACK;
+  }
+  function lookup(key, lang) {
+    const dict = DICT[normalize(lang)] || {};
+    if (Object.prototype.hasOwnProperty.call(dict, key)) return dict[key];
+    const fb = DICT[FALLBACK] || {};
+    if (Object.prototype.hasOwnProperty.call(fb, key)) return fb[key];
+    return null;
+  }
+  let current = normalize(window.SPM_LANG);
+  function applyTranslations(lang) {
+    current = normalize(lang);
+    if (document.documentElement) document.documentElement.setAttribute("lang", current);
+    if (document.body) document.body.setAttribute("data-lang", current);
+    document.querySelectorAll("[data-i18n]").forEach((node) => {
+      const key = node.getAttribute("data-i18n");
+      const text = lookup(key, current);
+      if (text !== null && text !== undefined) node.textContent = text;
+    });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach((node) => {
+      const key = node.getAttribute("data-i18n-placeholder");
+      const text = lookup(key, current);
+      if (text !== null && text !== undefined) node.setAttribute("placeholder", text);
+    });
+    const picker = document.getElementById("lang-picker");
+    if (picker) picker.value = current;
+  }
+  function persist(lang) {
+    try {
+      fetch("/lang", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-Requested-With": "fetch"
+        },
+        body: "lang=" + encodeURIComponent(lang),
+        credentials: "same-origin"
+      }).catch(() => {});
+    } catch (e) {}
+  }
+  function setLang(lang) {
+    const normalized = normalize(lang);
+    applyTranslations(normalized);
+    persist(normalized);
+  }
+  document.addEventListener("DOMContentLoaded", () => {
+    applyTranslations(current);
+    const picker = document.getElementById("lang-picker");
+    if (picker) {
+      picker.value = current;
+      picker.addEventListener("change", () => setLang(picker.value));
+    }
+  });
+  window.SPM_I18N = {
+    dict: DICT,
+    t: function(key, fallback) {
+      const text = lookup(key, current);
+      if (text !== null && text !== undefined) return text;
+      return fallback !== undefined ? fallback : key;
+    },
+    setLang: setLang,
+    getLang: function() { return current; },
+    apply: applyTranslations
+  };
+})();
 </script>
 """
 
@@ -4737,6 +5294,14 @@ MAIN_HTML = """<!doctype html>
       align-items:center;
       gap:8px;
       min-width:0;
+    }
+    .lang-picker select {
+      background:rgba(255,255,255,0.08);
+      border:1px solid rgba(255,255,255,0.18);
+      color:var(--text);
+      border-radius:10px;
+      padding:6px 8px;
+      font-size:12px;
     }
     .vault-badge {
       font-size:11px;
@@ -5150,26 +5715,33 @@ MAIN_HTML = """<!doctype html>
     }
   </style>
 </head>
-<body>
+<body data-lang="__LANG__">
   <header>
     <div class="title">
-      <h1>Sans Password Manager</h1>
-      <div class="sub">Liquid-glass web interface · GPG encrypted</div>
+      <h1 data-i18n="header.title">Sans Password Manager</h1>
+      <div class="sub" data-i18n="header.subtitle">Liquid-glass web interface · GPG encrypted</div>
     </div>
     <div class="right-header">
       <div class="vault-badge">
-        <span class="label">Vault</span> <span>__VAULT_PATH__</span>
+        <span class="label" data-i18n="header.vault">Vault</span> <span>__VAULT_PATH__</span>
       </div>
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <div style="font-size:11px; color:#888ea6;">v__VERSION__</div>
-        <button class="logout" style="padding:6px 10px; border-radius:10px;" onclick="checkUpdate(true)">Check update</button>
+        <div class="lang-picker">
+          <select id="lang-picker" aria-label="Language">
+            <option value="en">🇺🇸 EN</option>
+            <option value="id">🇮🇩 ID</option>
+            <option value="ja">🇯🇵 JP</option>
+          </select>
+        </div>
+        <button class="logout" data-i18n="header.check_update" style="padding:6px 10px; border-radius:10px;" onclick="checkUpdate(true)">Check update</button>
         <select id="theme-picker" style="background:rgba(255,255,255,0.08); color:#f5f5f7; border:1px solid rgba(255,255,255,0.18); border-radius:10px; padding:6px; font-size:12px;">
           <option value="dark">Dark</option>
           <option value="amoled">AMOLED</option>
           <option value="cyberpunk">Cyberpunk</option>
           <option value="light">Light</option>
         </select>
-        <a href="/logout" class="logout">Logout</a>
+        <a href="/logout" class="logout" data-i18n="header.logout">Logout</a>
       </div>
     </div>
   </header>
@@ -5178,56 +5750,56 @@ MAIN_HTML = """<!doctype html>
     <section class="panel">
       <div class="panel-header">
         <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-          <h2>Passwords</h2>
-          <div class="chip"><span class="chip-dot"></span><span>Online · read / write</span></div>
+          <h2 data-i18n="section.passwords">Passwords</h2>
+          <div class="chip"><span class="chip-dot"></span><span data-i18n="chip.online">Online · read / write</span></div>
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <a href="/add" class="btn-primary">+ Add Entry</a>
+          <a href="/add" class="btn-primary" data-i18n="btn.add_entry">+ Add Entry</a>
         </div>
       </div>
       <div class="table-wrapper">
         <table>
-          <tr><th style="width:52px;">ID</th><th>Name</th><th>Username</th><th style="width:110px; text-align:right;">Actions</th></tr>
+          <tr><th style="width:52px;" data-i18n="table.id">ID</th><th data-i18n="table.name">Name</th><th data-i18n="table.username">Username</th><th style="width:110px; text-align:right;" data-i18n="table.actions">Actions</th></tr>
           __ROWS__
         </table>
       </div>
       <div style="padding:8px 10px 4px; font-size:11px; color:#888ea6;">
-        Passwords are never sent anywhere else – all crypto stays on this host with GnuPG.
+        <span data-i18n="passwords.footer">Passwords are never sent anywhere else – all crypto stays on this host with GnuPG.</span>
       </div>
     </section>
     <section class="side">
       <div class="card">
-        <h3>Secure Notes</h3>
-        <p>Encrypted notes stored inside the same vault.</p>
+        <h3 data-i18n="section.secure_notes">Secure Notes</h3>
+        <p data-i18n="section.secure_notes_desc">Encrypted notes stored inside the same vault.</p>
         <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
-          <a href="/notes-add" class="btn-primary small">+ Add Note</a>
+          <a href="/notes-add" class="btn-primary small" data-i18n="btn.add_note">+ Add Note</a>
         </div>
         <div class="notes-table-wrapper">
           <table class="notes-table">
-            <tr><th style="width:40px;">ID</th><th>Title</th><th style="width:70px; text-align:right;">Actions</th></tr>
+            <tr><th style="width:40px;" data-i18n="table.id">ID</th><th data-i18n="table.title">Title</th><th style="width:70px; text-align:right;" data-i18n="table.actions">Actions</th></tr>
             __NOTES_ROWS__
           </table>
         </div>
       </div>
       <div class="card">
-        <h3>Password Generator</h3>
-        <p>Create strong passwords with length, mode, and symbol toggles.</p>
+        <h3 data-i18n="section.generator">Password Generator</h3>
+        <p data-i18n="section.generator_desc">Create strong passwords with length, mode, and symbol toggles.</p>
         <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
-          <a href="/generator" class="btn-primary small">Open Generator</a>
+          <a href="/generator" class="btn-primary small" data-i18n="btn.open_generator">Open Generator</a>
         </div>
       </div>
       <div class="card import-card" id="import-card">
         <div class="import-overlay" id="import-overlay" aria-live="polite" aria-busy="true">
           <div class="import-overlay-inner">
             <div class="import-spinner" id="import-overlay-spinner"></div>
-            <div class="import-overlay-text" id="import-overlay-text">Uploading...</div>
+            <div class="import-overlay-text" id="import-overlay-text" data-i18n="import.overlay_upload">Uploading...</div>
           </div>
         </div>
-        <h3>Export / Import</h3>
-        <p>Download or paste data (csv/json + extended formats).</p>
+        <h3 data-i18n="import.title">Export / Import</h3>
+        <p data-i18n="import.subtitle">Download or paste data (csv/json + extended formats).</p>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
           <form method="get" action="/export" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; width:100%;">
-            <label style="font-size:12px;">Format</label>
+            <label style="font-size:12px;" data-i18n="import.format_label">Format</label>
             <select name="fmt" style="flex:1; min-width:140px; padding:6px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text);">
               <option value="csv">csv (default)</option>
               <option value="json">json</option>
@@ -5248,11 +5820,11 @@ MAIN_HTML = """<!doctype html>
               <option value="csv-noheader">csv-noheader</option>
               <option value="jsonc">jsonc</option>
             </select>
-            <button class="btn-primary small" type="submit">Download</button>
+            <button class="btn-primary small" type="submit" data-i18n="import.download">Download</button>
           </form>
         </div>
         <form id="import-form" method="post" action="/import" enctype="multipart/form-data" onsubmit="return window.SPM_handleImportSubmit ? window.SPM_handleImportSubmit(event, this) : true;" style="display:flex; flex-direction:column; gap:8px;">
-          <label style="font-size:12px;">Import format</label>
+          <label style="font-size:12px;" data-i18n="import.import_label">Import format</label>
           <select name="fmt" style="padding:6px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text);">
             <option value="csv">csv</option>
             <option value="json">json</option>
@@ -5273,63 +5845,65 @@ MAIN_HTML = """<!doctype html>
             <option value="csv-noheader">csv-noheader</option>
             <option value="jsonc">jsonc</option>
           </select>
-          <label style="font-size:12px;">Upload export file</label>
+          <label style="font-size:12px;" data-i18n="import.upload_label">Upload export file</label>
           <input type="file" name="file" accept=".csv,.json,.tsv,.ndjson,.jsonl,.md,.markdown,.html,.txt,.yaml,.yml,.xml,.sql,.ini,.psv,.rst,.toml,.org,.scsv" style="color:var(--text);">
-          <label style="font-size:12px;">Or paste file contents</label>
-          <textarea name="data" rows="5" placeholder="Paste exported data here" style="width:100%; border-radius:12px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text); padding:8px;"></textarea>
-          <button class="btn-primary small" type="submit" id="import-submit">Import</button>
+          <label style="font-size:12px;" data-i18n="import.paste_label">Or paste file contents</label>
+          <textarea name="data" rows="5" placeholder="Paste exported data here" data-i18n-placeholder="import.placeholder" style="width:100%; border-radius:12px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text); padding:8px;"></textarea>
+          <button class="btn-primary small" type="submit" id="import-submit" data-i18n="import.submit">Import</button>
           <div id="import-status" style="font-size:11px; min-height:14px; color:var(--muted);"></div>
-          <div style="font-size:11px; color:var(--muted);">Supports passwords, notes, passphrases, authenticators, backup codes.</div>
+          <div style="font-size:11px; color:var(--muted);" data-i18n="import.supports">Supports passwords, notes, passphrases, authenticators, backup codes.</div>
         </form>
       </div>
       <div class="card">
-        <h3>Passphrases</h3>
-        <p>Store API tokens or recovery phrases. View prompts master re-check.</p>
+        <h3 data-i18n="section.passphrases">Passphrases</h3>
+        <p data-i18n="section.passphrases_desc">Store API tokens or recovery phrases. View prompts master re-check.</p>
         <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
-          <a href="/passphrase-add" class="btn-primary small">+ Add Passphrase</a>
+          <a href="/passphrase-add" class="btn-primary small" data-i18n="btn.add_passphrase">+ Add Passphrase</a>
         </div>
         <div class="notes-table-wrapper">
           <table class="notes-table">
-            <tr><th style="width:40px;">ID</th><th>Label</th><th style="width:70px; text-align:right;">Actions</th></tr>
+            <tr><th style="width:40px;" data-i18n="table.id">ID</th><th data-i18n="table.label">Label</th><th style="width:70px; text-align:right;" data-i18n="table.actions">Actions</th></tr>
             __PASSPHRASE_ROWS__
           </table>
         </div>
       </div>
       <div class="card">
-        <h3>Authenticators (TOTP)</h3>
-        <p>Store 2FA secrets and view live codes.</p>
+        <h3 data-i18n="section.authenticators">Authenticators (TOTP)</h3>
+        <p data-i18n="section.authenticators_desc">Store 2FA secrets and view live codes.</p>
         <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
-          <a href="/authenticator-add" class="btn-primary small">+ Add Authenticator</a>
+          <a href="/authenticator-add" class="btn-primary small" data-i18n="btn.add_authenticator">+ Add Authenticator</a>
         </div>
         <div class="notes-table-wrapper">
           <table class="notes-table">
-            <tr><th style="width:40px;">ID</th><th>Label</th><th style="width:70px;">Every</th><th style="width:70px;">Algo</th><th style="width:90px; text-align:right;">Actions</th></tr>
+            <tr><th style="width:40px;" data-i18n="table.id">ID</th><th data-i18n="table.label">Label</th><th style="width:70px;" data-i18n="table.every">Every</th><th style="width:70px;" data-i18n="table.algo">Algo</th><th style="width:90px; text-align:right;" data-i18n="table.actions">Actions</th></tr>
             __AUTH_ROWS__
           </table>
         </div>
       </div>
       <div class="card">
-        <h3>Backup Codes</h3>
-        <p>Store recovery codes (view shows full codes).</p>
+        <h3 data-i18n="section.backups">Backup Codes</h3>
+        <p data-i18n="section.backups_desc">Store recovery codes (view shows full codes).</p>
         <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
-          <a href="/backup-codes-add" class="btn-primary small">+ Add Backup Codes</a>
+          <a href="/backup-codes-add" class="btn-primary small" data-i18n="btn.add_backups">+ Add Backup Codes</a>
         </div>
         <div class="notes-table-wrapper">
           <table class="notes-table">
-            <tr><th style="width:40px;">ID</th><th>Label</th><th style="width:70px; text-align:right;">Actions</th></tr>
+            <tr><th style="width:40px;" data-i18n="table.id">ID</th><th data-i18n="table.label">Label</th><th style="width:70px; text-align:right;" data-i18n="table.actions">Actions</th></tr>
             __BACKUP_ROWS__
           </table>
         </div>
       </div>
       <div class="card">
-        <h3>Web Session</h3>
-        <p>Protected by your master password. The interface auto-locks after 30 seconds of inactivity and logs you out.</p>
+        <h3 data-i18n="section.session">Web Session</h3>
+        <p data-i18n="section.session_desc">Protected by your master password. The interface auto-locks after 30 seconds of inactivity and logs you out.</p>
       </div>
     </section>
   </div>
   <div style="position:fixed; bottom:10px; right:12px; font-size:11px; color:#888ea6;">
     © 2025 Sansyourways · v__VERSION__
   </div>
+  <script>window.SPM_LANG="__LANG__";</script>
+  """ + I18N_SCRIPT + """
   <script>
     const currentVersion = "__VERSION__";
     async function fetchLatestVersion() {
@@ -5370,6 +5944,12 @@ MAIN_HTML = """<!doctype html>
       if (ev) ev.preventDefault();
       form = form || document.getElementById("import-form");
       if (!form) return false;
+      const t = (key, fallback) => {
+        if (window.SPM_I18N && typeof window.SPM_I18N.t === "function") {
+          return window.SPM_I18N.t(key, fallback);
+        }
+        return fallback !== undefined ? fallback : key;
+      };
       const statusEl = document.getElementById("import-status");
       const submitBtn = document.getElementById("import-submit") || form.querySelector("button[type=submit]");
       const card = document.getElementById("import-card");
@@ -5422,10 +6002,10 @@ MAIN_HTML = """<!doctype html>
       if (window.SPM_AutoLock) window.SPM_AutoLock.pause();
       if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.textContent = "Importing...";
+        submitBtn.textContent = t("import.importing", "Importing...");
       }
-      setOverlay("loading", "Uploading...");
-      setStatus("Uploading...", true);
+      setOverlay("loading", t("import.overlay_upload", "Uploading..."));
+      setStatus(t("import.status_uploading", "Uploading..."), true);
       const fd = new FormData(form);
       fetch("/import", {
         method: "POST",
@@ -5441,22 +6021,24 @@ MAIN_HTML = """<!doctype html>
           return payload;
         })
         .then((payload) => {
-          const msg = payload.message || "Import complete.";
+          const fallbackMsg = t("import.success_default", "Import complete.");
+          const msg = payload.message || fallbackMsg;
           setStatus(msg, true);
           form.reset();
-          setOverlay("success", msg);
+          setOverlay("success", msg || fallbackMsg);
           setTimeout(() => { window.location.reload(); }, 800);
         })
         .catch((err) => {
-          const msg = err.message || "Import failed.";
+          const fallbackMsg = t("import.error_default", "Import failed.");
+          const msg = err.message || fallbackMsg;
           setStatus(msg, false);
-          setOverlay("error", msg);
+          setOverlay("error", msg || fallbackMsg);
           clearOverlayLater(2400);
         })
         .finally(() => {
           if (submitBtn) {
             submitBtn.disabled = false;
-            submitBtn.textContent = defaultLabel || "Import";
+            submitBtn.textContent = defaultLabel || t("import.submit", "Import");
           }
           if (!overlay) {
             if (card) delete card.dataset.loading;
@@ -5597,19 +6179,21 @@ ENTRY_FORM_HTML = """<!doctype html>
     }
   </style>
 </head>
-<body>
+<body data-lang="__LANG__">
   <div class="glass">
     <h1>__TITLE__</h1>
-    <p class="sub">Vault: __VAULT_PATH__</p>
+    <p class="sub"><span data-i18n="form.vault">Vault:</span> __VAULT_PATH__</p>
     <form method="post" action="__ACTION__">
       __BODY__
       <div class="actions">
-        <a href="/" class="link">← Back to list</a>
-        <button type="submit" class="btn-primary">Save</button>
+        <a href="/" class="link" data-i18n="form.back_list">← Back to list</a>
+        <button type="submit" class="btn-primary" data-i18n="form.save">Save</button>
       </div>
     </form>
     __MESSAGE__
   </div>
+  <script>window.SPM_LANG="__LANG__";</script>
+  """ + I18N_SCRIPT + """
   """ + AUTOLOCK_SCRIPT + """
 </body>
 </html>
@@ -5766,6 +6350,12 @@ VIEW_HTML = """<!doctype html>
   </style>
   <script>
     let toastTimer = null;
+    function t(key, fallback) {
+      if (window.SPM_I18N && typeof window.SPM_I18N.t === "function") {
+        return window.SPM_I18N.t(key, fallback);
+      }
+      return fallback !== undefined ? fallback : key;
+    }
     function ensureToast() {
       let toast = document.getElementById('spm-toast');
       if (!toast) {
@@ -5781,7 +6371,7 @@ VIEW_HTML = """<!doctype html>
     }
     function showToast(message, ok=true) {
       const toast = ensureToast();
-      toast.textContent = message || (ok ? 'Copied to clipboard.' : 'Copy failed.');
+      toast.textContent = message || (ok ? t('toast.copy_success','Copied to clipboard.') : t('toast.copy_fail','Copy failed.'));
       toast.classList.remove('error');
       if (!ok) toast.classList.add('error'); else toast.classList.remove('error');
       toast.classList.add('show');
@@ -5812,8 +6402,8 @@ VIEW_HTML = """<!doctype html>
     }
     function handleCopy(textPromise, label) {
       textPromise
-        .then(() => showToast(label ? `${label} copied.` : 'Copied.'))
-        .catch(() => showToast('Copy failed.', false));
+        .then(() => showToast(t('toast.copy_success','Copied to clipboard.'), true))
+        .catch(() => showToast(t('toast.copy_fail','Copy failed.'), false));
     }
     function togglePassword() {
       const el = document.getElementById('pw');
@@ -5823,68 +6413,70 @@ VIEW_HTML = """<!doctype html>
       if (hidden) {
         el.textContent = el.getAttribute('data-real');
         el.setAttribute('data-hidden', '0');
-        btn.textContent = 'Hide';
+        btn.textContent = t('btn.hide','Hide');
       } else {
         el.textContent = '••••••••';
         el.setAttribute('data-hidden', '1');
-        btn.textContent = 'Show';
+        btn.textContent = t('btn.show','Show');
       }
     }
-    function copyText(id, label) {
+    function copyText(id) {
       const el = document.getElementById(id);
       if (!el) return;
       const text = el.getAttribute('data-real') || el.textContent || '';
-      handleCopy(copyToClipboard(text), label);
+      handleCopy(copyToClipboard(text));
     }
   </script>
 </head>
-<body>
+<body data-lang="__LANG__">
   <div class="glass">
-    <h1>View Entry</h1>
-    <p class="sub">Vault: __VAULT_PATH__ · ID __ID__</p>
+    <h1 data-i18n="view.title">View Entry</h1>
+    <p class="sub"><span data-i18n="view.sub_prefix">Vault:</span> __VAULT_PATH__ · ID __ID__</p>
 
     <div class="field">
-      <div class="label">Name</div>
+      <div class="label" data-i18n="view.label.name">Name</div>
       <div class="value mono">__NAME__</div>
     </div>
     <div class="field">
-      <div class="label">Username</div>
+      <div class="label" data-i18n="view.label.username">Username</div>
       <div class="value mono" id="user-val">__USER__</div>
-      <button class="btn-secondary" type="button" onclick="copyText('user-val','Username')">Copy Username</button>
+      <button class="btn-secondary" type="button" data-i18n="btn.copy_username" onclick="copyText('user-val')">Copy Username</button>
     </div>
     <div class="field">
-      <div class="label">Password</div>
+      <div class="label" data-i18n="view.label.password">Password</div>
       <div class="value mono" id="pw" data-hidden="1" data-real="__PASS__">••••••••</div>
       <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
-        <button id="pwbtn" class="btn-soft" type="button" onclick="togglePassword()">Show</button>
-        <button class="btn-secondary" type="button" onclick="copyText('pw','Password')">Copy Password</button>
+        <button id="pwbtn" class="btn-soft" type="button" data-i18n="btn.show" onclick="togglePassword()">Show</button>
+        <button class="btn-secondary" type="button" data-i18n="btn.copy_password" onclick="copyText('pw')">Copy Password</button>
       </div>
     </div>
     <div class="field">
-      <div class="label">Notes</div>
+      <div class="label" data-i18n="view.label.notes">Notes</div>
       <div class="value mono" id="notes-val">__NOTES__</div>
-      <button class="btn-secondary" type="button" onclick="copyText('notes-val','Notes')">Copy Notes</button>
+      <button class="btn-secondary" type="button" data-i18n="btn.copy_notes" onclick="copyText('notes-val')">Copy Notes</button>
     </div>
     <div class="field">
-      <div class="label">Created at</div>
+      <div class="label" data-i18n="view.label.created">Created at</div>
       <div class="value mono">__CREATED__</div>
     </div>
 
     <div class="actions">
-      <a href="/" class="link">← Back to list</a>
+      <a href="/" class="link" data-i18n="form.back_list">← Back to list</a>
       <div style="display:flex; gap:6px; flex-wrap:wrap;">
         <form method="get" action="/edit" style="display:inline;">
           <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-soft">Edit</button>
+          <button type="submit" class="btn-soft" data-i18n="btn.edit">Edit</button>
         </form>
-        <form method="post" action="/delete" style="display:inline;" onsubmit="return confirm('Delete this entry?');">
+        <form method="post" action="/delete" style="display:inline;" onsubmit="return confirm(t('confirm.delete_entry','Delete this entry?'));">
           <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-danger">Delete</button>
+          <button type="submit" class="btn-danger" data-i18n="btn.delete">Delete</button>
         </form>
       </div>
     </div>
   </div>
   <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  <script>window.SPM_LANG="__LANG__";</script>
+  """ + I18N_SCRIPT + """
   """ + AUTOLOCK_SCRIPT + """
 </body>
 </html>
@@ -6034,7 +6626,7 @@ NOTES_VIEW_HTML = """<!doctype html>
     }
     function showToast(message, ok=true) {
       const toast = ensureToast();
-      toast.textContent = message || (ok ? 'Copied to clipboard.' : 'Copy failed.');
+      toast.textContent = message || (ok ? t('toast.copy_success','Copied to clipboard.') : t('toast.copy_fail','Copy failed.'));
       toast.classList.toggle('error', !ok);
       toast.classList.add('show');
       clearTimeout(toastTimer);
@@ -6093,7 +6685,7 @@ NOTES_VIEW_HTML = """<!doctype html>
       <a href="/" class="link">← Back to list</a>
       <form method="post" action="/notes-delete" onsubmit="return confirm('Delete this note?');">
         <input type="hidden" name="id" value="__ID__">
-        <button type="submit" class="btn-danger">Delete</button>
+        <button type="submit" class="btn-danger" data-i18n="btn.delete">Delete</button>
       </form>
     </div>
   </div>
@@ -6167,6 +6759,12 @@ PASSPHRASE_VIEW_HTML = """<!doctype html>
   </style>
   <script>
     let toastTimer = null;
+    function t(key, fallback) {
+      if (window.SPM_I18N && typeof window.SPM_I18N.t === "function") {
+        return window.SPM_I18N.t(key, fallback);
+      }
+      return fallback !== undefined ? fallback : key;
+    }
     function ensureToast() {
       let toast = document.getElementById('spm-toast');
       if (!toast) {
@@ -6182,7 +6780,7 @@ PASSPHRASE_VIEW_HTML = """<!doctype html>
     }
     function showToast(message, ok=true) {
       const toast = ensureToast();
-      toast.textContent = message || (ok ? 'Copied to clipboard.' : 'Copy failed.');
+      toast.textContent = message || (ok ? t('toast.copy_success','Copied to clipboard.') : t('toast.copy_fail','Copy failed.'));
       toast.classList.toggle('error', !ok);
       toast.classList.add('show');
       clearTimeout(toastTimer);
@@ -6213,33 +6811,35 @@ PASSPHRASE_VIEW_HTML = """<!doctype html>
     function copySecret() {
       const text = document.getElementById('pass-secret').textContent || '';
       copyToClipboard(text)
-        .then(() => showToast('Passphrase copied.'))
-        .catch(() => showToast('Copy failed.', false));
+        .then(() => showToast(t('toast.copy_success','Copied to clipboard.'), true))
+        .catch(() => showToast(t('toast.copy_fail','Copy failed.'), false));
     }
   </script>
 </head>
-<body>
+<body data-lang="__LANG__">
   <div class="glass">
-    <h1>Passphrase</h1>
-    <p class="sub">Vault: __VAULT_PATH__ · ID __ID__</p>
-    <div class="field"><div class="label">Label</div><div class="mono">__LABEL__</div></div>
-    <div class="field"><div class="label">Created</div><div class="mono">__CREATED__</div></div>
-    <div class="field"><div class="label">Passphrase</div><div class="mono" id="pass-secret">__SECRET__</div><button class="btn-secondary" type="button" onclick="copySecret()">Copy</button></div>
+    <h1 data-i18n="pass.view.title">Passphrase</h1>
+    <p class="sub"><span data-i18n="view.sub_prefix">Vault:</span> __VAULT_PATH__ · ID __ID__</p>
+    <div class="field"><div class="label" data-i18n="pass.view.label_field">Label</div><div class="mono">__LABEL__</div></div>
+    <div class="field"><div class="label" data-i18n="pass.view.created">Created</div><div class="mono">__CREATED__</div></div>
+    <div class="field"><div class="label" data-i18n="pass.view.secret">Passphrase</div><div class="mono" id="pass-secret">__SECRET__</div><button class="btn-secondary" type="button" data-i18n="btn.copy_passphrase" onclick="copySecret()">Copy</button></div>
     <div class="actions">
-      <a href="/" class="link">← Back</a>
+      <a href="/" class="link" data-i18n="link.back">← Back</a>
       <div style="display:flex; gap:6px; flex-wrap:wrap;">
         <form method="get" action="/passphrase-edit" style="display:inline;">
           <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-soft">Edit</button>
+          <button type="submit" class="btn-soft" data-i18n="btn.edit">Edit</button>
         </form>
-        <form method="post" action="/passphrase-delete" style="display:inline;" onsubmit="return confirm('Delete this passphrase?');">
+        <form method="post" action="/passphrase-delete" style="display:inline;" onsubmit="return confirm(t('confirm.delete_passphrase','Delete this passphrase?'));">
           <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-danger">Delete</button>
+          <button type="submit" class="btn-danger" data-i18n="btn.delete">Delete</button>
         </form>
       </div>
     </div>
   </div>
   <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  <script>window.SPM_LANG="__LANG__";</script>
+  """ + I18N_SCRIPT + """
   """ + AUTOLOCK_SCRIPT + """
 </body>
 </html>
@@ -6313,6 +6913,12 @@ BACKUP_VIEW_HTML = """<!doctype html>
   </style>
   <script>
     let toastTimer = null;
+    function t(key, fallback) {
+      if (window.SPM_I18N && typeof window.SPM_I18N.t === "function") {
+        return window.SPM_I18N.t(key, fallback);
+      }
+      return fallback !== undefined ? fallback : key;
+    }
     function ensureToast() {
       let toast = document.getElementById('spm-toast');
       if (!toast) {
@@ -6328,7 +6934,7 @@ BACKUP_VIEW_HTML = """<!doctype html>
     }
     function showToast(message, ok=true) {
       const toast = ensureToast();
-      toast.textContent = message || (ok ? 'Copied to clipboard.' : 'Copy failed.');
+      toast.textContent = message || (ok ? t('toast.copy_success','Copied to clipboard.') : t('toast.copy_fail','Copy failed.'));
       toast.classList.toggle('error', !ok);
       toast.classList.add('show');
       clearTimeout(toastTimer);
@@ -6359,34 +6965,36 @@ BACKUP_VIEW_HTML = """<!doctype html>
     function copyCodes() {
       const text = document.getElementById('backup-codes').textContent || '';
       copyToClipboard(text)
-        .then(() => showToast('Backup codes copied.'))
-        .catch(() => showToast('Copy failed.', false));
+        .then(() => showToast(t('toast.copy_success','Copied to clipboard.'), true))
+        .catch(() => showToast(t('toast.copy_fail','Copy failed.'), false));
     }
   </script>
 </head>
-<body>
+<body data-lang="__LANG__">
   <div class="glass">
-    <h1>Backup Codes</h1>
-    <p class="sub">Vault: __VAULT_PATH__ · ID __ID__</p>
-    <div style="font-size:13px; margin-bottom:8px;">Label: <span class="mono">__LABEL__</span></div>
-    <div style="font-size:13px; margin-bottom:8px;">Created: <span class="mono">__CREATED__</span></div>
+    <h1 data-i18n="backup.view.title">Backup Codes</h1>
+    <p class="sub"><span data-i18n="view.sub_prefix">Vault:</span> __VAULT_PATH__ · ID __ID__</p>
+    <div style="font-size:13px; margin-bottom:8px;"><span data-i18n="backup.view.label">Label:</span> <span class="mono">__LABEL__</span></div>
+    <div style="font-size:13px; margin-bottom:8px;"><span data-i18n="backup.view.created">Created:</span> <span class="mono">__CREATED__</span></div>
     <pre id="backup-codes">__CODES__</pre>
-    <button class="btn-secondary" type="button" onclick="copyCodes()">Copy Codes</button>
+    <button class="btn-secondary" type="button" data-i18n="btn.copy_codes" onclick="copyCodes()">Copy Codes</button>
     <div class="actions">
-      <a href="/" class="link">← Back</a>
+      <a href="/" class="link" data-i18n="link.back">← Back</a>
       <div style="display:flex; gap:6px; flex-wrap:wrap;">
         <form method="get" action="/backup-codes-edit" style="display:inline;">
           <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-soft">Edit</button>
+          <button type="submit" class="btn-soft" data-i18n="btn.edit">Edit</button>
         </form>
-        <form method="post" action="/backup-codes-delete" style="display:inline;" onsubmit="return confirm('Delete these backup codes?');">
+        <form method="post" action="/backup-codes-delete" style="display:inline;" onsubmit="return confirm(t('confirm.delete_backup','Delete these backup codes?'));">
           <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-danger">Delete</button>
+          <button type="submit" class="btn-danger" data-i18n="btn.delete">Delete</button>
         </form>
       </div>
     </div>
   </div>
   <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  <script>window.SPM_LANG="__LANG__";</script>
+  """ + I18N_SCRIPT + """
   """ + AUTOLOCK_SCRIPT + """
 </body>
 </html>
@@ -6434,38 +7042,109 @@ GENERATOR_HTML = """<!doctype html>
     .btn { border:none; padding:9px 14px; border-radius:14px; background:linear-gradient(135deg,#14c38e,#2f7cff); color:#fff; font-weight:600; letter-spacing:0.04em; cursor:pointer; }
     .btn-secondary { border:1px solid rgba(255,255,255,0.14); padding:8px 12px; border-radius:12px; background:rgba(255,255,255,0.08); color:#f5f5f7; font-weight:500; }
     .stats { font-size:12px; color:#c8cbe4; }
+    .toast {
+      position:fixed;
+      top:18px;
+      right:18px;
+      background:rgba(7,9,20,0.92);
+      border:1px solid rgba(159,163,240,0.45);
+      border-radius:12px;
+      padding:10px 14px;
+      font-size:12px;
+      letter-spacing:0.04em;
+      color:#f5f5f7;
+      opacity:0;
+      transform:translateY(-6px);
+      transition:opacity 0.25s ease, transform 0.25s ease;
+      pointer-events:none;
+      box-shadow:0 12px 30px rgba(0,0,0,0.55);
+      z-index:99;
+    }
+    .toast.show { opacity:1; transform:translateY(0); }
+    .toast.error { border-color:rgba(255,155,155,0.6); color:#ffd0d8; }
   </style>
 </head>
-<body>
+<body data-lang="__LANG__">
   <div class="glass">
-    <h1>Password Generator</h1>
-    <p class="sub">Vault: __VAULT_PATH__</p>
+    <h1 data-i18n="generator.title">Password Generator</h1>
+    <p class="sub"><span data-i18n="view.sub_prefix">Vault:</span> __VAULT_PATH__</p>
     <div class="row">
-      <label for="len">Length: <span id="len-label">16</span></label>
+      <label for="len"><span data-i18n="generator.length">Length</span>: <span id="len-label">16</span></label>
       <input type="range" id="len" min="4" max="64" value="16">
     </div>
     <div class="row">
-      <span id="mode-secure" class="pill active" onclick="setMode('secure')">Secure</span>
-      <span id="mode-easy" class="pill" onclick="setMode('easy')">Easy / Memorable</span>
+      <span id="mode-secure" class="pill active" data-i18n="generator.mode_secure" onclick="setMode('secure')">Secure</span>
+      <span id="mode-easy" class="pill" data-i18n="generator.mode_easy" onclick="setMode('easy')">Easy / Memorable</span>
     </div>
     <div class="row" style="flex-wrap:wrap; gap:10px;">
-      <label><input type="checkbox" id="upper" checked> Uppercase</label>
-      <label><input type="checkbox" id="lower" checked> Lowercase</label>
-      <label><input type="checkbox" id="digits" checked> Numbers</label>
-      <label><input type="checkbox" id="symbols" checked> Symbols</label>
+      <label><input type="checkbox" id="upper" checked> <span data-i18n="generator.opt.upper">Uppercase</span></label>
+      <label><input type="checkbox" id="lower" checked> <span data-i18n="generator.opt.lower">Lowercase</span></label>
+      <label><input type="checkbox" id="digits" checked> <span data-i18n="generator.opt.digits">Numbers</span></label>
+      <label><input type="checkbox" id="symbols" checked> <span data-i18n="generator.opt.symbols">Symbols</span></label>
     </div>
     <div class="row" style="flex-direction:column; align-items:flex-start;">
       <div class="output mono" id="pw-out">••••••</div>
-      <div class="stats" id="pw-stats">–</div>
+      <div class="stats" id="pw-stats" data-i18n="generator.stats.placeholder">–</div>
     </div>
     <div class="row">
-      <button class="btn" onclick="regen()">Regenerate</button>
-      <button class="btn-secondary" onclick="copyPw()">Copy</button>
-      <a href="/" class="btn-secondary" style="text-decoration:none;">Back</a>
+      <button class="btn" data-i18n="generator.btn.regen" onclick="regen()">Regenerate</button>
+      <button class="btn-secondary" data-i18n="generator.btn.copy" onclick="copyPw()">Copy</button>
+      <a href="/" class="btn-secondary" style="text-decoration:none;" data-i18n="generator.btn.back">Back</a>
     </div>
   </div>
+  <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   <script>
     const WORDS = ["sun","moon","star","river","ocean","cloud","stone","tree","leaf","fern","fire","ember","storm","wind","breeze","shadow","light","silver","gold","amber","flame","nova","comet","aurora","pulse","echo","vapor","wave","mist","dawn","dusk","zen","sage","whale","lynx","orca","hawk","raven"];
+    let toastTimer = null;
+    function t(key, fallback) {
+      if (window.SPM_I18N && typeof window.SPM_I18N.t === "function") {
+        return window.SPM_I18N.t(key, fallback);
+      }
+      return fallback !== undefined ? fallback : key;
+    }
+    function ensureToast() {
+      let toast = document.getElementById("spm-toast");
+      if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "spm-toast";
+        toast.className = "toast";
+        toast.setAttribute("role","status");
+        toast.setAttribute("aria-live","polite");
+        toast.setAttribute("aria-atomic","true");
+        document.body.appendChild(toast);
+      }
+      return toast;
+    }
+    function showToast(message, ok=true) {
+      const toast = ensureToast();
+      toast.textContent = message || (ok ? t('toast.copy_success','Copied to clipboard.') : t('toast.copy_fail','Copy failed.'));
+      toast.classList.toggle("error", !ok);
+      toast.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 2000);
+    }
+    function copyToClipboard(text) {
+      if (!text) return Promise.resolve();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      return new Promise((resolve, reject) => {
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.top = "-2000px";
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }
     function activeMode() {
       if (document.getElementById('mode-easy').classList.contains('active')) return 'easy';
       return 'secure';
@@ -6551,18 +7230,20 @@ GENERATOR_HTML = """<!doctype html>
           break;
         }
       }
-      return t.toFixed(1) + " " + label;
+      const unitLabel = t(`generator.unit.${label}`, label);
+      return t.toFixed(1) + " " + unitLabel;
     }
     function updateStats(pw, chars) {
       const bits = entropy(pw, chars);
-      let strength = "Weak";
-      if (bits >= 100) strength = "Excellent";
-      else if (bits >= 80) strength = "Strong";
-      else if (bits >= 60) strength = "Moderate";
-      else if (bits >= 40) strength = "Weak";
-      else strength = "Very weak";
+      let strengthKey = "generator.strength.weak";
+      let fallback = "Weak";
+      if (bits >= 100) { strengthKey = "generator.strength.excellent"; fallback = "Excellent"; }
+      else if (bits >= 80) { strengthKey = "generator.strength.strong"; fallback = "Strong"; }
+      else if (bits >= 60) { strengthKey = "generator.strength.moderate"; fallback = "Moderate"; }
+      else if (bits < 40) { strengthKey = "generator.strength.very_weak"; fallback = "Very weak"; }
+      const strength = t(strengthKey, fallback);
       const time = crackTime(bits);
-      document.getElementById('pw-stats').textContent = `${strength} · ~${bits.toFixed(1)} bits · ~${time} to brute-force (est.)`;
+      document.getElementById('pw-stats').textContent = `${strength} · ~${bits.toFixed(1)} ${t('generator.stats.bits','bits')} · ~${time} ${t('generator.stats.suffix','to brute-force (est.)')}`;
     }
     function regen() {
       let lenVal = parseInt(document.getElementById('len').value, 10) || 16;
@@ -6576,7 +7257,7 @@ GENERATOR_HTML = """<!doctype html>
       let result;
       if (mode === 'easy') {
         const wordsCount = Math.min(8, Math.max(2, Math.round(lenVal / 6)));
-        document.getElementById('len-label').textContent = `Words: ${wordsCount}`;
+        document.getElementById('len-label').textContent = `${t('generator.words_prefix','Words')}: ${wordsCount}`;
         result = genEasy(wordsCount, opts);
       } else {
         if (lenVal < 4) lenVal = 4;
@@ -6588,11 +7269,16 @@ GENERATOR_HTML = """<!doctype html>
     }
     function copyPw() {
       const pw = document.getElementById('pw-out').textContent || '';
-      navigator.clipboard.writeText(pw).catch(()=>{});
+      if (!pw) return;
+      copyToClipboard(pw)
+        .then(() => showToast(t('toast.copy_success','Copied to clipboard.'), true))
+        .catch(() => showToast(t('toast.copy_fail','Copy failed.'), false));
     }
     document.getElementById('len').addEventListener('input', regen);
     regen();
   </script>
+  <script>window.SPM_LANG="__LANG__";</script>
+  """ + I18N_SCRIPT + """
   """ + AUTOLOCK_SCRIPT + """
 </body>
 </html>
@@ -6668,34 +7354,34 @@ AUTH_VIEW_HTML = """<!doctype html>
     .toast.error { border-color:rgba(255,155,155,0.6); color:#ffd0d8; }
   </style>
 </head>
-<body>
+<body data-lang="__LANG__">
   <div class="glass">
-    <h1>Authenticator</h1>
-    <p class="sub">Vault: __VAULT_PATH__ · ID __ID__</p>
-    <div class="field"><div class="label">Label</div><div class="mono">__LABEL__</div></div>
-    <div class="field"><div class="label">Interval</div><div class="mono">__PERIOD__ seconds</div></div>
-    <div class="field"><div class="label">Algorithm</div><div class="mono">__ALGO__</div></div>
-    <div class="field"><div class="label">Created</div><div class="mono">__CREATED__</div></div>
-    <div class="field"><div class="label">Base32 Secret</div><div class="mono">__SECRET__</div></div>
+    <h1 data-i18n="auth.view.title">Authenticator</h1>
+    <p class="sub"><span data-i18n="view.sub_prefix">Vault:</span> __VAULT_PATH__ · ID __ID__</p>
+    <div class="field"><div class="label" data-i18n="auth.view.label">Label</div><div class="mono">__LABEL__</div></div>
+    <div class="field"><div class="label" data-i18n="auth.view.interval">Interval</div><div class="mono">__PERIOD__ <span data-i18n="auth.view.seconds_label">seconds</span></div></div>
+    <div class="field"><div class="label" data-i18n="auth.view.algo">Algorithm</div><div class="mono">__ALGO__</div></div>
+    <div class="field"><div class="label" data-i18n="auth.view.created">Created</div><div class="mono">__CREATED__</div></div>
+    <div class="field"><div class="label" data-i18n="auth.view.secret">Base32 Secret</div><div class="mono">__SECRET__</div></div>
     <div class="field">
-      <div class="label">Live Code</div>
+      <div class="label" data-i18n="auth.view.code">Live Code</div>
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <span id="code" class="code" style="margin:0;">••••••</span>
-        <button type="button" class="btn-soft" id="copy-btn" title="Copy code">📋 Copy</button>
+        <button type="button" class="btn-soft" id="copy-btn" data-i18n="btn.copy_code" title="Copy code">📋 Copy</button>
       </div>
       <div class="countdown" id="countdown"></div>
       <div id="copy-status" style="font-size:11px; color:#9fa3f0; min-height:14px;"></div>
     </div>
     <div class="actions">
-      <a href="/" class="link">← Back</a>
+      <a href="/" class="link" data-i18n="link.back">← Back</a>
       <div style="display:flex; gap:6px; flex-wrap:wrap;">
         <form method="get" action="/authenticator-edit" style="display:inline;">
           <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-soft">Edit</button>
+          <button type="submit" class="btn-soft" data-i18n="btn.edit">Edit</button>
         </form>
-        <form method="post" action="/authenticator-delete" style="display:inline;" onsubmit="return confirm('Delete this authenticator?');">
+        <form method="post" action="/authenticator-delete" style="display:inline;" onsubmit="return confirm(t('confirm.delete_authenticator','Delete this authenticator?'));">
           <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-danger">Delete</button>
+          <button type="submit" class="btn-danger" data-i18n="btn.delete">Delete</button>
         </form>
       </div>
     </div>
@@ -6703,10 +7389,16 @@ AUTH_VIEW_HTML = """<!doctype html>
   <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   <script>
     let toastTimer = null;
+    function t(key, fallback) {
+      if (window.SPM_I18N && typeof window.SPM_I18N.t === "function") {
+        return window.SPM_I18N.t(key, fallback);
+      }
+      return fallback !== undefined ? fallback : key;
+    }
     function showToast(message, ok=true) {
       const toast = document.getElementById('spm-toast');
       if (!toast) return;
-      toast.textContent = message || (ok ? 'Copied to clipboard.' : 'Copy failed.');
+      toast.textContent = message || (ok ? t('toast.copy_success','Copied to clipboard.') : t('toast.copy_fail','Copy failed.'));
       toast.classList.toggle('error', !ok);
       toast.classList.add('show');
       clearTimeout(toastTimer);
@@ -6730,12 +7422,12 @@ AUTH_VIEW_HTML = """<!doctype html>
       }
       function copyCode() {
         if (!currentCode) {
-          showStatus("No code yet", false);
+          showStatus(t('auth.status.no_code','No code yet'), false);
           return;
         }
         if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(currentCode)
-            .then(() => { showStatus("Copied!"); showToast("Code copied."); })
+            .then(() => { showStatus(t('auth.status.copy_ok','Copied!')); showToast(t('toast.copy_success','Copied to clipboard.'), true); })
             .catch(() => fallbackCopy());
         } else {
           fallbackCopy();
@@ -6749,11 +7441,11 @@ AUTH_VIEW_HTML = """<!doctype html>
           ta.select();
           document.execCommand("copy");
           ta.remove();
-          showStatus("Copied!");
-          showToast("Code copied.");
+          showStatus(t('auth.status.copy_ok','Copied!'));
+          showToast(t('toast.copy_success','Copied to clipboard.'), true);
         } catch (e) {
-          showStatus("Copy failed", false);
-          showToast("Copy failed.", false);
+          showStatus(t('auth.status.copy_fail','Copy failed'), false);
+          showToast(t('toast.copy_fail','Copy failed.'), false);
         }
       }
       if (copyBtn) {
@@ -6774,16 +7466,17 @@ AUTH_VIEW_HTML = """<!doctype html>
             currentCode = d.code || '';
             codeEl.textContent = currentCode || '------';
             let remaining = d.expires_in || period;
-            cdEl.textContent = 'Refreshes in ' + remaining + 's';
+            const template = t('auth.countdown.refresh_in','Refreshes in {n}s');
+            cdEl.textContent = template.replace('{n}', remaining);
             if (countdownTimer) clearInterval(countdownTimer);
             countdownTimer = setInterval(() => {
               remaining -= 1;
               if (remaining <= 0) {
-                cdEl.textContent = 'Refreshing...';
+                cdEl.textContent = t('auth.countdown.refreshing','Refreshing...');
                 clearInterval(countdownTimer);
                 tick();
               } else {
-                cdEl.textContent = 'Refreshes in ' + remaining + 's';
+                cdEl.textContent = template.replace('{n}', remaining);
               }
             }, 1000);
             const wait = Math.max(800, (remaining * 1000) - 250);
@@ -6794,6 +7487,8 @@ AUTH_VIEW_HTML = """<!doctype html>
       tick();
     })();
   </script>
+  <script>window.SPM_LANG="__LANG__";</script>
+  """ + I18N_SCRIPT + """
   """ + AUTOLOCK_SCRIPT + """
 </body>
 </html>
@@ -7425,13 +8120,13 @@ def build_entry_form(title, vault_path, action, values=None, message=""):
     values = values or {}
     def v(k): return html.escape(values.get(k, "") or "")
     body = (
-        "<label>Service / Name</label>"
+        "<label data-i18n='entry.field.service'>Service / Name</label>"
         f"<input type='text' name='name' value='{v('name')}' required>"
-        "<label>Username</label>"
+        "<label data-i18n='entry.field.username'>Username</label>"
         f"<input type='text' name='user' value='{v('user')}'>"
-        "<label>Password</label>"
+        "<label data-i18n='entry.field.password'>Password</label>"
         f"<input type='password' name='password' value='{v('password')}'>"
-        "<label>Notes</label>"
+        "<label data-i18n='entry.field.notes'>Notes</label>"
         f"<textarea name='notes'>{v('notes')}</textarea>"
     )
     page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
@@ -7445,9 +8140,9 @@ def build_note_form(title, vault_path, action, values=None, message=""):
     values = values or {}
     def v(k): return html.escape(values.get(k, "") or "")
     body = (
-        "<label>Title</label>"
+        "<label data-i18n='note.field.title'>Title</label>"
         f"<input type='text' name='title' value='{v('title')}' required>"
-        "<label>Content</label>"
+        "<label data-i18n='note.field.content'>Content</label>"
         f"<textarea name='content'>{v('content')}</textarea>"
     )
     page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
@@ -7461,9 +8156,9 @@ def build_passphrase_form(title, vault_path, action, values=None, message=""):
     values = values or {}
     def v(k): return html.escape(values.get(k, "") or "")
     body = (
-        "<label>Label</label>"
+        "<label data-i18n='pass.field.label'>Label</label>"
         f"<input type='text' name='label' value='{v('label')}' required>"
-        "<label>Passphrase (leave blank to auto-generate)</label>"
+        "<label data-i18n='pass.field.secret_hint'>Passphrase (leave blank to auto-generate)</label>"
         f"<input type='text' name='secret' value='{v('secret')}'>"
     )
     page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
@@ -7477,9 +8172,9 @@ def build_backup_form(title, vault_path, action, values=None, message=""):
     values = values or {}
     def v(k): return html.escape(values.get(k, "") or "")
     body = (
-        "<label>Label</label>"
+        "<label data-i18n='backup.field.label'>Label</label>"
         f"<input type='text' name='label' value='{v('label')}' required>"
-        "<label>Backup codes (one per line)</label>"
+        "<label data-i18n='backup.field.codes'>Backup codes (one per line)</label>"
         f"<textarea name='codes'>{v('codes')}</textarea>"
     )
     page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
@@ -7496,17 +8191,17 @@ def build_auth_form(title, vault_path, action, values=None, message=""):
     if algo not in ("sha1","sha256","sha512"):
         algo = "sha1"
     body = (
-        "<label>Label</label>"
+        "<label data-i18n='auth.field.label'>Label</label>"
         f"<input type='text' name='label' value='{v('label')}' required>"
-        "<label>Base32 Secret</label>"
+        "<label data-i18n='auth.field.secret'>Base32 Secret</label>"
         f"<input type='text' name='secret' value='{v('secret')}' placeholder='JBSWY3DPEHPK3PXP' required>"
-        "<label>Refresh interval (seconds)</label>"
+        "<label data-i18n='auth.field.period'>Refresh interval (seconds)</label>"
         f"<input type='number' name='period' min='5' max='120' value='{v('period') or '30'}'>"
-        "<label>Algorithm</label>"
+        "<label data-i18n='auth.field.algorithm'>Algorithm</label>"
         "<select name='algo'>"
-        f"<option value='sha1'{' selected' if algo=='sha1' else ''}>SHA1 (default)</option>"
-        f"<option value='sha256'{' selected' if algo=='sha256' else ''}>SHA256</option>"
-        f"<option value='sha512'{' selected' if algo=='sha512' else ''}>SHA512</option>"
+        f"<option value='sha1'{' selected' if algo=='sha1' else ''} data-i18n='auth.option.sha1'>SHA1 (default)</option>"
+        f"<option value='sha256'{' selected' if algo=='sha256' else ''} data-i18n='auth.option.sha256'>SHA256</option>"
+        f"<option value='sha512'{' selected' if algo=='sha512' else ''} data-i18n='auth.option.sha512'>SHA512</option>"
         "</select>"
     )
     page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
@@ -7522,13 +8217,21 @@ class SPMServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.sessions = {}  # token -> master password
+        self.sessions = {}  # token -> {"master": str, "created": float, "last_seen": float}
+
+SESSION_TTL = 1800
+MAX_POST_BYTES = 2 * 1024 * 1024
+MAX_IMPORT_BYTES = 1024 * 1024
+
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("[SPM Web] " + fmt % args + "\n")
 
     def _send_html(self, code, body):
+        lang = html.escape(self._get_lang())
+        if "__LANG__" in body:
+            body = body.replace("__LANG__", lang)
         self.send_response(code)
         self._add_cors()
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -7536,24 +8239,58 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body.encode("utf-8"))
 
     def _add_cors(self):
-        origin = self.headers.get("Origin")
-        if origin:
+        origin = self.headers.get("Origin", "")
+        allowed = {"http://127.0.0.1:%d" % PORT, "http://localhost:%d" % PORT}
+        if origin in allowed:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Access-Control-Allow-Credentials", "true")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token")
             self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
 
-    def _get_cookie_session(self):
-        cookie = self.headers.get("Cookie", "")
-        token = None
+    def _parse_cookies(self):
+        cookie = self.headers.get("Cookie", "") or ""
+        cookies = {}
+        if not cookie:
+            return cookies
         for part in cookie.split(";"):
             part = part.strip()
-            if part.startswith("spm_session="):
-                token = part.split("=", 1)[1].strip()
-                break
+            if not part or "=" not in part:
+                continue
+            name, value = part.split("=", 1)
+            cookies[name.strip()] = urllib.parse.unquote(value.strip())
+        return cookies
+
+    def _get_cookie_session(self):
+        token = self._parse_cookies().get("spm_session")
         if not token:
             return None
-        return self.server.sessions.get(token)
+        session = self.server.sessions.get(token)
+        if not session:
+            return None
+        now = time.time()
+        if now - session.get("last_seen", 0) > SESSION_TTL:
+            self.server.sessions.pop(token, None)
+            return None
+        session["last_seen"] = now
+        return session.get("master", "")
+
+    def _read_body(self, limit=MAX_POST_BYTES):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except (ValueError, TypeError):
+            self.send_error(400, "Invalid Content-Length")
+            return None
+        if length < 0 or length > limit:
+            self.send_error(413, "Request body too large")
+            return None
+        return self.rfile.read(length)
+
+    def _get_lang(self):
+        cookies = self._parse_cookies()
+        return sanitize_lang(cookies.get("spm_lang"))
 
     def _require_login(self):
         master = self._get_cookie_session()
@@ -7575,7 +8312,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path or "/"
 
+        if path == "/lang":
+            params = urllib.parse.parse_qs(parsed.query)
+            raw = (params.get("lang") or params.get("value") or [""])[0]
+            lang = sanitize_lang(raw)
+            self.send_response(200)
+            self.send_header("Set-Cookie", f"spm_lang={lang}; Path=/; Max-Age=31536000; SameSite=Lax")
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(jsonlib.dumps({"ok": True, "lang": lang}).encode("utf-8"))
+            return
+
         if path.startswith("/logout"):
+            token = self._parse_cookies().get("spm_session")
+            if token:
+                self.server.sessions.pop(token, None)
             self.send_response(302)
             self.send_header("Set-Cookie", "spm_session=deleted; Max-Age=0; HttpOnly; Path=/")
             self.send_header("Location", "/login")
@@ -7628,6 +8379,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = body.replace("__BACKUP_ROWS__", backup_rows_html)
             body = body.replace("__AUTH_ROWS__", auth_rows_html)
             body = body.replace("__VERSION__", html.escape(VERSION))
+            body = body.replace("__LANG__", html.escape(self._get_lang()))
             self._send_html(200, body)
             return
 
@@ -8010,9 +8762,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path or "/"
 
+        if path == "/lang":
+            raw_body = self._read_body(limit=4096)
+            if raw_body is None:
+                return
+            raw_body = raw_body.decode("utf-8", errors="ignore")
+            data = urllib.parse.parse_qs(raw_body)
+            lang = sanitize_lang((data.get("lang") or [""])[0])
+            self.send_response(200)
+            self.send_header("Set-Cookie", f"spm_lang={lang}; Path=/; Max-Age=31536000; SameSite=Lax")
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(jsonlib.dumps({"ok": True, "lang": lang}).encode("utf-8"))
+            return
+
         if path == "/login":
-            length = int(self.headers.get("Content-Length", "0"))
-            body = self.rfile.read(length).decode("utf-8", errors="ignore")
+            raw_body = self._read_body(limit=64 * 1024)
+            if raw_body is None:
+                return
+            body = raw_body.decode("utf-8", errors="ignore")
             data = urllib.parse.parse_qs(body)
             password = data.get("password", [""])[0]
 
@@ -8029,7 +8797,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             token = secrets.token_hex(32)
-            self.server.sessions[token] = password
+            self.server.sessions[token] = {"master": password, "created": time.time(), "last_seen": time.time()}
             self.send_response(302)
             self.send_header("Set-Cookie", f"spm_session={token}; HttpOnly; Path=/; SameSite=Lax")
             self.send_header("Location", "/")
@@ -8042,11 +8810,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_html(200, page)
             return
 
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except (ValueError, TypeError):
-            length = 0
-        raw_body_bytes = self.rfile.read(length)
+        raw_body_bytes = self._read_body()
+        if raw_body_bytes is None:
+            return
         raw_body = raw_body_bytes.decode("utf-8", errors="ignore")
         data = urllib.parse.parse_qs(raw_body)
 

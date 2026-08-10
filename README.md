@@ -75,7 +75,7 @@ SPM is designed for users who want:
 ### Fitur Utama (ID)
 
 - 🔐 **Vault terenkripsi GPG (AES-256)**  
-- 📟 **UI interaktif** (EN/ID)  
+- 📟 **UI interaktif** (EN/ID/JP)  
 - 🖥️ **Web Mode (Localhost)** — dashboard modern *offline-only*  
 - 📦 **Portable bundle** (script + vault + recovery + private key when available)  
 - 💾 **SAVE bundle** (backup + wipe vault lokal, menyertakan private key jika tersedia)  
@@ -98,7 +98,7 @@ SPM is designed for users who want:
 
 - 🔐 Encrypted vault (GPG AES-256)  
 - 🗂️ Clean interactive menu  
-- 🌐 Local Web Mode (browser UI, offline only)  
+- 🌐 Local Web Mode (browser UI, offline only, EN/ID/JP toggle)  
 - 📦 Portable bundle (ZIP; includes recovery + private key when present)  
 - 💾 SAVE bundle (backup + wipe local; includes private key when present)  
 - 🧠 Password strength analysis & coaching  
@@ -108,6 +108,7 @@ SPM is designed for users who want:
 - ⚡ Fast copy buttons on password, notes, passphrase, backup views with device-friendly toast confirmation  
 - 🔒 Password generator (easy memorable words + secure random, slider length/words, toggles for upper/lower/digits/symbols, strength estimate)
 - 🎨 Web themes (Dark, AMOLED, Cyberpunk, Light) with header update check/version display  
+- 🇬🇧🇮🇩🇯🇵 Live language switcher (EN/ID/JP) in the web header with cookie persistence and instant translations across dashboard cards/import UI  
 - 📤 Vault export/import (CLI & Web) to CSV/JSON + advanced formats
 - 📜 Backup codes  
 - 🔑 RSA-based recovery  
@@ -209,6 +210,8 @@ Includes:
   - View backup codes  
   - Edit entries  
   - Local copy-to-clipboard with inline toast feedback  
+  - Language dropdown (EN/ID/JP) that translates the dashboard/import card and remembers your choice via cookie  
+  - Detail pages (/view, /edit, authenticator viewer/editor, generator) inherit that language selection so every screen stays localized  
 
 ---
 
@@ -265,7 +268,7 @@ Stored inside encrypted vault.
 ./spm.sh export json
 ```
 
-Exports passwords, secure notes, passphrases, backup codes, and authenticators. Defaults to `spm_export_<timestamp>.csv` when no filename is provided; if you omit the extension on a custom name, it is auto-added. Advanced formats available: tsv, ndjson/jsonl, md, html, txt, yaml/yml, xml, sql, ini, psv, rst, toml, org, scsv, csv-noheader, jsonc. Web mode also has an Export/Import card with the same formats and supports direct file upload for import.
+Exports passwords, secure notes, passphrases, backup codes, and authenticators. Defaults to `spm_export_<timestamp>.csv` when no filename is provided; if you omit the extension on a custom name, it is auto-added. Advanced formats available: tsv, ndjson/jsonl, md, html, txt, yaml/yml, xml, sql, ini, psv, rst, toml, org, scsv, csv-noheader, jsonc. Web mode also has an Export/Import card with the same formats and supports direct file upload for import. The format selector respects your EN/ID/JP language choice so menu text stays localized across sessions.
 
 ---
 
@@ -276,7 +279,7 @@ Exports passwords, secure notes, passphrases, backup codes, and authenticators. 
 ./spm.sh import json backup.json
 ```
 
-Imports passwords, secure notes, passphrases, backup codes, and authenticators from supported export formats (csv/json primary; advanced formats accepted as listed above). Entries are appended and IDs auto-renumbered. Web mode overlays the entire Export/Import card with a loader during uploads, validates that at least one record was parsed, reports how many rows of each type were added, and automatically reloads the dashboard on success so the new rows appear immediately (errors show inline without redirect).
+Imports passwords, secure notes, passphrases, backup codes, and authenticators from supported export formats (csv/json primary; advanced formats accepted as listed above). Entries are appended and IDs auto-renumbered. Web mode overlays the entire Export/Import card with a loader during uploads, validates that at least one record was parsed, reports how many rows of each type were added, and automatically reloads the dashboard on success so the new rows appear immediately (errors show inline without redirect). Status messages and overlay text follow the selected language (EN/ID/JP) so users get consistent feedback during uploads.
 
 ---
 
@@ -395,7 +398,7 @@ Creates encrypted backup, wipes local vault.
 
 ## Development & Versioning
 
-Version: **2.7.9**  
+Version: **2.8.2**  
 Uses **semantic versioning**.  
 `./spm.sh update` fetches the latest GitHub ZIP and installs to `/usr/local/bin/spm` (sudo may be required).  
 See `CHANGELOG.md` for details.

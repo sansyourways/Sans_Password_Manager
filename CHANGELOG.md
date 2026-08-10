@@ -5,10 +5,38 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.8.2] - 2025-12-16
+
+### Added
+- Web-mode interactive prompt now lets you choose localhost, 0.0.0.0, or a custom bind IP after selecting temporary/background mode.
+
+---
+
+## [2.8.1] - 2025-12-16
+
+### Fixed
+- Web-mode firewall detection now recognizes UFW even when it lives in `/usr/sbin`, avoids false “ufw not found” messages, and no longer tries to install firewalld automatically.
+
+---
+
+## [2.8.0] - 2025-12-16
+
+### Added
+- Web mode now speaks Japanese: the header dropdown offers EN/ID/JP, and all dashboard panels, table headers, session copy, and the Export/Import workflow translate instantly while remembering the selection via cookies.
+
+### Fixed
+- Detail pages (view/edit screens, authenticator live view/edit, and the generator) now honor the selected EN/ID/JP language so translations persist after leaving the dashboard.
+
+### Changed
+- Version bumped to 2.8.0.
+
+---
+
 ## [2.7.9] - 2025-12-15
 
 ### Added
 - All copy buttons across password, secure note, passphrase, backup code, and authenticator views now show device-friendly toast notifications so users immediately see when clipboard actions succeed (or fail) on desktop and mobile browsers alike.
+- Web mode now includes a persistent EN/ID language switcher in the header; dashboard panels, table headers, and the entire Export/Import card translate instantly and remember your preference via a cookie.
 - Save bundles now include your RSA private key (when present) alongside the vault and recovery file, making off-device restores self-contained.
 - Portable bundles now copy the RSA private key as well whenever it sits beside the script, so both bundle types are self-contained.
 - New `./spm.sh restore` command + menu option detects when you run SPM from a portable/save folder and moves `spm_vault.gpg` (and its recovery file) back to `~/.spm_vault.gpg`.
