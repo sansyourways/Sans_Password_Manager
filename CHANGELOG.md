@@ -17,6 +17,7 @@ Keep-a-Changelog style format.
   written contributor agreement for unusually substantial contributions.
 - Aligned the Code of Conduct, security policy, terms, README, issue forms, and
   pull-request guidance with open-source forks and collaboration.
+- Preserved executable permissions for `spm.sh` in Git and the release archive.
 
 ### Documentation
 - Fixed the README hero artwork to use a stable absolute raw-content URL so it
