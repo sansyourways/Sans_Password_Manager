@@ -5,6 +5,16 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.9.5] - 2026-08-19
+
+### Fixed
+- Every advertised advanced import format now accepts the output produced by
+  its matching exporter in both CLI and web mode. HTML, YAML/YML, XML, SQL,
+  INI, TOML, TXT, PSV, RST, Markdown/Org tables, and headerless CSV no longer
+  fall through to an incompatible table parser or shift fields by one column.
+- YAML and INI exports now escape quoted and multiline values consistently,
+  and the RST web exporter no longer raises an exception while rendering rows.
+
 ## [2.9.4] - 2026-08-19
 
 ### Security

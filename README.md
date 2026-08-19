@@ -419,10 +419,11 @@ The recovery private key remains separate unless
 
 ## Development & Versioning
 
-Version: **2.9.4**
+Version: **2.9.5**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds are refused by default: bind localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` is an explicit escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 Authenticated web mutations also require an exact same-origin request and are serialized across threads/processes to prevent CSRF and lost vault writes. Decrypted web responses use `Cache-Control: no-store`.
+All listed import formats are round-trip compatible with their matching CLI and web exports.
 Uses **semantic versioning**.  
 `./spm.sh update` fetches the latest GitHub ZIP and installs to `/usr/local/bin/spm` (sudo may be required).  
 See `CHANGELOG.md` for details.

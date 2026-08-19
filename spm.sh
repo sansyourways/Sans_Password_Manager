@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.9.4"
+VERSION="2.9.5"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -3611,9 +3611,8 @@ elif fmt in ("yaml", "yml"):
         for r in rows:
             f.write("-\n")
             for k in fieldnames:
-                val = r.get(k, "") or ""
-                val = val.replace("\n", "\\n")
-                f.write(f"  {k}: \"{val}\"\n")
+                val = (r.get(k, "") or "").replace("\n", "\\n")
+                f.write(f"  {k}: {json.dumps(val, ensure_ascii=False)}\n")
 elif fmt == "xml":
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<data>\n")
@@ -3637,7 +3636,8 @@ elif fmt == "ini":
             sect = f"{r.get('type','unknown')}_{r.get('id','')}"
             f.write(f"[{sect}]\n")
             for k in fieldnames:
-                f.write(f"{k}={r.get(k,'') or ''}\n")
+                val = (r.get(k,'') or '').replace("\n", "\\n")
+                f.write(f"{k}={val}\n")
             f.write("\n")
 elif fmt == "psv":
     with open(out_path, "w", encoding="utf-8", newline="") as f:
@@ -3699,7 +3699,9 @@ cmd_import() {
 	decrypt_vault_to_file "$tmp"
 
 	if ! python3 - "$format" "$infile" "$tmp" <<'PY'
-import sys, json, csv, base64
+import sys, json, csv, base64, configparser, io, re
+import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
 fmt, src_path, vault_path = sys.argv[1:]
 
 def load_vault_lines(path):
@@ -3820,45 +3822,108 @@ def parse_rows():
             for row in reader:
                 rows.append({
                     "type": row[0] if len(row)>0 else "",
-                    "label": row[1] if len(row)>1 else "",
-                    "username": row[2] if len(row)>2 else "",
-                    "secret": row[3] if len(row)>3 else "",
-                    "notes": row[4] if len(row)>4 else "",
-                    "created": row[5] if len(row)>5 else "",
-                    "extra": row[6] if len(row)>6 else "",
+                    "id": row[1] if len(row)>1 else "",
+                    "label": row[2] if len(row)>2 else "",
+                    "username": row[3] if len(row)>3 else "",
+                    "secret": row[4] if len(row)>4 else "",
+                    "notes": row[5] if len(row)>5 else "",
+                    "created": row[6] if len(row)>6 else "",
+                    "extra": row[7] if len(row)>7 else "",
                 })
         else:
             rows = list(reader)
     return rows
 
+def parse_advanced_rows():
+    with open(src_path, "r", encoding="utf-8", errors="ignore") as f:
+        content = f.read()
+    if fmt in ("txt",):
+        return list(csv.DictReader(io.StringIO(content), delimiter=","))
+    if fmt in ("md", "markdown", "org", "rst"):
+        return parse_plain_table()
+    if fmt == "html":
+        class TableParser(HTMLParser):
+            def __init__(self):
+                super().__init__(); self.rows=[]; self.row=[]; self.cell=[]; self.in_cell=False
+            def handle_starttag(self, tag, attrs):
+                if tag.lower() in ("td", "th"): self.in_cell=True; self.cell=[]
+            def handle_data(self, data):
+                if self.in_cell: self.cell.append(data)
+            def handle_endtag(self, tag):
+                tag=tag.lower()
+                if tag in ("td", "th") and self.in_cell:
+                    self.row.append("".join(self.cell)); self.in_cell=False
+                elif tag == "tr" and self.row:
+                    self.rows.append(self.row); self.row=[]
+        parser=TableParser(); parser.feed(content)
+        if not parser.rows: return []
+        headers=parser.rows[0]
+        return [dict(zip(headers, row)) for row in parser.rows[1:]]
+    if fmt in ("yaml", "yml"):
+        rows=[]; current=None
+        for line in content.splitlines():
+            if line.strip() == "-":
+                if current is not None: rows.append(current)
+                current={}
+            elif current is not None and ":" in line:
+                key, value=line.strip().split(":", 1)
+                value=value.strip()
+                try: value=json.loads(value)
+                except json.JSONDecodeError: value=value.strip('"')
+                current[key]=value
+        if current is not None: rows.append(current)
+        return rows
+    if fmt == "xml":
+        root=ET.fromstring(content)
+        return [{child.tag: (child.text or "") for child in item} for item in root.findall("item")]
+    if fmt == "sql":
+        rows=[]; fields=["type","id","label","username","secret","notes","created","extra"]
+        for values in re.findall(r"INSERT\s+INTO\s+spm_export\s*\([^)]*\)\s*VALUES\s*\((.*?)\)\s*;", content, re.I | re.S):
+            parsed=next(csv.reader([values], delimiter=",", quotechar="'", doublequote=True, skipinitialspace=True))
+            rows.append(dict(zip(fields, parsed)))
+        return rows
+    if fmt == "ini":
+        cfg=configparser.ConfigParser(interpolation=None); cfg.optionxform=str; cfg.read_string(content)
+        return [{k: v.replace("\\n", "\n") for k,v in cfg.items(section)} for section in cfg.sections()]
+    if fmt == "toml":
+        import tomllib
+        return tomllib.loads(content).get("item", [])
+    return []
+
 def parse_plain_table():
     rows = []
+    headers = None
     with open(src_path,"r",encoding="utf-8",errors="ignore") as f:
         for ln in f:
             ln=ln.strip()
-            if not ln or ln.startswith("#") or ln.startswith("| ---"): continue
+            if not ln or ln.startswith("#") or ln.startswith("| ---") or ln.startswith("+"): continue
             if "|" in ln:
                 parts=[p.strip() for p in ln.strip("|").split("|")]
             else:
                 parts=[p.strip() for p in ln.split()]
             if len(parts) < 2:
                 continue
-            rows.append({
-                "type": parts[0],
-                "label": parts[1] if len(parts)>1 else "",
-                "username": parts[2] if len(parts)>2 else "",
-                "secret": parts[3] if len(parts)>3 else "",
-                "notes": parts[4] if len(parts)>4 else "",
-                "created": parts[5] if len(parts)>5 else "",
-                "extra": parts[6] if len(parts)>6 else "",
-            })
+            if parts[0].lower() == "type":
+                headers = [p.lower() for p in parts]
+                continue
+            if headers:
+                rows.append(dict(zip(headers, parts)))
+            else:
+                rows.append({
+                    "type": parts[0],
+                    "label": parts[1] if len(parts)>1 else "",
+                    "username": parts[2] if len(parts)>2 else "",
+                    "secret": parts[3] if len(parts)>3 else "",
+                    "notes": parts[4] if len(parts)>4 else "",
+                    "created": parts[5] if len(parts)>5 else "",
+                    "extra": parts[6] if len(parts)>6 else "",
+                })
     return rows
 
 def load_rows():
-    if fmt in ("json","jsonc","ndjson","jsonl","csv","csv-noheader","tsv","scsv"):
+    if fmt in ("json","jsonc","ndjson","jsonl","csv","csv-noheader","tsv","scsv","psv"):
         return parse_rows()
-    else:
-        return parse_plain_table()
+    return parse_advanced_rows()
 
 for row in load_rows():
     t = (row.get("type","") or "").lower()
@@ -7301,7 +7366,7 @@ def export_content(fmt: str, plaintext: str):
             out.append("-")
             for k in fieldnames:
                 val = str(r.get(k, "") or "").replace("\n","\\n")
-                out.append(f"  {k}: \"{val}\"")
+                out.append(f"  {k}: {json.dumps(val, ensure_ascii=False)}")
         return "\n".join(out) + "\n"
     if fmt == "xml":
         out=["<?xml version=\"1.0\" encoding=\"UTF-8\"?>","<data>"]
@@ -7326,7 +7391,8 @@ def export_content(fmt: str, plaintext: str):
             sect = f"{r.get('type','unknown')}_{r.get('id','')}"
             out.append(f"[{sect}]")
             for k in fieldnames:
-                out.append(f"{k}={r.get(k,'') or ''}")
+                val = str(r.get(k,'') or '').replace("\n", "\\n")
+                out.append(f"{k}={val}")
             out.append("")
         return "\n".join(out)
     if fmt == "psv":
@@ -7342,7 +7408,7 @@ def export_content(fmt: str, plaintext: str):
             return "|" + "|".join(" " + v.ljust(widths[k]) + " " for k,v in vals) + "|"
         out=[sep(), row([(k,k) for k in fieldnames]), sep("+")]
         for r in rows:
-            out.append(row([(k, str(r.get(k,"") or "")).replace("\n"," ") for k in fieldnames]))
+            out.append(row([(k, str(r.get(k,"") or "").replace("\n"," ")) for k in fieldnames]))
             out.append(sep())
         return "\n".join(out) + "\n"
     # default csv/txt
@@ -7352,13 +7418,61 @@ def export_content(fmt: str, plaintext: str):
     return buf.getvalue()
 
 def _parse_import_rows(fmt: str, content: str):
-    import csv, json
+    import configparser, csv, json, re
+    import xml.etree.ElementTree as ET
+    from html.parser import HTMLParser
     fmt = fmt.lower()
     if fmt in ("json","jsonc"):
         return json.loads(content)
     if fmt in ("ndjson","jsonl"):
         return [json.loads(line) for line in content.splitlines() if line.strip()]
-    delim = "," if fmt in ("csv","csv-noheader","jsonc") else ";" if fmt=="scsv" else "\t" if fmt=="tsv" else "|"
+    if fmt == "html":
+        class TableParser(HTMLParser):
+            def __init__(self):
+                super().__init__(); self.rows=[]; self.row=[]; self.cell=[]; self.in_cell=False
+            def handle_starttag(self, tag, attrs):
+                if tag.lower() in ("td", "th"): self.in_cell=True; self.cell=[]
+            def handle_data(self, data):
+                if self.in_cell: self.cell.append(data)
+            def handle_endtag(self, tag):
+                tag=tag.lower()
+                if tag in ("td", "th") and self.in_cell:
+                    self.row.append("".join(self.cell)); self.in_cell=False
+                elif tag == "tr" and self.row:
+                    self.rows.append(self.row); self.row=[]
+        parser=TableParser(); parser.feed(content)
+        if not parser.rows: return []
+        return [dict(zip(parser.rows[0], row)) for row in parser.rows[1:]]
+    if fmt in ("yaml", "yml"):
+        rows=[]; current=None
+        for line in content.splitlines():
+            if line.strip() == "-":
+                if current is not None: rows.append(current)
+                current={}
+            elif current is not None and ":" in line:
+                key, value=line.strip().split(":", 1)
+                value=value.strip()
+                try: value=json.loads(value)
+                except json.JSONDecodeError: value=value.strip('"')
+                current[key]=value
+        if current is not None: rows.append(current)
+        return rows
+    if fmt == "xml":
+        root=ET.fromstring(content)
+        return [{child.tag: (child.text or "") for child in item} for item in root.findall("item")]
+    if fmt == "sql":
+        rows=[]; fields=["type","id","label","username","secret","notes","created","extra"]
+        for values in re.findall(r"INSERT\s+INTO\s+spm_export\s*\([^)]*\)\s*VALUES\s*\((.*?)\)\s*;", content, re.I | re.S):
+            parsed=next(csv.reader([values], delimiter=",", quotechar="'", doublequote=True, skipinitialspace=True))
+            rows.append(dict(zip(fields, parsed)))
+        return rows
+    if fmt == "ini":
+        cfg=configparser.ConfigParser(interpolation=None); cfg.optionxform=str; cfg.read_string(content)
+        return [{k: v.replace("\\n", "\n") for k,v in cfg.items(section)} for section in cfg.sections()]
+    if fmt == "toml":
+        import tomllib
+        return tomllib.loads(content).get("item", [])
+    delim = "," if fmt in ("csv","csv-noheader","jsonc","txt") else ";" if fmt=="scsv" else "\t" if fmt=="tsv" else "|"
     rows=[]
     if fmt=="csv-noheader":
         # StringIO, not splitlines(): csv needs the embedded newlines intact
@@ -7367,12 +7481,13 @@ def _parse_import_rows(fmt: str, content: str):
         for row in reader:
             rows.append({
                 "type": row[0] if len(row)>0 else "",
-                "label": row[1] if len(row)>1 else "",
-                "username": row[2] if len(row)>2 else "",
-                "secret": row[3] if len(row)>3 else "",
-                "notes": row[4] if len(row)>4 else "",
-                "created": row[5] if len(row)>5 else "",
-                "extra": row[6] if len(row)>6 else "",
+                "id": row[1] if len(row)>1 else "",
+                "label": row[2] if len(row)>2 else "",
+                "username": row[3] if len(row)>3 else "",
+                "secret": row[4] if len(row)>4 else "",
+                "notes": row[5] if len(row)>5 else "",
+                "created": row[6] if len(row)>6 else "",
+                "extra": row[7] if len(row)>7 else "",
             })
         return rows
     reader = csv.DictReader(io.StringIO(content), delimiter=delim)
@@ -7482,9 +7597,10 @@ def _apply_import(fmt: str, content: str, plaintext: str):
 
     def parse_plain_table(text):
         rows=[]
+        headers=None
         for ln in text.splitlines():
             ln=ln.strip()
-            if not ln or ln.startswith("#") or ln.startswith("| ---"):
+            if not ln or ln.startswith("#") or ln.startswith("| ---") or ln.startswith("+"):
                 continue
             if "|" in ln:
                 parts=[p.strip() for p in ln.strip("|").split("|")]
@@ -7492,18 +7608,24 @@ def _apply_import(fmt: str, content: str, plaintext: str):
                 parts=[p.strip() for p in ln.split()]
             if len(parts) < 2:
                 continue
-            rows.append({
-                "type": parts[0],
-                "label": parts[1] if len(parts)>1 else "",
-                "username": parts[2] if len(parts)>2 else "",
-                "secret": parts[3] if len(parts)>3 else "",
-                "notes": parts[4] if len(parts)>4 else "",
-                "created": parts[5] if len(parts)>5 else "",
-                "extra": parts[6] if len(parts)>6 else "",
-            })
+            if parts[0].lower() == "type":
+                headers=[p.lower() for p in parts]
+                continue
+            if headers:
+                rows.append(dict(zip(headers, parts)))
+            else:
+                rows.append({
+                    "type": parts[0],
+                    "label": parts[1] if len(parts)>1 else "",
+                    "username": parts[2] if len(parts)>2 else "",
+                    "secret": parts[3] if len(parts)>3 else "",
+                    "notes": parts[4] if len(parts)>4 else "",
+                    "created": parts[5] if len(parts)>5 else "",
+                    "extra": parts[6] if len(parts)>6 else "",
+                })
         return rows
 
-    if fmt in ("json","jsonc","ndjson","jsonl","csv","csv-noheader","tsv","scsv"):
+    if fmt in ("json","jsonc","ndjson","jsonl","csv","csv-noheader","tsv","scsv","psv","txt","html","yaml","yml","xml","sql","ini","toml"):
         rows = _parse_import_rows(fmt, content)
     else:
         rows = parse_plain_table(content)
