@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.10.1"
+VERSION="2.10.2"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -4679,172 +4679,14 @@ configure_firewall_for_web() {
 	fi
 	[ -z "$bind_port" ] && return 0
 
-	# Termux environment: usually behind NAT, no ufw/firewalld
-	# Use ${VAR-} so set -u doesn't explode if VAR is undefined
-	if [ -n "${TERMUX_VERSION-}" ] || printf '%s\n' "${PREFIX-}" | grep -qi 'termux'; then
-		if [ "$SPM_LANG" = "id" ]; then
-			echo
-			echo ">> Termux terdeteksi. Melewati konfigurasi firewall otomatis."
-			echo "   Pastikan jaringan kamu aman jika membuka port ${bind_port}/tcp."
-		else
-			echo
-			echo ">> Termux detected. Skipping automatic firewall configuration."
-			echo "   Ensure your network is safe if you expose port ${bind_port}/tcp."
-		fi
-		return 0
-	fi
-
 	if [ "$SPM_LANG" = "id" ]; then
 		echo
-		echo ">> Mengatur firewall untuk port ${bind_port}/tcp (jika memungkinkan)..."
+		echo ">> SPM tidak mengubah firewall secara otomatis."
+		echo "   Jika diperlukan, izinkan port ${bind_port}/tcp hanya dari jaringan tepercaya."
 	else
 		echo
-		echo ">> Configuring firewall for port ${bind_port}/tcp (if possible)..."
-	fi
-
-	_spm_try_install_pkg() {
-		local pkg="$1"
-
-		if command -v apt-get >/dev/null 2>&1; then
-			sudo apt-get update -y >/dev/null 2>&1 && sudo apt-get install -y "$pkg" >/dev/null 2>&1
-			return $?
-		fi
-		if command -v dnf >/dev/null 2>&1; then
-			sudo dnf install -y "$pkg" >/dev/null 2>&1
-			return $?
-		fi
-		if command -v yum >/dev/null 2>&1; then
-			sudo yum install -y "$pkg" >/dev/null 2>&1
-			return $?
-		fi
-		if command -v pacman >/dev/null 2>&1; then
-			sudo pacman -Sy --noconfirm "$pkg" >/dev/null 2>&1
-			return $?
-		fi
-		if command -v zypper >/dev/null 2>&1; then
-			sudo zypper install -y "$pkg" >/dev/null 2>&1
-			return $?
-		fi
-		if command -v apk >/dev/null 2>&1; then
-			sudo apk add "$pkg" >/dev/null 2>&1
-			return $?
-		fi
-		return 1
-	}
-
-	# 1) ufw path
-	local ufw_cmd=""
-	if command -v ufw >/dev/null 2>&1; then
-		ufw_cmd="$(command -v ufw)"
-	elif [ -x /usr/sbin/ufw ]; then
-		ufw_cmd="/usr/sbin/ufw"
-	fi
-
-	if [ -z "$ufw_cmd" ]; then
-		if [ "$SPM_LANG" = "id" ]; then
-			echo "   - ufw tidak ditemukan. Mencoba menginstal ufw..."
-		else
-			echo "   - ufw not found. Trying to install ufw..."
-		fi
-		if _spm_try_install_pkg ufw; then
-			if [ "$SPM_LANG" = "id" ]; then
-				echo "   ✓ ufw berhasil diinstal."
-			else
-				echo "   ✓ ufw installed successfully."
-			fi
-		else
-			if [ "$SPM_LANG" = "id" ]; then
-				echo "   ⚠ Gagal menginstal ufw (mungkin butuh sudo / distro tidak mendukung)."
-			else
-				echo "   ⚠ Failed to install ufw (maybe needs sudo / unsupported distro)."
-			fi
-		fi
-	fi
-
-	if [ -n "$ufw_cmd" ]; then
-		if sudo "$ufw_cmd" status 2>/dev/null | grep -qi "Status: inactive"; then
-			if [ "$SPM_LANG" = "id" ]; then
-				echo "   - Mengaktifkan ufw..."
-			else
-				echo "   - Enabling ufw..."
-			fi
-			sudo "$ufw_cmd" enable >/dev/null 2>&1
-		fi
-
-		if [ "$SPM_LANG" = "id" ]; then
-			echo "   - Menambahkan rule ufw: allow ${bind_port}/tcp"
-		else
-			echo "   - Adding ufw rule: allow ${bind_port}/tcp"
-		fi
-		if sudo "$ufw_cmd" allow "${bind_port}"/tcp >/dev/null 2>&1; then
-			if [ "$SPM_LANG" = "id" ]; then
-				echo "   ✓ Rule ufw ditambahkan (port ${bind_port}/tcp)."
-			else
-				echo "   ✓ ufw rule added (port ${bind_port}/tcp)."
-			fi
-		else
-			if [ "$SPM_LANG" = "id" ]; then
-				echo "   ⚠ Gagal menambahkan rule ufw. Cek 'sudo ufw status' secara manual."
-			else
-				echo "   ⚠ Failed to add ufw rule. Check 'sudo ufw status' manually."
-			fi
-		fi
-		return 0
-	fi
-
-	# 2) firewalld path (configure only if already installed)
-	if command -v firewall-cmd >/dev/null 2>&1; then
-		if [ "$SPM_LANG" = "id" ]; then
-			echo "   - Menambahkan port permanen ${bind_port}/tcp pada firewalld."
-		else
-			echo "   - Adding permanent port ${bind_port}/tcp to firewalld."
-		fi
-		if sudo firewall-cmd --add-port="${bind_port}"/tcp --permanent >/dev/null 2>&1 && \
-		   sudo firewall-cmd --reload >/dev/null 2>&1; then
-			if [ "$SPM_LANG" = "id" ]; then
-				echo "   ✓ Rule firewalld ditambahkan dan direload."
-			else
-				echo "   ✓ firewalld rule added and reloaded."
-			fi
-		else
-			if [ "$SPM_LANG" = "id" ]; then
-				echo "   ⚠ Gagal mengatur firewalld. Cek 'sudo firewall-cmd --list-ports'."
-			else
-				echo "   ⚠ Failed to configure firewalld. Check 'sudo firewall-cmd --list-ports'."
-			fi
-		fi
-		return 0
-	fi
-
-	# 3) Fallback: iptables
-	if command -v iptables >/dev/null 2>&1; then
-		if [ "$SPM_LANG" = "id" ]; then
-			echo "   - Menggunakan iptables. Menambahkan rule sementara (non-persisten)."
-		else
-			echo "   - Using iptables. Adding temporary (non-persistent) rule."
-		fi
-		if sudo iptables -I INPUT -p tcp --dport "${bind_port}" -j ACCEPT >/dev/null 2>&1; then
-			if [ "$SPM_LANG" = "id" ]; then
-				echo "   ✓ Rule iptables ditambahkan (tidak persisten setelah reboot)."
-			else
-				echo "   ✓ iptables rule added (not persistent after reboot)."
-			fi
-		else
-			if [ "$SPM_LANG" = "id" ]; then
-				echo "   ⚠ Gagal menambahkan rule iptables. Atur firewall secara manual."
-			else
-				echo "   ⚠ Failed to add iptables rule. Configure firewall manually."
-			fi
-		fi
-		return 0
-	fi
-
-	if [ "$SPM_LANG" = "id" ]; then
-		echo "   ⚠ Tidak ada tool firewall yang dikenali (ufw / firewalld / iptables)."
-		echo "     Pastikan port ${bind_port}/tcp dibuka atau diamankan secara manual."
-	else
-		echo "   ⚠ No known firewall tool detected (ufw / firewalld / iptables)."
-		echo "     Please ensure port ${bind_port}/tcp is opened/secured manually."
+		echo ">> SPM does not modify your firewall automatically."
+		echo "   If needed, allow port ${bind_port}/tcp only from a trusted network."
 	fi
 }
 ensure_pm2_installed() {
@@ -5043,7 +4885,7 @@ start_web_mode() {
 
 	# Ask bind address & port
 	echo
-	local bind_addr bind_port
+	local bind_addr bind_port allow_insecure_remote=0
 	if [ "${SPM_LANG:-en}" = "id" ]; then
 		echo "Pilih alamat bind:"
 		echo "  1) Lokal (127.0.0.1)"
@@ -5099,11 +4941,29 @@ start_web_mode() {
 	case "$bind_addr" in
 		localhost|127.*|::1|\[::1\]) ;;
 		*)
-			if [ "${SPM_WEB_ALLOW_INSECURE_REMOTE:-0}" != "1" ]; then
-				printf "\nRefusing a non-loopback plain-HTTP bind (%s).\n" "$bind_addr"
-				printf "Bind to localhost and place a TLS reverse proxy in front of SPM.\n"
-				printf "For an isolated trusted network only, explicitly set SPM_WEB_ALLOW_INSECURE_REMOTE=1.\n"
-				return 1
+			if [ "${SPM_WEB_ALLOW_INSECURE_REMOTE:-0}" = "1" ]; then
+				allow_insecure_remote=1
+			else
+				if [ "${SPM_LANG:-en}" = "id" ]; then
+					printf "\nPERINGATAN: %s akan membuka vault melalui HTTP tanpa enkripsi transport.\n" "$bind_addr"
+					printf "Gunakan hanya pada jaringan terisolasi/tepercaya. Untuk akses internet, gunakan proxy TLS.\n"
+					printf "Ketik 'yes' untuk menerima risiko dan melanjutkan: "
+				else
+					printf "\nWARNING: %s exposes the vault over HTTP without transport encryption.\n" "$bind_addr"
+					printf "Use this only on an isolated trusted network. For internet access, use a TLS reverse proxy.\n"
+					printf "Type 'yes' to accept the risk and continue: "
+				fi
+				local remote_confirm
+				read -r remote_confirm || remote_confirm=""
+				if [ "$remote_confirm" != "yes" ]; then
+					if [ "${SPM_LANG:-en}" = "id" ]; then
+						printf "Bind global dibatalkan; tidak ada server yang dijalankan.\n"
+					else
+						printf "Global bind cancelled; no server was started.\n"
+					fi
+					return 1
+				fi
+				allow_insecure_remote=1
 			fi
 			;;
 	esac
@@ -5171,14 +5031,74 @@ start_web_mode() {
 			echo "Use this menu again (option 3) to stop the background process."
 		fi
 
-		# Use env wrapper so PM2 runs with correct variables
+		# Replace only SPM's own named process so changed bind/port settings are
+		# guaranteed to take effect. Never hide PM2 startup errors: otherwise the
+		# menu claims success and immediately returns while no server is running.
+		local pm2_output pm2_pid probe_host web_ready=0
+		pm2_output="$(make_tmp)"
+		if pm2 describe spm-web >/dev/null 2>&1; then
+			if ! pm2 delete spm-web >"$pm2_output" 2>&1; then
+				printf "Failed to replace the existing spm-web process:\n" >&2
+				tail -n 20 "$pm2_output" >&2
+				secure_wipe "$pm2_output"
+				return 1
+			fi
+		fi
+
 		SPM_VAULT_PATH="$VAULT_FILE" \
 		SPM_WEB_BIND="$bind_addr" \
 		SPM_WEB_PORT="$bind_port" \
 		SPM_VERSION="$VERSION" \
+		SPM_WEB_ALLOW_INSECURE_REMOTE="$allow_insecure_remote" \
 		pm2 start "$spm_web_script" \
 			--name "spm-web" \
-			--interpreter python3 >/dev/null 2>&1 || true
+			--interpreter python3 >"$pm2_output" 2>&1 || {
+				printf "Failed to start SPM web mode with PM2:\n" >&2
+				tail -n 20 "$pm2_output" >&2
+				secure_wipe "$pm2_output"
+				return 1
+			}
+
+		pm2_pid=""
+		case "$bind_addr" in
+			0.0.0.0|127.*|localhost) probe_host="127.0.0.1" ;;
+			::|\[::\]|::1|\[::1\]) probe_host="::1" ;;
+			*) probe_host="${bind_addr#[}"; probe_host="${probe_host%]}" ;;
+		esac
+		for _ in 1 2 3 4 5 6 7 8 9 10; do
+			pm2_pid="$(pm2 pid spm-web 2>/dev/null | tail -n 1)"
+			if printf '%s' "$pm2_pid" | grep -Eq '^[1-9][0-9]*$'; then
+				if python3 - "$probe_host" "$bind_port" <<'PY' >/dev/null 2>&1
+import socket, sys
+host, port = sys.argv[1], int(sys.argv[2])
+with socket.create_connection((host, port), timeout=1) as sock:
+    sock.sendall(b"GET /login HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+    response = b""
+    while len(response) < 128 * 1024:
+        chunk = sock.recv(8192)
+        if not chunk:
+            break
+        response += chunk
+    if (not response.startswith(b"HTTP/1.0 200")
+            or b">Sans Password Manager</h1>" not in response):
+        raise SystemExit(1)
+PY
+				then
+					web_ready=1
+					break
+				fi
+			fi
+			sleep 0.25
+		done
+		if [ "$web_ready" -ne 1 ]; then
+			printf "SPM web mode did not remain online. PM2 output:\n" >&2
+			tail -n 20 "$pm2_output" >&2
+			pm2 logs spm-web --nostream --lines 20 >&2 || true
+			secure_wipe "$pm2_output"
+			return 1
+		fi
+		secure_wipe "$pm2_output"
+		printf "SPM web mode is online (PID %s).\n" "$pm2_pid"
 
 		if [ "${SPM_LANG:-en}" = "id" ]; then
 			read -r -p "Tekan Enter untuk kembali ke menu..." _
@@ -5209,6 +5129,7 @@ start_web_mode() {
 	SPM_WEB_BIND="$bind_addr" \
 	SPM_WEB_PORT="$bind_port" \
 	SPM_VERSION="$VERSION" \
+	SPM_WEB_ALLOW_INSECURE_REMOTE="$allow_insecure_remote" \
 	python3 "$spm_web_script"
 
 	echo
@@ -9774,7 +9695,16 @@ PY
 }
 
 get_external_ip() {
-    curl -s ifconfig.me || curl -s ipinfo.io/ip || echo "UNKNOWN_IP"
+	# Keep web mode offline: never call a public IP-discovery service merely to
+	# print the access URL. Prefer a LAN address already known by the device.
+	local addr=""
+	if command -v hostname >/dev/null 2>&1; then
+		addr="$(hostname -I 2>/dev/null | awk '{print $1}')" || addr=""
+	fi
+	if [ -z "$addr" ] && command -v ip >/dev/null 2>&1; then
+		addr="$(ip -o -4 addr show scope global 2>/dev/null | awk 'NR==1{sub(/\/.*/,"",$4);print $4}')" || addr=""
+	fi
+	printf '%s\n' "${addr:-YOUR_SERVER_IP}"
 }
 
 # ----- Interactive menu ------------------------------------------------------

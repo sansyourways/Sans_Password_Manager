@@ -22,7 +22,7 @@
 - [Installation](#installation)
 - [Usage](#usage)
   - [Interactive Menu](#interactive-menu)
-  - [Web Mode (Local Only)](#web-mode-local-only)
+  - [Web Mode](#web-mode)
   - [CLI Commands](#cli-commands)
   - [Secure Notes](#secure-notes)
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
@@ -200,13 +200,15 @@ Includes:
 
 ---
 
-### Web Mode (Local Only)
+### Web Mode
 
 ```bash
 ./spm.sh web
 ```
 
-- Runs on localhost only  
+- Runs on localhost by default; Global/custom binds require an explicit risk confirmation
+- Background mode verifies that its PM2 process is online and reports startup errors
+- SPM never changes firewall rules automatically; restrict any remote port to trusted clients
 - Vault stays encrypted locally  
 - Master password required  
 - Features:
@@ -425,8 +427,8 @@ The recovery private key remains separate unless
 
 ## Development & Versioning
 
-Version: **2.10.1**
-Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds are refused by default: bind localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` is an explicit escape hatch for isolated trusted networks only.
+Version: **2.10.2**
+Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 Authenticated web mutations also require an exact same-origin request and are serialized across threads/processes to prevent CSRF and lost vault writes. Decrypted web responses use `Cache-Control: no-store`.
 All listed import formats are round-trip compatible with their matching CLI and web exports.

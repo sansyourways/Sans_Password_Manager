@@ -5,6 +5,23 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.10.2] - 2026-08-19
+
+### Fixed
+- Choosing background Web Mode with the Global bind now presents an explicit
+  risk confirmation and, after acceptance, passes that decision to both PM2
+  and the generated server instead of silently returning to the main menu.
+- Background startup now replaces only the existing `spm-web` process, checks
+  that PM2 assigned a live PID, and exposes actionable startup logs instead of
+  discarding failures while claiming success.
+- Global Web Mode derives its displayed LAN address locally instead of calling
+  public IP-discovery services, preserving the offline/privacy contract.
+
+### Security
+- Remote HTTP exposure remains fail-closed until the user types `yes` or sets
+  the documented environment override. Web startup no longer installs,
+  enables, or changes host firewall rules automatically.
+
 ## [2.10.1] - 2026-08-19
 
 ### Security
