@@ -5,6 +5,31 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.9.6] - 2026-08-19
+
+### Security
+- CLI and interactive vault operations now take the same mode-`600` advisory
+  file lock as web mode, preventing concurrent CLI/web lost updates when
+  `flock` is available.
+- CLI encryption now writes a unique mode-`600` ciphertext and atomically
+  replaces the live vault only after GnuPG succeeds. Failed encryption leaves
+  the current vault unchanged.
+- `save` verifies the archived vault digest before wiping local data, and
+  restore stages mode-`600` files before atomically replacing destinations.
+
+### Fixed
+- Markdown, Org, RST, TOML, and INI exports now preserve pipes, quotes,
+  backslashes, literal escape text, and multiline secrets during import; YAML
+  exports preserve real newlines.
+- CLI import now fails when no records or no supported record types are found,
+  instead of reporting a misleading success.
+- Numeric password-generator mode now emits digits only. Missing, unknown, and
+  invalid generator options fail with an actionable error.
+- Portable/save commands refuse to overwrite an existing archive.
+- The updater now resolves a checksum named for the ZIP it verifies (while
+  retaining legacy compatibility) and rejects an extracted `spm.sh` that does
+  not pass `bash -n` before installation.
+
 ## [2.9.5] - 2026-08-19
 
 ### Fixed

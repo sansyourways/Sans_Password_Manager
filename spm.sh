@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.9.5"
+VERSION="2.9.6"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -720,23 +720,45 @@ decrypt_vault_to_file() {
 
 encrypt_file_to_vault() {
 	local in_file="$1"
+	local vault_dir vault_name tmp_cipher
 	[ "${MASTER_PW:-}" ] || die "MASTER_PW is empty in encrypt_file_to_vault"
 
-	if [ -f "$VAULT_FILE" ]; then
-		cp "$VAULT_FILE" "${VAULT_FILE}.bak" 2>/dev/null || true
-		# cp creates the copy under the current umask, so the backup would
-		# otherwise land as 0644 while the vault itself is 0600.
-		chmod 600 "${VAULT_FILE}.bak" 2>/dev/null || true
-	fi
-
+	vault_dir="$(dirname "$VAULT_FILE")"
+	vault_name="$(basename "$VAULT_FILE")"
+	tmp_cipher="$(mktemp "${vault_dir}/.${vault_name}.tmp.XXXXXX")" || die "Failed to create vault staging file."
+	chmod 600 "$tmp_cipher" 2>/dev/null || true
 	if ! printf '%s' "$MASTER_PW" | gpg --batch --yes \
 		--symmetric --cipher-algo AES256 \
 		--pinentry-mode loopback --passphrase-fd 0 \
-		-o "$VAULT_FILE" "$in_file" 2>/dev/null; then
-		die "Failed to re-encrypt vault. Your data is still in '$in_file' and '${VAULT_FILE}.bak'."
+		-o "$tmp_cipher" "$in_file" 2>/dev/null; then
+		secure_wipe "$tmp_cipher"
+		die "Failed to re-encrypt vault. The existing vault was not changed; plaintext remains in '$in_file'."
 	fi
 
+	if [ -f "$VAULT_FILE" ]; then
+		cp "$VAULT_FILE" "${VAULT_FILE}.bak" || { secure_wipe "$tmp_cipher"; die "Failed to preserve the previous vault."; }
+		chmod 600 "${VAULT_FILE}.bak" 2>/dev/null || true
+	fi
+	mv -f "$tmp_cipher" "$VAULT_FILE" || { secure_wipe "$tmp_cipher"; die "Failed to install the encrypted vault."; }
 	chmod 600 "$VAULT_FILE" 2>/dev/null || true
+}
+
+acquire_cli_vault_lock() {
+	command -v flock >/dev/null 2>&1 || {
+		printf "Warning: 'flock' is unavailable; do not run concurrent CLI or web vault operations.\n" >&2
+		return 0
+	}
+	exec 9>"${VAULT_FILE}.lock" || die "Cannot open vault lock file."
+	chmod 600 "${VAULT_FILE}.lock" 2>/dev/null || true
+	flock -x 9 || die "Cannot lock vault."
+	CLI_VAULT_LOCKED=1
+}
+
+release_cli_vault_lock() {
+	[ "${CLI_VAULT_LOCKED:-0}" = "1" ] || return 0
+	flock -u 9 2>/dev/null || true
+	exec 9>&-
+	CLI_VAULT_LOCKED=0
 }
 
 # ----- Vault format helpers ---------------------------------------------------
@@ -1099,6 +1121,10 @@ generate_password() {
 	elif [ "$length" -gt 128 ]; then
 		length=128
 	fi
+	case "$mode" in
+		secure|easy|numeric) ;;
+		*) mode="secure" ;;
+	esac
 
 	if [ "$mode" = "easy" ]; then
 		local words_needed
@@ -1135,10 +1161,14 @@ generate_password() {
 	fi
 
 	local charset=""
-	[ "$include_upper" = "1" ] && charset="${charset}ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	[ "$include_lower" = "1" ] && charset="${charset}abcdefghijklmnopqrstuvwxyz"
-	[ "$include_digits" = "1" ] && charset="${charset}0123456789"
-	[ "$include_symbols" = "1" ] && charset="${charset}!@#$%^&*()_-+=[]{}:;,.?/|~"
+	if [ "$mode" = "numeric" ]; then
+		charset="0123456789"
+	else
+		[ "$include_upper" = "1" ] && charset="${charset}ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		[ "$include_lower" = "1" ] && charset="${charset}abcdefghijklmnopqrstuvwxyz"
+		[ "$include_digits" = "1" ] && charset="${charset}0123456789"
+		[ "$include_symbols" = "1" ] && charset="${charset}!@#$%^&*()_-+=[]{}:;,.?/|~"
+	fi
 
 	if [ -z "$charset" ]; then
 		charset="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -1168,11 +1198,14 @@ cmd_generate_password() {
 	while [ $# -gt 0 ]; do
 		case "$1" in
 			-l|--length)
-				length="${2:-16}"
+				[ $# -ge 2 ] || die "Missing value for $1."
+				length="$2"
 				shift 2
 				;;
 			-m|--mode)
-				mode="${2:-secure}"
+				[ $# -ge 2 ] || die "Missing value for $1."
+				mode="$2"
+				case "$mode" in secure|easy|numeric) ;; *) die "Invalid generator mode '$mode'." ;; esac
 				shift 2
 				;;
 			--no-symbols)
@@ -1196,7 +1229,7 @@ cmd_generate_password() {
 				return 0
 				;;
 			*)
-				break
+				die "Unknown generator option '$1'."
 				;;
 		esac
 	done
@@ -2496,6 +2529,9 @@ cmd_portable() {
 	if [ -e "$workdir" ]; then
 		die "Target directory '$workdir' already exists. Choose another name."
 	fi
+	if [ -e "${bundle_name}.zip" ] || [ -e "${bundle_name}.tar.gz" ]; then
+		die "Target archive for '$bundle_name' already exists. Choose another name."
+	fi
 
 	mkdir -p "$workdir" || die "Failed to create directory '$workdir'."
 
@@ -2669,6 +2705,9 @@ cmd_save() {
 	if [ -e "$workdir" ]; then
 		die "Target directory '$workdir' already exists. Choose another name."
 	fi
+	if [ -e "${bundle_name}.zip" ] || [ -e "${bundle_name}.tar.gz" ]; then
+		die "Target archive for '$bundle_name' already exists. Choose another name."
+	fi
 
 	mkdir -p "$workdir" || die "Failed to create directory '$workdir'."
 
@@ -2777,6 +2816,19 @@ EOF
 		fi
 	fi
 
+	# A successful archiver exit alone is not enough to justify deleting the
+	# local vault. Read the archived member back and require its digest to match.
+	local source_vault_sha archived_vault_sha
+	source_vault_sha="$(sha256sum "$VAULT_FILE" | awk '{print $1}')"
+	if [ "${archive_path##*.}" = "zip" ]; then
+		archived_vault_sha="$(unzip -p "$archive_path" "$bundle_name/spm_vault.gpg" 2>/dev/null | sha256sum | awk '{print $1}')"
+	else
+		archived_vault_sha="$(tar -xOf "$archive_path" "$bundle_name/spm_vault.gpg" 2>/dev/null | sha256sum | awk '{print $1}')"
+	fi
+	if [ -z "$source_vault_sha" ] || [ "$source_vault_sha" != "$archived_vault_sha" ]; then
+		die "Archive verification failed; the local vault was not removed."
+	fi
+
 	# Remove the folder, leave ONLY the archive on disk
 	rm -rf "$workdir"
 
@@ -2816,6 +2868,7 @@ cmd_restore() {
 	local bundle_recovery="./spm_vault.gpg.recovery"
 	local dest_vault="$HOME/.spm_vault.gpg"
 	local dest_recovery="${dest_vault}.recovery"
+	local restore_tmp=""
 
 	if [ "$VAULT_FILE" != "$bundle_vault" ] || [ ! -f "$bundle_vault" ]; then
 		if [ "$SPM_LANG" = "id" ]; then
@@ -2842,11 +2895,11 @@ cmd_restore() {
 
 	mkdir -p "$(dirname "$dest_vault")" || die "Failed to create destination directory."
 
-	if ! mv "$bundle_vault" "$dest_vault" 2>/dev/null; then
-		cp "$bundle_vault" "$dest_vault" || die "Failed to copy vault."
-		rm -f "$bundle_vault"
-	fi
-	chmod 600 "$dest_vault" 2>/dev/null || true
+	restore_tmp="$(mktemp "$(dirname "$dest_vault")/.spm_restore.XXXXXX")" || die "Failed to create restore staging file."
+	cp "$bundle_vault" "$restore_tmp" || { rm -f "$restore_tmp"; die "Failed to stage vault restore."; }
+	chmod 600 "$restore_tmp" 2>/dev/null || true
+	mv -f "$restore_tmp" "$dest_vault" || { rm -f "$restore_tmp"; die "Failed to install restored vault."; }
+	rm -f "$bundle_vault"
 
 	if [ -f "$bundle_recovery" ]; then
 		if [ -f "$dest_recovery" ]; then
@@ -2863,11 +2916,11 @@ cmd_restore() {
 			esac
 		fi
 		if [ -n "$bundle_recovery" ] && [ -f "./spm_vault.gpg.recovery" ]; then
-			if ! mv "./spm_vault.gpg.recovery" "$dest_recovery" 2>/dev/null; then
-				cp "./spm_vault.gpg.recovery" "$dest_recovery" || die "Failed to copy recovery file."
-				rm -f "./spm_vault.gpg.recovery"
-			fi
-			chmod 600 "$dest_recovery" 2>/dev/null || true
+			restore_tmp="$(mktemp "$(dirname "$dest_recovery")/.spm_recovery_restore.XXXXXX")" || die "Failed to create recovery staging file."
+			cp "./spm_vault.gpg.recovery" "$restore_tmp" || { rm -f "$restore_tmp"; die "Failed to stage recovery file."; }
+			chmod 600 "$restore_tmp" 2>/dev/null || true
+			mv -f "$restore_tmp" "$dest_recovery" || { rm -f "$restore_tmp"; die "Failed to install recovery file."; }
+			rm -f "./spm_vault.gpg.recovery"
 		fi
 	fi
 
@@ -2951,8 +3004,14 @@ cmd_update() {
 		return 1
 	fi
 
-	local sha_url
-	sha_url="$(printf '%s\n' "$json" | grep -E '"browser_download_url"' | grep -E 'spm\.sh\.sha256"' | head -n1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')" || true
+	local asset_name sha_url
+	asset_name="${asset_url##*/}"
+	sha_url="$(printf '%s\n' "$json" | grep -E '"browser_download_url"' | grep -F "${asset_name}.sha256\"" | head -n1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')" || true
+	if [ -z "$sha_url" ]; then
+		# Compatibility with the first checksum-enabled development builds,
+		# which used this misleading filename for the ZIP digest.
+		sha_url="$(printf '%s\n' "$json" | grep -E '"browser_download_url"' | grep -E 'spm\.sh\.sha256"' | head -n1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')" || true
+	fi
 
 	if [ -z "$sha_url" ]; then
 		if [ "$SPM_LANG" = "id" ]; then
@@ -2998,7 +3057,7 @@ cmd_update() {
 		mkdir -p "$tmpdir"
 	fi
 	local zip_path="$tmpdir/spm_latest.zip"
-	local sha_path="$tmpdir/spm.sh.sha256"
+	local sha_path="$tmpdir/archive.sha256"
 
 	if [ "$SPM_LANG" = "id" ]; then
 		printf "Mengunduh: %s\n" "$asset_url"
@@ -3083,6 +3142,11 @@ cmd_update() {
 		else
 			printf "spm.sh not found in archive.\n"
 		fi
+		rm -rf "$tmpdir"
+		return 1
+	fi
+	if ! bash -n "$new_spm"; then
+		printf "Downloaded spm.sh failed its syntax check; installation aborted.\n"
 		rm -rf "$tmpdir"
 		return 1
 	fi
@@ -3570,7 +3634,8 @@ elif fmt in ("md", "markdown"):
         f.write("| " + " | ".join(fieldnames) + " |\n")
         f.write("|" + "|".join([" --- "]*len(fieldnames)) + "|\n")
         for r in rows:
-            f.write("| " + " | ".join((r.get(k,"") or "").replace("\n"," ") for k in fieldnames) + " |\n")
+            cells = [json.dumps(str(r.get(k,"") or ""), ensure_ascii=False).replace("|", "\\u007c") for k in fieldnames]
+            f.write("| " + " | ".join(cells) + " |\n")
 elif fmt == "html":
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("<table border='1' cellpadding='4' cellspacing='0'>\n")
@@ -3583,7 +3648,7 @@ elif fmt == "toml":
         for r in rows:
             f.write("[[item]]\n")
             for k in fieldnames:
-                val = (r.get(k, "") or "").replace("\n", "\\n").replace('"', '\\"')
+                val = (r.get(k, "") or "").replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
                 f.write(f'{k} = "{val}"\n')
             f.write("\n")
 elif fmt == "org":
@@ -3593,7 +3658,8 @@ elif fmt == "org":
         f.write(header)
         f.write(sep)
         for r in rows:
-            f.write("| " + " | ".join((r.get(k,"") or "").replace("\n"," ") for k in fieldnames) + " |\n")
+            cells = [json.dumps(str(r.get(k,"") or ""), ensure_ascii=False).replace("|", "\\u007c") for k in fieldnames]
+            f.write("| " + " | ".join(cells) + " |\n")
 elif fmt == "scsv":
     with open(out_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=";")
@@ -3611,7 +3677,7 @@ elif fmt in ("yaml", "yml"):
         for r in rows:
             f.write("-\n")
             for k in fieldnames:
-                val = (r.get(k, "") or "").replace("\n", "\\n")
+                val = r.get(k, "") or ""
                 f.write(f"  {k}: {json.dumps(val, ensure_ascii=False)}\n")
 elif fmt == "xml":
     with open(out_path, "w", encoding="utf-8") as f:
@@ -3636,7 +3702,7 @@ elif fmt == "ini":
             sect = f"{r.get('type','unknown')}_{r.get('id','')}"
             f.write(f"[{sect}]\n")
             for k in fieldnames:
-                val = (r.get(k,'') or '').replace("\n", "\\n")
+                val = json.dumps(str(r.get(k,'') or ''), ensure_ascii=False)
                 f.write(f"{k}={val}\n")
             f.write("\n")
 elif fmt == "psv":
@@ -3645,7 +3711,8 @@ elif fmt == "psv":
         writer.writeheader()
         writer.writerows(rows)
 elif fmt == "rst":
-    widths = {k: max(len(k), max(len((r.get(k,"") or "")) for r in rows) if rows else 0) for k in fieldnames}
+    encoded_rows = [{k: json.dumps(str(r.get(k,"") or ""), ensure_ascii=False).replace("|", "\\u007c") for k in fieldnames} for r in rows]
+    widths = {k: max(len(k), max(len(r[k]) for r in encoded_rows) if encoded_rows else 0) for k in fieldnames}
     def sep(char="+"):
         return char + char.join("-" * (widths[k]+2) for k in fieldnames) + char + "\n"
     def row(vals):
@@ -3654,8 +3721,8 @@ elif fmt == "rst":
         f.write(sep())
         f.write(row([(k,k) for k in fieldnames]))
         f.write(sep("+"))
-        for r in rows:
-            f.write(row([(k, (r.get(k,"") or "").replace("\n"," ")) for k in fieldnames]))
+        for r in encoded_rows:
+            f.write(row([(k, r[k]) for k in fieldnames]))
             f.write(sep())
 else:  # csv or txt fallback
     delim = "," if fmt == "csv" else ","
@@ -3884,7 +3951,7 @@ def parse_advanced_rows():
         return rows
     if fmt == "ini":
         cfg=configparser.ConfigParser(interpolation=None); cfg.optionxform=str; cfg.read_string(content)
-        return [{k: v.replace("\\n", "\n") for k,v in cfg.items(section)} for section in cfg.sections()]
+        return [{k: (json.loads(v) if v.startswith('"') and v.endswith('"') else v) for k,v in cfg.items(section)} for section in cfg.sections()]
     if fmt == "toml":
         import tomllib
         return tomllib.loads(content).get("item", [])
@@ -3906,6 +3973,7 @@ def parse_plain_table():
             if parts[0].lower() == "type":
                 headers = [p.lower() for p in parts]
                 continue
+            parts = [json.loads(p) if p.startswith('"') and p.endswith('"') else p for p in parts]
             if headers:
                 rows.append(dict(zip(headers, parts)))
             else:
@@ -3925,18 +3993,31 @@ def load_rows():
         return parse_rows()
     return parse_advanced_rows()
 
-for row in load_rows():
+rows = load_rows()
+if not rows:
+    raise ValueError("No records detected in import.")
+
+added = 0
+for row in rows:
     t = (row.get("type","") or "").lower()
     if t in ("password","pass"):
         add_password(row)
+        added += 1
     elif t in ("note","notes"):
         add_note(row)
+        added += 1
     elif t in ("passphrase","phrase","secret"):
         add_passphrase(row)
+        added += 1
     elif t in ("backup_code","backup","codes","backupcode"):
         add_backup(row)
+        added += 1
     elif t in ("authenticator","auth"):
         add_auth(row)
+        added += 1
+
+if added == 0:
+    raise ValueError("No supported records found in import.")
 
 with open(vault_path, "w", encoding="utf-8") as f:
     for ln in lines:
@@ -7323,7 +7404,8 @@ def export_content(fmt: str, plaintext: str):
     if fmt in ("md","markdown"):
         out = ["| " + " | ".join(fieldnames) + " |", "|" + "|".join([" --- "]*len(fieldnames)) + "|"]
         for r in rows:
-            out.append("| " + " | ".join((r.get(k,"") or "").replace("\n"," ") for k in fieldnames) + " |")
+            cells = [json.dumps(str(r.get(k,"") or ""), ensure_ascii=False).replace("|", "\\u007c") for k in fieldnames]
+            out.append("| " + " | ".join(cells) + " |")
         return "\n".join(out) + "\n"
     if fmt == "html":
         out = ["<table border='1' cellpadding='4' cellspacing='0'>", "<tr>" + "".join(f"<th>{htmlmod.escape(k)}</th>" for k in fieldnames) + "</tr>"]
@@ -7336,7 +7418,7 @@ def export_content(fmt: str, plaintext: str):
         for r in rows:
             out.append("[[item]]")
             for k in fieldnames:
-                val = str(r.get(k, "") or "").replace("\n","\\n").replace('"','\\"')
+                val = str(r.get(k, "") or "").replace("\\","\\\\").replace("\n","\\n").replace('"','\\"')
                 out.append(f'{k} = "{val}"')
             out.append("")
         return "\n".join(out)
@@ -7345,7 +7427,8 @@ def export_content(fmt: str, plaintext: str):
         sep = "|" + "+".join("-" * (len(k)+2) for k in fieldnames) + "|"
         out = [header, sep]
         for r in rows:
-            out.append("| " + " | ".join((str(r.get(k,"") or "")).replace("\n"," ") for k in fieldnames) + " |")
+            cells = [json.dumps(str(r.get(k,"") or ""), ensure_ascii=False).replace("|", "\\u007c") for k in fieldnames]
+            out.append("| " + " | ".join(cells) + " |")
         return "\n".join(out) + "\n"
     if fmt == "scsv":
         buf = io.StringIO()
@@ -7365,7 +7448,7 @@ def export_content(fmt: str, plaintext: str):
         for r in rows:
             out.append("-")
             for k in fieldnames:
-                val = str(r.get(k, "") or "").replace("\n","\\n")
+                val = str(r.get(k, "") or "")
                 out.append(f"  {k}: {json.dumps(val, ensure_ascii=False)}")
         return "\n".join(out) + "\n"
     if fmt == "xml":
@@ -7391,7 +7474,7 @@ def export_content(fmt: str, plaintext: str):
             sect = f"{r.get('type','unknown')}_{r.get('id','')}"
             out.append(f"[{sect}]")
             for k in fieldnames:
-                val = str(r.get(k,'') or '').replace("\n", "\\n")
+                val = json.dumps(str(r.get(k,'') or ''), ensure_ascii=False)
                 out.append(f"{k}={val}")
             out.append("")
         return "\n".join(out)
@@ -7401,14 +7484,15 @@ def export_content(fmt: str, plaintext: str):
         writer.writeheader(); writer.writerows(rows)
         return buf.getvalue()
     if fmt == "rst":
-        widths={k:max(len(k), max(len(str((r.get(k,"") or ""))) for r in rows) if rows else 0) for k in fieldnames}
+        encoded_rows=[{k:json.dumps(str(r.get(k,"") or ""), ensure_ascii=False).replace("|", "\\u007c") for k in fieldnames} for r in rows]
+        widths={k:max(len(k), max(len(r[k]) for r in encoded_rows) if encoded_rows else 0) for k in fieldnames}
         def sep(char="+"):
             return char + char.join("-" * (widths[k]+2) for k in fieldnames) + char
         def row(vals):
             return "|" + "|".join(" " + v.ljust(widths[k]) + " " for k,v in vals) + "|"
         out=[sep(), row([(k,k) for k in fieldnames]), sep("+")]
-        for r in rows:
-            out.append(row([(k, str(r.get(k,"") or "").replace("\n"," ")) for k in fieldnames]))
+        for r in encoded_rows:
+            out.append(row([(k, r[k]) for k in fieldnames]))
             out.append(sep())
         return "\n".join(out) + "\n"
     # default csv/txt
@@ -7468,7 +7552,7 @@ def _parse_import_rows(fmt: str, content: str):
         return rows
     if fmt == "ini":
         cfg=configparser.ConfigParser(interpolation=None); cfg.optionxform=str; cfg.read_string(content)
-        return [{k: v.replace("\\n", "\n") for k,v in cfg.items(section)} for section in cfg.sections()]
+        return [{k: (json.loads(v) if v.startswith('"') and v.endswith('"') else v) for k,v in cfg.items(section)} for section in cfg.sections()]
     if fmt == "toml":
         import tomllib
         return tomllib.loads(content).get("item", [])
@@ -7596,6 +7680,7 @@ def _apply_import(fmt: str, content: str, plaintext: str):
         stats["authenticators"] += 1
 
     def parse_plain_table(text):
+        import json
         rows=[]
         headers=None
         for ln in text.splitlines():
@@ -7611,6 +7696,7 @@ def _apply_import(fmt: str, content: str, plaintext: str):
             if parts[0].lower() == "type":
                 headers=[p.lower() for p in parts]
                 continue
+            parts=[json.loads(p) if p.startswith('"') and p.endswith('"') else p for p in parts]
             if headers:
                 rows.append(dict(zip(headers, parts)))
             else:
@@ -9813,7 +9899,12 @@ interactive_menu() {
 			17) interactive_menu_backup_codes ;;
 			18) interactive_menu_generator ;;
 			19) clear; cmd_doctor || true; pause_menu ;;
-			20) clear; start_web_mode || true ;;  # ← Web Mode (experimental)
+			20)
+				clear
+				release_cli_vault_lock
+				start_web_mode || true
+				acquire_cli_vault_lock
+				;;
 			21) clear; cmd_restore || true; pause_menu ;;
 			0)
 				if [ "$SPM_LANG" = "id" ]; then
@@ -9843,12 +9934,17 @@ main() {
 	ensure_policy_consent
 
 	if [ $# -eq 0 ]; then
+		acquire_cli_vault_lock
 		interactive_menu
 		return
 	fi
 
 	local cmd="$1"
 	shift || true
+	case "$cmd" in
+		update|generate|password-generate|web|web-mode|help|-h|--help) ;;
+		*) acquire_cli_vault_lock ;;
+	esac
 
 	case "$cmd" in
 		init)             cmd_init "$@" ;;

@@ -284,7 +284,7 @@ Exports passwords, secure notes, passphrases, backup codes, and authenticators. 
 ./spm.sh import json backup.json
 ```
 
-Imports passwords, secure notes, passphrases, backup codes, and authenticators from supported export formats (csv/json primary; advanced formats accepted as listed above). Entries are appended and IDs auto-renumbered. Web mode overlays the entire Export/Import card with a loader during uploads, validates that at least one record was parsed, reports how many rows of each type were added, and automatically reloads the dashboard on success so the new rows appear immediately (errors show inline without redirect). Status messages and overlay text follow the selected language (EN/ID/JP) so users get consistent feedback during uploads.
+Imports passwords, secure notes, passphrases, backup codes, and authenticators from supported export formats (csv/json primary; advanced formats accepted as listed above). Entries are appended and IDs auto-renumbered. Imports fail if no supported records are detected. Web mode overlays the entire Export/Import card with a loader during uploads, reports how many rows of each type were added, and automatically reloads the dashboard on success so the new rows appear immediately (errors show inline without redirect). Status messages and overlay text follow the selected language (EN/ID/JP) so users get consistent feedback during uploads.
 
 ---
 
@@ -419,13 +419,14 @@ The recovery private key remains separate unless
 
 ## Development & Versioning
 
-Version: **2.9.5**
+Version: **2.9.6**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds are refused by default: bind localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` is an explicit escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 Authenticated web mutations also require an exact same-origin request and are serialized across threads/processes to prevent CSRF and lost vault writes. Decrypted web responses use `Cache-Control: no-store`.
 All listed import formats are round-trip compatible with their matching CLI and web exports.
+Vault writes are staged and atomically installed. CLI and web processes share an advisory vault lock when `flock` is available; avoid concurrent access on systems without it. `save` verifies the archived vault before removing the local copy.
 Uses **semantic versioning**.  
-`./spm.sh update` fetches the latest GitHub ZIP and installs to `/usr/local/bin/spm` (sudo may be required).  
+`./spm.sh update` fetches the latest GitHub ZIP, verifies its published SHA-256 and the extracted script syntax, then installs to `/usr/local/bin/spm` (sudo may be required).
 See `CHANGELOG.md` for details.
 
 ---

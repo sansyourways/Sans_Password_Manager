@@ -1,6 +1,6 @@
 # Security Policy for Sans Password Manager (SPM)
-Version 2.0 — © 2025 Sansyourways  
-Last Updated: January 2025
+Version 2.1 — © 2025–2026 Sansyourways
+Last Updated: August 2026
 
 SPM (Sans Password Manager) is a privacy-focused, offline, fully client-side encrypted application.  
 This document contains the security policy for vulnerability reporting, responsible disclosure, and usage expectations.
@@ -12,11 +12,14 @@ SPM is designed around the following core principles:
 
 - **Offline-first** — no servers, no cloud sync, no telemetry.  
 - **Zero data collection** — all vault data stays on the user's device.  
-- **Strong encryption** — GnuPG (OpenPGP) or AES-256-GCM protects all stored data.  
+- **Strong encryption** — GnuPG symmetric encryption with AES-256 protects stored vault data.
 - **User-controlled keys** — the user is the sole owner of all keys and passwords.  
-- **No recovery mechanisms** — master password or private key cannot be recovered by the developer.  
+- **User-controlled recovery** — recovery requires the locally generated RSA private key and recovery blob; the developer cannot recover either.
+- **Crash-safe writes** — ciphertext is staged and atomically installed, with a last-known-good encrypted backup.
+- **Concurrent-write protection** — CLI and web mutations share an advisory file lock when `flock` is available.
 
-SPM is intentionally built without remote dependencies to minimize risk.
+Core vault operations are offline. The optional updater contacts GitHub Releases,
+and web mode serves the local vault UI on the address selected by the user.
 
 ---
 
