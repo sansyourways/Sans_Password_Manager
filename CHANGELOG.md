@@ -5,6 +5,30 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.9.3] - 2026-08-19
+
+### Fixed
+- **`doctor`'s permission check could report a world-readable recovery private
+  key as fine.** The key path it audited was `./spm_recovery_private.pem` -
+  relative to the current directory, because that is where `init` generates it.
+  So the check tested whichever copy happened to sit in the directory you ran
+  `doctor` from, and found nothing at all when run from somewhere else. Run
+  from `$HOME` on a machine whose exposed copy lived in a project folder, it
+  printed a clean bill of health. This matters more than a loose vault file:
+  the recovery key decrypts the vault through `forgot` *without* the master
+  password, so an exposed copy is a master-password bypass rather than one more
+  encrypted blob to crack.
+- `doctor` now audits every copy of the key it can reasonably find - in the
+  current directory, beside the vault, next to the script, and anywhere within
+  four levels of `$HOME` - and matches `spm_recovery_private*.pem`, the same
+  glob `.gitignore` uses, so renamed and spare keys are caught too. Results are
+  de-duplicated by canonical path, so one key reached by several paths (or via
+  a symlink) is reported once. The `chmod 600` hint still names only the files
+  that are actually exposed.
+- The cwd-relative default itself is unchanged: `init`, `portable`, `save`, and
+  `forgot` all still generate and look for the key in the working directory.
+  Only the audit got wider.
+
 ## [2.9.2] - 2026-08-19
 
 ### Added

@@ -345,11 +345,16 @@ Validates:
 - Secure notes integrity  
 - Recovery metadata  
 - RSA key pairing  
-- File permissions on the vault, its `.bak`, the recovery file, and the RSA
-  private key — each should be `600`. Anything readable by group or others is
-  reported with a ready-to-run `chmod` command. Vaults last written by a web
-  session before 2.9.1 were left at the umask default (usually `644`), and this
-  is how you find and fix them.
+- File permissions on the vault, its `.bak`, the recovery file, and **every
+  copy of the RSA private key** — each should be `600`. Anything readable by
+  group or others is reported with a ready-to-run `chmod` command. Vaults last
+  written by a web session before 2.9.1 were left at the umask default (usually
+  `644`), and this is how you find and fix them.
+  Because `init` generates the recovery key in whatever directory you run it
+  from, copies tend to accumulate. The check looks in the current directory,
+  beside the vault, next to the script, and up to four levels under `$HOME`,
+  de-duplicating by real path. An exposed recovery key is worth fixing first:
+  it unlocks the vault via `forgot` **without** the master password.
 
 ---
 
@@ -403,7 +408,7 @@ Creates encrypted backup, wipes local vault.
 
 ## Development & Versioning
 
-Version: **2.9.2**  
+Version: **2.9.3**  
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Keep non-loopback web deployments behind HTTPS or a TLS reverse proxy.  
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 Uses **semantic versioning**.  

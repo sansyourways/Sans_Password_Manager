@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.9.2"
+VERSION="2.9.3"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -103,6 +103,55 @@ mode_is_exposed() {
 	local mode="$1"
 	[ -n "$mode" ] || return 1
 	[ "${mode: -2}" != "00" ]
+}
+
+# Resolve a path to its canonical absolute form so the same file reached by two
+# different paths is not audited (or reported) twice.
+canon_path() {
+	local p="$1"
+	realpath "$p" 2>/dev/null && return 0
+	readlink -f "$p" 2>/dev/null && return 0
+	# Older macOS has neither; fall back to a subshell cd so the caller still
+	# gets an absolute path and this function never changes our own cwd.
+	local d b
+	d="$(dirname "$p")"
+	b="$(basename "$p")"
+	( cd "$d" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$b" ) 2>/dev/null && return 0
+	printf '%s\n' "$p"
+}
+
+# Every sensitive file 'doctor' should audit, one per line, de-duplicated.
+#
+# RECOVERY_PRIV_DEFAULT is cwd-relative by design (the key is generated in
+# whatever directory you ran 'init' from), so checking only that path lets an
+# exposed key in another directory pass unnoticed: run from $HOME and doctor
+# reports OK while a world-readable copy sits in the project folder. Look in
+# the cwd, alongside the vault, next to the script, and anywhere shallow
+# under $HOME, matching the same glob .gitignore uses so renamed or spare
+# keys are caught too.
+sensitive_files() {
+	local vault_dir script_dir d g p
+	vault_dir="$(dirname "$VAULT_FILE")"
+	script_dir="$(dirname "$0")"
+	{
+		printf '%s\n' "$VAULT_FILE" "${VAULT_FILE}.bak" "$RECOVERY_FILE"
+		# The cwd and the vault's directory may sit outside $HOME entirely
+		# (portable bundle on removable media), so check them explicitly.
+		for d in "." "$vault_dir" "$script_dir"; do
+			for g in "$d"/spm_recovery_private*.pem; do
+				if [ -f "$g" ]; then
+					printf '%s\n' "$g"
+				fi
+			done
+		done
+		# Copies of the key get left behind in project folders and backup
+		# directories, where a directory-list check would never look. Bounded
+		# depth keeps this well under a second on a normal home directory.
+		find "$HOME" -maxdepth 4 -type f -name 'spm_recovery_private*.pem' 2>/dev/null || true
+	} | while IFS= read -r p; do
+		[ -f "$p" ] || continue
+		printf '%s\t%s\n' "$(canon_path "$p")" "$p"
+	done | awk -F '\t' '!seen[$1]++ { print $2 }'
 }
 
 make_tmp() {
@@ -3317,8 +3366,10 @@ cmd_doctor() {
 	local perm_bad=0
 	local perm_fix=""
 	local pf pmode
-	for pf in "$VAULT_FILE" "${VAULT_FILE}.bak" "$RECOVERY_FILE" "$RECOVERY_PRIV_DEFAULT"; do
-		[ -f "$pf" ] || continue
+	# Here-string, not a pipe: a piped 'while' runs in a subshell and would
+	# discard perm_bad/perm_fix.
+	while IFS= read -r pf; do
+		[ -n "$pf" ] || continue
 		pmode="$(file_mode "$pf")"
 		if [ -z "$pmode" ]; then
 			if [ "$SPM_LANG" = "id" ]; then
@@ -3343,7 +3394,7 @@ cmd_doctor() {
 				printf "[✔] Permissions OK (%s): %s\n" "$pmode" "$pf"
 			fi
 		fi
-	done
+	done <<<"$(sensitive_files)"
 
 	if [ "$perm_bad" -gt 0 ]; then
 		if [ "$SPM_LANG" = "id" ]; then
