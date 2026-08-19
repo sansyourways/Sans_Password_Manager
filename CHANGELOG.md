@@ -42,6 +42,9 @@ Keep-a-Changelog style format.
 - Rebuilt the animated product tour (`docs/product-demo.gif`) from the same
   2.10.5 captures, preserving its six-screen sequence, 960x638 size, and
   1.8-second cadence.
+- Redrew the social preview card (`docs/social-preview.png`) so its brand mark
+  is the shipped terminal glyph rather than the retired letterform, and its
+  palette is taken from the Console tokens the product actually renders.
 
 ## [2.10.4] - 2026-08-19
 
