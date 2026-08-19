@@ -28,6 +28,8 @@ Keep-a-Changelog style format.
   coordinated-disclosure targets.
 
 ### Fixed
+- Regression tests load SPM functions from a temporary file instead of process
+  substitution, preventing Bash 3/BSD sed truncation on macOS.
 - Regression tests use a short isolated GnuPG home and explicitly manage their
   agent, avoiding macOS runner socket failures without touching user keyrings.
 - Termux dependency installation now uses `pkg` instead of incorrectly invoking

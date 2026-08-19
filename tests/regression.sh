@@ -33,9 +33,12 @@ printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback \
 	--passphrase-fd 0 --symmetric --cipher-algo AES256 \
 	-o "$PASSWORD_VAULT" "$PLAIN"
 
-# Load functions without executing main. spm.sh intentionally ends with main "$@".
+# Load functions without executing main. A real temporary file avoids the
+# process-substitution truncation seen with Bash 3 and BSD sed on macOS.
+SPM_LIBRARY="$TEST_ROOT/spm-library.sh"
+sed '$d' "$ROOT_DIR/spm.sh" > "$SPM_LIBRARY"
 # shellcheck source=/dev/null
-source <(sed '$d' "$ROOT_DIR/spm.sh")
+source "$SPM_LIBRARY"
 export MASTER_PW="$AUDIT_PASSWORD"
 export SPM_LANG="en"
 

@@ -8,6 +8,7 @@ This patch completes SPM's open-source contributor and portability foundation.
 - Fixed Termux dependency installation to use `pkg` and made CLI help available
   before environment setup prompts
 - Isolated GnuPG test-agent state for reliable macOS regression execution
+- Removed Bash 3 process-substitution truncation from the macOS test path
 - Updated GitHub Actions to the Node.js 24 checkout runtime
 - Corrected privacy and GDPR documentation for optional network behavior
 - Standardized public contact domains and added security response targets
