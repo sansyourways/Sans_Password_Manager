@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **2.10.4**
+Current release: **2.10.5**
 
 ---
 
@@ -215,7 +215,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 2.10.4
+bash install.sh --version 2.10.5
 bash install.sh --prefix "$HOME/.local"
 ```
 
