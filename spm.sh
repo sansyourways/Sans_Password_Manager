@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.9.0"
+VERSION="2.9.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -78,6 +78,14 @@ now_iso() {
 	else
 		date
 	fi
+}
+
+# Vault records are TAB-delimited, one line each. A field carrying a raw TAB or
+# newline silently splits the record: a password pasted with a TAB used to be
+# stored whole but read back truncated at the TAB, with the remainder bleeding
+# into the next column. Collapse both to a space before any field is written.
+sanitize_field() {
+	printf '%s' "$1" | tr '\t\r\n' '   '
 }
 
 make_tmp() {
@@ -638,6 +646,9 @@ encrypt_file_to_vault() {
 
 	if [ -f "$VAULT_FILE" ]; then
 		cp "$VAULT_FILE" "${VAULT_FILE}.bak" 2>/dev/null || true
+		# cp creates the copy under the current umask, so the backup would
+		# otherwise land as 0644 while the vault itself is 0600.
+		chmod 600 "${VAULT_FILE}.bak" 2>/dev/null || true
 	fi
 
 	if ! printf '%s' "$MASTER_PW" | gpg --batch --yes \
@@ -1316,7 +1327,12 @@ cmd_add() {
 	id="$(next_id_from_vault "$tmp")"
 	created="$(now_iso)"
 
-	printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$service" "$username" "$pw" "$notes" "$created" >>"$tmp"
+	printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" \
+		"$(sanitize_field "$service")" \
+		"$(sanitize_field "$username")" \
+		"$(sanitize_field "$pw")" \
+		"$(sanitize_field "$notes")" \
+		"$created" >>"$tmp"
 
 	encrypt_file_to_vault "$tmp"
 	secure_wipe "$tmp"
@@ -1545,7 +1561,7 @@ cmd_notes_add() {
 	note_id="$(next_note_id_from_vault "$tmp")"
 	created="$(now_iso)"
 
-	printf 'NOTE\t%s\t%s\t%s\t%s\t-\n' "$note_id" "$title" "$body_b64" "$created" >>"$tmp"
+	printf 'NOTE\t%s\t%s\t%s\t%s\t-\n' "$note_id" "$(sanitize_field "$title")" "$body_b64" "$created" >>"$tmp"
 
 	encrypt_file_to_vault "$tmp"
 	secure_wipe "$tmp"
@@ -1730,7 +1746,7 @@ cmd_passphrase_add() {
 	local secret_b64
 	secret_b64="$(printf '%s' "$secret" | base64 | tr -d '\n')"
 
-	printf 'PASSPHRASE\t%s\t%s\t%s\t%s\t-\n' "$pass_id" "$label" "$secret_b64" "$created" >>"$tmp"
+	printf 'PASSPHRASE\t%s\t%s\t%s\t%s\t-\n' "$pass_id" "$(sanitize_field "$label")" "$secret_b64" "$created" >>"$tmp"
 
 	encrypt_file_to_vault "$tmp"
 	secure_wipe "$tmp"
@@ -1964,7 +1980,7 @@ cmd_authenticator_add() {
 	local secret_b32
 	secret_b32="$(printf '%s' "$secret" | tr -d '\n' | tr '[:lower:]' '[:upper:]')"
 
-	printf 'AUTH\t%s\t%s\t%s\t%s\t%s\t%s\n' "$auth_id" "$label" "$secret_b32" "$period" "$created" "$algo" >>"$tmp"
+	printf 'AUTH\t%s\t%s\t%s\t%s\t%s\t%s\n' "$auth_id" "$(sanitize_field "$label")" "$secret_b32" "$period" "$created" "$algo" >>"$tmp"
 
 	encrypt_file_to_vault "$tmp"
 	secure_wipe "$tmp"
@@ -2243,7 +2259,7 @@ cmd_backup_codes_add() {
 	bc_id="$(next_backup_code_id_from_vault "$tmp")"
 	created="$(now_iso)"
 
-	printf 'BACKUP_CODE\t%s\t%s\t%s\t%s\t-\n' "$bc_id" "$label" "$codes_b64" "$created" >>"$tmp"
+	printf 'BACKUP_CODE\t%s\t%s\t%s\t%s\t-\n' "$bc_id" "$(sanitize_field "$label")" "$codes_b64" "$created" >>"$tmp"
 
 	encrypt_file_to_vault "$tmp"
 	secure_wipe "$tmp"
@@ -3555,6 +3571,12 @@ def load_vault_lines(path):
 
 lines = load_vault_lines(vault_path)
 
+def _vf(value):
+    # Vault records are TAB-delimited and line-based, so a field holding a raw
+    # TAB or newline splits the record. Quoted multi-line notes are ordinary in
+    # CSV exports from other managers, and used to land as extra broken rows.
+    return str(value or "").replace("\t", " ").replace("\r", " ").replace("\n", " ")
+
 def next_id(tag):
     max_id = 0
     for ln in lines:
@@ -3571,11 +3593,11 @@ def add_password(r):
     pid = str(next_id("PASS"))
     lines.append("\t".join([
         pid,
-        r.get("label","").replace("\t"," "),
-        r.get("username","").replace("\t"," "),
-        r.get("secret",""),
-        r.get("notes","").replace("\t"," "),
-        r.get("created","")
+        _vf(r.get("label","")),
+        _vf(r.get("username","")),
+        _vf(r.get("secret","")),
+        _vf(r.get("notes","")),
+        _vf(r.get("created",""))
     ]))
 
 def add_note(r):
@@ -3584,9 +3606,9 @@ def add_note(r):
     lines.append("\t".join([
         "NOTE",
         nid,
-        r.get("label","").replace("\t"," "),
+        _vf(r.get("label","")),
         body_b64,
-        r.get("created",""),
+        _vf(r.get("created","")),
         "-"
     ]))
 
@@ -3596,9 +3618,9 @@ def add_passphrase(r):
     lines.append("\t".join([
         "PASSPHRASE",
         pid,
-        r.get("label","").replace("\t"," "),
+        _vf(r.get("label","")),
         secret_b64,
-        r.get("created",""),
+        _vf(r.get("created","")),
         "-"
     ]))
 
@@ -3608,9 +3630,9 @@ def add_backup(r):
     lines.append("\t".join([
         "BACKUP_CODE",
         bid,
-        r.get("label","").replace("\t"," "),
+        _vf(r.get("label","")),
         codes_b64,
-        r.get("created",""),
+        _vf(r.get("created","")),
         "-"
     ]))
 
@@ -3631,10 +3653,10 @@ def add_auth(r):
     lines.append("\t".join([
         "AUTH",
         aid,
-        r.get("label","").replace("\t"," "),
-        r.get("secret",""),
-        period,
-        r.get("created",""),
+        _vf(r.get("label","")),
+        _vf(r.get("secret","")),
+        _vf(period),
+        _vf(r.get("created","")),
         algo
     ]))
 
@@ -4513,6 +4535,12 @@ def sanitize_lang(value):
     if value in SUPPORTED_WEB_LANGS:
         return value
     return DEFAULT_WEB_LANG
+
+def _vf(value):
+    # Vault records are TAB-delimited and line-based. Tabs were already being
+    # stripped here, but a newline slipped through and split one entry into two
+    # broken records, so collapse both.
+    return str(value or "").replace("\t", " ").replace("\r", " ").replace("\n", " ")
 
 def fetch_latest_version():
     now = time.time()
@@ -6808,19 +6836,41 @@ def auth_view_page(aid, label, secret, period, algo, created):
     return render_shell(content, "authenticators", VERSION, VAULT_PATH, title=label)
 
 
+def _passphrase_fd(master: str) -> int:
+    # Never hand the master password to gpg on the command line: argv is world
+    # readable through `ps` and /proc/<pid>/cmdline, so every local user could
+    # read it. Write it into a pipe instead and let gpg read that fd, mirroring
+    # the --passphrase-fd approach the shell side already uses.
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, master.encode("utf-8"))
+    finally:
+        os.close(write_fd)
+    return read_fd
+
 def decrypt_vault(master: str) -> str:
-    return subprocess.check_output(
-        ["gpg", "--batch", "--yes", "--passphrase", master, "-d", VAULT_PATH],
-        stderr=subprocess.DEVNULL,
-        timeout=15,
-    ).decode("utf-8", errors="ignore")
+    pw_fd = _passphrase_fd(master)
+    try:
+        return subprocess.check_output(
+            ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
+             "--passphrase-fd", str(pw_fd), "-d", VAULT_PATH],
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+            pass_fds=(pw_fd,),
+        ).decode("utf-8", errors="ignore")
+    finally:
+        os.close(pw_fd)
 
 def encrypt_vault(master: str, plaintext: str) -> None:
     tmp_path = VAULT_PATH + ".webtmp"
+    pw_fd = _passphrase_fd(master)
     p = subprocess.Popen(
-        ["gpg", "--batch", "--yes", "--passphrase", master, "-c", "-o", tmp_path],
+        ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
+         "--passphrase-fd", str(pw_fd), "--cipher-algo", "AES256",
+         "-c", "-o", tmp_path],
         stdin=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
+        pass_fds=(pw_fd,),
     )
     try:
         stdout, stderr = p.communicate(input=plaintext.encode("utf-8"), timeout=30)
@@ -6828,12 +6878,17 @@ def encrypt_vault(master: str, plaintext: str) -> None:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
             raise RuntimeError("Failed to encrypt vault")
+        # os.replace swaps the inode, so the vault would otherwise inherit this
+        # temp file's umask-derived mode and silently drop from 0600 to 0644.
+        os.chmod(tmp_path, 0o600)
         os.replace(tmp_path, VAULT_PATH)
     except subprocess.TimeoutExpired:
         p.kill()
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
         raise RuntimeError("Vault encryption timed out")
+    finally:
+        os.close(pw_fd)
 
 def totp_code(secret_b32: str, period: int = 30, algo: str = "sha1") -> str:
     import hashlib, hmac, struct, base64
@@ -7035,10 +7090,12 @@ def _parse_import_rows(fmt: str, content: str):
         return json.loads(content)
     if fmt in ("ndjson","jsonl"):
         return [json.loads(line) for line in content.splitlines() if line.strip()]
-    delim = "," if fmt in ("csv","csv-noheader","jsonc") else ";" if fmt=="scsv" else "\\t" if fmt=="tsv" else "|"
+    delim = "," if fmt in ("csv","csv-noheader","jsonc") else ";" if fmt=="scsv" else "\t" if fmt=="tsv" else "|"
     rows=[]
     if fmt=="csv-noheader":
-        reader = csv.reader(content.splitlines(), delimiter=delim)
+        # StringIO, not splitlines(): csv needs the embedded newlines intact
+        # to reassemble quoted multi-line fields into a single row.
+        reader = csv.reader(io.StringIO(content), delimiter=delim)
         for row in reader:
             rows.append({
                 "type": row[0] if len(row)>0 else "",
@@ -7050,7 +7107,7 @@ def _parse_import_rows(fmt: str, content: str):
                 "extra": row[6] if len(row)>6 else "",
             })
         return rows
-    reader = csv.DictReader(content.splitlines(), delimiter=delim)
+    reader = csv.DictReader(io.StringIO(content), delimiter=delim)
     return list(reader)
 
 def _apply_import(fmt: str, content: str, plaintext: str):
@@ -7080,11 +7137,11 @@ def _apply_import(fmt: str, content: str, plaintext: str):
         pid = str(next_id("PASS", lines))
         lines.append(tab.join([
             pid,
-            (r.get("label","") or "").replace(tab," "),
-            (r.get("username","") or "").replace(tab," "),
-            r.get("secret","") or "",
-            (r.get("notes","") or "").replace(tab," "),
-            r.get("created","") or ""
+            _vf(r.get("label","")),
+            _vf(r.get("username","")),
+            _vf(r.get("secret","")),
+            _vf(r.get("notes","")),
+            _vf(r.get("created",""))
         ]))
         stats["passwords"] += 1
 
@@ -7094,9 +7151,9 @@ def _apply_import(fmt: str, content: str, plaintext: str):
         lines.append(tab.join([
             "NOTE",
             nid,
-            (r.get("label","") or "").replace(tab," "),
+            _vf(r.get("label","")),
             body_b64,
-            r.get("created","") or "",
+            _vf(r.get("created","")),
             "-"
         ]))
         stats["notes"] += 1
@@ -7107,9 +7164,9 @@ def _apply_import(fmt: str, content: str, plaintext: str):
         lines.append(tab.join([
             "PASSPHRASE",
             pid,
-            (r.get("label","") or "").replace(tab," "),
+            _vf(r.get("label","")),
             secret_b64,
-            r.get("created","") or "",
+            _vf(r.get("created","")),
             "-"
         ]))
         stats["passphrases"] += 1
@@ -7120,9 +7177,9 @@ def _apply_import(fmt: str, content: str, plaintext: str):
         lines.append(tab.join([
             "BACKUP_CODE",
             bid,
-            (r.get("label","") or "").replace(tab," "),
+            _vf(r.get("label","")),
             codes_b64,
-            r.get("created","") or "",
+            _vf(r.get("created","")),
             "-"
         ]))
         stats["backups"] += 1
@@ -7147,10 +7204,10 @@ def _apply_import(fmt: str, content: str, plaintext: str):
         lines.append(tab.join([
             "AUTH",
             aid,
-            (r.get("label","") or "").replace(tab," "),
-            r.get("secret","") or "",
-            period_val or "30",
-            r.get("created","") or "",
+            _vf(r.get("label","")),
+            _vf(r.get("secret","")),
+            _vf(period_val or "30"),
+            _vf(r.get("created","")),
             algo
         ]))
         stats["authenticators"] += 1
@@ -7303,8 +7360,18 @@ class SPMServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.sessions = {}  # token -> {"master": str, "created": float, "last_seen": float}
+        self.login_failures = {}  # client ip -> {"count": int, "until": float}
 
 SESSION_TTL = 1800
+# Absolute lifetime: the idle TTL above slides on every request, so without
+# this a session (and the plaintext master password it holds) could live for
+# as long as the browser kept poking it.
+SESSION_MAX_AGE = 12 * 3600
+# Web mode can bind beyond loopback, so an unauthenticated master-password
+# guess has to cost something. Lock a client out briefly once it burns through
+# this many attempts.
+LOGIN_MAX_FAILURES = 5
+LOGIN_LOCKOUT_SECONDS = 60
 MAX_POST_BYTES = 2 * 1024 * 1024
 MAX_IMPORT_BYTES = 1024 * 1024
 
@@ -7362,16 +7429,50 @@ class Handler(http.server.BaseHTTPRequestHandler):
             cookies[name.strip()] = urllib.parse.unquote(value.strip())
         return cookies
 
+    def _sweep_sessions(self, now):
+        # Expired entries used to be dropped only when their own token came
+        # back, so an abandoned session kept its master password in memory for
+        # the life of the process. Sweep the whole table instead.
+        for tok, sess in list(self.server.sessions.items()):
+            if (now - sess.get("last_seen", 0) > SESSION_TTL
+                    or now - sess.get("created", 0) > SESSION_MAX_AGE):
+                self.server.sessions.pop(tok, None)
+
+    def _login_client(self):
+        try:
+            return self.client_address[0]
+        except (AttributeError, IndexError):
+            return "unknown"
+
+    def _login_lockout_remaining(self):
+        entry = self.server.login_failures.get(self._login_client())
+        if not entry:
+            return 0
+        return max(0, int(entry.get("until", 0) - time.time()))
+
+    def _record_login_failure(self):
+        client = self._login_client()
+        now = time.time()
+        entry = self.server.login_failures.get(client) or {"count": 0, "until": 0}
+        if entry.get("until", 0) <= now and entry.get("count", 0) >= LOGIN_MAX_FAILURES:
+            entry = {"count": 0, "until": 0}
+        entry["count"] = entry.get("count", 0) + 1
+        if entry["count"] >= LOGIN_MAX_FAILURES:
+            entry["until"] = now + LOGIN_LOCKOUT_SECONDS
+        self.server.login_failures[client] = entry
+        self.log_message("failed login from %s (%d/%d)", client, entry["count"], LOGIN_MAX_FAILURES)
+
+    def _clear_login_failures(self):
+        self.server.login_failures.pop(self._login_client(), None)
+
     def _get_cookie_session(self):
+        now = time.time()
+        self._sweep_sessions(now)
         token = self._parse_cookies().get("spm_session")
         if not token:
             return None
         session = self.server.sessions.get(token)
         if not session:
-            return None
-        now = time.time()
-        if now - session.get("last_seen", 0) > SESSION_TTL:
-            self.server.sessions.pop(token, None)
             return None
         session["last_seen"] = now
         return session.get("master", "")
@@ -7909,6 +8010,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/login":
+            locked_for = self._login_lockout_remaining()
+            if locked_for > 0:
+                page = login_page(
+                    VERSION,
+                    "<div class='msg'>Too many failed attempts. Try again in %d seconds.</div>" % locked_for,
+                )
+                self._send_html(429, page)
+                return
+
             raw_body = self._read_body(limit=64 * 1024)
             if raw_body is None:
                 return
@@ -7924,10 +8034,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 decrypt_vault(password)
             except subprocess.CalledProcessError:
+                self._record_login_failure()
                 page = login_page(VERSION, "<div class='msg'>Invalid master password.</div>")
                 self._send_html(200, page)
                 return
 
+            self._clear_login_failures()
             token = secrets.token_hex(32)
             self.server.sessions[token] = {"master": password, "created": time.time(), "last_seen": time.time()}
             self.send_response(302)
@@ -7977,10 +8089,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             new_line = "\t".join([
                 str(new_id),
-                name.replace("\t", " "),
-                user.replace("\t", " "),
-                password.replace("\t", " "),
-                notes.replace("\t", " "),
+                _vf(name),
+                _vf(user),
+                _vf(password),
+                _vf(notes),
                 now,
             ])
             lines.append(new_line)
@@ -8039,10 +8151,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             new_line = "\t".join([
                 entry_id,
-                name.replace("\t", " "),
-                user.replace("\t", " "),
-                password.replace("\t", " "),
-                notes.replace("\t", " "),
+                _vf(name),
+                _vf(user),
+                _vf(password),
+                _vf(notes),
                 old_created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             ])
             lines[idx_to_update] = new_line
@@ -8113,7 +8225,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             new_line = "\t".join([
                 "NOTE",
                 str(new_id),
-                title.replace("\t", " "),
+                _vf(title),
                 encoded,
                 now,
                 "-",
@@ -8279,7 +8391,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             new_line = "\t".join([
                 "PASSPHRASE",
                 str(new_id),
-                label.replace("\t", " "),
+                _vf(label),
                 encoded,
                 now,
                 "-",
@@ -8335,7 +8447,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             lines[idx_to_update] = "\t".join([
                 "PASSPHRASE",
                 pid,
-                label.replace("\t", " "),
+                _vf(label),
                 encoded,
                 created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "-",
@@ -8425,8 +8537,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             new_line = "\t".join([
                 "AUTH",
                 str(new_id),
-                label.replace("\t", " "),
-                secret.replace("\t", ""),
+                _vf(label),
+                _vf(secret),
                 str(period_int),
                 now,
                 algo,
@@ -8504,8 +8616,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             lines[idx_to_update] = "\t".join([
                 "AUTH",
                 aid,
-                label.replace("\t", " "),
-                secret.replace("\t", ""),
+                _vf(label),
+                _vf(secret),
                 str(period_int),
                 created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 algo,
@@ -8575,7 +8687,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             new_line = "\t".join([
                 "BACKUP_CODE",
                 str(new_id),
-                label.replace("\t", " "),
+                _vf(label),
                 encoded,
                 now,
                 "-",
@@ -8625,7 +8737,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             lines[idx_to_update] = "\t".join([
                 "BACKUP_CODE",
                 bid,
-                label.replace("\t", " "),
+                _vf(label),
                 encoded,
                 created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "-",

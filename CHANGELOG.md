@@ -5,6 +5,50 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.9.1] - 2026-08-19
+
+### Security
+- **The master password was exposed to every other user on the machine.** The
+  web server invoked GnuPG as `gpg --passphrase <master> ...`, putting the
+  plaintext password in the process argument list, where any local user could
+  read it from `ps` or `/proc/<pid>/cmdline` for the duration of every vault
+  read and write. It is now passed over a pipe with `--passphrase-fd`, matching
+  what the shell side already did.
+- **Every web-mode write made the vault world-readable.** `encrypt_vault` wrote
+  a temp file and `os.replace`d it over the vault without setting a mode; since
+  `os.replace` swaps the inode, the vault silently dropped from `0600` to
+  whatever the umask allowed (typically `0644`). The temp file is now chmod'd
+  to `0600` before the swap, and vault backups (`*.gpg.bak`), which `cp`
+  likewise created under the umask, are chmod'd too.
+- **The web login had no brute-force protection.** Since 2.8.4 allowed binding
+  beyond loopback, anyone who could reach the port could guess the master
+  password without limit. A client is now locked out for 60 seconds after 5
+  failed attempts, and failures are logged.
+- Web sessions are swept on every request and capped at an absolute 12-hour
+  lifetime. Previously an expired session was discarded only if that exact
+  token was presented again, so an abandoned session kept its plaintext master
+  password in memory for as long as the server ran.
+
+### Fixed
+- **Passwords containing a TAB were silently corrupted.** Vault records are
+  TAB-delimited, and the CLI wrote user input verbatim, so a password pasted
+  with a TAB was stored whole but read back truncated at the TAB - with the
+  remainder bleeding into the notes column. The original was unrecoverable.
+  All fields are now sanitized on write, in both the CLI and the web UI.
+- **Importing an ordinary CSV could corrupt the vault.** Nothing stripped
+  newlines, so a quoted multi-line field - routine in exports from other
+  password managers - split one entry into two malformed records. Compounding
+  it, the web importer fed `content.splitlines()` to the `csv` module, which
+  strips the very newlines needed to reassemble quoted fields; it now parses
+  from a `StringIO` so multi-line values arrive intact.
+- The CLI importer sanitized the label, username, and notes but not the
+  `secret` field, leaving the most important value exposed to the same
+  splitting bug.
+- **TSV import always failed.** The delimiter was written as `"\\t"`, a literal
+  two-character backslash-t rather than a tab, so `csv` raised
+  `TypeError: "delimiter" must be a 1-character string`. TSV *export* used a
+  real tab, so a TSV export could never be imported back.
+
 ## [2.9.0] - 2026-08-19
 
 ### Changed - web interface redesign
