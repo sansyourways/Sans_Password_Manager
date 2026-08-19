@@ -1,6 +1,6 @@
 # Privacy Policy for Sans Password Manager (SPM)
 Effective Date: January 2025  
-© 2025 Sansyourways. All Rights Reserved.
+Copyright 2025–2026 Sansyourways and contributors.
 
 Sans Password Manager (“SPM”, “the Software”, “we”) is designed to maximize your privacy.  
 SPM is a **local-only**, **offline-first**, **client-side encrypted** password manager.  
@@ -92,9 +92,11 @@ SPM does not collect personal information from anyone, including children under 
 
 ---
 
-## 7. Paid Versions or Commercial Use
-If you obtain a commercial or private-build license, SPM remains fully offline.  
-No remote verification, telemetry, or usage tracking is used.
+## 7. Forks and Commercial Use
+Apache-2.0 permits commercial use and modified distributions. This policy
+describes official SPM releases only; distributors of modified builds are
+responsible for documenting any different data handling. Official SPM has no
+remote license verification, telemetry, or usage tracking.
 
 ---
 

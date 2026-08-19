@@ -2,12 +2,14 @@
 # Sans Password Manager (SPM)
 # Portable Bash + GPG password manager with encrypted vault.
 # Dependencies: bash, gpg, openssl, base64, curl (for update)
+# Copyright 2025-2026 Sansyourways and contributors
+# SPDX-License-Identifier: Apache-2.0
 
 set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.10.2"
+VERSION="2.10.3"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -232,7 +234,7 @@ print_banner() {
 EOF
 	local year
 	year="$(date +%Y 2>/dev/null || echo "2025")"
-	printf "Sans Password Manager (SPM)  v%s  \u00a9 %s Sansyourways. All rights reserved.\n\n" "$VERSION" "$year"
+	printf "Sans Password Manager (SPM)  v%s  \u00a9 %s Sansyourways and contributors · Apache-2.0\n\n" "$VERSION" "$year"
 }
 
 pause_menu() {

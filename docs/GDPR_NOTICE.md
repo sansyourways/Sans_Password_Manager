@@ -1,7 +1,7 @@
 # GDPR Privacy Notice  
 For Sans Password Manager (SPM)  
 Effective Date: January 2025  
-© 2025 Sansyourways. All Rights Reserved.
+Copyright 2025–2026 Sansyourways and contributors.
 
 Sans Password Manager (“SPM”, “the Software”) is designed from the ground up to protect user privacy.  
 SPM operates **fully offline**, performs **all encryption locally**, and does **not collect or process any personal data** under the meaning of the GDPR.

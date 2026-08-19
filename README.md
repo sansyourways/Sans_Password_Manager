@@ -4,7 +4,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/sansyourways/Sans_Password_Manager?style=flat-square&color=fbbf24)](https://github.com/sansyourways/Sans_Password_Manager/stargazers)
 [![Release downloads](https://img.shields.io/github/downloads/sansyourways/Sans_Password_Manager/total?style=flat-square&color=60a5fa)](https://github.com/sansyourways/Sans_Password_Manager/releases)
 [![CI](https://github.com/sansyourways/Sans_Password_Manager/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sansyourways/Sans_Password_Manager/actions/workflows/ci.yml)
-[![Private license](https://img.shields.io/badge/license-Private-red?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-7c3aed?style=flat-square)](LICENSE)
 [![Last commit](https://img.shields.io/github/last-commit/sansyourways/Sans_Password_Manager?style=flat-square)](https://github.com/sansyourways/Sans_Password_Manager/commits/main)
 
 <p align="center">
@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **2.10.2**
+Current release: **2.10.3**
 
 ---
 
@@ -214,7 +214,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 2.10.2
+bash install.sh --version 2.10.3
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -483,6 +483,10 @@ forms are available for bugs, feature requests, and non-sensitive security
 design questions. Potential vulnerabilities must use the repository's private
 security-advisory channel.
 
+Contributions are accepted under Apache-2.0 and require a Developer Certificate
+of Origin sign-off. Contributors retain copyright in their work; see
+[the contributor license policy](docs/CONTRIBUTOR_LICENSE_POLICY.md).
+
 Every change is checked with Bash syntax validation, ShellCheck, and a
 disposable-vault regression suite covering all supported import/export formats,
 web uploads, backups, synchronization, attachments, passkey metadata, emergency
@@ -492,7 +496,7 @@ kits, and password generation.
 
 ## Development & Versioning
 
-Version: **2.10.2**
+Version: **2.10.3**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 Authenticated web mutations also require an exact same-origin request and are serialized across threads/processes to prevent CSRF and lost vault writes. Decrypted web responses use `Cache-Control: no-store`.
@@ -540,13 +544,19 @@ See `CHANGELOG.md` for details.
 
 ## Documentation & Legal
 
-SPM is closed-source and licensed under a **Private License**.
+SPM is open-source software licensed under the **Apache License 2.0**. The code
+may be used, modified, and redistributed under that license. Project names and
+logos remain subject to the separate trademark policy.
 
 Refer to:
 
 - [`LICENSE`](LICENSE)
+- [`NOTICE`](NOTICE)
+- [`DCO`](DCO)
+- [`docs/CONTRIBUTOR_LICENSE_POLICY.md`](docs/CONTRIBUTOR_LICENSE_POLICY.md)
+- [`docs/TRADEMARK_POLICY.md`](docs/TRADEMARK_POLICY.md)
 - [`docs/PRIVACY_POLICY.md`](docs/PRIVACY_POLICY.md)
-- [`docs/GDPR_PRIVACY_NOTICE.md`](docs/GDPR_PRIVACY_NOTICE.md)
+- [`docs/GDPR_NOTICE.md`](docs/GDPR_NOTICE.md)
 - [`docs/TERMS_AND_CONDITIONS.md`](docs/TERMS_AND_CONDITIONS.md)
 - [`docs/CODE_OF_CONDUCT.md`](docs/CODE_OF_CONDUCT.md)
 - [`docs/SECURITY.md`](docs/SECURITY.md)
@@ -555,7 +565,9 @@ Refer to:
 
 ## License
 
-**Sans Password Manager — Private License**  
-© 2025 Sansyourways. All Rights Reserved.
+Licensed under the **Apache License 2.0**.
+Copyright 2025–2026 Sansyourways and contributors.
 
-See [`LICENSE`](LICENSE) for full terms.
+See [`LICENSE`](LICENSE) for the full terms and [`NOTICE`](NOTICE) for
+attribution. Releases before 2.10.3 remain governed by the license included in
+their historical release artifacts.

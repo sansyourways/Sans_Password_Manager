@@ -26,12 +26,14 @@ and web mode serves the local vault UI on the address selected by the user.
 ---
 
 ## 2. Supported Versions
-Because SPM is distributed under a **Private License**, only the latest stable release is officially supported.
+SPM is open-source under Apache-2.0. Security fixes are maintained for the
+latest stable official release; forks and modified distributions should obtain
+support from their respective maintainers.
 
 | Version | Status |
 |--------|--------|
 | Latest stable (current release) | Supported |
-| Any modified, altered, or redistributed build | **Not supported** |
+| Forks or modified distributions | Supported by their distributor |
 | Older versions | Not supported |
 
 ---
@@ -50,7 +52,8 @@ If you discover a potential security issue, follow these rules:
 - Post the issue in GitHub issues.
 - Share vaults, passwords, or private keys.
 - Upload sensitive data for testing.
-- Attempt to reverse engineer or bypass protections (violates license).
+- Test official releases with synthetic data and within systems you are
+  authorized to assess.
 
 ### 📩 **Report via Email (only):**
 **security@sansyourways.xyz**
@@ -95,7 +98,7 @@ The following are **out of scope**:
 - Lost master passwords  
 - User-caused key loss  
 - Device compromise (malware/virus/root)  
-- Modified or tampered versions of SPM  
+- Issues found only in an independently modified distribution
 - Vault recovery requests  
 - Cloud leakage (SPM never uploads data)  
 - Brute-forcing encrypted vaults  
@@ -112,7 +115,9 @@ All valid security reports will be:
 - Credited (if you wish)
 - Kept confidential until fixed
 
-Reports violating the Private License (reverse engineering, decompiling, etc.) may result in termination of your license.
+Good-faith source review and security research are welcome. Do not access data,
+devices, or services without authorization, and coordinate disclosure of
+unfixed vulnerabilities that could put users at risk.
 
 ---
 
@@ -132,6 +137,6 @@ Because SPM does not collect data or hold keys, **the developer cannot restore l
 ## 8. Contact Information
 Security issues: **security@sansyourways.xyz**  
 General support: **support@sansyourways.xyz**  
-Commercial licensing: **business@sansyourways.xyz**
+Trademark and partnership questions: **business@sansyourways.xyz**
 
-© 2025 Sansyourways. All Rights Reserved.
+Copyright 2025–2026 Sansyourways and contributors.

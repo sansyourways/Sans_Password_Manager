@@ -7,6 +7,17 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [2.10.3] - 2026-08-19
+
+### Changed
+- Relicensed SPM as open-source software under the Apache License 2.0; releases
+  before 2.10.3 retain the license shipped in their historical artifacts.
+- Replaced private-source contribution restrictions with Apache-2.0 inbound
+  licensing, Developer Certificate of Origin 1.1 sign-offs, and an optional
+  written contributor agreement for unusually substantial contributions.
+- Aligned the Code of Conduct, security policy, terms, README, issue forms, and
+  pull-request guidance with open-source forks and collaboration.
+
 ### Documentation
 - Fixed the README hero artwork to use a stable absolute raw-content URL so it
   renders reliably on GitHub and external Markdown viewers.
@@ -14,18 +25,20 @@ Keep-a-Changelog style format.
   portability, recovery, and operational-safety benefits.
 - Added a Chrome-verified visual tour covering all 23 web interface pages with
   synthetic documentation data only.
-- Added a concise badge row for the latest release, stars, downloads, Bash
-  implementation, private license, and repository activity.
+- Added a concise badge row for the latest release, stars, downloads,
+  Apache-2.0 license, CI status, and repository activity.
 - Added branded social-preview artwork and an animated, synthetic-data product
   demonstration derived from the verified Chrome captures.
 
 ### Added
+- Apache-2.0 `NOTICE`, the DCO 1.1 text, a contributor-license policy, and a
+  trademark policy separating code rights from project identity.
 - Reusable disposable-vault regression tests and a GitHub Actions CI workflow
   covering syntax, ShellCheck, imports/exports, web uploads, and advanced
   local-first features.
 - A tag-driven GitHub release workflow that enforces version consistency,
   rebuilds and verifies the ZIP/checksum, refuses release overwrites, and
-  verifies downloaded published assets.
+  verifies downloaded published assets while excluding local backup files.
 - A checksum-verifying release installer with version, prefix, and dry-run
   options.
 - Contribution guidance, structured bug/feature/security issue forms, private
