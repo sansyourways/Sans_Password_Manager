@@ -7,7 +7,9 @@
 [![Private license](https://img.shields.io/badge/license-Private-red?style=flat-square)](LICENSE)
 [![Last commit](https://img.shields.io/github/last-commit/sansyourways/Sans_Password_Manager?style=flat-square)](https://github.com/sansyourways/Sans_Password_Manager/commits/main)
 
-![Sans Password Manager — Own the vault](docs/social-preview.png)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/sansyourways/Sans_Password_Manager/main/docs/social-preview.png" alt="Sans Password Manager — Own the vault" width="1280">
+</p>
 
 An offline, portable password manager for people who want to own the vault,
 understand the storage model, and keep cloud infrastructure out of the trust

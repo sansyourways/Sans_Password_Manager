@@ -8,6 +8,8 @@ Keep-a-Changelog style format.
 ## [Unreleased]
 
 ### Documentation
+- Fixed the README hero artwork to use a stable absolute raw-content URL so it
+  renders reliably on GitHub and external Markdown viewers.
 - Reframed the README around SPM's local ownership, auditable implementation,
   portability, recovery, and operational-safety benefits.
 - Added a Chrome-verified visual tour covering all 23 web interface pages with
