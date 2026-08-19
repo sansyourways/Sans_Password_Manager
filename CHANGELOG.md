@@ -39,6 +39,9 @@ Keep-a-Changelog style format.
   show the inline SVG icon set rather than the replaced emoji glyphs, using a
   larger synthetic documentation vault. Screenshots now live in
   `docs/screenshots/web-v2.10.5/`.
+- Rebuilt the animated product tour (`docs/product-demo.gif`) from the same
+  2.10.5 captures, preserving its six-screen sequence, 960x638 size, and
+  1.8-second cadence.
 
 ## [2.10.4] - 2026-08-19
 
