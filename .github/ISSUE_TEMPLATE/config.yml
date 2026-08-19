@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Private vulnerability report
+    url: https://github.com/sansyourways/Sans_Password_Manager/security/advisories/new
+    about: Report exploitable security vulnerabilities privately.
+  - name: Security policy
+    url: https://github.com/sansyourways/Sans_Password_Manager/security/policy
+    about: Read the supported disclosure process before reporting.

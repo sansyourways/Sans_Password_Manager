@@ -3,9 +3,11 @@
 [![Latest release](https://img.shields.io/github/v/release/sansyourways/Sans_Password_Manager?style=flat-square&color=4ade80)](https://github.com/sansyourways/Sans_Password_Manager/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/sansyourways/Sans_Password_Manager?style=flat-square&color=fbbf24)](https://github.com/sansyourways/Sans_Password_Manager/stargazers)
 [![Release downloads](https://img.shields.io/github/downloads/sansyourways/Sans_Password_Manager/total?style=flat-square&color=60a5fa)](https://github.com/sansyourways/Sans_Password_Manager/releases)
-[![Bash](https://img.shields.io/badge/language-Bash-4EAA25?style=flat-square&logo=gnubash&logoColor=white)](spm.sh)
+[![CI](https://github.com/sansyourways/Sans_Password_Manager/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sansyourways/Sans_Password_Manager/actions/workflows/ci.yml)
 [![Private license](https://img.shields.io/badge/license-Private-red?style=flat-square)](LICENSE)
 [![Last commit](https://img.shields.io/github/last-commit/sansyourways/Sans_Password_Manager?style=flat-square)](https://github.com/sansyourways/Sans_Password_Manager/commits/main)
+
+![Sans Password Manager — Own the vault](docs/social-preview.png)
 
 An offline, portable password manager for people who want to own the vault,
 understand the storage model, and keep cloud infrastructure out of the trust
@@ -38,6 +40,7 @@ Current release: **2.10.2**
 - [Password Strength Coaching](#password-strength-coaching)
 - [Clipboard Auto-Clean](#clipboard-auto-clean)
 - [Portable & Save Bundles](#portable--save-bundles)
+- [Contributing](#contributing)
 - [Development & Versioning](#development--versioning)
 - [Documentation & Legal](#documentation--legal)
 - [License](#license)
@@ -72,6 +75,8 @@ attacker with root access.
 All screenshots below were captured in Google Chrome from SPM 2.10.2 using a
 disposable vault containing only synthetic documentation data. No personal
 vault or real credential appears in these images.
+
+![Animated tour of the SPM web interface using synthetic records](docs/product-demo.gif)
 
 ### Unlock and assess the vault
 
@@ -192,6 +197,26 @@ SPM automatically checks / installs:
 ---
 
 ## Installation
+
+### Verified release installer
+
+Download the installer first so you can inspect it, then install the latest
+release. The installer downloads both the official ZIP and its matching
+SHA-256 file, verifies the archive, checks Bash syntax, and installs `spm`.
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/sansyourways/Sans_Password_Manager/main/install.sh
+bash install.sh
+```
+
+Install a specific release or a user-writable prefix:
+
+```bash
+bash install.sh --version 2.10.2
+bash install.sh --prefix "$HOME/.local"
+```
+
+### From source
 
 ```bash
 git clone https://github.com/sansyourways/Sans_Password_Manager.git
@@ -445,6 +470,21 @@ Treat that opt-in archive as plaintext-equivalent credential material.
 Creates encrypted backup, wipes local vault.
 The recovery private key remains separate unless
 `SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1` is explicitly set.
+
+---
+
+## Contributing
+
+Bug reports, focused improvements, and portability fixes are welcome. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes. Public issue
+forms are available for bugs, feature requests, and non-sensitive security
+design questions. Potential vulnerabilities must use the repository's private
+security-advisory channel.
+
+Every change is checked with Bash syntax validation, ShellCheck, and a
+disposable-vault regression suite covering all supported import/export formats,
+web uploads, backups, synchronization, attachments, passkey metadata, emergency
+kits, and password generation.
 
 ---
 

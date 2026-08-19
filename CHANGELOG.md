@@ -14,6 +14,20 @@ Keep-a-Changelog style format.
   synthetic documentation data only.
 - Added a concise badge row for the latest release, stars, downloads, Bash
   implementation, private license, and repository activity.
+- Added branded social-preview artwork and an animated, synthetic-data product
+  demonstration derived from the verified Chrome captures.
+
+### Added
+- Reusable disposable-vault regression tests and a GitHub Actions CI workflow
+  covering syntax, ShellCheck, imports/exports, web uploads, and advanced
+  local-first features.
+- A tag-driven GitHub release workflow that enforces version consistency,
+  rebuilds and verifies the ZIP/checksum, refuses release overwrites, and
+  verifies downloaded published assets.
+- A checksum-verifying release installer with version, prefix, and dry-run
+  options.
+- Contribution guidance, structured bug/feature/security issue forms, private
+  vulnerability-report links, and a pull-request verification template.
 
 ## [2.10.2] - 2026-08-19
 

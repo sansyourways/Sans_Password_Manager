@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg openssl shellcheck unzip zip
+
+      - name: Static checks
+        run: |
+          bash -n spm.sh install.sh tests/regression.sh
+          shellcheck -x -S warning spm.sh install.sh tests/regression.sh
+
+      - name: Disposable-vault regression suite
+        run: |
+          chmod +x tests/regression.sh
+          ./tests/regression.sh
+
+      - name: Release metadata consistency
+        run: |
+          version="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' spm.sh)"
+          test -n "$version"
+          grep -q "Current release: \*\*$version\*\*" README.md
+          grep -q '"version": "'"$version"'"' browser-extension/manifest.json

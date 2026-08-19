@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Install release dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg openssl shellcheck unzip zip
+
+      - name: Verify source and release version
+        run: |
+          bash -n spm.sh install.sh tests/regression.sh
+          shellcheck -x -S warning spm.sh install.sh tests/regression.sh
+          ./tests/regression.sh
+          version="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' spm.sh)"
+          tag_version="${RELEASE_TAG#v}"
+          test "$version" = "$tag_version"
+          grep -q "## \[$version\]" CHANGELOG.md
+          grep -q '"version": "'"$version"'"' browser-extension/manifest.json
+
+      - name: Build and verify release archive
+        run: |
+          version="${RELEASE_TAG#v}"
+          archive="Sans_Password_Manager_v${version}.zip"
+          test ! -e "$archive"
+          zip -9 -r "$archive" \
+            spm.sh install.sh README.md CHANGELOG.md CONTRIBUTING.md LICENSE \
+            docs browser-extension tests \
+            .github/PULL_REQUEST_TEMPLATE.md .github/ISSUE_TEMPLATE
+          sha256sum "$archive" > "$archive.sha256"
+          unzip -t "$archive"
+          sha256sum -c "$archive.sha256"
+
+      - name: Publish immutable GitHub release
+        run: |
+          version="${RELEASE_TAG#v}"
+          archive="Sans_Password_Manager_v${version}.zip"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+          notes="release-${version}.md"
+          if test -f "$notes"; then
+            gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" \
+              --verify-tag --title "Sans Password Manager $version" \
+              --notes-file "$notes"
+          else
+            gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" \
+              --verify-tag --title "Sans Password Manager $version" \
+              --generate-notes
+          fi
+
+      - name: Verify published assets
+        run: |
+          version="${RELEASE_TAG#v}"
+          archive="Sans_Password_Manager_v${version}.zip"
+          verify_dir="$(mktemp -d)"
+          gh release download "$RELEASE_TAG" --dir "$verify_dir" \
+            --pattern "$archive*"
+          (cd "$verify_dir" && sha256sum -c "$archive.sha256" && unzip -t "$archive")

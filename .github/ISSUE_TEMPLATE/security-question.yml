@@ -1,0 +1,28 @@
+name: Security design question
+description: Discuss non-sensitive hardening ideas. Report vulnerabilities privately instead.
+title: "[Security design]: "
+labels: [security]
+body:
+  - type: markdown
+    attributes:
+      value: "Do not disclose a vulnerability here. Use the repository Security tab or security@sansyourways.xyz for private reports."
+  - type: textarea
+    id: topic
+    attributes:
+      label: Design or hardening topic
+      description: Do not include exploit details, credentials, private paths, or production data.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired security outcome
+    validations:
+      required: true
+  - type: checkboxes
+    id: disclosure
+    attributes:
+      label: Disclosure confirmation
+      options:
+        - label: This is not an undisclosed vulnerability and contains no sensitive information.
+          required: true
