@@ -36,6 +36,8 @@ spm.*.tmp
 
 # Gemini local files
 GEMINI.md
+.github/commands/
+.github/workflows/gemini-*.yml
 release-2.3.0.md
 release-2.*.md
 
