@@ -76,7 +76,7 @@ SPM is designed for users who want:
 
 - 🔐 **Vault terenkripsi GPG (AES-256)**  
 - 📟 **UI interaktif** (EN/ID/JP)  
-- 🖥️ **Web Mode (Localhost)** — dashboard modern *offline-only*  
+- 🖥️ **Web Mode (Localhost)** — antarmuka Console gelap bergaya transkrip, *offline-only*
 - 📦 **Portable bundle** (script + vault + recovery + private key when available)  
 - 💾 **SAVE bundle** (backup + wipe vault lokal, menyertakan private key jika tersedia)  
 - 🧠 **Password Strength Coaching**  
@@ -85,7 +85,7 @@ SPM is designed for users who want:
 - 🔢 **Authenticator (TOTP)** dengan live code di web (plus tombol copy), interval kustom, dan pilihan algoritma SHA1/SHA256/SHA512  
 - ⚡ **Copy cepat** (tombol copy di tampilan kata sandi, catatan, passphrase, kode backup) dengan notifikasi pop-up sukses yang ramah perangkat  
 - 🔒 **Generator kata sandi** (mode mudah/aman, kata mudah diingat, panjang/slider, toggle huruf besar/kecil/angka/simbol, estimasi kekuatan)
-- 🎨 **Tema web** (Dark, AMOLED, Cyberpunk, Light) + cek update di header
+- 🖥️ **Console web UI** — aksi hijau, nilai keluaran amber, panel datar tanpa bayangan
 - 📤 **Export/Import vault** (CLI & Web) ke CSV/JSON + format lanjutan
 - 📜 Kode Backup
 - 🔑 **Lupa password** via RSA private key  
@@ -98,7 +98,7 @@ SPM is designed for users who want:
 
 - 🔐 Encrypted vault (GPG AES-256)  
 - 🗂️ Clean interactive menu  
-- 🌐 Local Web Mode (browser UI, offline only, EN/ID/JP toggle)  
+- 🌐 Local Web Mode (dark Console transcript UI, offline only, EN/ID/JP toggle)
 - 📦 Portable bundle (ZIP; includes recovery + private key when present)  
 - 💾 SAVE bundle (backup + wipe local; includes private key when present)  
 - 🧠 Password strength analysis & coaching  
@@ -107,7 +107,7 @@ SPM is designed for users who want:
 - 🔢 Authenticator (TOTP) with live codes + copy button, configurable interval, and SHA1/SHA256/SHA512 algorithms  
 - ⚡ Fast copy buttons on password, notes, passphrase, backup views with device-friendly toast confirmation  
 - 🔒 Password generator (easy memorable words + secure random, slider length/words, toggles for upper/lower/digits/symbols, strength estimate)
-- 🎨 Web themes (Dark, AMOLED, Cyberpunk, Light) with header update check/version display  
+- 🖥️ Console web design with square ruled surfaces, green actions, amber emitted values, and no floating panels
 - 🇬🇧🇮🇩🇯🇵 Live language switcher (EN/ID/JP) in the web header with cookie persistence and instant translations across dashboard cards/import UI  
 - 📤 Vault export/import (CLI & Web) to CSV/JSON + advanced formats
 - 📜 Backup codes  
@@ -212,6 +212,11 @@ Includes:
   - Local copy-to-clipboard with inline toast feedback  
   - Language dropdown (EN/ID/JP) that translates the dashboard/import card and remembers your choice via cookie  
   - Detail pages (/view, /edit, authenticator viewer/editor, generator) inherit that language selection so every screen stays localized  
+  - Dark-only Console presentation with a command-style vault status overview, visible keyboard focus, and mobile record layouts
+
+Console deliberately favors dense, auditable rows over spacious cards. Very long
+vault labels still wrap and can make mobile records tall; this is preferable to
+shrinking text or forcing page-level horizontal scrolling.
 
 ---
 

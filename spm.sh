@@ -4385,10 +4385,10 @@ start_web_mode() {
 				fi
 			else
 				if [ "${SPM_LANG:-en}" = "id" ]; then
-					echo "ℹ️ Tidak ada proses spm-web di PM2."
+					echo "ℹ Tidak ada proses spm-web di PM2."
 					read -r -p "Tekan Enter untuk kembali ke menu..." _
 				else
-					echo "ℹ️ No spm-web process found in PM2."
+					echo "ℹ No spm-web process found in PM2."
 					read -r -p "Press Enter to return to menu..." _
 				fi
 			fi
@@ -4845,6 +4845,11 @@ I18N_SCRIPT = """
       "overview.sub": "Everything in your encrypted vault at a glance.",
       "overview.recent": "Recently added",
       "overview.view_all": "View all",
+      "overview.console_eyebrow": "session / local vault / authenticated",
+      "overview.console_records": "encrypted records indexed",
+      "overview.console_gpg": "GnuPG boundary active on this host",
+      "overview.console_lock": "idle lock armed for 30 seconds",
+      "overview.console_lede": "Inspect, generate, and maintain credentials from one auditable session.",
       "btn.view": "View",
       "generator.mode": "Mode",
       "login.sub": "Unlock your encrypted vault to continue.",
@@ -5029,6 +5034,11 @@ I18N_SCRIPT = """
       "overview.sub": "Semua isi brankas terenkripsi Anda sekilas.",
       "overview.recent": "Baru ditambahkan",
       "overview.view_all": "Lihat semua",
+      "overview.console_eyebrow": "sesi / brankas lokal / terautentikasi",
+      "overview.console_records": "rekaman terenkripsi terindeks",
+      "overview.console_gpg": "Batas GnuPG aktif pada host ini",
+      "overview.console_lock": "kunci diam disiapkan selama 30 detik",
+      "overview.console_lede": "Periksa, buat, dan kelola kredensial dari satu sesi yang dapat diaudit.",
       "btn.view": "Lihat",
       "generator.mode": "Mode",
       "login.sub": "Buka brankas terenkripsi Anda untuk melanjutkan.",
@@ -5213,6 +5223,11 @@ I18N_SCRIPT = """
       "overview.sub": "\u6697\u53f7\u5316\u3055\u308c\u305f\u4fdd\u7ba1\u5eab\u306e\u5185\u5bb9\u3092\u4e00\u89a7\u3067\u304d\u307e\u3059\u3002",
       "overview.recent": "\u6700\u8fd1\u8ffd\u52a0\u3057\u305f\u9805\u76ee",
       "overview.view_all": "\u3059\u3079\u3066\u8868\u793a",
+      "overview.console_eyebrow": "\u30bb\u30c3\u30b7\u30e7\u30f3 / \u30ed\u30fc\u30ab\u30eb\u4fdd\u7ba1\u5eab / \u8a8d\u8a3c\u6e08\u307f",
+      "overview.console_records": "\u4ef6\u306e\u6697\u53f7\u5316\u30ec\u30b3\u30fc\u30c9\u3092\u7d22\u5f15\u6e08\u307f",
+      "overview.console_gpg": "\u3053\u306e\u30db\u30b9\u30c8\u3067 GnuPG \u5883\u754c\u304c\u6709\u52b9",
+      "overview.console_lock": "30 \u79d2\u306e\u30a2\u30a4\u30c9\u30eb\u30ed\u30c3\u30af\u3092\u6709\u52b9\u5316",
+      "overview.console_lede": "\u76e3\u67fb\u53ef\u80fd\u306a1\u3064\u306e\u30bb\u30c3\u30b7\u30e7\u30f3\u3067\u8a8d\u8a3c\u60c5\u5831\u3092\u78ba\u8a8d\u3001\u751f\u6210\u3001\u7ba1\u7406\u3057\u307e\u3059\u3002",
       "btn.view": "\u8868\u793a",
       "generator.mode": "\u30e2\u30fc\u30c9",
       "login.sub": "\u7d9a\u884c\u3059\u308b\u306b\u306f\u4fdd\u7ba1\u5eab\u306e\u30ed\u30c3\u30af\u3092\u89e3\u9664\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
@@ -5316,8 +5331,8 @@ DESIGN_CSS = """
 /* ============================================================
    SPM design system - one stylesheet for every page.
    Tokens first, then primitives, then components, then layout.
-   All four themes are token overrides only; no component rule
-   ever hardcodes a colour.
+   Console is intentionally dark-only. Components consume semantic
+   action, emitted-value, state, surface, and text roles.
    ============================================================ */
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -5863,6 +5878,95 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
+/* Console / CNS-18: the interface is a transcript. */
+:root {
+  --bg:#0a0e0c; --surface:#121815; --surface-2:#0f1412; --surface-3:#18201c;
+  --border:#232e28; --border-hi:#3b4a42; --text:#d8e8dc; --text-dim:#9aada1; --text-faint:#84968b;
+  --accent:#5fd095; --accent-hi:#7be0aa; --accent-fg:#05120b; --accent-soft:#10251a;
+  --ok:#5fd095; --ok-soft:#10251a; --warn:#dda95e; --warn-soft:#1c1610;
+  --danger:#ff8b84; --danger-soft:#291311; --shadow:none; --shadow-lg:none;
+  --r-sm:0; --r-md:0; --r-lg:0; --r-full:0;
+  --font:"JetBrains Mono","DejaVu Sans Mono",ui-monospace,monospace;
+  --mono:"JetBrains Mono","DejaVu Sans Mono",ui-monospace,monospace;
+  --ease:cubic-bezier(.2,.7,.3,1); --sidebar-w:248px; color-scheme:dark;
+}
+body, body.theme-dark, body.theme-amoled, body.theme-cyberpunk, body.theme-light {
+  --bg:#0a0e0c; --surface:#121815; --surface-2:#0f1412; --surface-3:#18201c;
+  --border:#232e28; --border-hi:#3b4a42; --text:#d8e8dc; --text-dim:#9aada1; --text-faint:#84968b;
+  --accent:#5fd095; --accent-hi:#7be0aa; --accent-fg:#05120b; --accent-soft:#10251a;
+  --ok:#5fd095; --ok-soft:#10251a; --warn:#dda95e; --warn-soft:#1c1610;
+  --danger:#ff8b84; --danger-soft:#291311; --shadow:none; --shadow-lg:none;
+  background:var(--bg); color:var(--text);
+}
+body { font-variant-numeric:tabular-nums; transition:none; }
+body::before { content:""; position:fixed; inset:0; pointer-events:none; opacity:.16;
+  background-image:repeating-linear-gradient(to bottom,var(--border) 0 1px,transparent 1px 4px); }
+.skip-link { position:fixed; top:var(--sp-2); left:var(--sp-2); z-index:300; padding:var(--sp-2) var(--sp-3);
+  background:var(--accent); color:var(--accent-fg); transform:translateY(-160%); }
+.skip-link:focus { transform:translateY(0); }
+.sidebar { background:var(--bg); padding:var(--sp-4); }
+.brand { border-bottom:1px solid var(--border); padding:var(--sp-2) 0 var(--sp-4); }
+.brand-mark { width:36px; height:36px; border:1px solid var(--accent); background:transparent; color:var(--accent); box-shadow:none; }
+.brand-name::before { content:"$ "; color:var(--accent); }
+.brand-meta { color:var(--warn); }
+.nav { gap:0; }
+.nav-label { padding:var(--sp-4) 0 var(--sp-2); color:var(--text-faint); }
+.nav-label::before { content:"# "; color:var(--warn); }
+.nav-item { border-left:2px solid transparent; padding:var(--sp-2) var(--sp-3); }
+.nav-item:hover { background:var(--surface-2); color:var(--accent); }
+.nav-item.active { border-left-color:var(--accent); background:var(--accent-soft); color:var(--accent); }
+.nav-item.active::before { display:none; }
+.nav-count, .nav-item.active .nav-count { background:var(--warn-soft); color:var(--warn); border:1px solid var(--border); }
+.vault-chip { border-left:2px solid var(--warn); background:var(--surface-2); }
+.vault-chip .dot { background:var(--ok); box-shadow:none; }
+.topbar { background:var(--bg); backdrop-filter:none; -webkit-backdrop-filter:none; }
+.content { max-width:1180px; padding:var(--sp-6); position:relative; }
+.page-head { border-bottom:1px solid var(--border); padding-bottom:var(--sp-4); }
+.page-title { font-weight:500; letter-spacing:-.01em; }
+.page-title::before { content:"$ "; color:var(--accent); }
+.page-sub { color:var(--text-dim); margin-top:var(--sp-2); }
+.page-sub::before { content:"> "; color:var(--warn); }
+.console-hero { border-left:2px solid var(--accent); padding:var(--sp-5); margin-bottom:var(--sp-5); background:var(--surface-2); }
+.console-hero .eyebrow { color:var(--text-dim); font-size:var(--fs-sm); margin-bottom:var(--sp-3); }
+.console-hero .eyebrow::before { content:"> "; color:var(--accent); }
+.console-hero h1 { font-size:clamp(24px,4vw,42px); font-weight:500; margin-bottom:var(--sp-3); }
+.console-hero h1::before { content:"$ "; color:var(--accent); }
+.console-output { display:grid; gap:var(--sp-1); color:var(--warn); margin-bottom:var(--sp-3); }
+.console-output span::before { content:"[emit] "; color:var(--text-faint); }
+.console-output i { font-style:normal; }
+.console-hero .lede { max-width:66ch; color:var(--text-dim); }
+.console-hero .lede::after { content:""; display:inline-block; width:.55em; height:1em; margin-left:.25em;
+  vertical-align:-.14em; background:var(--accent); animation:cnsblink 1.1s steps(2,end) infinite; }
+@keyframes cnsblink { 50% { opacity:0; } }
+.card, .stat { border-left:2px solid var(--accent); box-shadow:none; background:var(--surface); }
+.card-head h2::before, .card-head h3::before { content:"* "; color:var(--warn); }
+.stat { display:block; }
+.stat:hover { transform:none; border-color:var(--border); border-left-color:var(--accent); background:var(--surface-2); }
+.stat-ico { width:auto; height:auto; display:inline; background:none; color:var(--text-faint); margin-right:var(--sp-2); }
+.stat-n { display:block; color:var(--warn); margin-top:var(--sp-2); }
+.stat-l { display:block; margin-top:var(--sp-1); }
+.btn, .icon-btn, .select, .input, textarea.input, select.input, .search input { border-radius:0; }
+.btn-primary { box-shadow:none; }
+.chip { border-radius:0; background:var(--warn-soft); color:var(--warn); }
+.flash, .msg { border-radius:0; border-left:2px solid currentColor; }
+.secret-val, .totp-code, .gen-out, .stat-n, .num, .faint.mono { color:var(--warn); }
+#toast { left:auto; right:var(--sp-4); bottom:var(--sp-4); transform:none; border-left:2px solid var(--accent); box-shadow:none; }
+#toast.show { transform:none; }
+.overlay { border-radius:0; backdrop-filter:none; -webkit-backdrop-filter:none; background:var(--surface); border-left:2px solid var(--accent); }
+.spinner { border-radius:0; }
+
+@media (max-width:620px) {
+  .content, .console-hero { padding:var(--sp-4); }
+  .stats { grid-template-columns:1fr; }
+  table.t thead { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); }
+  table.t, table.t tbody, table.t tr, table.t td { display:block; width:100%; }
+  table.t tr { border-bottom:1px solid var(--border); padding:var(--sp-2) 0; }
+  table.t td { border:0; padding:var(--sp-1) var(--sp-3); white-space:normal; }
+  table.t td.actions { width:100%; text-align:left; }
+  .icon-row { justify-content:flex-start; }
+}
+@media (prefers-reduced-motion:reduce) { .console-hero .lede::after { animation:none; } }
+
 @media print { .sidebar, .topbar, .page-actions, #toast { display: none !important; } .app { grid-template-columns: 1fr; } }
 </style>
 """
@@ -5871,18 +5975,6 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 SHELL_SCRIPT = """
 <script>
 (function () {
-  /* ---- theme ---------------------------------------------------------- */
-  var THEMES = ["dark", "amoled", "cyberpunk", "light"];
-  function applyTheme(t) {
-    if (THEMES.indexOf(t) < 0) t = "dark";
-    THEMES.forEach(function (x) { document.body.classList.remove("theme-" + x); });
-    document.body.classList.add("theme-" + t);
-    try { localStorage.setItem("spm_theme", t); } catch (e) {}
-    var p = document.getElementById("theme-picker");
-    if (p && p.value !== t) p.value = t;
-  }
-  window.SPM_setTheme = applyTheme;
-
   /* ---- toast ---------------------------------------------------------- */
   var toastTimer;
   function toast(msg, isErr) {
@@ -5962,11 +6054,6 @@ SHELL_SCRIPT = """
   });
 
   document.addEventListener("DOMContentLoaded", function () {
-    var saved = "dark";
-    try { saved = localStorage.getItem("spm_theme") || "dark"; } catch (e) {}
-    applyTheme(saved);
-    var p = document.getElementById("theme-picker");
-    if (p) p.addEventListener("change", function () { applyTheme(p.value); });
     wireSearch();
   });
 })();
@@ -6089,6 +6176,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
 {DESIGN_CSS}
 </head>
 <body class="theme-dark">
+<a class="skip-link" href="#main-content">Skip to vault content</a>
 <div class="scrim" onclick="SPM_toggleNav()"></div>
 <div class="app">
   <aside class="sidebar">
@@ -6126,16 +6214,10 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
           <option value="id">ID</option>
           <option value="ja">JP</option>
         </select>
-        <select class="select" id="theme-picker" aria-label="Theme">
-          <option value="dark">Dark</option>
-          <option value="amoled">AMOLED</option>
-          <option value="cyberpunk">Cyberpunk</option>
-          <option value="light">Light</option>
-        </select>
       </div>
     </header>
 
-    <main class="content">
+    <main class="content" id="main-content" tabindex="-1">
       {flash}
       {content}
     </main>
@@ -6363,10 +6445,21 @@ def overview_page(counts, recent):
   <a class="btn btn-primary" href="/add" data-i18n="btn.add_entry">+ Add Entry</a>
 </div></div>"""
 
+    total = sum(counts.get(k, 0) for k in ("passwords", "notes", "passphrases", "authenticators", "backups"))
     return f"""
+<section class="console-hero" aria-labelledby="overview-command">
+  <div class="eyebrow" data-i18n="overview.console_eyebrow">session / local vault / authenticated</div>
+  <h1 id="overview-command">spm vault status</h1>
+  <div class="console-output" aria-label="Vault status output">
+    <span><b>{total}</b> <i data-i18n="overview.console_records">encrypted records indexed</i></span>
+    <span data-i18n="overview.console_gpg">GnuPG boundary active on this host</span>
+    <span data-i18n="overview.console_lock">idle lock armed for 30 seconds</span>
+  </div>
+  <p class="lede" data-i18n="overview.console_lede">Inspect, generate, and maintain credentials from one auditable session.</p>
+</section>
 <div class="page-head">
   <div>
-    <h1 class="page-title" data-i18n="nav.overview">Overview</h1>
+    <h2 class="page-title" data-i18n="nav.overview">Overview</h2>
     <div class="page-sub" data-i18n="overview.sub">Everything in your encrypted vault at a glance.</div>
   </div>
   <div class="page-actions">
@@ -6583,8 +6676,9 @@ def login_page(version, message=""):
 {DESIGN_CSS}
 </head>
 <body class="theme-dark">
+<a class="skip-link" href="#main-content">Skip to unlock form</a>
 <div class="login-wrap">
-  <div class="login-card">
+  <main class="login-card" id="main-content">
     <div class="login-brand">
       <div class="brand-mark" aria-hidden="true">S</div>
       <h1 data-i18n="header.title">Sans Password Manager</h1>
@@ -6608,13 +6702,9 @@ def login_page(version, message=""):
       <select class="select" id="lang-picker" aria-label="Language">
         <option value="en">EN</option><option value="id">ID</option><option value="ja">JP</option>
       </select>
-      <select class="select" id="theme-picker" aria-label="Theme">
-        <option value="dark">Dark</option><option value="amoled">AMOLED</option>
-        <option value="cyberpunk">Cyberpunk</option><option value="light">Light</option>
-      </select>
       <div class="faint" style="margin-top:var(--sp-2)">v{html.escape(version)}</div>
     </div>
-  </div>
+  </main>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 {LANG_BOOTSTRAP}

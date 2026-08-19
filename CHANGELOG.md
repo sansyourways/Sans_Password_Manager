@@ -7,6 +7,17 @@ Keep-a-Changelog style format.
 
 ## [2.9.3] - 2026-08-19
 
+### Changed
+- Web mode now uses the Console (CNS-18) design system: a dark operational
+  transcript with square ruled surfaces, monospace typography, green actions,
+  and amber vault-produced values. The overview opens with a live vault-status
+  command and emitted session facts instead of a generic dashboard header.
+- The four-theme picker was retired so every route follows Console's deliberate
+  dark-only ground. EN/ID/JP switching, search, responsive navigation, auto-lock,
+  CRUD, generator, and export/import behavior remain available.
+- Web tables replace their column layout with stacked records on narrow screens;
+  skip links now reach the authenticated content and unlock form directly.
+
 ### Fixed
 - **`doctor`'s permission check could report a world-readable recovery private
   key as fine.** The key path it audited was `./spm_recovery_private.pem` -
