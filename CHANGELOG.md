@@ -5,6 +5,28 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.10.1] - 2026-08-19
+
+### Security
+- History restore authenticates and decrypts a snapshot before replacing the
+  live vault, and emergency kits authenticate both manifest and ciphertext with
+  HMAC-SHA-256 before decryption.
+- First-time sync refuses mismatched local/remote vaults unless the user sets
+  the explicit `SPM_SYNC_FORCE_INITIAL=1` override after verification.
+- Vault profile paths reject control characters that could inject configuration
+  rows.
+
+### Fixed
+- Sync now uses a portable channel name (`default` unless supplied), allowing
+  the same encrypted vault to synchronize across different absolute paths.
+  Push/pull staging and device-local base-state updates are verified and atomic.
+- Automatic-backup failure no longer reports the preceding successful vault
+  mutation as failed, which could cause duplicate retries.
+- History listing and emergency-date parsing no longer depend on GNU-only
+  `find -printf` or `date -d` behavior.
+- The browser popup clears its retained master-password variable after native
+  messaging dispatch.
+
 ## [2.10.0] - 2026-08-19
 
 ### Added

@@ -425,7 +425,7 @@ The recovery private key remains separate unless
 
 ## Development & Versioning
 
-Version: **2.10.0**
+Version: **2.10.1**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds are refused by default: bind localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` is an explicit escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 Authenticated web mutations also require an exact same-origin request and are serialized across threads/processes to prevent CSRF and lost vault writes. Decrypted web responses use `Cache-Control: no-store`.
@@ -455,7 +455,8 @@ spm emergency-open <archive> <recipient-private.pem> [output.json]
 
 Automatic backups are opportunistic: SPM checks the configured interval after
 successful vault writes. Filesystem sync stores only encrypted vault bytes and
-refuses two-sided changes instead of selecting a last writer. Emergency dates
+refuses two-sided or mismatched first-time changes instead of selecting a last
+writer. Use the same optional channel name on every device. Emergency dates
 are enforced by `spm emergency-open` but remain advisory because a recipient
 holding the private key can use lower-level cryptographic tools. Passkey private
 keys remain non-exportable in the operating-system or hardware authenticator;

@@ -1,13 +1,13 @@
 const status = document.getElementById("status");
 document.getElementById("fill").addEventListener("click", async () => {
   const record = document.getElementById("record").value.trim();
-  const master = document.getElementById("master").value;
+  let master = document.getElementById("master").value;
   document.getElementById("master").value = "";
   if (!/^\d+$/.test(record) || !master) { status.textContent = "Record ID and master password are required."; return; }
   const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
   const url = new URL(tab.url); status.textContent = "Requesting a domain-bound record…";
   chrome.runtime.sendNativeMessage("xyz.sansyourways.spm", {action:"get", record, host:url.hostname, master}, async response => {
-    master.replace?.(/./g, "0");
+    master = "";
     if (chrome.runtime.lastError || !response?.ok) { status.textContent = response?.error || chrome.runtime.lastError?.message || "Request failed."; return; }
     await chrome.scripting.executeScript({target:{tabId:tab.id}, func:(u,p)=>{
       const visible=e=>e.offsetParent!==null&&!e.disabled&&!e.readOnly;

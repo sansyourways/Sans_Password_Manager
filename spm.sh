@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.10.0"
+VERSION="2.10.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -761,7 +761,9 @@ encrypt_file_to_vault() {
 	fi
 	mv -f "$tmp_cipher" "$VAULT_FILE" || { secure_wipe "$tmp_cipher"; die "Failed to install the encrypted vault."; }
 	chmod 600 "$VAULT_FILE" 2>/dev/null || true
-	maybe_auto_backup
+	if ! ( maybe_auto_backup ); then
+		printf 'Warning: vault write succeeded, but the automatic backup failed.\n' >&2
+	fi
 }
 
 acquire_cli_vault_lock() {
@@ -4166,17 +4168,21 @@ cmd_history_list() {
 	local dir
 	dir="$(history_dir)"
 	[ -d "$dir" ] || { printf 'No encrypted history snapshots.\n'; return 0; }
-	find "$dir" -maxdepth 1 -type f -name '*.gpg' -printf '%f\n' 2>/dev/null | sort -r
+	find "$dir" -maxdepth 1 -type f -name '*.gpg' -print 2>/dev/null \
+		| while IFS= read -r snapshot; do basename "$snapshot"; done | sort -r
 }
 
 cmd_history_restore() {
-	local name="${1:-}" dir source answer staged
+	local name="${1:-}" dir source answer staged verify_tmp
 	[ -n "$name" ] || die "Usage: $0 history-restore <snapshot-name>"
 	case "$name" in */*|*\\*|.|..) die "Invalid snapshot name." ;; esac
 	dir="$(history_dir)"; source="$dir/$name"
 	[ -f "$source" ] || die "History snapshot not found."
 	printf "Restore encrypted snapshot %s? (yes/NO): " "$name"; read -r answer || answer=no
 	case "$answer" in yes|y|YES|Y) ;; *) return 1 ;; esac
+	ensure_master_password_loaded; verify_tmp="$(make_tmp)"
+	printf '%s' "$MASTER_PW" | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 --decrypt "$source" > "$verify_tmp" 2>/dev/null || { secure_wipe "$verify_tmp"; die "History snapshot failed authentication or uses a different master password."; }
+	secure_wipe "$verify_tmp"
 	staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm_history_restore.XXXXXX")"
 	cp "$source" "$staged" || { rm -f "$staged"; die "Failed to stage history snapshot."; }
 	chmod 600 "$staged" 2>/dev/null || true
@@ -4227,6 +4233,7 @@ cmd_vault_profile() {
 		list) awk -F '\t' '{printf "%-20s %s\n",$1,$2}' "$SPM_PROFILE_FILE" ;;
 		add)
 			name="${2:-}"; path="${3:-}"; validate_profile_name "$name"; [ -n "$path" ] || die "Vault path required."
+			if printf '%s' "$path" | LC_ALL=C grep -q '[[:cntrl:]]'; then die "Vault paths cannot contain control characters."; fi
 			path="$(canon_path "$path")"; awk -F '\t' -v n="$name" '$1==n{found=1} END{exit found?0:1}' "$SPM_PROFILE_FILE" && die "Profile already exists."
 			printf '%s\t%s\n' "$name" "$path" >> "$SPM_PROFILE_FILE"; printf 'Profile added.\n' ;;
 		use)
@@ -4308,8 +4315,15 @@ sync_paths() {
 	SYNC_REMOTE="$target/spm-$channel.gpg"; SYNC_STATE="$SPM_CONFIG_DIR/sync-$target_id.base-sha256"
 }
 
+write_sync_state() {
+	local digest="$1" staged_state
+	staged_state="$(mktemp "$SPM_CONFIG_DIR/.spm-sync-state.XXXXXX")" || die "Cannot stage sync state."
+	printf '%s\n' "$digest" > "$staged_state"; chmod 600 "$staged_state"
+	mv -f "$staged_state" "$SYNC_STATE" || { rm -f "$staged_state"; die "Cannot install sync state."; }
+}
+
 cmd_sync() {
-	local action="${1:-status}" target="${2:-}" channel="${3:-$(basename "$VAULT_FILE" .gpg)}" local_sha remote_sha base_sha staged tmp
+	local action="${1:-status}" target="${2:-}" channel="${3:-default}" local_sha remote_sha base_sha staged tmp
 	[ -n "$target" ] || die "Usage: $0 sync status|push|pull <directory> [channel]"
 	mkdir -p "$target" || die "Cannot create sync target."; target="$(canon_path "$target")"; sync_paths "$target" "$channel"
 	local_sha=""; remote_sha=""; base_sha=""
@@ -4320,14 +4334,20 @@ cmd_sync() {
 		status) printf 'local=%s\nremote=%s\nbase=%s\n' "${local_sha:-missing}" "${remote_sha:-missing}" "${base_sha:-none}" ;;
 		push)
 			[ -n "$local_sha" ] || die "Local vault missing."
+			if [ -n "$remote_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then die "Initial sync conflict: remote differs; pull or set SPM_SYNC_FORCE_INITIAL=1 after verification."; fi
 			if [ -n "$remote_sha" ] && [ -n "$base_sha" ] && [ "$remote_sha" != "$base_sha" ] && [ "$local_sha" != "$base_sha" ]; then die "Sync conflict: local and remote both changed."; fi
-			staged="$(mktemp "$target/.spm-sync.XXXXXX")"; cp "$VAULT_FILE" "$staged"; chmod 600 "$staged"; mv -f "$staged" "$SYNC_REMOTE"; printf '%s\n' "$local_sha" > "$SYNC_STATE"; chmod 600 "$SYNC_STATE"; printf 'Encrypted vault pushed.\n' ;;
+			staged="$(mktemp "$target/.spm-sync.XXXXXX")"; cp "$VAULT_FILE" "$staged" || { rm -f "$staged"; die "Cannot stage sync push."; }; chmod 600 "$staged"
+			[ "$(sha256sum "$staged" | awk '{print $1}')" = "$local_sha" ] || { secure_wipe "$staged"; die "Staged sync push failed verification."; }
+			mv -f "$staged" "$SYNC_REMOTE"; write_sync_state "$local_sha"; printf 'Encrypted vault pushed.\n' ;;
 		pull)
 			[ -n "$remote_sha" ] || die "Remote vault missing."
+			if [ -n "$local_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then die "Initial sync conflict: local differs; set SPM_SYNC_FORCE_INITIAL=1 only after verification."; fi
 			if [ -n "$local_sha" ] && [ -n "$base_sha" ] && [ "$local_sha" != "$base_sha" ] && [ "$remote_sha" != "$base_sha" ]; then die "Sync conflict: local and remote both changed."; fi
 			tmp="$(make_tmp)"; ensure_master_password_loaded
 			printf '%s' "$MASTER_PW" | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 --decrypt "$SYNC_REMOTE" > "$tmp" 2>/dev/null || { secure_wipe "$tmp"; die "Remote vault cannot be decrypted with this master password."; }
-			secure_wipe "$tmp"; archive_current_vault; staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm-sync.XXXXXX")"; cp "$SYNC_REMOTE" "$staged"; chmod 600 "$staged"; mv -f "$staged" "$VAULT_FILE"; printf '%s\n' "$remote_sha" > "$SYNC_STATE"; chmod 600 "$SYNC_STATE"; printf 'Encrypted vault pulled.\n' ;;
+			secure_wipe "$tmp"; archive_current_vault; staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm-sync.XXXXXX")"; cp "$SYNC_REMOTE" "$staged" || { rm -f "$staged"; die "Cannot stage sync pull."; }; chmod 600 "$staged"
+			[ "$(sha256sum "$staged" | awk '{print $1}')" = "$remote_sha" ] || { secure_wipe "$staged"; die "Staged sync pull failed verification."; }
+			mv -f "$staged" "$VAULT_FILE"; write_sync_state "$remote_sha"; printf 'Encrypted vault pulled.\n' ;;
 		*) die "Usage: $0 sync status|push|pull <directory> [channel]" ;;
 	esac
 }
@@ -4336,7 +4356,11 @@ cmd_emergency_create() {
 	local id="${1:-}" public_key="${2:-}" activation="${3:-}" output="${4:-}" tmp payload key_file kit_dir
 	printf '%s' "$id" | grep -Eq '^[0-9]+$' || die "Numeric password ID required."
 	[ -f "$public_key" ] || die "Recipient RSA public key not found."
-	[ -n "$activation" ] || die "Activation date required (YYYY-MM-DD)."; date -d "$activation" +%s >/dev/null 2>&1 || die "Invalid activation date."
+	[ -n "$activation" ] || die "Activation date required (YYYY-MM-DD)."
+	python3 - "$activation" <<'PY' >/dev/null || die "Invalid activation date."
+import datetime,sys
+datetime.date.fromisoformat(sys.argv[1])
+PY
 	[ -n "$output" ] || output="emergency-$id-$activation.tar.gz"; [ ! -e "$output" ] || die "Emergency archive already exists."
 	tmp="$(make_tmp)"; payload="$(make_tmp)"; key_file="$(make_tmp)"; kit_dir="$(mktemp -d "${TMPDIR:-/tmp}/spm-emergency.XXXXXX")"; chmod 700 "$kit_dir"
 	decrypt_vault_to_file "$tmp"
@@ -4351,28 +4375,48 @@ PY
 	openssl rand -hex 32 > "$key_file"
 	openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -pass file:"$key_file" -in "$payload" -out "$kit_dir/payload.enc"
 	openssl pkeyutl -encrypt -pubin -inkey "$public_key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$key_file" -out "$kit_dir/key.enc"
-	printf 'SPM emergency kit\nactivation=%s\ncreated=%s\nnotice=Activation is advisory; offline recipients can decrypt early.\nfiles=key.enc,payload.enc\n' "$activation" "$(now_iso)" > "$kit_dir/manifest.txt"
-	chmod 600 "$kit_dir"/*; tar -czf "$output" -C "$kit_dir" manifest.txt key.enc payload.enc
-	chmod 600 "$output" 2>/dev/null || true; secure_wipe "$tmp"; secure_wipe "$payload"; secure_wipe "$key_file"; secure_wipe "$kit_dir/key.enc"; secure_wipe "$kit_dir/payload.enc"; secure_wipe "$kit_dir/manifest.txt"; rmdir "$kit_dir"
+	printf 'SPM emergency kit\nactivation=%s\ncreated=%s\nnotice=Activation is advisory; offline recipients can decrypt early.\nfiles=key.enc,payload.enc,payload.hmac\n' "$activation" "$(now_iso)" > "$kit_dir/manifest.txt"
+	python3 - "$key_file" "$kit_dir/manifest.txt" "$kit_dir/payload.enc" "$kit_dir/payload.hmac" <<'PY'
+import hashlib,hmac,sys
+key=bytes.fromhex(open(sys.argv[1],encoding="ascii").read().strip())
+data=open(sys.argv[2],"rb").read()+open(sys.argv[3],"rb").read()
+open(sys.argv[4],"w",encoding="ascii").write(hmac.new(key,data,hashlib.sha256).hexdigest()+"\n")
+PY
+	chmod 600 "$kit_dir"/*; tar -czf "$output" -C "$kit_dir" manifest.txt key.enc payload.enc payload.hmac
+	chmod 600 "$output" 2>/dev/null || true; secure_wipe "$tmp"; secure_wipe "$payload"; secure_wipe "$key_file"; secure_wipe "$kit_dir/key.enc"; secure_wipe "$kit_dir/payload.enc"; secure_wipe "$kit_dir/payload.hmac"; secure_wipe "$kit_dir/manifest.txt"; rmdir "$kit_dir"
 	printf '%s\n' "$output"
 }
 
 cmd_emergency_open() {
-	local archive="${1:-}" private_key="${2:-}" output="${3:-./spm-emergency-record.json}" manifest activation activation_epoch now key_file plain_key payload_file
+	local archive="${1:-}" private_key="${2:-}" output="${3:-./spm-emergency-record.json}" manifest activation activation_epoch now key_file plain_key payload_file hmac_file manifest_file
 	if [ ! -f "$archive" ] || [ ! -f "$private_key" ]; then
 		die "Usage: $0 emergency-open <archive> <private.pem> [output.json]"
 	fi
 	[ ! -e "$output" ] || die "Output file already exists."
 	manifest="$(tar -xOf "$archive" manifest.txt 2>/dev/null)" || die "Invalid emergency archive."
 	activation="$(printf '%s\n' "$manifest" | awk -F= '$1=="activation"{print $2;exit}')"
-	activation_epoch="$(date -d "$activation" +%s 2>/dev/null)" || die "Invalid emergency activation date."
+	activation_epoch="$(python3 - "$activation" <<'PY'
+import datetime,sys
+print(int(datetime.datetime.combine(datetime.date.fromisoformat(sys.argv[1]),datetime.time(),tzinfo=datetime.timezone.utc).timestamp()))
+PY
+)" || die "Invalid emergency activation date."
 	now="$(date +%s)"; [ "$now" -ge "$activation_epoch" ] || die "Emergency kit is scheduled for $activation."
-	key_file="$(make_tmp)"; plain_key="$(make_tmp)"; payload_file="$(make_tmp)"
+	key_file="$(make_tmp)"; plain_key="$(make_tmp)"; payload_file="$(make_tmp)"; hmac_file="$(make_tmp)"; manifest_file="$(make_tmp)"
+	printf '%s\n' "$manifest" > "$manifest_file"
 	tar -xOf "$archive" key.enc > "$key_file" 2>/dev/null || die "Emergency key payload missing."
 	tar -xOf "$archive" payload.enc > "$payload_file" 2>/dev/null || die "Emergency record payload missing."
+	tar -xOf "$archive" payload.hmac > "$hmac_file" 2>/dev/null || die "Emergency integrity tag missing."
 	openssl pkeyutl -decrypt -inkey "$private_key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$key_file" -out "$plain_key" || die "Emergency private key does not match."
+	python3 - "$plain_key" "$manifest_file" "$payload_file" "$hmac_file" <<'PY'
+import hashlib,hmac,sys
+key=bytes.fromhex(open(sys.argv[1],encoding="ascii").read().strip())
+data=open(sys.argv[2],"rb").read()+open(sys.argv[3],"rb").read()
+expected=open(sys.argv[4],encoding="ascii").read().strip()
+if not hmac.compare_digest(hmac.new(key,data,hashlib.sha256).hexdigest(),expected):
+ raise SystemExit("emergency kit authentication failed")
+PY
 	openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:"$plain_key" -in "$payload_file" -out "$output" || { secure_wipe "$output"; die "Emergency payload decryption failed."; }
-	chmod 600 "$output" 2>/dev/null || true; secure_wipe "$key_file"; secure_wipe "$plain_key"; secure_wipe "$payload_file"; printf '%s\n' "$output"
+	chmod 600 "$output" 2>/dev/null || true; secure_wipe "$key_file"; secure_wipe "$plain_key"; secure_wipe "$payload_file"; secure_wipe "$hmac_file"; secure_wipe "$manifest_file"; printf '%s\n' "$output"
 }
 
 cmd_bridge_get() {
