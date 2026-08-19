@@ -1,22 +1,23 @@
-![IMG_1113](https://github.com/user-attachments/assets/3108e84d-a612-49fc-945e-dd38c35e19ae)
-![IMG_1122](https://github.com/user-attachments/assets/37a78d2f-f3a8-4b7a-97aa-c80b6ff24642)
-![IMG_1114](https://github.com/user-attachments/assets/acc62927-fc23-41b2-9664-35c40f22ecf6)
-
-
 # Sans Password Manager (SPM)
 
-> A fully offline, portable, terminal-based password manager  
-> built in pure Bash + GnuPG, designed for **security-first**,  
-> **minimalism**, and **complete user control**.
+An offline, portable password manager for people who want to own the vault,
+understand the storage model, and keep cloud infrastructure out of the trust
+boundary.
+
+SPM is one executable Bash script backed by GnuPG. It provides a terminal
+interface for automation and administration, plus an optional local web
+interface for everyday browsing. There are no accounts, hosted APIs,
+subscriptions, analytics, or vendor-operated recovery services.
+
+Current release: **2.10.2**
 
 ---
 
 ## Table of Contents
-- [Overview](#overview)
-- [Philosophy](#philosophy)
-- [Features](#features)
-  - [Fitur Utama (ID)](#fitur-utama-id)
-  - [Key Features (EN)](#key-features-en)
+
+- [Why use SPM?](#why-use-spm)
+- [Product tour](#product-tour)
+- [Capabilities](#capabilities)
 - [Architecture & Security Model](#architecture--security-model)
 - [Requirements](#requirements)
 - [Installation](#installation)
@@ -36,91 +37,106 @@
 
 ---
 
-## Overview
+## Why use SPM?
 
-**SPM (Sans Password Manager)** is a **single-file**, **portable**,  
-**offline-only**, **encrypted password manager** powered by:
+Most password managers ask you to trust an application, a browser extension,
+an account system, a synchronization service, and the company operating all of
+them. SPM deliberately keeps that trust boundary small.
 
-- **GnuPG (AES-256, symmetric)**  
-- **OpenSSL (RSA)** for optional recovery  
-- **Pure Bash**, requiring no internet access
+| Reason | What it means in practice |
+| --- | --- |
+| Your vault stays yours | The encrypted vault, recovery material, backups, and sync target remain on storage you control. |
+| No service dependency | Core vault operations work without an internet connection, hosted account, license server, or vendor API. |
+| Auditable implementation | The primary application is one readable Bash file that delegates encryption to standard GnuPG and OpenSSL tools. |
+| Terminal and browser workflows | Use deterministic CLI commands for administration and automation, or launch the optional web interface for a more visual workflow. |
+| Portable by design | Create a self-contained encrypted bundle for removable media or move between Linux, macOS, and Termux environments. |
+| Recovery without vendor custody | Generate your own RSA recovery key and store it offline; SPM never holds a copy. |
+| More than passwords | Store notes, passphrases, backup codes, TOTP authenticators, attachments, and passkey metadata in the same encrypted vault. |
+| Built-in operational safety | Atomic writes, advisory locking, encrypted history, verified backups, sync conflict detection, and health diagnostics reduce avoidable data loss. |
 
-SPM is designed for users who want:
+SPM is a strong fit for technically confident individuals, administrators,
+small teams with local-first requirements, air-gapped systems, and anyone who
+prefers transparent tools over opaque hosted custody. It is not intended to
+protect a compromised operating system, malware-infected device, or an
+attacker with root access.
 
-- full ownership of their vault  
-- no cloud storage  
-- no telemetry  
-- no tracking  
-- a clean UI (terminal + optional local web mode)
+## Product tour
 
-> ✔ SPM never transmits any data.  
-> ✔ Fully offline.  
-> ✔ You are the **sole data controller** (GDPR compliant).  
-> ❗ The developer cannot recover your vault if you lose your master password.
+All screenshots below were captured in Google Chrome from SPM 2.10.2 using a
+disposable vault containing only synthetic documentation data. No personal
+vault or real credential appears in these images.
 
----
+### Unlock and assess the vault
 
-## Philosophy
-- **Privacy First:** No analytics, no logs, no tracking.  
-- **Offline Forever:** Everything stored locally; no servers.  
-- **Portable:** Carry your encrypted vault anywhere.  
-- **Simplicity:** A single Bash script.  
-- **Transparency:** Encryption handled by GnuPG/OpenSSL directly.  
-- **User Ownership:** You control your keys, vaults, and backups.
+| Secure login | Security overview |
+| --- | --- |
+| ![SPM master-password login](docs/screenshots/web-v2.10.2/01-login.png) | ![SPM vault overview and security score](docs/screenshots/web-v2.10.2/02-overview.png) |
 
----
+### Work with credentials and protected records
 
-## Features
+| Password records | Authenticator codes |
+| --- | --- |
+| ![SPM password list](docs/screenshots/web-v2.10.2/03-passwords.png) | ![SPM TOTP authenticator view](docs/screenshots/web-v2.10.2/16-authenticator-view.png) |
 
-### Fitur Utama (ID)
+| Password generator | Import and export |
+| --- | --- |
+| ![SPM password generator](docs/screenshots/web-v2.10.2/22-generator.png) | ![SPM import and export workspace](docs/screenshots/web-v2.10.2/23-transfer.png) |
 
-- 🔐 **Vault terenkripsi GPG (AES-256)**  
-- 📟 **UI interaktif** (EN/ID/JP)  
-- 🖥️ **Web Mode (Localhost)** — antarmuka Console gelap bergaya transkrip, *offline-only*
-- 📦 **Portable bundle** (script + vault + recovery; private key disimpan terpisah secara default)
-- 💾 **SAVE bundle** (backup + wipe vault lokal; private key tidak disertakan secara default)
-- 🧠 **Password Strength Coaching**  
-- 📝 **Secure Notes**  
-- 🔑 **Passphrase Vault** (simpan passphrase, verifikasi ulang saat melihat)  
-- 🔢 **Authenticator (TOTP)** dengan live code di web (plus tombol copy), interval kustom, dan pilihan algoritma SHA1/SHA256/SHA512  
-- ⚡ **Copy cepat** (tombol copy di tampilan kata sandi, catatan, passphrase, kode backup) dengan notifikasi pop-up sukses yang ramah perangkat  
-- 🔒 **Generator kata sandi** (mode mudah/aman, kata mudah diingat, panjang/slider, toggle huruf besar/kecil/angka/simbol, estimasi kekuatan)
-- 🖥️ **Console web UI** — aksi hijau, nilai keluaran amber, panel datar tanpa bayangan
-- 📤 **Export/Import vault** (CLI & Web) ke CSV/JSON + format lanjutan
-- 📜 Kode Backup
-- 🔑 **Lupa password** via RSA private key  
-- 🩺 **Doctor mode** (diagnostik integritas vault & recovery)  
-- 🧽 **Clear clipboard otomatis** (~15 detik)
+<details>
+<summary><strong>Complete web interface gallery (23 pages)</strong></summary>
 
----
+#### Passwords
 
-### Key Features (EN)
+| Add | View | Edit |
+| --- | --- | --- |
+| ![Add password](docs/screenshots/web-v2.10.2/04-password-add.png) | ![View password](docs/screenshots/web-v2.10.2/05-password-view.png) | ![Edit password](docs/screenshots/web-v2.10.2/06-password-edit.png) |
 
-- 🔐 Encrypted vault (GPG AES-256)  
-- 🗂️ Clean interactive menu  
-- 🌐 Local Web Mode (dark Console transcript UI, offline only, EN/ID/JP toggle)
-- 📦 Portable bundle (ZIP; recovery private key excluded by default)
-- 💾 SAVE bundle (backup + wipe local; recovery private key excluded by default)
-- 🧠 Password strength analysis & coaching  
-- 📝 Secure notes
-- 🔑 Passphrase vault with re-verification on view  
-- 🔢 Authenticator (TOTP) with live codes + copy button, configurable interval, and SHA1/SHA256/SHA512 algorithms  
-- ⚡ Fast copy buttons on password, notes, passphrase, backup views with device-friendly toast confirmation  
-- 🔒 Password generator (easy memorable words + secure random, slider length/words, toggles for upper/lower/digits/symbols, strength estimate)
-- 🖥️ Console web design with square ruled surfaces, green actions, amber emitted values, and no floating panels
-- 🇬🇧🇮🇩🇯🇵 Live language switcher (EN/ID/JP) in the web header with cookie persistence and instant translations across dashboard cards/import UI  
-- 📤 Vault export/import (CLI & Web) to CSV/JSON + advanced formats
-- 🛡️ Vault-wide security score with weak, reused, old, and incomplete-record findings
-- 🕘 Encrypted history, verified automatic backups, and confirmed rollback
-- 📎 Encrypted attachments with SHA-256 verification and a 1 MiB safety limit
-- 🗂️ Named vault profiles and conflict-safe local filesystem synchronization
-- 🚨 Recipient-encrypted emergency kits with advisory activation dates
-- 🔑 Platform passkey metadata and an exact-domain browser autofill bridge
-- 📜 Backup codes  
-- 🔑 RSA-based recovery  
-- 🩺 Doctor diagnostics  
-- 🧽 Clipboard auto-clean  
-- 🚫 No cloud, no telemetry, no data collection
+#### Secure notes
+
+| List | Add | View |
+| --- | --- | --- |
+| ![Secure notes list](docs/screenshots/web-v2.10.2/07-notes.png) | ![Add secure note](docs/screenshots/web-v2.10.2/08-note-add.png) | ![View secure note](docs/screenshots/web-v2.10.2/09-note-view.png) |
+
+#### Passphrases
+
+| List | Add | View | Edit |
+| --- | --- | --- | --- |
+| ![Passphrase list](docs/screenshots/web-v2.10.2/10-passphrases.png) | ![Add passphrase](docs/screenshots/web-v2.10.2/11-passphrase-add.png) | ![View passphrase](docs/screenshots/web-v2.10.2/12-passphrase-view.png) | ![Edit passphrase](docs/screenshots/web-v2.10.2/13-passphrase-edit.png) |
+
+#### Authenticators
+
+| List | Add | View | Edit |
+| --- | --- | --- | --- |
+| ![Authenticator list](docs/screenshots/web-v2.10.2/14-authenticators.png) | ![Add authenticator](docs/screenshots/web-v2.10.2/15-authenticator-add.png) | ![View authenticator](docs/screenshots/web-v2.10.2/16-authenticator-view.png) | ![Edit authenticator](docs/screenshots/web-v2.10.2/17-authenticator-edit.png) |
+
+#### Backup codes
+
+| List | Add | View | Edit |
+| --- | --- | --- | --- |
+| ![Backup-code list](docs/screenshots/web-v2.10.2/18-backup-codes.png) | ![Add backup codes](docs/screenshots/web-v2.10.2/19-backup-codes-add.png) | ![View backup codes](docs/screenshots/web-v2.10.2/20-backup-codes-view.png) | ![Edit backup codes](docs/screenshots/web-v2.10.2/21-backup-codes-edit.png) |
+
+</details>
+
+## Capabilities
+
+- GnuPG AES-256 encrypted vault with atomic writes and advisory locking
+- Interactive terminal interface with English, Indonesian, and Japanese modes
+- Optional Console-style web interface with inactivity locking
+- Password records, secure notes, passphrases, backup codes, and TOTP
+  authenticators using SHA-1, SHA-256, or SHA-512
+- Secure and memorable password generation with strength coaching
+- Clipboard copy feedback and automatic clipboard clearing
+- CLI and web import/export across CSV, JSON, TSV, NDJSON, Markdown, HTML,
+  YAML, XML, SQL, INI, PSV, RST, TOML, Org, SCSV, JSONC, and related variants
+- Vault-wide security score for weak, reused, old, incomplete, or malformed
+  records
+- Encrypted history, verified manual/automatic backups, and confirmed rollback
+- Digest-verified encrypted attachments with a 1 MiB limit
+- Named vault profiles and conflict-aware filesystem synchronization
+- Recipient-encrypted emergency kits with authenticated contents
+- Platform passkey metadata and an exact-domain native browser bridge
+- Portable and SAVE bundles with recovery private keys excluded by default
+- RSA-based self-custodied recovery and built-in doctor diagnostics
 
 ---
 

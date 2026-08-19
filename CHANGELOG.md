@@ -5,6 +5,14 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [Unreleased]
+
+### Documentation
+- Reframed the README around SPM's local ownership, auditable implementation,
+  portability, recovery, and operational-safety benefits.
+- Added a Chrome-verified visual tour covering all 23 web interface pages with
+  synthetic documentation data only.
+
 ## [2.10.2] - 2026-08-19
 
 ### Fixed
