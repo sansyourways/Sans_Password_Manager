@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.8.4"
+VERSION="2.9.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -4536,38 +4536,6 @@ def fetch_latest_version():
 
 # ---------- HTML templates (liquid glass, icons, auto-lock) ------------------
 
-AUTOLOCK_SCRIPT = """
-<script>
-  (function() {
-    let autoTimer;
-    let paused = false;
-    function start() {
-      if (paused) return;
-      stop();
-      autoTimer = setTimeout(function() {
-        window.location.href = "/logout";
-      }, 30000);
-    }
-    function stop() {
-      if (autoTimer) {
-        clearTimeout(autoTimer);
-        autoTimer = null;
-      }
-    }
-    window.SPM_AutoLock = {
-      pause: function() { paused = true; stop(); },
-      resume: function() { paused = false; start(); },
-      restart: function() { start(); }
-    };
-    ["click","keydown","mousemove","touchstart","scroll"].forEach(function(ev) {
-      window.addEventListener(ev, function() {
-        if (!paused) start();
-      }, { passive: true });
-    });
-    start();
-  })();
-</script>
-"""
 
 I18N_SCRIPT = """
 <script>
@@ -4715,7 +4683,47 @@ I18N_SCRIPT = """
       "confirm.delete_entry": "Delete this entry?",
       "confirm.delete_passphrase": "Delete this passphrase?",
       "confirm.delete_backup": "Delete these backup codes?",
-      "confirm.delete_authenticator": "Delete this authenticator?"
+      "confirm.delete_authenticator": "Delete this authenticator?",
+      "nav.group.vault": "Vault",
+      "nav.group.tools": "Tools",
+      "nav.overview": "Overview",
+      "nav.passwords": "Passwords",
+      "nav.notes": "Secure Notes",
+      "nav.passphrases": "Passphrases",
+      "nav.authenticators": "Authenticators",
+      "nav.backup_codes": "Backup Codes",
+      "nav.generator": "Generator",
+      "nav.transfer": "Export / Import",
+      "search.placeholder": "Search this vault...",
+      "search.no_results": "Nothing matches your search",
+      "lock.in": "Locks in",
+      "lock.paused": "Lock paused",
+      "overview.sub": "Everything in your encrypted vault at a glance.",
+      "overview.recent": "Recently added",
+      "overview.view_all": "View all",
+      "btn.view": "View",
+      "generator.mode": "Mode",
+      "login.sub": "Unlock your encrypted vault to continue.",
+      "login.master": "Master password",
+      "login.unlock": "Unlock",
+      "login.note": "All decryption happens locally with GnuPG. Nothing leaves this host.",
+      "empty.vault.t": "Your vault is empty",
+      "empty.vault.d": "Add your first password to get started.",
+      "empty.passwords.t": "No passwords yet",
+      "empty.passwords.d": "Entries you add will appear here.",
+      "empty.notes.t": "No secure notes",
+      "empty.notes.d": "Encrypted notes live inside the same vault.",
+      "empty.passphrases.t": "No passphrases",
+      "empty.passphrases.d": "Store API tokens or recovery phrases here.",
+      "empty.backups.t": "No backup codes",
+      "empty.backups.d": "Keep one-time recovery codes safe here.",
+      "empty.auth.t": "No authenticators",
+      "empty.auth.d": "Add a TOTP secret to generate 2FA codes.",
+      "page.passwords.desc": "Login credentials stored in your vault.",
+      "page.notes.desc": "Encrypted notes stored inside the same vault.",
+      "page.passphrases.desc": "API tokens and recovery phrases.",
+      "page.authenticators.desc": "Time-based one-time password codes.",
+      "page.backups.desc": "One-time recovery codes for your accounts.",
     },
     "id": {
       "header.title": "Sans Password Manager",
@@ -4859,7 +4867,47 @@ I18N_SCRIPT = """
       "confirm.delete_entry": "Hapus entri ini?",
       "confirm.delete_passphrase": "Hapus frasa sandi ini?",
       "confirm.delete_backup": "Hapus kode cadangan ini?",
-      "confirm.delete_authenticator": "Hapus autentikator ini?"
+      "confirm.delete_authenticator": "Hapus autentikator ini?",
+      "nav.group.vault": "Brankas",
+      "nav.group.tools": "Alat",
+      "nav.overview": "Ringkasan",
+      "nav.passwords": "Kata Sandi",
+      "nav.notes": "Catatan Aman",
+      "nav.passphrases": "Frasa Sandi",
+      "nav.authenticators": "Autentikator",
+      "nav.backup_codes": "Kode Cadangan",
+      "nav.generator": "Generator",
+      "nav.transfer": "Ekspor / Impor",
+      "search.placeholder": "Cari di brankas ini...",
+      "search.no_results": "Tidak ada yang cocok dengan pencarian",
+      "lock.in": "Terkunci dalam",
+      "lock.paused": "Kunci dijeda",
+      "overview.sub": "Semua isi brankas terenkripsi Anda sekilas.",
+      "overview.recent": "Baru ditambahkan",
+      "overview.view_all": "Lihat semua",
+      "btn.view": "Lihat",
+      "generator.mode": "Mode",
+      "login.sub": "Buka brankas terenkripsi Anda untuk melanjutkan.",
+      "login.master": "Kata sandi utama",
+      "login.unlock": "Buka",
+      "login.note": "Semua dekripsi dilakukan lokal dengan GnuPG. Tidak ada data yang keluar dari host ini.",
+      "empty.vault.t": "Brankas Anda kosong",
+      "empty.vault.d": "Tambahkan kata sandi pertama untuk memulai.",
+      "empty.passwords.t": "Belum ada kata sandi",
+      "empty.passwords.d": "Entri yang Anda tambahkan akan muncul di sini.",
+      "empty.notes.t": "Belum ada catatan aman",
+      "empty.notes.d": "Catatan terenkripsi tersimpan di brankas yang sama.",
+      "empty.passphrases.t": "Belum ada frasa sandi",
+      "empty.passphrases.d": "Simpan token API atau frasa pemulihan di sini.",
+      "empty.backups.t": "Belum ada kode cadangan",
+      "empty.backups.d": "Simpan kode pemulihan sekali pakai dengan aman di sini.",
+      "empty.auth.t": "Belum ada autentikator",
+      "empty.auth.d": "Tambahkan secret TOTP untuk membuat kode 2FA.",
+      "page.passwords.desc": "Kredensial login yang tersimpan di brankas Anda.",
+      "page.notes.desc": "Catatan terenkripsi di dalam brankas yang sama.",
+      "page.passphrases.desc": "Token API dan frasa pemulihan.",
+      "page.authenticators.desc": "Kode sekali pakai berbasis waktu.",
+      "page.backups.desc": "Kode pemulihan sekali pakai untuk akun Anda.",
     },
     "ja": {
       "header.title": "Sans Password Manager",
@@ -5003,7 +5051,47 @@ I18N_SCRIPT = """
       "confirm.delete_entry": "このエントリを削除しますか？",
       "confirm.delete_passphrase": "このパスフレーズを削除しますか？",
       "confirm.delete_backup": "これらのバックアップコードを削除しますか？",
-      "confirm.delete_authenticator": "この認証情報を削除しますか？"
+      "confirm.delete_authenticator": "この認証情報を削除しますか？",
+      "nav.group.vault": "\u4fdd\u7ba1\u5eab",
+      "nav.group.tools": "\u30c4\u30fc\u30eb",
+      "nav.overview": "\u6982\u8981",
+      "nav.passwords": "\u30d1\u30b9\u30ef\u30fc\u30c9",
+      "nav.notes": "\u30bb\u30ad\u30e5\u30a2\u30e1\u30e2",
+      "nav.passphrases": "\u30d1\u30b9\u30d5\u30ec\u30fc\u30ba",
+      "nav.authenticators": "\u8a8d\u8a3c\u30a2\u30d7\u30ea",
+      "nav.backup_codes": "\u30d0\u30c3\u30af\u30a2\u30c3\u30d7\u30b3\u30fc\u30c9",
+      "nav.generator": "\u30b8\u30a7\u30cd\u30ec\u30fc\u30bf\u30fc",
+      "nav.transfer": "\u30a8\u30af\u30b9\u30dd\u30fc\u30c8 / \u30a4\u30f3\u30dd\u30fc\u30c8",
+      "search.placeholder": "\u3053\u306e\u4fdd\u7ba1\u5eab\u3092\u691c\u7d22...",
+      "search.no_results": "\u691c\u7d22\u6761\u4ef6\u306b\u4e00\u81f4\u3059\u308b\u9805\u76ee\u306f\u3042\u308a\u307e\u305b\u3093",
+      "lock.in": "\u30ed\u30c3\u30af\u307e\u3067",
+      "lock.paused": "\u30ed\u30c3\u30af\u4e00\u6642\u505c\u6b62\u4e2d",
+      "overview.sub": "\u6697\u53f7\u5316\u3055\u308c\u305f\u4fdd\u7ba1\u5eab\u306e\u5185\u5bb9\u3092\u4e00\u89a7\u3067\u304d\u307e\u3059\u3002",
+      "overview.recent": "\u6700\u8fd1\u8ffd\u52a0\u3057\u305f\u9805\u76ee",
+      "overview.view_all": "\u3059\u3079\u3066\u8868\u793a",
+      "btn.view": "\u8868\u793a",
+      "generator.mode": "\u30e2\u30fc\u30c9",
+      "login.sub": "\u7d9a\u884c\u3059\u308b\u306b\u306f\u4fdd\u7ba1\u5eab\u306e\u30ed\u30c3\u30af\u3092\u89e3\u9664\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
+      "login.master": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
+      "login.unlock": "\u30ed\u30c3\u30af\u89e3\u9664",
+      "login.note": "\u5fa9\u53f7\u306f\u3059\u3079\u3066 GnuPG \u306b\u3088\u308a\u30ed\u30fc\u30ab\u30eb\u3067\u884c\u308f\u308c\u3001\u30c7\u30fc\u30bf\u304c\u30db\u30b9\u30c8\u5916\u3078\u51fa\u308b\u3053\u3068\u306f\u3042\u308a\u307e\u305b\u3093\u3002",
+      "empty.vault.t": "\u4fdd\u7ba1\u5eab\u306f\u7a7a\u3067\u3059",
+      "empty.vault.d": "\u6700\u521d\u306e\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u8ffd\u52a0\u3057\u3066\u59cb\u3081\u307e\u3057\u3087\u3046\u3002",
+      "empty.passwords.t": "\u30d1\u30b9\u30ef\u30fc\u30c9\u304c\u3042\u308a\u307e\u305b\u3093",
+      "empty.passwords.d": "\u8ffd\u52a0\u3057\u305f\u9805\u76ee\u304c\u3053\u3053\u306b\u8868\u793a\u3055\u308c\u307e\u3059\u3002",
+      "empty.notes.t": "\u30bb\u30ad\u30e5\u30a2\u30e1\u30e2\u304c\u3042\u308a\u307e\u305b\u3093",
+      "empty.notes.d": "\u6697\u53f7\u5316\u3055\u308c\u305f\u30e1\u30e2\u306f\u540c\u3058\u4fdd\u7ba1\u5eab\u306b\u4fdd\u5b58\u3055\u308c\u307e\u3059\u3002",
+      "empty.passphrases.t": "\u30d1\u30b9\u30d5\u30ec\u30fc\u30ba\u304c\u3042\u308a\u307e\u305b\u3093",
+      "empty.passphrases.d": "API \u30c8\u30fc\u30af\u30f3\u3084\u5fa9\u65e7\u30d5\u30ec\u30fc\u30ba\u3092\u3053\u3053\u306b\u4fdd\u5b58\u3067\u304d\u307e\u3059\u3002",
+      "empty.backups.t": "\u30d0\u30c3\u30af\u30a2\u30c3\u30d7\u30b3\u30fc\u30c9\u304c\u3042\u308a\u307e\u305b\u3093",
+      "empty.backups.d": "\u4f7f\u3044\u6368\u3066\u306e\u5fa9\u65e7\u30b3\u30fc\u30c9\u3092\u3053\u3053\u306b\u5b89\u5168\u306b\u4fdd\u7ba1\u3057\u307e\u3059\u3002",
+      "empty.auth.t": "\u8a8d\u8a3c\u30a2\u30d7\u30ea\u304c\u3042\u308a\u307e\u305b\u3093",
+      "empty.auth.d": "TOTP \u30b7\u30fc\u30af\u30ec\u30c3\u30c8\u3092\u8ffd\u52a0\u3057\u3066 2FA \u30b3\u30fc\u30c9\u3092\u751f\u6210\u3057\u307e\u3059\u3002",
+      "page.passwords.desc": "\u4fdd\u7ba1\u5eab\u306b\u4fdd\u5b58\u3055\u308c\u3066\u3044\u308b\u30ed\u30b0\u30a4\u30f3\u60c5\u5831\u3002",
+      "page.notes.desc": "\u540c\u3058\u4fdd\u7ba1\u5eab\u5185\u306b\u4fdd\u5b58\u3055\u308c\u305f\u6697\u53f7\u5316\u30e1\u30e2\u3002",
+      "page.passphrases.desc": "API \u30c8\u30fc\u30af\u30f3\u3068\u5fa9\u65e7\u30d5\u30ec\u30fc\u30ba\u3002",
+      "page.authenticators.desc": "\u6642\u523b\u30d9\u30fc\u30b9\u306e\u30ef\u30f3\u30bf\u30a4\u30e0\u30d1\u30b9\u30ef\u30fc\u30c9\u30b3\u30fc\u30c9\u3002",
+      "page.backups.desc": "\u30a2\u30ab\u30a6\u30f3\u30c8\u7528\u306e\u4f7f\u3044\u6368\u3066\u5fa9\u65e7\u30b3\u30fc\u30c9\u3002",
     }
   };
   const FALLBACK = "en";
@@ -5079,2524 +5167,1646 @@ I18N_SCRIPT = """
 </script>
 """
 
-LOGIN_HTML = """<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>SPM Web Login</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg-image: radial-gradient(circle at top, #202438 0, #05060a 40%, #020308 100%);
-      --bg: #05060a;
-      --panel: rgba(10,10,14,0.9);
-      --card: rgba(10,10,14,0.9);
-      --text: #f5f5f7;
-      --muted: #888ea6;
-      --accent: #5f5fff;
-    }
-    body.theme-amoled {
-      --bg-image: #000;
-      --bg: #000;
-      --panel: rgba(0,0,0,0.92);
-      --card: rgba(0,0,0,0.92);
-      --text: #e9e9f0;
-      --muted: #7d8199;
-      --accent: #00d2ff;
-    }
-    body.theme-cyberpunk {
-      --bg-image: linear-gradient(135deg,#11001f 0%,#0a0014 100%);
-      --bg: #0a0014;
-      --panel: rgba(12,0,28,0.92);
-      --card: rgba(20,0,36,0.9);
-      --text: #f8e9ff;
-      --muted: #9b7fff;
-      --accent: #ff2fd1;
-    }
-    body.theme-light {
-      color-scheme: light;
-      --bg-image: linear-gradient(135deg,#f7f9fc 0%,#edf1f9 100%);
-      --bg: #f6f7fb;
-      --panel: #ffffff;
-      --card: #f5f7fc;
-      --text: #0f172a;
-      --muted: #5b6475;
-      --accent: #2563eb;
-    }
-    * { box-sizing: border-box; }
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      background: var(--bg-image);
-      color: var(--text);
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      min-height:100vh;
-      margin:0;
-      padding:16px;
-      animation: bgShift 18s ease-in-out infinite alternate;
-    }
-    @keyframes bgShift {
-      0% { background-position: 0% 0%; }
-      50% { background-position: 50% 50%; }
-      100% { background-position: 100% 0%; }
-    }
-    .glass {
-      position: relative;
-      padding: 24px 22px 20px;
-      width: min(380px, 100%);
-      border-radius: 20px;
-      background: linear-gradient(145deg, rgba(255,255,255,0.16), rgba(5,5,9,0.9));
-      box-shadow:
-        0 22px 50px rgba(0,0,0,0.9),
-        0 0 0 1px rgba(255,255,255,0.04);
-      backdrop-filter: blur(26px) saturate(180%);
-      -webkit-backdrop-filter: blur(26px) saturate(180%);
-      border: 1px solid rgba(255,255,255,0.18);
-      animation: floatIn 0.5s ease-out, floatLoop 8s ease-in-out infinite alternate;
-      transform-origin: center;
-    }
-    @keyframes floatIn {
-      from { opacity:0; transform: translateY(18px) scale(0.98); }
-      to   { opacity:1; transform: translateY(0) scale(1); }
-    }
-    @keyframes floatLoop {
-      0% { transform: translateY(0) scale(1); }
-      100% { transform: translateY(-4px) scale(1.01); }
-    }
-    h1 {
-      margin: 0 0 4px 0;
-      font-size: 20px;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      text-align:center;
-    }
-    .subtitle {
-      text-align:center;
-      font-size: 12px;
-      color:#aaa;
-      margin-bottom: 18px;
-    }
-    label {
-      font-size: 13px;
-      color:#ccc;
-      display:block;
-      margin-bottom:6px;
-    }
-    input[type=password] {
-      width:100%;
-      padding:11px 12px;
-      margin-bottom:14px;
-      border-radius:12px;
-      border:1px solid rgba(255,255,255,0.18);
-      background:rgba(5,5,7,0.9);
-      color:#f5f5f5;
-      outline:none;
-      font-size:13px;
-      transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
-    }
-    input[type=password]:focus {
-      border-color:rgba(140,190,255,0.9);
-      box-shadow:0 0 0 1px rgba(120,180,255,0.5);
-      background:rgba(2,2,5,1);
-    }
-    input[type=submit] {
-      width:100%;
-      padding:10px;
-      border:none;
-      border-radius:999px;
-      background:linear-gradient(135deg,#0f9bff,#5f5fff);
-      color:#fff;
-      cursor:pointer;
-      font-size:13px;
-      font-weight:500;
-      letter-spacing:0.09em;
-      text-transform:uppercase;
-      transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
-    }
-    input[type=submit]:hover {
-      filter:brightness(1.08);
-      box-shadow:0 10px 24px rgba(15,155,255,0.35);
-      transform: translateY(-1px);
-    }
-    input[type=submit]:active {
-      transform: translateY(0);
-      box-shadow:none;
-    }
-    .msg {
-      margin-top:10px;
-      font-size:12px;
-      color:#ff7b7b;
-      text-align:center;
-      animation: fadeIn 0.25s ease-out;
-    }
-    @keyframes fadeIn {
-      from { opacity:0; transform: translateY(4px); }
-      to   { opacity:1; transform: translateY(0); }
-    }
-  </style>
-  <style>
-    body.theme-dark {
-      --bg:#05060a; --panel:rgba(10,10,14,0.9); --card:rgba(10,10,14,0.9); --text:#f5f5f7; --muted:#888ea6; --accent:#5f5fff;
-      background:var(--bg); color:var(--text);
-    }
-    body.theme-amoled {
-      --bg:#000; --panel:rgba(0,0,0,0.9); --card:rgba(0,0,0,0.9); --text:#e9e9f0; --muted:#7d8199; --accent:#00d2ff;
-      background:var(--bg); color:var(--text);
-    }
-    body.theme-cyberpunk {
-      --bg:#0a0014; --panel:rgba(12,0,28,0.9); --card:rgba(20,0,36,0.9); --text:#f8e9ff; --muted:#9b7fff; --accent:#ff2fd1;
-      background:var(--bg); color:var(--text);
-    }
-    body.theme-light {
-      --bg:#f6f7fb; --panel:#ffffff; --card:#f1f3f9; --text:#12131a; --muted:#5a5d70; --accent:#2563eb;
-      background:var(--bg); color:var(--text);
-    }
-    body[class*="theme-"] .panel,
-    body[class*="theme-"] .card,
-    body[class*="theme-"] .glass,
-    body[class*="theme-"] .vault-badge {
-      background:var(--panel) !important;
-      color:var(--text);
-    }
-    body[class*="theme-"] .sub,
-    body[class*="theme-"] .muted,
-    body[class*="theme-"] .vault-badge span,
-    body[class*="theme-"] th,
-    body[class*="theme-"] td {
-      color:var(--muted);
-    }
-    body[class*="theme-"] .btn-primary { background:linear-gradient(135deg,var(--accent),#9a7bff); }
-    body.theme-light a, body.theme-light .link { color:#2563eb; }
-  </style>
-</head>
-<body>
-  <div class="glass">
-    <h1>Sans Password Manager</h1>
-    <div class="subtitle">Web access · encrypted with GnuPG</div>
-    <form method="post" action="/login">
-      <label>Master Password</label>
-      <input type="password" name="password" autocomplete="current-password" autofocus>
-      <input type="submit" value="Unlock">
-    </form>
-    __MESSAGE__
-  </div>
-</body>
-</html>
+DESIGN_CSS = """
+<style>
+/* ============================================================
+   SPM design system - one stylesheet for every page.
+   Tokens first, then primitives, then components, then layout.
+   All four themes are token overrides only; no component rule
+   ever hardcodes a colour.
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 24px; --sp-6: 32px; --sp-7: 48px;
+  --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-full: 999px;
+  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-base: 14px;
+  --fs-lg: 16px; --fs-xl: 20px; --fs-2xl: 26px; --fs-3xl: 34px;
+  --sidebar-w: 260px;
+  --topbar-h: 60px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --ease: cubic-bezier(.4, 0, .2, 1);
+}
+
+/* ---- Theme: dark (default) ---- */
+body, body.theme-dark {
+  --bg:        #0d1017;
+  --bg-grad:   radial-gradient(1200px 600px at 15% -10%, #1b2540 0%, transparent 60%), #0d1017;
+  --surface:   #151a24;
+  --surface-2: #1c2230;
+  --surface-3: #232b3b;
+  --border:    #262e3d;
+  --border-hi: #364157;
+  --text:      #e8ecf5;
+  --text-dim:  #98a3b8;
+  --text-faint:#6b7688;
+  --accent:    #5b8cff;
+  --accent-hi: #7aa2ff;
+  --accent-fg: #ffffff;
+  --accent-soft:rgba(91,140,255,.14);
+  --ok:        #3ecf8e;
+  --ok-soft:   rgba(62,207,142,.14);
+  --warn:      #f5b544;
+  --warn-soft: rgba(245,181,68,.14);
+  --danger:    #f2555a;
+  --danger-soft:rgba(242,85,90,.14);
+  --shadow:    0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.28);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,.5);
+}
+
+/* ---- Theme: AMOLED ---- */
+body.theme-amoled {
+  --bg:        #000000;
+  --bg-grad:   radial-gradient(900px 500px at 20% -15%, #0d1424 0%, transparent 62%), #000000;
+  --surface:   #08090c;
+  --surface-2: #101319;
+  --surface-3: #171b23;
+  --border:    #1b1f28;
+  --border-hi: #2b3140;
+  --text:      #f2f5fa;
+  --text-dim:  #94a0b4;
+  --text-faint:#636d7e;
+  --accent:    #4f8bff;
+  --accent-hi: #74a6ff;
+  --accent-soft:rgba(79,139,255,.16);
+  --shadow:    0 1px 2px rgba(0,0,0,.9), 0 4px 18px rgba(0,0,0,.7);
+  --shadow-lg: 0 14px 44px rgba(0,0,0,.85);
+}
+
+/* ---- Theme: cyberpunk ---- */
+body.theme-cyberpunk {
+  --bg:        #0a0713;
+  --bg-grad:   radial-gradient(1000px 520px at 12% -10%, #2a0f47 0%, transparent 58%), radial-gradient(800px 400px at 95% 8%, #06303a 0%, transparent 55%), #0a0713;
+  --surface:   #140d22;
+  --surface-2: #1c1230;
+  --surface-3: #26193f;
+  --border:    #33204f;
+  --border-hi: #4b2f70;
+  --text:      #f6ecff;
+  --text-dim:  #b19ad0;
+  --text-faint:#8875a3;
+  --accent:    #f637d4;
+  --accent-hi: #ff6ae0;
+  --accent-fg: #ffffff;
+  --accent-soft:rgba(246,55,212,.16);
+  --ok:        #35f0c0;
+  --ok-soft:   rgba(53,240,192,.14);
+  --warn:      #ffcc4d;
+  --danger:    #ff4d6d;
+  --shadow:    0 1px 2px rgba(0,0,0,.6), 0 4px 20px rgba(120,20,140,.3);
+  --shadow-lg: 0 14px 46px rgba(140,20,160,.42);
+}
+
+/* ---- Theme: light ---- */
+body.theme-light {
+  --bg:        #f4f6fa;
+  --bg-grad:   radial-gradient(1100px 560px at 12% -12%, #e2eaff 0%, transparent 60%), #f4f6fa;
+  --surface:   #ffffff;
+  --surface-2: #f7f9fc;
+  --surface-3: #eef2f8;
+  --border:    #dfe5ee;
+  --border-hi: #c4cede;
+  --text:      #131822;
+  --text-dim:  #5a6577;
+  --text-faint:#8b95a6;
+  --accent:    #2f6bf0;
+  --accent-hi: #1d55d4;
+  --accent-fg: #ffffff;
+  --accent-soft:rgba(47,107,240,.10);
+  --ok:        #14915c;
+  --ok-soft:   rgba(20,145,92,.12);
+  --warn:      #b57611;
+  --warn-soft: rgba(181,118,17,.12);
+  --danger:    #d3323b;
+  --danger-soft:rgba(211,50,59,.10);
+  --shadow:    0 1px 2px rgba(16,24,40,.06), 0 4px 14px rgba(16,24,40,.07);
+  --shadow-lg: 0 14px 40px rgba(16,24,40,.16);
+}
+
+/* ---- Base ---- */
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: var(--fs-base);
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--bg-grad, var(--bg));
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color .25s var(--ease), color .25s var(--ease);
+}
+a { color: inherit; text-decoration: none; }
+h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -.01em; }
+p  { margin: 0; }
+::selection { background: var(--accent-soft); }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--border-hi) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: var(--r-full); border: 3px solid transparent; background-clip: content-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
+
+/* ============================ Layout ============================ */
+.app { display: grid; grid-template-columns: var(--sidebar-w) 1fr; min-height: 100vh; }
+
+.sidebar {
+  position: sticky; top: 0; height: 100vh;
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: var(--sp-4) var(--sp-3);
+  gap: var(--sp-4);
+  overflow-y: auto;
+  z-index: 40;
+}
+.brand { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2); }
+.brand-mark {
+  width: 36px; height: 36px; flex: none; border-radius: 10px;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hi));
+  color: var(--accent-fg); font-size: 17px; font-weight: 700;
+  box-shadow: var(--shadow);
+}
+.brand-text { min-width: 0; }
+.brand-name { font-size: var(--fs-base); font-weight: 650; line-height: 1.25; }
+.brand-meta { font-size: var(--fs-xs); color: var(--text-faint); }
+
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-label {
+  font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text-faint); padding: var(--sp-3) var(--sp-2) var(--sp-1);
+  font-weight: 600;
+}
+.nav-item {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: 9px var(--sp-3); border-radius: var(--r-md);
+  color: var(--text-dim); font-size: var(--fs-md); font-weight: 500;
+  transition: background .16s var(--ease), color .16s var(--ease);
+  position: relative;
+}
+.nav-item:hover { background: var(--surface-2); color: var(--text); }
+.nav-item.active { background: var(--accent-soft); color: var(--accent-hi); font-weight: 600; }
+.nav-item.active::before {
+  content: ""; position: absolute; left: -12px;
+  top: 50%; transform: translateY(-50%);
+  width: 3px; height: 18px; border-radius: 0 3px 3px 0; background: var(--accent);
+}
+.nav-ico { width: 18px; text-align: center; font-size: 15px; flex: none; }
+.nav-count {
+  margin-left: auto; font-size: var(--fs-xs); font-variant-numeric: tabular-nums;
+  background: var(--surface-3); color: var(--text-dim);
+  padding: 1px 7px; border-radius: var(--r-full); font-weight: 600;
+}
+.nav-item.active .nav-count { background: var(--accent); color: var(--accent-fg); }
+
+.sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: var(--sp-2); }
+.vault-chip {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md);
+  background: var(--surface-2); border: 1px solid var(--border);
+  font-size: var(--fs-xs); color: var(--text-dim); min-width: 0;
+}
+.vault-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; box-shadow: 0 0 0 3px var(--ok-soft); }
+.vault-chip .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 10px; }
+
+.main { display: flex; flex-direction: column; min-width: 0; }
+
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  height: var(--topbar-h); flex: none;
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: 0 var(--sp-5);
+  background: var(--surface);
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+}
+@supports not (backdrop-filter: blur(4px)) { .topbar { background: var(--bg); } }
+
+.menu-btn { display: none; }
+
+.search {
+  position: relative; flex: 1; max-width: 460px;
+}
+.search input {
+  width: 100%; height: 38px;
+  padding: 0 var(--sp-3) 0 36px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text); font-size: var(--fs-md); font-family: inherit;
+  transition: border-color .16s var(--ease), box-shadow .16s var(--ease);
+}
+.search input::placeholder { color: var(--text-faint); }
+.search input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.search-ico { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-faint); font-size: 14px; pointer-events: none; }
+.search kbd {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  font-family: var(--font); font-size: 10px; color: var(--text-faint);
+  border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; background: var(--surface-2);
+}
+.search input:focus ~ kbd { opacity: 0; }
+
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); }
+
+.select {
+  height: 34px; padding: 0 26px 0 var(--sp-3);
+  border-radius: var(--r-md); border: 1px solid var(--border);
+  background: var(--surface); color: var(--text);
+  font-size: var(--fs-sm); font-family: inherit; cursor: pointer;
+  appearance: none; -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  transition: border-color .16s var(--ease);
+}
+.select:hover { border-color: var(--border-hi); }
+.select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+.content { padding: var(--sp-5); max-width: 1280px; width: 100%; margin: 0 auto; flex: 1; }
+
+.page-head { display: flex; align-items: flex-start; gap: var(--sp-4); margin-bottom: var(--sp-5); flex-wrap: wrap; }
+.page-title { font-size: var(--fs-2xl); line-height: 1.2; }
+.page-sub { color: var(--text-dim); font-size: var(--fs-md); margin-top: 2px; }
+.page-actions { margin-left: auto; display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+
+/* ============================ Components ============================ */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 36px; padding: 0 var(--sp-4);
+  border-radius: var(--r-md); border: 1px solid var(--border);
+  background: var(--surface); color: var(--text);
+  font-size: var(--fs-md); font-weight: 550; font-family: inherit;
+  cursor: pointer; white-space: nowrap;
+  transition: background .16s var(--ease), border-color .16s var(--ease), transform .08s var(--ease), box-shadow .16s var(--ease);
+}
+.btn:hover { background: var(--surface-2); border-color: var(--border-hi); }
+.btn:active { transform: translateY(1px); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); box-shadow: var(--shadow); }
+.btn-primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
+.btn-danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+.btn-danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+.btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+.btn-sm { height: 30px; padding: 0 var(--sp-3); font-size: var(--fs-sm); }
+.btn-block { width: 100%; }
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+
+.icon-btn {
+  display: inline-grid; place-items: center;
+  width: 30px; height: 30px; flex: none;
+  border-radius: var(--r-sm); border: 1px solid transparent;
+  background: transparent; color: var(--text-dim);
+  cursor: pointer; font-size: 14px; line-height: 1;
+  transition: background .14s var(--ease), color .14s var(--ease), border-color .14s var(--ease);
+}
+.icon-btn:hover { background: var(--surface-3); color: var(--text); border-color: var(--border); }
+.icon-btn.danger:hover { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+.icon-row { display: flex; gap: 2px; justify-content: flex-end; align-items: center; }
+form.inline { display: inline; margin: 0; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.card-head {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+}
+.card-head h2, .card-head h3 { font-size: var(--fs-lg); }
+.card-head .spacer { margin-left: auto; }
+.card-body { padding: var(--sp-5); }
+.card-foot {
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: var(--fs-xs); color: var(--text-faint);
+}
+
+/* Stat tiles */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--sp-4); margin-bottom: var(--sp-5); }
+.stat {
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg); box-shadow: var(--shadow);
+  transition: border-color .16s var(--ease), transform .16s var(--ease);
+}
+.stat:hover { border-color: var(--border-hi); transform: translateY(-2px); }
+.stat-ico {
+  width: 42px; height: 42px; flex: none; border-radius: var(--r-md);
+  display: grid; place-items: center; font-size: 19px;
+  background: var(--accent-soft); color: var(--accent-hi);
+}
+.stat-n { font-size: var(--fs-2xl); font-weight: 680; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stat-l { font-size: var(--fs-sm); color: var(--text-dim); }
+
+/* Tables */
+.table-wrap { overflow-x: auto; }
+table.t { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
+table.t th {
+  text-align: left; font-weight: 600; font-size: var(--fs-xs);
+  text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint);
+  padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border);
+  white-space: nowrap; background: var(--surface-2);
+  position: sticky; top: 0; z-index: 1;
+}
+table.t td { padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); vertical-align: middle; }
+table.t tbody tr { transition: background .13s var(--ease); }
+table.t tbody tr:hover { background: var(--surface-2); }
+table.t tbody tr:last-child td { border-bottom: none; }
+table.t td.num { font-variant-numeric: tabular-nums; color: var(--text-faint); width: 56px; }
+table.t td.actions { text-align: right; width: 1%; white-space: nowrap; }
+table.t td.strong { font-weight: 550; }
+.mono { font-family: var(--mono); font-size: var(--fs-sm); }
+
+.empty { padding: var(--sp-7) var(--sp-5); text-align: center; color: var(--text-dim); }
+.empty-ico { font-size: 34px; opacity: .5; margin-bottom: var(--sp-3); }
+.empty-t { font-weight: 600; color: var(--text); margin-bottom: var(--sp-1); }
+.empty-d { font-size: var(--fs-md); margin-bottom: var(--sp-4); }
+
+/* Forms */
+.field { margin-bottom: var(--sp-4); }
+.field > label { display: block; font-size: var(--fs-sm); font-weight: 550; color: var(--text-dim); margin-bottom: 6px; }
+.input, textarea.input, select.input {
+  width: 100%; min-height: 38px; padding: 8px var(--sp-3);
+  border-radius: var(--r-md); border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text);
+  font-size: var(--fs-base); font-family: inherit; line-height: 1.5;
+  transition: border-color .16s var(--ease), box-shadow .16s var(--ease), background .16s var(--ease);
+}
+.input::placeholder { color: var(--text-faint); }
+.input:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
+textarea.input { min-height: 120px; resize: vertical; font-family: var(--mono); font-size: var(--fs-md); }
+.hint { font-size: var(--fs-xs); color: var(--text-faint); margin-top: 5px; }
+.form-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-5); flex-wrap: wrap; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
+
+/* Chips / badges */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: var(--r-full);
+  font-size: var(--fs-xs); font-weight: 600;
+  background: var(--surface-3); color: var(--text-dim); border: 1px solid var(--border);
+}
+.chip.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.chip.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.chip-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* Flash / alerts */
+.flash {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4);
+  border-radius: var(--r-md); font-size: var(--fs-md);
+  background: var(--ok-soft); color: var(--ok);
+  border: 1px solid transparent;
+}
+.flash.error { background: var(--danger-soft); color: var(--danger); }
+.msg {
+  padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4);
+  border-radius: var(--r-md); font-size: var(--fs-md);
+  background: var(--danger-soft); color: var(--danger);
+}
+
+/* Secret reveal field */
+.secret {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.secret-val { font-family: var(--mono); font-size: var(--fs-base); word-break: break-all; flex: 1; min-width: 0; }
+.secret-val.masked { letter-spacing: .18em; color: var(--text-faint); }
+
+/* Definition list for view pages */
+.dl { display: grid; grid-template-columns: 150px 1fr; gap: var(--sp-3) var(--sp-4); align-items: start; }
+.dl dt { font-size: var(--fs-sm); color: var(--text-dim); font-weight: 550; }
+.dl dd { margin: 0; font-size: var(--fs-base); word-break: break-word; }
+
+/* Toast */
+#toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 14px);
+  background: var(--surface-3); color: var(--text);
+  border: 1px solid var(--border-hi); border-radius: var(--r-md);
+  padding: 10px var(--sp-4); font-size: var(--fs-md); font-weight: 550;
+  box-shadow: var(--shadow-lg); z-index: 200;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s var(--ease), transform .2s var(--ease);
+}
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+#toast.error { border-color: var(--danger); color: var(--danger); }
+
+/* Auto-lock countdown */
+.lockbar { display: flex; align-items: center; gap: 7px; font-size: var(--fs-xs); color: var(--text-faint); }
+.lockbar.warn { color: var(--warn); font-weight: 600; }
+.lockbar .track { width: 44px; height: 4px; border-radius: var(--r-full); background: var(--surface-3); overflow: hidden; }
+.lockbar .fill { height: 100%; width: 100%; background: var(--ok); transition: width .95s linear, background .3s var(--ease); }
+.lockbar.warn .fill { background: var(--warn); }
+
+/* TOTP */
+.totp {
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-5);
+}
+.totp-code {
+  font-family: var(--mono); font-size: 44px; font-weight: 600;
+  letter-spacing: .14em; color: var(--accent-hi);
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.totp-ring { --pct: 100; width: 100%; max-width: 240px; height: 5px; border-radius: var(--r-full); background: var(--surface-3); overflow: hidden; }
+.totp-ring i { display: block; height: 100%; width: calc(var(--pct) * 1%); background: var(--accent); transition: width .95s linear; }
+
+/* Login */
+.login-wrap { min-height: 100vh; display: grid; place-items: center; padding: var(--sp-5); }
+.login-card { width: 100%; max-width: 400px; }
+.login-brand { text-align: center; margin-bottom: var(--sp-5); }
+.login-brand .brand-mark { margin: 0 auto var(--sp-3); width: 52px; height: 52px; font-size: 24px; border-radius: 14px; }
+.login-brand h1 { font-size: var(--fs-xl); }
+.login-brand p { color: var(--text-dim); font-size: var(--fs-md); margin-top: 4px; }
+
+/* Generator */
+.gen-out {
+  font-family: var(--mono); font-size: var(--fs-xl); font-weight: 600;
+  padding: var(--sp-4); border-radius: var(--r-md);
+  background: var(--surface-2); border: 1px dashed var(--border-hi);
+  word-break: break-all; text-align: center; min-height: 62px;
+  display: grid; place-items: center;
+}
+.meter { height: 6px; border-radius: var(--r-full); background: var(--surface-3); overflow: hidden; margin-top: var(--sp-3); }
+.meter i { display: block; height: 100%; width: 0; transition: width .3s var(--ease), background .3s var(--ease); }
+.switch-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.switch-row:last-child { border-bottom: none; }
+.switch-row span { font-size: var(--fs-md); }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+
+/* Overlay (import progress) */
+.overlay {
+  position: absolute; inset: 0; z-index: 5;
+  display: none; place-items: center;
+  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  border-radius: var(--r-lg);
+}
+.overlay.on { display: grid; }
+.spinner {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 3px solid var(--border-hi); border-top-color: var(--accent);
+  animation: spin .8s linear infinite; margin: 0 auto var(--sp-3);
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.overlay-in { text-align: center; font-size: var(--fs-md); color: var(--text-dim); }
+
+/* Utilities */
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--sp-4); }
+.stack { display: flex; flex-direction: column; gap: var(--sp-4); }
+.muted { color: var(--text-dim); }
+.faint { color: var(--text-faint); font-size: var(--fs-sm); }
+.hidden { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+/* ============================ Responsive ============================ */
+.scrim { display: none; }
+
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar {
+    position: fixed; inset: 0 auto 0 0; width: 272px;
+    transform: translateX(-100%);
+    transition: transform .24s var(--ease);
+    box-shadow: var(--shadow-lg);
+  }
+  body.nav-open .sidebar { transform: translateX(0); }
+  body.nav-open .scrim {
+    display: block; position: fixed; inset: 0; z-index: 35;
+    background: rgba(0,0,0,.5);
+  }
+  .menu-btn { display: inline-grid; }
+  .content { padding: var(--sp-4); }
+  .search kbd { display: none; }
+  .dl { grid-template-columns: 1fr; gap: var(--sp-1); }
+  .dl dt { margin-top: var(--sp-3); }
+  .row2 { grid-template-columns: 1fr; }
+  .page-actions { width: 100%; }
+}
+@media (max-width: 620px) {
+  .topbar { padding: 0 var(--sp-3); gap: var(--sp-2); }
+  .lockbar .track, .vault-chip .path { display: none; }
+  .totp-code { font-size: 34px; }
+  .stats { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--sp-3); }
+  .stat { padding: var(--sp-3) var(--sp-4); gap: var(--sp-3); }
+  .stat-ico { width: 36px; height: 36px; font-size: 16px; }
+  .stat-n { font-size: var(--fs-xl); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+@media print { .sidebar, .topbar, .page-actions, #toast { display: none !important; } .app { grid-template-columns: 1fr; } }
+</style>
 """
 
-MAIN_HTML = """<!doctype html>
-<html>
+
+SHELL_SCRIPT = """
+<script>
+(function () {
+  /* ---- theme ---------------------------------------------------------- */
+  var THEMES = ["dark", "amoled", "cyberpunk", "light"];
+  function applyTheme(t) {
+    if (THEMES.indexOf(t) < 0) t = "dark";
+    THEMES.forEach(function (x) { document.body.classList.remove("theme-" + x); });
+    document.body.classList.add("theme-" + t);
+    try { localStorage.setItem("spm_theme", t); } catch (e) {}
+    var p = document.getElementById("theme-picker");
+    if (p && p.value !== t) p.value = t;
+  }
+  window.SPM_setTheme = applyTheme;
+
+  /* ---- toast ---------------------------------------------------------- */
+  var toastTimer;
+  function toast(msg, isErr) {
+    var el = document.getElementById("toast");
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.toggle("error", !!isErr);
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove("show"); }, 2000);
+  }
+  window.SPM_toast = toast;
+
+  /* ---- clipboard ------------------------------------------------------ */
+  function t(key, fb) {
+    return (window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t(key, fb) : fb;
+  }
+  window.SPM_copy = function (text, label) {
+    function ok() { toast(label || t("toast.copy_success", "Copied to clipboard.")); }
+    function bad() { toast(t("toast.copy_fail", "Copy failed."), true); }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(ok).catch(fallback);
+    } else { fallback(); }
+    function fallback() {
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        var done = document.execCommand("copy");
+        document.body.removeChild(ta);
+        done ? ok() : bad();
+      } catch (e) { bad(); }
+    }
+  };
+
+  /* ---- mobile nav ----------------------------------------------------- */
+  window.SPM_toggleNav = function () { document.body.classList.toggle("nav-open"); };
+
+  /* ---- instant table filter ------------------------------------------- */
+  function wireSearch() {
+    var box = document.getElementById("q");
+    if (!box) return;
+    function run() {
+      var term = box.value.trim().toLowerCase();
+      var any = false;
+      document.querySelectorAll("[data-searchable] tbody tr[data-row]").forEach(function (tr) {
+        var hit = !term || (tr.getAttribute("data-row") || "").indexOf(term) >= 0;
+        tr.classList.toggle("hidden", !hit);
+        if (hit) any = true;
+      });
+      document.querySelectorAll("[data-empty-search]").forEach(function (n) {
+        n.classList.toggle("hidden", any || !term);
+      });
+    }
+    box.addEventListener("input", run);
+    box.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { box.value = ""; run(); box.blur(); }
+    });
+    run();
+  }
+
+  /* ---- keyboard shortcuts --------------------------------------------- */
+  document.addEventListener("keydown", function (e) {
+    var tag = (e.target && e.target.tagName || "").toLowerCase();
+    var typing = tag === "input" || tag === "textarea" || tag === "select";
+    if (e.key === "/" && !typing) {
+      var box = document.getElementById("q");
+      if (box) { e.preventDefault(); box.focus(); box.select(); }
+    }
+    if (e.key === "Escape" && document.body.classList.contains("nav-open")) {
+      document.body.classList.remove("nav-open");
+    }
+  });
+
+  document.addEventListener("DOMContentLoaded", function () {
+    var saved = "dark";
+    try { saved = localStorage.getItem("spm_theme") || "dark"; } catch (e) {}
+    applyTheme(saved);
+    var p = document.getElementById("theme-picker");
+    if (p) p.addEventListener("change", function () { applyTheme(p.value); });
+    wireSearch();
+  });
+})();
+</script>
+"""
+
+# Auto-lock with a visible countdown. Same 30s idle policy as before, but the
+# user can now see it coming instead of being logged out with no warning.
+LOCKBAR_SCRIPT = """
+<script>
+(function () {
+  var IDLE_MS = 30000, WARN_AT = 10;
+  var deadline = Date.now() + IDLE_MS, paused = false, ticker;
+  function reset() { if (!paused) deadline = Date.now() + IDLE_MS; }
+  function render() {
+    var left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    var bar = document.getElementById("lockbar");
+    if (bar) {
+      var fill = bar.querySelector(".fill");
+      if (fill) fill.style.width = (left / (IDLE_MS / 1000) * 100) + "%";
+      bar.classList.toggle("warn", left <= WARN_AT);
+      var lbl = bar.querySelector(".lbl");
+      if (lbl) {
+        var t = (window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t("lock.in", "Locks in") : "Locks in";
+        lbl.textContent = paused ? ((window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t("lock.paused", "Lock paused") : "Lock paused") : (t + " " + left + "s");
+      }
+    }
+    if (!paused && left <= 0) { window.location.href = "/logout"; }
+  }
+  window.SPM_AutoLock = {
+    pause: function () { paused = true; render(); },
+    resume: function () { paused = false; reset(); render(); },
+    restart: reset
+  };
+  ["click", "keydown", "mousemove", "touchstart", "scroll"].forEach(function (ev) {
+    window.addEventListener(ev, reset, { passive: true });
+  });
+  ticker = setInterval(render, 1000);
+  document.addEventListener("DOMContentLoaded", render);
+})();
+</script>
+"""
+
+# nav key -> (href, icon, i18n key, fallback label, counter name)
+NAV_SECTIONS = [
+    ("nav.group.vault", [
+        ("overview",       "/",               "◈", "nav.overview",       "Overview",       None),
+        ("passwords",      "/passwords",      "\U0001F511", "nav.passwords",      "Passwords",      "passwords"),
+        ("notes",          "/notes",          "\U0001F5D2", "nav.notes",          "Secure Notes",   "notes"),
+        ("passphrases",    "/passphrases",    "\U0001F4DD", "nav.passphrases",    "Passphrases",    "passphrases"),
+        ("authenticators", "/authenticators", "⏱",  "nav.authenticators", "Authenticators", "authenticators"),
+        ("backup-codes",   "/backup-codes",   "\U0001F9EF", "nav.backup_codes",   "Backup Codes",   "backups"),
+    ]),
+    ("nav.group.tools", [
+        ("generator", "/generator", "✨", "nav.generator", "Generator",       None),
+        ("transfer",  "/transfer",  "⇅", "nav.transfer",  "Export / Import", None),
+    ]),
+]
+
+
+def _nav_html(active, counts):
+    out = []
+    for group_key, items in NAV_SECTIONS:
+        label = {"nav.group.vault": "Vault", "nav.group.tools": "Tools"}[group_key]
+        out.append(f'<div class="nav-label" data-i18n="{group_key}">{label}</div>')
+        out.append('<div class="nav">')
+        for key, href, ico, i18n, fallback, counter in items:
+            cls = "nav-item active" if key == active else "nav-item"
+            badge = ""
+            if counter is not None:
+                n = counts.get(counter, 0)
+                if n:
+                    badge = f'<span class="nav-count">{n}</span>'
+            out.append(
+                f'<a class="{cls}" href="{href}">'
+                f'<span class="nav-ico" aria-hidden="true">{ico}</span>'
+                f'<span data-i18n="{i18n}">{fallback}</span>{badge}</a>'
+            )
+        out.append("</div>")
+    return "".join(out)
+
+
+LANG_BOOTSTRAP = """
+<script>
+/* Resolve language from the cookie on the client. Keeping it out of the
+   server response means no request-scoped state has to be threaded through
+   every template - which matters because the server is threaded. */
+window.SPM_LANG = (function () {
+  var m = document.cookie.match(/(?:^|;\\s*)spm_lang=([^;]*)/);
+  var v = m ? decodeURIComponent(m[1]) : "en";
+  return ["en", "id", "ja"].indexOf(v) >= 0 ? v : "en";
+})();
+</script>
+"""
+
+
+def render_shell(content, active, version, vault_path, title="Sans Password Manager",
+                 counts=None, flash="", searchable=False):
+    """Wrap page content in the shared app shell (sidebar + topbar)."""
+    counts = counts or {}
+    search_html = ""
+    if searchable:
+        search_html = (
+            '<div class="search">'
+            '<span class="search-ico" aria-hidden="true">⌕</span>'
+            '<input id="q" type="search" autocomplete="off" spellcheck="false" '
+            'data-i18n-placeholder="search.placeholder" placeholder="Search this vault...">'
+            '<kbd>/</kbd></div>'
+        )
+    else:
+        search_html = '<div class="search" aria-hidden="true"></div>'
+
+    return f"""<!doctype html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Sans Password Manager – Web</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg-image: radial-gradient(circle at top left, #1a1a27 0, #050509 45%, #000 100%);
-      --bg: #05060a;
-      --panel: rgba(12,12,18,0.94);
-      --card: rgba(16,16,24,0.9);
-      --text: #f7f8fb;
-      --muted: #a3a7be;
-      --accent: #5f5fff;
-      --accent-2: #8d8dff;
-      --danger: #ff4d6a;
-      --danger-soft: rgba(255,77,106,0.14);
-      --table-alt: rgba(255,255,255,0.03);
-      --border: rgba(255,255,255,0.1);
-    }
-    body.theme-amoled {
-      --bg-image: #000;
-      --bg: #000;
-      --panel: #0b0b0b;
-      --card: #111;
-      --text: #ededf2;
-      --muted: #90909c;
-      --accent: #00c2ff;
-      --accent-2: #2ee1ff;
-      --table-alt: rgba(255,255,255,0.05);
-      --border: rgba(255,255,255,0.08);
-    }
-    body.theme-cyberpunk {
-      --bg-image: linear-gradient(135deg,#1a0030 0%,#0a0014 50%,#180020 100%);
-      --bg: #0a0014;
-      --panel: rgba(22,0,40,0.96);
-      --card: rgba(28,0,48,0.9);
-      --text: #fce9ff;
-      --muted: #caa8ff;
-      --accent: #ff2fd1;
-      --accent-2: #5cf4ff;
-      --table-alt: rgba(255,47,209,0.08);
-      --border: rgba(255,255,255,0.12);
-    }
-    body.theme-light {
-      color-scheme: light;
-      --bg-image: linear-gradient(135deg,#f8fafc 0%,#eef2f9 100%);
-      --bg: #f7f9fc;
-      --panel: #ffffffea;
-      --card: #ffffff;
-      --text: #0f172a;
-      --muted: #4b5563;
-      --accent: #2563eb;
-      --accent-2: #5f8dff;
-      --table-alt: #f3f4f7;
-      --border: rgba(17,24,39,0.08);
-    }
-    * { box-sizing:border-box; }
-    body {
-      margin:0;
-      padding:0;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      background: var(--bg-image);
-      color: var(--text);
-      min-height:100vh;
-      display:flex;
-      flex-direction:column;
-      animation:bgShift 24s ease-in-out infinite alternate;
-    }
-    @keyframes bgShift {
-      0% { background-position: 0% 0%; }
-      50% { background-position: 60% 40%; }
-      100% { background-position: 100% 0%; }
-    }
-    header {
-      position:sticky;
-      top:0;
-      z-index:10;
-      padding:10px 16px;
-      background:linear-gradient(to bottom, rgba(0,0,0,0.35), transparent);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
-      border-bottom:1px solid var(--border);
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:12px;
-    }
-    .title {
-      display:flex;
-      flex-direction:column;
-      gap:2px;
-    }
-    .title h1 {
-      margin:0;
-      font-size:17px;
-      letter-spacing:0.12em;
-      text-transform:uppercase;
-    }
-    .title .sub {
-      font-size:11px;
-      color:var(--muted);
-    }
-    .right-header {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      min-width:0;
-    }
-    .lang-picker select {
-      background:rgba(255,255,255,0.08);
-      border:1px solid rgba(255,255,255,0.18);
-      color:var(--text);
-      border-radius:10px;
-      padding:6px 8px;
-      font-size:12px;
-    }
-    .vault-badge {
-      font-size:11px;
-      padding:6px 10px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,0.12);
-      background:var(--panel);
-      color:var(--text);
-      max-width:220px;
-      text-overflow:ellipsis;
-      overflow:hidden;
-      white-space:nowrap;
-      display:flex;
-      align-items:center;
-      gap:4px;
-      animation: floatHeader 9s ease-in-out infinite alternate;
-    }
-    @keyframes floatHeader {
-      0% { transform: translateY(0); }
-      100% { transform: translateY(-2px); }
-    }
-    .vault-badge span.label {
-      opacity:0.7;
-    }
-    .logout {
-      font-size:11px;
-      padding:6px 10px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,0.18);
-      background:linear-gradient(to bottom right, rgba(255,255,255,0.05), rgba(0,0,0,0.9));
-      color:#ff9b9b;
-      text-decoration:none;
-      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-      white-space:nowrap;
-    }
-    .logout:hover {
-      background:linear-gradient(to bottom right, rgba(255,120,120,0.18), rgba(0,0,0,0.9));
-      box-shadow:0 8px 24px rgba(255,120,120,0.4);
-      transform: translateY(-1px);
-    }
-    .layout {
-      flex:1;
-      display:flex;
-      padding:16px;
-      gap:16px;
-      flex-wrap:wrap;
-    }
-    .panel {
-      flex: 3 1 280px;
-      border-radius:22px;
-      background:var(--panel);
-      backdrop-filter: blur(26px) saturate(180%);
-      -webkit-backdrop-filter: blur(26px) saturate(180%);
-      border:1px solid var(--border);
-      box-shadow:0 18px 40px rgba(0,0,0,0.28);
-      padding:14px 16px 10px;
-      display:flex;
-      flex-direction:column;
-      overflow:hidden;
-      animation: fadeUp 0.4s ease-out;
-    }
-    .panel-header {
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      padding:4px 4px 6px;
-      gap:8px;
-      flex-wrap:wrap;
-    }
-    .panel-header h2 {
-      margin:0;
-      font-size:13px;
-      text-transform:uppercase;
-      letter-spacing:0.18em;
-      color:#d4d7e5;
-    }
-    .chip {
-      display:inline-flex;
-      align-items:center;
-      padding:3px 9px;
-      border-radius:999px;
-      font-size:10px;
-      border:1px solid rgba(255,255,255,0.18);
-      background:radial-gradient(circle at top, rgba(255,255,255,0.08), rgba(0,0,0,0.9));
-      color:#cfd3e8;
-      gap:6px;
-      margin-left:8px;
-    }
-    .chip-dot {
-      width:7px;
-      height:7px;
-      border-radius:999px;
-      background:radial-gradient(circle, #54e37d, #1d9c55);
-      box-shadow:0 0 9px rgba(84,227,125,0.9);
-      animation: pulse 1.6s ease-in-out infinite;
-    }
-    @keyframes pulse {
-      0% { transform: scale(0.9); opacity:0.9; }
-      50% { transform: scale(1.15); opacity:1; }
-      100% { transform: scale(0.9); opacity:0.9; }
-    }
-.btn-primary {
-      border-radius:999px;
-      border:none;
-      padding:7px 13px;
-      font-size:11px;
-      font-weight:500;
-      letter-spacing:0.08em;
-      text-transform:uppercase;
-      cursor:pointer;
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      text-decoration:none;
-      background:linear-gradient(135deg, rgba(95,95,255,0.18), rgba(95,95,255,0.32));
-      color:var(--text);
-      border:1px solid var(--border);
-      box-shadow:0 6px 14px rgba(0,0,0,0.12);
-      transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
-    }
-    .btn-primary.small {
-      padding:6px 11px;
-      font-size:10px;
-    }
-    .btn-primary:hover {
-      filter:brightness(1.08);
-      box-shadow:0 8px 22px rgba(0,0,0,0.18);
-      transform: translateY(-1px);
-    }
-    .table-wrapper {
-      margin-top:8px;
-      border-radius:18px;
-      border:1px solid var(--border);
-      background:var(--card);
-      overflow:auto;
-      max-height:60vh;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(120,120,140,0.7) transparent;
-    }
-    .table-wrapper::-webkit-scrollbar {
-      height:6px;
-      width:6px;
-    }
-    .table-wrapper::-webkit-scrollbar-thumb {
-      background:rgba(140,140,170,0.7);
-      border-radius:999px;
-    }
-    table {
-      width:100%;
-      border-collapse:collapse;
-      min-width:380px;
-      background:var(--card);
-      border:1px solid var(--border);
-      border-radius:12px;
-      overflow:hidden;
-    }
-    th, td {
-      padding:8px 10px;
-      font-size:12px;
-      border-bottom:1px solid var(--border);
-      color:var(--text);
-    }
-    th {
-      text-align:left;
-      background:linear-gradient(to right, rgba(255,255,255,0.04), transparent);
-      font-weight:600;
-      color:var(--text);
-      position:sticky;
-      top:0;
-      z-index:1;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-    }
-    tr:nth-child(even) td {
-      background:var(--table-alt);
-    }
-    tr:last-child td {
-      border-bottom:none;
-    }
-    tr:hover td {
-      background:linear-gradient(to right, rgba(255,255,255,0.07), transparent);
-    }
-    td.actions {
-      text-align:right;
-      white-space:nowrap;
-      min-width:90px;
-    }
-    .icon-row {
-      display:inline-flex;
-      gap:4px;
-    }
-    .icon-btn {
-      width:26px;
-      height:26px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,0.25);
-      background:rgba(5,5,8,0.96);
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      font-size:14px;
-      color:#e5e7f5;
-      text-decoration:none;
-      cursor:pointer;
-      padding:0;
-      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-    }
-    .icon-btn:hover {
-      background:rgba(15,15,22,1);
-      box-shadow:0 6px 18px rgba(0,0,0,0.7);
-      transform: translateY(-1px);
-    }
-    .icon-btn.danger {
-      border-color:rgba(255,77,106,0.7);
-      color:#ffd0d8;
-      background:rgba(60,10,20,0.98);
-    }
-    .icon-btn.danger:hover {
-      box-shadow:0 8px 22px rgba(255,77,106,0.6);
-    }
-    .badge-empty {
-      padding:16px;
-      text-align:center;
-      font-size:12px;
-      color:#9fa3b4;
-    }
-    .side {
-      flex: 2 1 260px;
-      display:flex;
-      flex-direction:column;
-      gap:16px;
-    }
-    .card {
-      border-radius:20px;
-      padding:14px 14px 12px;
-      background:var(--card);
-      border:1px solid var(--border);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      box-shadow:0 12px 26px rgba(0,0,0,0.16);
-      animation: fadeUp 0.5s ease-out;
-    }
-    .import-card {
-      position:relative;
-      overflow:hidden;
-    }
-    .import-card[data-loading] > *:not(.import-overlay) {
-      filter:blur(1px);
-      pointer-events:none;
-      user-select:none;
-    }
-    .import-overlay {
-      position:absolute;
-      inset:0;
-      display:none;
-      align-items:center;
-      justify-content:center;
-      background:rgba(3,5,18,0.85);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      z-index:5;
-      text-align:center;
-      padding:18px;
-    }
-    .import-overlay.visible {
-      display:flex;
-    }
-    .import-card[data-loading] .import-overlay {
-      display:flex;
-    }
-    .import-overlay-inner {
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-      align-items:center;
-    }
-    .import-spinner {
-      width:30px;
-      height:30px;
-      border-radius:50%;
-      border:3px solid rgba(255,255,255,0.2);
-      border-top-color:#9fa3f0;
-      animation:spin 1s linear infinite;
-    }
-    .import-overlay.success {
-      background:rgba(16,48,30,0.9);
-    }
-    .import-overlay.error {
-      background:rgba(70,16,24,0.92);
-    }
-    .import-overlay.success .import-spinner,
-    .import-overlay.error .import-spinner {
-      display:none;
-    }
-    .import-overlay-text {
-      font-size:12px;
-      color:#f5f5f7;
-      letter-spacing:0.04em;
-      text-transform:uppercase;
-    }
-    .card h3 {
-      margin:0 0 6px;
-      font-size:13px;
-      letter-spacing:0.12em;
-      text-transform:uppercase;
-      color:var(--text);
-    }
-    .card p {
-      margin:0 0 8px;
-      font-size:11px;
-      color:var(--muted);
-    }
-    .notes-table-wrapper {
-      margin-top:6px;
-      border-radius:14px;
-      border:1px solid var(--border);
-      background:var(--card);
-      overflow:auto;
-      max-height:220px;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(120,120,140,0.5) transparent;
-    }
-    .notes-table-wrapper::-webkit-scrollbar {
-      height:6px;
-      width:6px;
-    }
-    .notes-table-wrapper::-webkit-scrollbar-thumb {
-      background:rgba(140,140,170,0.7);
-      border-radius:999px;
-    }
-    table.notes-table {
-      width:100%;
-      border-collapse:collapse;
-      min-width:260px;
-      background:var(--card);
-      border:1px solid var(--border);
-      border-radius:12px;
-      overflow:hidden;
-    }
-    table.notes-table th,
-    table.notes-table td {
-      padding:6px 8px;
-      font-size:11px;
-      border-bottom:1px solid var(--border);
-      color:var(--text);
-    }
-    table.notes-table th {
-      background:linear-gradient(to right, rgba(255,255,255,0.04), transparent);
-      font-weight:600;
-    }
-    table.notes-table tr:nth-child(even) td { background:var(--table-alt); }
-    table.notes-table tr:last-child td {
-      border-bottom:none;
-    }
-    table.notes-table td.actions {
-      min-width:70px;
-    }
-    form.inline {
-      display:inline;
-      margin:0;
-      padding:0;
-    }
-    @keyframes fadeUp {
-      from { opacity:0; transform: translateY(10px); }
-      to   { opacity:1; transform: translateY(0); }
-    }
-    @keyframes spin {
-      from { transform: rotate(0deg); }
-      to   { transform: rotate(360deg); }
-    }
-
-    @media (max-width: 720px) {
-      header {
-        flex-direction:column;
-        align-items:flex-start;
-      }
-      .right-header {
-        width:100%;
-        justify-content:space-between;
-      }
-      .layout {
-        padding:12px;
-      }
-      table {
-        min-width:100%;
-      }
-    }
-
-    /* Theme overrides */
-    body { background: var(--bg-image) !important; color: var(--text) !important; }
-    header { background: linear-gradient(to bottom, var(--panel), rgba(0,0,0,0.4), transparent) !important; }
-    .panel, .card, .glass, .vault-badge { background: var(--panel) !important; color: var(--text) !important; }
-    .panel, .card { border:1px solid rgba(255,255,255,0.08); }
-    .title .sub, .muted, .panel-header h2, .chip, th, td { color: var(--muted) !important; }
-.btn-primary { background: linear-gradient(135deg, rgba(95,95,255,0.18), rgba(95,95,255,0.32)) !important; color: var(--text) !important; border:1px solid var(--border) !important; }
-    a, .link { color: var(--accent); }
-    body.theme-light a, body.theme-light .link { color: #2563eb; }
-    .flash {
-      margin: 12px 16px 0;
-      padding: 10px 12px;
-      border-radius: 10px;
-      font-size: 12px;
-      background: rgba(46, 204, 113, 0.14);
-      color: #b3f5c6;
-      border: 1px solid rgba(46, 204, 113, 0.25);
-    }
-    .flash.error {
-      background: rgba(255, 77, 106, 0.16);
-      color: #ffd0d8;
-      border-color: rgba(255,77,106,0.3);
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{html.escape(title)} · SPM</title>
+{DESIGN_CSS}
 </head>
-<body data-lang="__LANG__">
-  <header>
-    <div class="title">
-      <h1 data-i18n="header.title">Sans Password Manager</h1>
-      <div class="sub" data-i18n="header.subtitle">Liquid-glass web interface · GPG encrypted</div>
-    </div>
-    <div class="right-header">
-      <div class="vault-badge">
-        <span class="label" data-i18n="header.vault">Vault</span> <span>__VAULT_PATH__</span>
+<body class="theme-dark">
+<div class="scrim" onclick="SPM_toggleNav()"></div>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">S</div>
+      <div class="brand-text">
+        <div class="brand-name">SPM</div>
+        <div class="brand-meta">v{html.escape(version)}</div>
       </div>
-      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        <div style="font-size:11px; color:#888ea6;">v__VERSION__</div>
-        <div class="lang-picker">
-          <select id="lang-picker" aria-label="Language">
-            <option value="en">🇺🇸 EN</option>
-            <option value="id">🇮🇩 ID</option>
-            <option value="ja">🇯🇵 JP</option>
-          </select>
+    </div>
+    {_nav_html(active, counts)}
+    <div class="sidebar-foot">
+      <div class="vault-chip" title="{html.escape(vault_path)}">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="path">{html.escape(vault_path)}</span>
+      </div>
+      <a class="btn btn-ghost btn-sm btn-block" href="/logout">
+        <span aria-hidden="true">⏻</span>
+        <span data-i18n="header.logout">Logout</span>
+      </a>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" onclick="SPM_toggleNav()" aria-label="Menu">☰</button>
+      {search_html}
+      <div class="topbar-right">
+        <div class="lockbar" id="lockbar" title="Idle auto-lock">
+          <span class="lbl">Locks in 30s</span>
+          <span class="track"><span class="fill"></span></span>
         </div>
-        <button class="logout" data-i18n="header.check_update" style="padding:6px 10px; border-radius:10px;" onclick="checkUpdate(true)">Check update</button>
-        <select id="theme-picker" style="background:rgba(255,255,255,0.08); color:#f5f5f7; border:1px solid rgba(255,255,255,0.18); border-radius:10px; padding:6px; font-size:12px;">
+        <select class="select" id="lang-picker" aria-label="Language">
+          <option value="en">EN</option>
+          <option value="id">ID</option>
+          <option value="ja">JP</option>
+        </select>
+        <select class="select" id="theme-picker" aria-label="Theme">
           <option value="dark">Dark</option>
           <option value="amoled">AMOLED</option>
           <option value="cyberpunk">Cyberpunk</option>
           <option value="light">Light</option>
         </select>
-        <a href="/logout" class="logout" data-i18n="header.logout">Logout</a>
       </div>
-    </div>
-  </header>
-  __FLASH__
-  <div class="layout">
-    <section class="panel">
-      <div class="panel-header">
-        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-          <h2 data-i18n="section.passwords">Passwords</h2>
-          <div class="chip"><span class="chip-dot"></span><span data-i18n="chip.online">Online · read / write</span></div>
-        </div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <a href="/add" class="btn-primary" data-i18n="btn.add_entry">+ Add Entry</a>
-        </div>
-      </div>
-      <div class="table-wrapper">
-        <table>
-          <tr><th style="width:52px;" data-i18n="table.id">ID</th><th data-i18n="table.name">Name</th><th data-i18n="table.username">Username</th><th style="width:110px; text-align:right;" data-i18n="table.actions">Actions</th></tr>
-          __ROWS__
-        </table>
-      </div>
-      <div style="padding:8px 10px 4px; font-size:11px; color:#888ea6;">
-        <span data-i18n="passwords.footer">Passwords are never sent anywhere else – all crypto stays on this host with GnuPG.</span>
-      </div>
-    </section>
-    <section class="side">
-      <div class="card">
-        <h3 data-i18n="section.secure_notes">Secure Notes</h3>
-        <p data-i18n="section.secure_notes_desc">Encrypted notes stored inside the same vault.</p>
-        <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
-          <a href="/notes-add" class="btn-primary small" data-i18n="btn.add_note">+ Add Note</a>
-        </div>
-        <div class="notes-table-wrapper">
-          <table class="notes-table">
-            <tr><th style="width:40px;" data-i18n="table.id">ID</th><th data-i18n="table.title">Title</th><th style="width:70px; text-align:right;" data-i18n="table.actions">Actions</th></tr>
-            __NOTES_ROWS__
-          </table>
-        </div>
-      </div>
-      <div class="card">
-        <h3 data-i18n="section.generator">Password Generator</h3>
-        <p data-i18n="section.generator_desc">Create strong passwords with length, mode, and symbol toggles.</p>
-        <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
-          <a href="/generator" class="btn-primary small" data-i18n="btn.open_generator">Open Generator</a>
-        </div>
-      </div>
-      <div class="card import-card" id="import-card">
-        <div class="import-overlay" id="import-overlay" aria-live="polite" aria-busy="true">
-          <div class="import-overlay-inner">
-            <div class="import-spinner" id="import-overlay-spinner"></div>
-            <div class="import-overlay-text" id="import-overlay-text" data-i18n="import.overlay_upload">Uploading...</div>
-          </div>
-        </div>
-        <h3 data-i18n="import.title">Export / Import</h3>
-        <p data-i18n="import.subtitle">Download or paste data (csv/json + extended formats).</p>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
-          <form method="get" action="/export" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; width:100%;">
-            <label style="font-size:12px;" data-i18n="import.format_label">Format</label>
-            <select name="fmt" style="flex:1; min-width:140px; padding:6px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text);">
-              <option value="csv">csv (default)</option>
-              <option value="json">json</option>
-              <option value="tsv">tsv</option>
-              <option value="ndjson">ndjson</option>
-              <option value="md">md</option>
-              <option value="html">html</option>
-              <option value="txt">txt</option>
-              <option value="yaml">yaml</option>
-              <option value="xml">xml</option>
-              <option value="sql">sql</option>
-              <option value="ini">ini</option>
-              <option value="psv">psv</option>
-              <option value="rst">rst</option>
-              <option value="toml">toml</option>
-              <option value="org">org</option>
-              <option value="scsv">scsv</option>
-              <option value="csv-noheader">csv-noheader</option>
-              <option value="jsonc">jsonc</option>
-            </select>
-            <button class="btn-primary small" type="submit" data-i18n="import.download">Download</button>
-          </form>
-        </div>
-        <form id="import-form" method="post" action="/import" enctype="multipart/form-data" onsubmit="return window.SPM_handleImportSubmit ? window.SPM_handleImportSubmit(event, this) : true;" style="display:flex; flex-direction:column; gap:8px;">
-          <label style="font-size:12px;" data-i18n="import.import_label">Import format</label>
-          <select name="fmt" style="padding:6px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text);">
-            <option value="csv">csv</option>
-            <option value="json">json</option>
-            <option value="tsv">tsv</option>
-            <option value="ndjson">ndjson/jsonl</option>
-            <option value="md">md/markdown</option>
-            <option value="html">html</option>
-            <option value="txt">txt</option>
-            <option value="yaml">yaml/yml</option>
-            <option value="xml">xml</option>
-            <option value="sql">sql</option>
-            <option value="ini">ini</option>
-            <option value="psv">psv</option>
-            <option value="rst">rst</option>
-            <option value="toml">toml</option>
-            <option value="org">org</option>
-            <option value="scsv">scsv</option>
-            <option value="csv-noheader">csv-noheader</option>
-            <option value="jsonc">jsonc</option>
-          </select>
-          <label style="font-size:12px;" data-i18n="import.upload_label">Upload export file</label>
-          <input type="file" name="file" accept=".csv,.json,.tsv,.ndjson,.jsonl,.md,.markdown,.html,.txt,.yaml,.yml,.xml,.sql,.ini,.psv,.rst,.toml,.org,.scsv" style="color:var(--text);">
-          <label style="font-size:12px;" data-i18n="import.paste_label">Or paste file contents</label>
-          <textarea name="data" rows="5" placeholder="Paste exported data here" data-i18n-placeholder="import.placeholder" style="width:100%; border-radius:12px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text); padding:8px;"></textarea>
-          <button class="btn-primary small" type="submit" id="import-submit" data-i18n="import.submit">Import</button>
-          <div id="import-status" style="font-size:11px; min-height:14px; color:var(--muted);"></div>
-          <div style="font-size:11px; color:var(--muted);" data-i18n="import.supports">Supports passwords, notes, passphrases, authenticators, backup codes.</div>
-        </form>
-      </div>
-      <div class="card">
-        <h3 data-i18n="section.passphrases">Passphrases</h3>
-        <p data-i18n="section.passphrases_desc">Store API tokens or recovery phrases. View prompts master re-check.</p>
-        <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
-          <a href="/passphrase-add" class="btn-primary small" data-i18n="btn.add_passphrase">+ Add Passphrase</a>
-        </div>
-        <div class="notes-table-wrapper">
-          <table class="notes-table">
-            <tr><th style="width:40px;" data-i18n="table.id">ID</th><th data-i18n="table.label">Label</th><th style="width:70px; text-align:right;" data-i18n="table.actions">Actions</th></tr>
-            __PASSPHRASE_ROWS__
-          </table>
-        </div>
-      </div>
-      <div class="card">
-        <h3 data-i18n="section.authenticators">Authenticators (TOTP)</h3>
-        <p data-i18n="section.authenticators_desc">Store 2FA secrets and view live codes.</p>
-        <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
-          <a href="/authenticator-add" class="btn-primary small" data-i18n="btn.add_authenticator">+ Add Authenticator</a>
-        </div>
-        <div class="notes-table-wrapper">
-          <table class="notes-table">
-            <tr><th style="width:40px;" data-i18n="table.id">ID</th><th data-i18n="table.label">Label</th><th style="width:70px;" data-i18n="table.every">Every</th><th style="width:70px;" data-i18n="table.algo">Algo</th><th style="width:90px; text-align:right;" data-i18n="table.actions">Actions</th></tr>
-            __AUTH_ROWS__
-          </table>
-        </div>
-      </div>
-      <div class="card">
-        <h3 data-i18n="section.backups">Backup Codes</h3>
-        <p data-i18n="section.backups_desc">Store recovery codes (view shows full codes).</p>
-        <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
-          <a href="/backup-codes-add" class="btn-primary small" data-i18n="btn.add_backups">+ Add Backup Codes</a>
-        </div>
-        <div class="notes-table-wrapper">
-          <table class="notes-table">
-            <tr><th style="width:40px;" data-i18n="table.id">ID</th><th data-i18n="table.label">Label</th><th style="width:70px; text-align:right;" data-i18n="table.actions">Actions</th></tr>
-            __BACKUP_ROWS__
-          </table>
-        </div>
-      </div>
-      <div class="card">
-        <h3 data-i18n="section.session">Web Session</h3>
-        <p data-i18n="section.session_desc">Protected by your master password. The interface auto-locks after 30 seconds of inactivity and logs you out.</p>
-      </div>
-    </section>
-  </div>
-  <div style="position:fixed; bottom:10px; right:12px; font-size:11px; color:#888ea6;">
-    © 2025 Sansyourways · v__VERSION__
-  </div>
-  <script>window.SPM_LANG="__LANG__";</script>
-  """ + I18N_SCRIPT + """
-  <script>
-    const currentVersion = "__VERSION__";
-    async function fetchLatestVersion() {
-      try {
-        const resp = await fetch("https://api.github.com/repos/sansyourways/Sans_Password_Manager/releases/latest", { headers: { "Accept": "application/vnd.github+json" } });
-        const data = await resp.json();
-        const tag = (data.tag_name || "").replace(/^v/i, "");
-        return tag;
-      } catch (e) {
-        return "";
-      }
-    }
-    async function checkUpdate(showPopup) {
-      const latest = await fetchLatestVersion();
-      if (latest && latest !== currentVersion) {
-        if (showPopup) alert(`Update available: v${latest} (current v${currentVersion}).`);
-        const btn = document.querySelector(".right-header .logout");
-        if (btn) btn.textContent = `Update · v${latest}`;
-      } else if (showPopup) {
-        alert(`You are on the latest version (v${currentVersion}) or cannot reach update server.`);
-      }
-    }
-    function setTheme(theme) {
-      document.body.classList.remove("theme-dark","theme-amoled","theme-cyberpunk","theme-light");
-      document.body.classList.add("theme-" + theme);
-      localStorage.setItem("spm_theme", theme);
-    }
-    function initTheme() {
-      const saved = localStorage.getItem("spm_theme") || "dark";
-      setTheme(saved);
-      const picker = document.getElementById("theme-picker");
-      if (picker) {
-        picker.value = saved;
-        picker.addEventListener("change", () => setTheme(picker.value));
-      }
-    }
-    window.SPM_handleImportSubmit = function(ev, form) {
-      if (ev) ev.preventDefault();
-      form = form || document.getElementById("import-form");
-      if (!form) return false;
-      const t = (key, fallback) => {
-        if (window.SPM_I18N && typeof window.SPM_I18N.t === "function") {
-          return window.SPM_I18N.t(key, fallback);
-        }
-        return fallback !== undefined ? fallback : key;
-      };
-      const statusEl = document.getElementById("import-status");
-      const submitBtn = document.getElementById("import-submit") || form.querySelector("button[type=submit]");
-      const card = document.getElementById("import-card");
-      const overlay = document.getElementById("import-overlay");
-      const overlayText = document.getElementById("import-overlay-text");
-      const overlaySpinner = document.getElementById("import-overlay-spinner");
-      const defaultLabel = submitBtn ? submitBtn.textContent : "";
-      let overlayClearTimer = null;
-      const setStatus = (msg, ok=true) => {
-        if (!statusEl) return;
-        statusEl.textContent = msg || "";
-        statusEl.style.color = ok ? "#9fa3f0" : "#ff9b9b";
-      };
-      const setOverlay = (state, msg) => {
-        if (!card) return;
-        if (!overlay) {
-          if (state) {
-            card.dataset.loading = "1";
-            card.setAttribute("aria-busy", "true");
-          } else {
-            delete card.dataset.loading;
-            card.removeAttribute("aria-busy");
-          }
-          return;
-        }
-        if (!state) {
-          delete card.dataset.loading;
-          card.removeAttribute("aria-busy");
-          overlay.style.display = "none";
-          overlay.classList.remove("success","error");
-          if (overlaySpinner) overlaySpinner.style.display = "";
-          if (overlayText) overlayText.textContent = "";
-          return;
-        }
-        card.dataset.loading = "1";
-        card.setAttribute("aria-busy", "true");
-        overlay.style.display = "flex";
-        overlay.classList.remove("success","error");
-        if (state === "success") overlay.classList.add("success");
-        if (state === "error") overlay.classList.add("error");
-        if (overlaySpinner) overlaySpinner.style.display = state === "loading" ? "" : "none";
-        if (overlayText) overlayText.textContent = msg || "";
-      };
-      const clearOverlayLater = (delay) => {
-        if (overlayClearTimer) {
-          clearTimeout(overlayClearTimer);
-        }
-        overlayClearTimer = setTimeout(() => setOverlay(null), delay);
-      };
-      if (window.SPM_AutoLock) window.SPM_AutoLock.pause();
-      if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.textContent = t("import.importing", "Importing...");
-      }
-      setOverlay("loading", t("import.overlay_upload", "Uploading..."));
-      setStatus(t("import.status_uploading", "Uploading..."), true);
-      const fd = new FormData(form);
-      fetch("/import", {
-        method: "POST",
-        body: fd,
-        headers: { "X-Requested-With": "fetch" },
-      })
-        .then(async (resp) => {
-          let payload = {};
-          try { payload = await resp.json(); } catch (e) {}
-          if (!payload.ok) {
-            throw new Error((payload && payload.message) || "Import failed.");
-          }
-          return payload;
-        })
-        .then((payload) => {
-          const fallbackMsg = t("import.success_default", "Import complete.");
-          const msg = payload.message || fallbackMsg;
-          setStatus(msg, true);
-          form.reset();
-          setOverlay("success", msg || fallbackMsg);
-          setTimeout(() => { window.location.reload(); }, 800);
-        })
-        .catch((err) => {
-          const fallbackMsg = t("import.error_default", "Import failed.");
-          const msg = err.message || fallbackMsg;
-          setStatus(msg, false);
-          setOverlay("error", msg || fallbackMsg);
-          clearOverlayLater(2400);
-        })
-        .finally(() => {
-          if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.textContent = defaultLabel || t("import.submit", "Import");
-          }
-          if (!overlay) {
-            if (card) delete card.dataset.loading;
-          }
-          if (window.SPM_AutoLock) window.SPM_AutoLock.resume();
-        });
-      return false;
-    };
-    document.addEventListener("DOMContentLoaded", () => {
-      initTheme();
-      checkUpdate(false);
-    });
+    </header>
 
-  </script>
-  """ + AUTOLOCK_SCRIPT + """
+    <main class="content">
+      {flash}
+      {content}
+    </main>
+  </div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+{LANG_BOOTSTRAP}
+{I18N_SCRIPT}
+{SHELL_SCRIPT}
+{LOCKBAR_SCRIPT}
 </body>
-</html>
-"""
+</html>"""
 
-ENTRY_FORM_HTML = """<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>SPM Web – __TITLE__</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    :root { color-scheme: dark; }
-    * { box-sizing:border-box; }
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
-      color:#f5f5f7;
-      margin:0;
-      padding:16px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      min-height:100vh;
-      animation:bgShift 20s ease-in-out infinite alternate;
-    }
-    @keyframes bgShift {
-      0% { background-position: 0% 0%; }
-      100% { background-position: 80% 40%; }
-    }
-    .glass {
-      width:min(480px, 100%);
-      padding:22px 22px 18px;
-      border-radius:24px;
-      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
-      border:1px solid rgba(255,255,255,0.16);
-      backdrop-filter: blur(26px);
-      -webkit-backdrop-filter: blur(26px);
-      box-shadow:
-        0 22px 42px rgba(0,0,0,0.9),
-        0 0 0 1px rgba(255,255,255,0.04);
-      animation: fadeUp 0.4s ease-out;
-    }
-    @keyframes fadeUp {
-      from { opacity:0; transform: translateY(10px); }
-      to   { opacity:1; transform: translateY(0); }
-    }
-    h1 {
-      margin:0 0 4px;
-      font-size:18px;
-      letter-spacing:0.1em;
-      text-transform:uppercase;
-    }
-    .sub {
-      margin:0 0 16px;
-      font-size:11px;
-      color:#a4a9c0;
-    }
-    label {
-      display:block;
-      font-size:12px;
-      margin-bottom:4px;
-      color:#d0d4e0;
-    }
-    input[type=text], input[type=password], textarea {
-      width:100%;
-      padding:9px 10px;
-      border-radius:12px;
-      border:1px solid rgba(255,255,255,0.18);
-      background:rgba(3,3,5,0.94);
-      color:#f5f5f7;
-      font-size:13px;
-      margin-bottom:10px;
-      outline:none;
-      transition:border-color 0.2s ease, box-shadow 0.2s ease;
-    }
-    input[type=text]:focus, input[type=password]:focus, textarea:focus {
-      border-color:rgba(120,180,255,0.85);
-      box-shadow:0 0 0 1px rgba(120,180,255,0.5);
-    }
-    textarea {
-      resize:vertical;
-      min-height:80px;
-    }
-    .actions {
-      margin-top:10px;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:10px;
-      flex-wrap:wrap;
-    }
-    .btn-primary {
-      border-radius:999px;
-      border:none;
-      padding:8px 16px;
-      font-size:12px;
-      font-weight:500;
-      letter-spacing:0.08em;
-      text-transform:uppercase;
-      cursor:pointer;
-      background:linear-gradient(135deg,#0f9bff,#5f5fff);
-      color:#fff;
-      transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
-    }
-    .btn-primary:hover {
-      filter:brightness(1.08);
-      box-shadow:0 10px 25px rgba(15,155,255,0.5);
-      transform: translateY(-1px);
-    }
-    .link {
-      font-size:12px;
-      color:#9fa3f0;
-      text-decoration:none;
-    }
-    .link:hover {
-      text-decoration:underline;
-    }
-    .msg {
-      margin-top:6px;
-      font-size:11px;
-      color:#ff9f9f;
-      animation: fadeUp 0.2s ease-out;
-    }
-  </style>
-</head>
-<body data-lang="__LANG__">
-  <div class="glass">
-    <h1>__TITLE__</h1>
-    <p class="sub"><span data-i18n="form.vault">Vault:</span> __VAULT_PATH__</p>
-    <form method="post" action="__ACTION__">
-      __BODY__
-      <div class="actions">
-        <a href="/" class="link" data-i18n="form.back_list">← Back to list</a>
-        <button type="submit" class="btn-primary" data-i18n="form.save">Save</button>
+
+def _esc(v):
+    return html.escape(v if v is not None else "")
+
+
+def _empty(icon, title_key, title, desc_key, desc, cta_html="", colspan=4):
+    return (
+        f'<tr class="empty-row"><td colspan="{colspan}">'
+        f'<div class="empty"><div class="empty-ico" aria-hidden="true">{icon}</div>'
+        f'<div class="empty-t" data-i18n="{title_key}">{title}</div>'
+        f'<div class="empty-d" data-i18n="{desc_key}">{desc}</div>{cta_html}</div>'
+        f'</td></tr>'
+    )
+
+
+def _actions(view_href, edit_href, delete_action, item_id, confirm_key, confirm_text):
+    bits = ['<div class="icon-row">']
+    if view_href:
+        bits.append(f'<a class="icon-btn" href="{view_href}" title="View" aria-label="View">\U0001F441</a>')
+    if edit_href:
+        bits.append(f'<a class="icon-btn" href="{edit_href}" title="Edit" aria-label="Edit">✏</a>')
+    if delete_action:
+        bits.append(
+            f'<form class="inline" method="post" action="{delete_action}" '
+            f'onsubmit="return confirm(SPM_I18N.t(\'{confirm_key}\',\'{confirm_text}\'));">'
+            f'<input type="hidden" name="id" value="{item_id}">'
+            f'<button type="submit" class="icon-btn danger" title="Delete" aria-label="Delete">\U0001F5D1</button>'
+            f'</form>'
+        )
+    bits.append("</div>")
+    return "".join(bits)
+
+
+# --------------------------------------------------------------------------
+# Row builders  (each row carries data-row for the instant client-side filter)
+# --------------------------------------------------------------------------
+def build_rows_html(entries):
+    if not entries:
+        return _empty("\U0001F511", "empty.passwords.t", "No passwords yet",
+                      "empty.passwords.d", "Entries you add will appear here.",
+                      '<a class="btn btn-primary btn-sm" href="/add" data-i18n="btn.add_entry">+ Add Entry</a>', 4)
+    rows = []
+    for _, parts in entries:
+        eid, name, user = _esc(parts[0]), _esc(parts[1]), _esc(parts[2])
+        key = f"{name} {user} {eid}".lower()
+        rows.append(
+            f'<tr data-row="{key}">'
+            f'<td class="num">{eid}</td>'
+            f'<td class="strong">{name}</td>'
+            f'<td class="muted">{user or "&mdash;"}</td>'
+            f'<td class="actions">{_actions(f"/view?id={eid}", f"/edit?id={eid}", "/delete", eid, "confirm.delete_entry", "Delete this entry?")}</td>'
+            f'</tr>'
+        )
+    return "".join(rows)
+
+
+def build_notes_rows_html(notes):
+    if not notes:
+        return _empty("\U0001F5D2", "empty.notes.t", "No secure notes",
+                      "empty.notes.d", "Encrypted notes live inside the same vault.",
+                      '<a class="btn btn-primary btn-sm" href="/notes-add" data-i18n="btn.add_note">+ Add Note</a>', 3)
+    rows = []
+    for _, parts in notes:
+        nid, title = _esc(parts[1]), _esc(parts[2])
+        rows.append(
+            f'<tr data-row="{(title + " " + nid).lower()}">'
+            f'<td class="num">{nid}</td>'
+            f'<td class="strong">{title}</td>'
+            f'<td class="actions">{_actions(f"/notes-view?id={nid}", None, "/notes-delete", nid, "confirm.delete_entry", "Delete this note?")}</td>'
+            f'</tr>'
+        )
+    return "".join(rows)
+
+
+def build_passphrase_rows_html(passphrases):
+    if not passphrases:
+        return _empty("\U0001F4DD", "empty.passphrases.t", "No passphrases",
+                      "empty.passphrases.d", "Store API tokens or recovery phrases here.",
+                      '<a class="btn btn-primary btn-sm" href="/passphrase-add" data-i18n="btn.add_passphrase">+ Add Passphrase</a>', 3)
+    rows = []
+    for _, parts in passphrases:
+        pid, label = _esc(parts[1]), _esc(parts[2])
+        rows.append(
+            f'<tr data-row="{(label + " " + pid).lower()}">'
+            f'<td class="num">{pid}</td>'
+            f'<td class="strong">{label}</td>'
+            f'<td class="actions">{_actions(f"/passphrase-view?id={pid}", f"/passphrase-edit?id={pid}", "/passphrase-delete", pid, "confirm.delete_passphrase", "Delete this passphrase?")}</td>'
+            f'</tr>'
+        )
+    return "".join(rows)
+
+
+def build_backup_rows_html(backups):
+    if not backups:
+        return _empty("\U0001F9EF", "empty.backups.t", "No backup codes",
+                      "empty.backups.d", "Keep one-time recovery codes safe here.",
+                      '<a class="btn btn-primary btn-sm" href="/backup-codes-add" data-i18n="btn.add_backups">+ Add Backup Codes</a>', 3)
+    rows = []
+    for _, parts in backups:
+        bid, label = _esc(parts[1]), _esc(parts[2])
+        rows.append(
+            f'<tr data-row="{(label + " " + bid).lower()}">'
+            f'<td class="num">{bid}</td>'
+            f'<td class="strong">{label}</td>'
+            f'<td class="actions">{_actions(f"/backup-codes-view?id={bid}", f"/backup-codes-edit?id={bid}", "/backup-codes-delete", bid, "confirm.delete_backup", "Delete these backup codes?")}</td>'
+            f'</tr>'
+        )
+    return "".join(rows)
+
+
+def build_auth_rows_html(auths):
+    if not auths:
+        return _empty("⏱", "empty.auth.t", "No authenticators",
+                      "empty.auth.d", "Add a TOTP secret to generate 2FA codes.",
+                      '<a class="btn btn-primary btn-sm" href="/authenticator-add" data-i18n="btn.add_authenticator">+ Add Authenticator</a>', 5)
+    rows = []
+    for _, parts in auths:
+        aid, label = _esc(parts[1]), _esc(parts[2])
+        interval = _esc(parts[4] if len(parts) > 4 else "30")
+        algo = _esc(parts[6] if len(parts) > 6 else "sha1")
+        rows.append(
+            f'<tr data-row="{(label + " " + aid + " " + algo).lower()}">'
+            f'<td class="num">{aid}</td>'
+            f'<td class="strong">{label}</td>'
+            f'<td><span class="chip">{interval}s</span></td>'
+            f'<td><span class="chip">{algo.upper()}</span></td>'
+            f'<td class="actions">{_actions(f"/authenticator-view?id={aid}", f"/authenticator-edit?id={aid}", "/authenticator-delete", aid, "confirm.delete_authenticator", "Delete this authenticator?")}</td>'
+            f'</tr>'
+        )
+    return "".join(rows)
+
+
+# --------------------------------------------------------------------------
+# Generic list page
+# --------------------------------------------------------------------------
+def list_page(title_key, title, desc_key, desc, add_href, add_key, add_label, headers, rows_html):
+    def _th(h):
+        cls = ' class="num"' if h[2] == "num" else ""
+        sty = ' style="text-align:right"' if h[2] == "act" else ""
+        return '<th' + cls + sty + ' data-i18n="' + h[0] + '">' + h[1] + '</th>'
+    ths = "".join(_th(h) for h in headers)
+    add_btn = (
+        f'<a class="btn btn-primary" href="{add_href}" data-i18n="{add_key}">{add_label}</a>'
+        if add_href else ""
+    )
+    ncols = len(headers)
+    return f"""
+<div class="page-head">
+  <div>
+    <h1 class="page-title" data-i18n="{title_key}">{title}</h1>
+    <div class="page-sub" data-i18n="{desc_key}">{desc}</div>
+  </div>
+  <div class="page-actions">{add_btn}</div>
+</div>
+<div class="card" data-searchable>
+  <div class="table-wrap">
+    <table class="t">
+      <thead><tr>{ths}</tr></thead>
+      <tbody>{rows_html}
+        <tr class="hidden" data-empty-search>
+          <td colspan="{ncols}"><div class="empty"><div class="empty-ico">⌕</div>
+          <div class="empty-t" data-i18n="search.no_results">Nothing matches your search</div></div></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>"""
+
+
+# --------------------------------------------------------------------------
+# Overview
+# --------------------------------------------------------------------------
+def overview_page(counts, recent):
+    tiles = [
+        ("\U0001F511", counts.get("passwords", 0), "nav.passwords", "Passwords", "/passwords"),
+        ("\U0001F5D2", counts.get("notes", 0), "nav.notes", "Secure Notes", "/notes"),
+        ("\U0001F4DD", counts.get("passphrases", 0), "nav.passphrases", "Passphrases", "/passphrases"),
+        ("⏱", counts.get("authenticators", 0), "nav.authenticators", "Authenticators", "/authenticators"),
+        ("\U0001F9EF", counts.get("backups", 0), "nav.backup_codes", "Backup Codes", "/backup-codes"),
+    ]
+    stats = "".join(
+        f'<a class="stat" href="{href}">'
+        f'<span class="stat-ico" aria-hidden="true">{ico}</span>'
+        f'<span><span class="stat-n">{n}</span>'
+        f'<span class="stat-l" data-i18n="{k}">{lbl}</span></span></a>'
+        for ico, n, k, lbl, href in tiles
+    )
+
+    if recent:
+        items = "".join(
+            f'<tr data-row=""><td class="num">{_esc(p[0])}</td>'
+            f'<td class="strong">{_esc(p[1])}</td>'
+            f'<td class="muted">{_esc(p[2]) or "&mdash;"}</td>'
+            f'<td class="actions"><a class="btn btn-ghost btn-sm" href="/view?id={_esc(p[0])}" data-i18n="btn.view">View</a></td></tr>'
+            for _, p in recent
+        )
+        recent_html = f"""
+<div class="card">
+  <div class="card-head">
+    <h2 data-i18n="overview.recent">Recently added</h2>
+    <span class="spacer"></span>
+    <a class="btn btn-ghost btn-sm" href="/passwords" data-i18n="overview.view_all">View all</a>
+  </div>
+  <div class="table-wrap"><table class="t"><tbody>{items}</tbody></table></div>
+</div>"""
+    else:
+        recent_html = f"""
+<div class="card"><div class="empty">
+  <div class="empty-ico" aria-hidden="true">\U0001F510</div>
+  <div class="empty-t" data-i18n="empty.vault.t">Your vault is empty</div>
+  <div class="empty-d" data-i18n="empty.vault.d">Add your first password to get started.</div>
+  <a class="btn btn-primary" href="/add" data-i18n="btn.add_entry">+ Add Entry</a>
+</div></div>"""
+
+    return f"""
+<div class="page-head">
+  <div>
+    <h1 class="page-title" data-i18n="nav.overview">Overview</h1>
+    <div class="page-sub" data-i18n="overview.sub">Everything in your encrypted vault at a glance.</div>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/generator" data-i18n="btn.open_generator">Open Generator</a>
+    <a class="btn btn-primary" href="/add" data-i18n="btn.add_entry">+ Add Entry</a>
+  </div>
+</div>
+<div class="stats">{stats}</div>
+{recent_html}
+<div class="card" style="margin-top:var(--sp-4)">
+  <div class="card-foot" style="border-top:none">
+    <span data-i18n="passwords.footer">Passwords are never sent anywhere else - all crypto stays on this host with GnuPG.</span>
+  </div>
+</div>"""
+
+
+# --------------------------------------------------------------------------
+# Forms
+# --------------------------------------------------------------------------
+def _form_page(title, action, fields_html, message="", back="/", active="overview"):
+    msg = f'<div class="msg">{message}</div>' if message and "<div" not in message else (message or "")
+    content = f"""
+<div class="page-head">
+  <div><h1 class="page-title">{html.escape(title)}</h1></div>
+  <div class="page-actions">
+    <a class="btn btn-ghost" href="{back}" data-i18n="form.back_list">Back to list</a>
+  </div>
+</div>
+{msg}
+<div class="card" style="max-width:640px">
+  <div class="card-body">
+    <form method="post" action="{action}">
+      {fields_html}
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit" data-i18n="form.save">Save</button>
+        <a class="btn btn-ghost" href="{back}" data-i18n="link.back">Cancel</a>
       </div>
     </form>
-    __MESSAGE__
   </div>
-  <script>window.SPM_LANG="__LANG__";</script>
-  """ + I18N_SCRIPT + """
-  """ + AUTOLOCK_SCRIPT + """
-</body>
-</html>
+</div>"""
+    return render_shell(content, active, VERSION, VAULT_PATH, title=title)
+
+
+def _field(name, label_key, label, value="", ftype="text", placeholder_key=None, hint=None, required=False, rows=0):
+    req = " required" if required else ""
+    ph = f' data-i18n-placeholder="{placeholder_key}"' if placeholder_key else ""
+    if rows:
+        ctrl = f'<textarea class="input" name="{name}" rows="{rows}"{ph}{req}>{html.escape(value)}</textarea>'
+    else:
+        ctrl = f'<input class="input" type="{ftype}" name="{name}" value="{html.escape(value)}"{ph}{req} autocomplete="off">'
+    hint_html = f'<div class="hint">{hint}</div>' if hint else ""
+    return f'<div class="field"><label data-i18n="{label_key}">{label}</label>{ctrl}{hint_html}</div>'
+
+
+def build_entry_form(title, vault_path, action, values=None, message=""):
+    v = values or {}
+    f = (
+        _field("name", "entry.field.service", "Service", v.get("name", ""), required=True) +
+        _field("user", "entry.field.username", "Username", v.get("user", "")) +
+        _field("password", "entry.field.password", "Password", v.get("password", "")) +
+        _field("notes", "entry.field.notes", "Notes", v.get("notes", ""), rows=4)
+    )
+    extra = f'<input type="hidden" name="id" value="{html.escape(v.get("id",""))}">' if v.get("id") else ""
+    return _form_page(title, action, extra + f, message, "/passwords", "passwords")
+
+
+def build_note_form(title, vault_path, action, values=None, message=""):
+    v = values or {}
+    f = (
+        _field("title", "note.field.title", "Title", v.get("title", ""), required=True) +
+        _field("content", "note.field.content", "Content", v.get("content", ""), rows=8)
+    )
+    return _form_page(title, action, f, message, "/notes", "notes")
+
+
+def build_passphrase_form(title, vault_path, action, values=None, message=""):
+    v = values or {}
+    f = (
+        _field("label", "pass.field.label", "Label", v.get("label", ""), required=True) +
+        _field("secret", "pass.field.secret_hint", "Passphrase (leave blank to auto-generate)", v.get("secret", ""), rows=3)
+    )
+    extra = f'<input type="hidden" name="id" value="{html.escape(v.get("id",""))}">' if v.get("id") else ""
+    return _form_page(title, action, extra + f, message, "/passphrases", "passphrases")
+
+
+def build_backup_form(title, vault_path, action, values=None, message=""):
+    v = values or {}
+    f = (
+        _field("label", "backup.field.label", "Label", v.get("label", ""), required=True) +
+        _field("codes", "backup.field.codes", "Backup codes (one per line)", v.get("codes", ""), rows=8)
+    )
+    extra = f'<input type="hidden" name="id" value="{html.escape(v.get("id",""))}">' if v.get("id") else ""
+    return _form_page(title, action, extra + f, message, "/backup-codes", "backup-codes")
+
+
+def build_auth_form(title, vault_path, action, values=None, message=""):
+    v = values or {}
+    algo = (v.get("algo") or "sha1").lower()
+    opts = "".join(
+        f'<option value="{a}"{" selected" if algo == a else ""} data-i18n="auth.option.{a}">{a.upper()}</option>'
+        for a in ("sha1", "sha256", "sha512")
+    )
+    f = (
+        _field("label", "auth.field.label", "Label", v.get("label", ""), required=True) +
+        _field("secret", "auth.field.secret", "Base32 secret", v.get("secret", ""), required=True,
+               hint="e.g. JBSWY3DPEHPK3PXP") +
+        '<div class="row2">' +
+        _field("period", "auth.field.period", "Refresh interval (s)", v.get("period", "30") or "30", ftype="number") +
+        f'<div class="field"><label data-i18n="auth.field.algorithm">Algorithm</label>'
+        f'<select class="input" name="algo">{opts}</select></div>' +
+        '</div>'
+    )
+    extra = f'<input type="hidden" name="id" value="{html.escape(v.get("id",""))}">' if v.get("id") else ""
+    return _form_page(title, action, extra + f, message, "/authenticators", "authenticators")
+
+
+# --------------------------------------------------------------------------
+# View pages
+# --------------------------------------------------------------------------
+def _secret_block(value, label_key, label, elem_id):
+    return f"""
+<div class="field">
+  <label data-i18n="{label_key}">{label}</label>
+  <div class="secret">
+    <span class="secret-val masked" id="{elem_id}" data-val="{html.escape(value)}">{"•" * min(len(value), 24) if value else "&mdash;"}</span>
+    <button class="icon-btn" type="button" onclick="SPM_reveal('{elem_id}', this)" data-title-show="Show" aria-label="Show">\U0001F441</button>
+    <button class="icon-btn" type="button" onclick="SPM_copy(document.getElementById('{elem_id}').dataset.val)" aria-label="Copy">\U0001F4CB</button>
+  </div>
+</div>"""
+
+
+REVEAL_SCRIPT = """
+<script>
+window.SPM_reveal = function (id, btn) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var masked = el.classList.contains("masked");
+  if (masked) {
+    el.textContent = el.dataset.val || "";
+    el.classList.remove("masked");
+    btn.textContent = "\\uD83D\\uDE48";
+    if (window.SPM_AutoLock) window.SPM_AutoLock.restart();
+  } else {
+    var v = el.dataset.val || "";
+    el.textContent = "\\u2022".repeat(Math.min(v.length, 24));
+    el.classList.add("masked");
+    btn.textContent = "\\uD83D\\uDC41";
+  }
+};
+</script>
 """
 
-VIEW_HTML = """<!doctype html>
-<html>
+
+def view_entry_page(parts):
+    """Full page for a single password entry."""
+    eid, name, user, pw = _esc(parts[0]), _esc(parts[1]), _esc(parts[2]), parts[3] if len(parts) > 3 else ""
+    notes = parts[4] if len(parts) > 4 else ""
+    created = _esc(parts[5] if len(parts) > 5 else "")
+    content = f"""
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{name}</h1>
+    <div class="page-sub">{user or ""}</div>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/edit?id={eid}" data-i18n="btn.edit">Edit</a>
+    <a class="btn btn-ghost" href="/passwords" data-i18n="form.back_list">Back to list</a>
+  </div>
+</div>
+<div class="card" style="max-width:680px"><div class="card-body">
+  <div class="field"><label data-i18n="view.label.username">Username</label>
+    <div class="secret"><span class="secret-val">{user or "&mdash;"}</span>
+    <button class="icon-btn" type="button" onclick="SPM_copy({jsonlib.dumps(parts[2] if len(parts)>2 else '')})" aria-label="Copy">\U0001F4CB</button></div>
+  </div>
+  {_secret_block(pw, "view.label.password", "Password", "pw")}
+  <div class="field"><label data-i18n="view.label.notes">Notes</label>
+    <div class="secret"><span class="secret-val" style="white-space:pre-wrap">{_esc(notes) or "&mdash;"}</span></div>
+  </div>
+  <div class="field"><label data-i18n="view.label.created">Created</label>
+    <div class="faint mono">{created or "&mdash;"}</div>
+  </div>
+</div></div>
+{REVEAL_SCRIPT}"""
+    return render_shell(content, "passwords", VERSION, VAULT_PATH, title=name)
+
+
+def view_simple_page(title, back, label_key, label, value, created, secret_key, secret_label, active="overview"):
+    body = _secret_block(value, secret_key, secret_label, "sec")
+    content = f"""
+<div class="page-head">
+  <div><h1 class="page-title">{html.escape(title)}</h1>
+    <div class="page-sub">{html.escape(label)}</div></div>
+  <div class="page-actions">
+    <a class="btn btn-ghost" href="{back}" data-i18n="form.back_list">Back to list</a>
+  </div>
+</div>
+<div class="card" style="max-width:680px"><div class="card-body">
+  {body}
+  <div class="field"><label data-i18n="view.label.created">Created</label>
+    <div class="faint mono">{html.escape(created) or "&mdash;"}</div></div>
+</div></div>
+{REVEAL_SCRIPT}"""
+    return render_shell(content, active, VERSION, VAULT_PATH, title=title)
+
+
+def login_page(version, message=""):
+    return f"""<!doctype html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>SPM Web – View Entry</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    :root { color-scheme: dark; }
-    * { box-sizing:border-box; }
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
-      color:#f5f5f7;
-      margin:0;
-      padding:16px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      min-height:100vh;
-      animation:bgShift 20s ease-in-out infinite alternate;
-    }
-    @keyframes bgShift {
-      0% { background-position: 0% 0%; }
-      100% { background-position: 80% 40%; }
-    }
-    .glass {
-      width:min(460px, 100%);
-      padding:22px 22px 18px;
-      border-radius:24px;
-      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
-      border:1px solid rgba(255,255,255,0.16);
-      backdrop-filter: blur(26px);
-      -webkit-backdrop-filter: blur(26px);
-      box-shadow:
-        0 22px 42px rgba(0,0,0,0.9),
-        0 0 0 1px rgba(255,255,255,0.04);
-      animation: fadeUp 0.35s ease-out;
-    }
-    @keyframes fadeUp {
-      from { opacity:0; transform: translateY(10px); }
-      to   { opacity:1; transform: translateY(0); }
-    }
-    h1 {
-      margin:0 0 4px;
-      font-size:18px;
-      letter-spacing:0.1em;
-      text-transform:uppercase;
-    }
-    .sub {
-      margin:0 0 16px;
-      font-size:11px;
-      color:#a4a9c0;
-    }
-    .field {
-      margin-bottom:10px;
-      font-size:13px;
-    }
-    .label {
-      font-size:11px;
-      text-transform:uppercase;
-      letter-spacing:0.12em;
-      color:#a4a9c0;
-      margin-bottom:2px;
-    }
-    .value {
-      font-size:13px;
-    }
-    .mono {
-      font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    }
-    .actions {
-      margin-top:12px;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:10px;
-      font-size:12px;
-      flex-wrap:wrap;
-    }
-    .btn-soft, .btn-danger {
-      border-radius:999px;
-      border:none;
-      padding:7px 13px;
-      font-size:11px;
-      font-weight:500;
-      letter-spacing:0.08em;
-      text-transform:uppercase;
-      cursor:pointer;
-      background:rgba(255,255,255,0.06);
-      color:#e1e3f0;
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }
-    .btn-soft:hover {
-      box-shadow:0 8px 20px rgba(255,255,255,0.18);
-      transform: translateY(-1px);
-    }
-    .btn-danger {
-      background:rgba(255,77,106,0.16);
-      color:#ffd0d8;
-    }
-    .btn-danger:hover {
-      box-shadow:0 8px 20px rgba(255,77,106,0.4);
-      transform: translateY(-1px);
-    }
-    .link {
-      font-size:12px;
-      color:#9fa3f0;
-      text-decoration:none;
-    }
-    .link:hover {
-      text-decoration:underline;
-    }
-    .btn-secondary {
-      border-radius:10px;
-      border:1px solid rgba(255,255,255,0.15);
-      background:rgba(255,255,255,0.08);
-      color:#f5f5f7;
-      padding:6px 10px;
-      font-size:12px;
-      cursor:pointer;
-      margin-right:6px;
-    }
-    .toast {
-      position:fixed;
-      top:18px;
-      right:18px;
-      background:rgba(7,9,20,0.92);
-      border:1px solid rgba(159,163,240,0.45);
-      border-radius:12px;
-      padding:10px 14px;
-      font-size:12px;
-      letter-spacing:0.04em;
-      color:#f5f5f7;
-      opacity:0;
-      transform:translateY(-6px);
-      transition:opacity 0.25s ease, transform 0.25s ease;
-      pointer-events:none;
-      box-shadow:0 12px 30px rgba(0,0,0,0.55);
-      z-index:99;
-    }
-    .toast.show {
-      opacity:1;
-      transform:translateY(0);
-    }
-    .toast.error {
-      border-color:rgba(255,155,155,0.6);
-      color:#ffd0d8;
-    }
-  </style>
-  <script>
-    let toastTimer = null;
-    function t(key, fallback) {
-      if (window.SPM_I18N && typeof window.SPM_I18N.t === "function") {
-        return window.SPM_I18N.t(key, fallback);
-      }
-      return fallback !== undefined ? fallback : key;
-    }
-    function ensureToast() {
-      let toast = document.getElementById('spm-toast');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'spm-toast';
-        toast.className = 'toast';
-        toast.setAttribute('role','status');
-        toast.setAttribute('aria-live','polite');
-        toast.setAttribute('aria-atomic','true');
-        document.body.appendChild(toast);
-      }
-      return toast;
-    }
-    function showToast(message, ok=true) {
-      const toast = ensureToast();
-      toast.textContent = message || (ok ? t('toast.copy_success','Copied to clipboard.') : t('toast.copy_fail','Copy failed.'));
-      toast.classList.remove('error');
-      if (!ok) toast.classList.add('error'); else toast.classList.remove('error');
-      toast.classList.add('show');
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => { toast.classList.remove('show'); }, 2000);
-    }
-    function copyToClipboard(text) {
-      if (!text) return Promise.resolve();
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        return navigator.clipboard.writeText(text);
-      }
-      return new Promise(function(resolve, reject) {
-        try {
-          const ta = document.createElement('textarea');
-          ta.value = text;
-          ta.style.position = 'fixed';
-          ta.style.top = '-1000px';
-          document.body.appendChild(ta);
-          ta.focus();
-          ta.select();
-          document.execCommand('copy');
-          document.body.removeChild(ta);
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      });
-    }
-    function handleCopy(textPromise, label) {
-      textPromise
-        .then(() => showToast(t('toast.copy_success','Copied to clipboard.'), true))
-        .catch(() => showToast(t('toast.copy_fail','Copy failed.'), false));
-    }
-    function togglePassword() {
-      const el = document.getElementById('pw');
-      const btn = document.getElementById('pwbtn');
-      if (!el) return;
-      const hidden = el.getAttribute('data-hidden') === '1';
-      if (hidden) {
-        el.textContent = el.getAttribute('data-real');
-        el.setAttribute('data-hidden', '0');
-        btn.textContent = t('btn.hide','Hide');
-      } else {
-        el.textContent = '••••••••';
-        el.setAttribute('data-hidden', '1');
-        btn.textContent = t('btn.show','Show');
-      }
-    }
-    function copyText(id) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      const text = el.getAttribute('data-real') || el.textContent || '';
-      handleCopy(copyToClipboard(text));
-    }
-  </script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Unlock Vault · SPM</title>
+{DESIGN_CSS}
 </head>
-<body data-lang="__LANG__">
-  <div class="glass">
-    <h1 data-i18n="view.title">View Entry</h1>
-    <p class="sub"><span data-i18n="view.sub_prefix">Vault:</span> __VAULT_PATH__ · ID __ID__</p>
-
-    <div class="field">
-      <div class="label" data-i18n="view.label.name">Name</div>
-      <div class="value mono">__NAME__</div>
+<body class="theme-dark">
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="brand-mark" aria-hidden="true">S</div>
+      <h1 data-i18n="header.title">Sans Password Manager</h1>
+      <p data-i18n="login.sub">Unlock your encrypted vault to continue.</p>
     </div>
-    <div class="field">
-      <div class="label" data-i18n="view.label.username">Username</div>
-      <div class="value mono" id="user-val">__USER__</div>
-      <button class="btn-secondary" type="button" data-i18n="btn.copy_username" onclick="copyText('user-val')">Copy Username</button>
+    <div class="card"><div class="card-body">
+      {message}
+      <form method="post" action="/login">
+        <div class="field">
+          <label for="pw" data-i18n="login.master">Master password</label>
+          <input class="input" id="pw" name="password" type="password"
+                 autocomplete="current-password" autofocus required>
+        </div>
+        <button class="btn btn-primary btn-block" type="submit" data-i18n="login.unlock">Unlock</button>
+      </form>
     </div>
-    <div class="field">
-      <div class="label" data-i18n="view.label.password">Password</div>
-      <div class="value mono" id="pw" data-hidden="1" data-real="__PASS__">••••••••</div>
-      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
-        <button id="pwbtn" class="btn-soft" type="button" data-i18n="btn.show" onclick="togglePassword()">Show</button>
-        <button class="btn-secondary" type="button" data-i18n="btn.copy_password" onclick="copyText('pw')">Copy Password</button>
-      </div>
-    </div>
-    <div class="field">
-      <div class="label" data-i18n="view.label.notes">Notes</div>
-      <div class="value mono" id="notes-val">__NOTES__</div>
-      <button class="btn-secondary" type="button" data-i18n="btn.copy_notes" onclick="copyText('notes-val')">Copy Notes</button>
-    </div>
-    <div class="field">
-      <div class="label" data-i18n="view.label.created">Created at</div>
-      <div class="value mono">__CREATED__</div>
-    </div>
-
-    <div class="actions">
-      <a href="/" class="link" data-i18n="form.back_list">← Back to list</a>
-      <div style="display:flex; gap:6px; flex-wrap:wrap;">
-        <form method="get" action="/edit" style="display:inline;">
-          <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-soft" data-i18n="btn.edit">Edit</button>
-        </form>
-        <form method="post" action="/delete" style="display:inline;" onsubmit="return confirm(t('confirm.delete_entry','Delete this entry?'));">
-          <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-danger" data-i18n="btn.delete">Delete</button>
-        </form>
-      </div>
+    <div class="card-foot">
+      <span data-i18n="login.note">All decryption happens locally with GnuPG. Nothing leaves this host.</span>
+    </div></div>
+    <div style="text-align:center;margin-top:var(--sp-4)">
+      <select class="select" id="lang-picker" aria-label="Language">
+        <option value="en">EN</option><option value="id">ID</option><option value="ja">JP</option>
+      </select>
+      <select class="select" id="theme-picker" aria-label="Theme">
+        <option value="dark">Dark</option><option value="amoled">AMOLED</option>
+        <option value="cyberpunk">Cyberpunk</option><option value="light">Light</option>
+      </select>
+      <div class="faint" style="margin-top:var(--sp-2)">v{html.escape(version)}</div>
     </div>
   </div>
-  <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script>window.SPM_LANG="__LANG__";</script>
-  """ + I18N_SCRIPT + """
-  """ + AUTOLOCK_SCRIPT + """
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+{LANG_BOOTSTRAP}
+{I18N_SCRIPT}
+{SHELL_SCRIPT}
 </body>
-</html>
+</html>"""
+
+
+GENERATOR_SCRIPT = """
+<script>
+(function () {
+  var WORDS = ["sun","moon","star","river","ocean","cloud","stone","tree","leaf","fern","fire","ember",
+    "storm","wind","breeze","shadow","light","silver","gold","amber","flame","nova","comet","aurora",
+    "pulse","echo","vapor","wave","mist","dawn","dusk","zen","sage","whale","lynx","orca","hawk","raven"];
+
+  function t(key, fb) {
+    return (window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t(key, fb) : fb;
+  }
+
+  /* Uniform random int in [0, bound) from the platform CSPRNG.
+     Rejection sampling keeps the distribution flat - a plain % bound would
+     bias the low end of the charset. */
+  function randBelow(bound) {
+    if (bound <= 0) return 0;
+    var limit = Math.floor(4294967296 / bound) * bound;
+    var buf = new Uint32Array(1);
+    for (var i = 0; i < 64; i++) {
+      crypto.getRandomValues(buf);
+      if (buf[0] < limit) return buf[0] % bound;
+    }
+    return buf[0] % bound;
+  }
+
+  function charset(sym, up, low, dig) {
+    var b = "";
+    if (up)  b += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    if (low) b += "abcdefghijklmnopqrstuvwxyz";
+    if (dig) b += "0123456789";
+    if (sym) b += "!@#$%^&*()_-+=[]{}:;,.?/|~";
+    if (!b) b = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    return b;
+  }
+
+  function genSecure(len, o) {
+    var chars = charset(o.symbols, o.upper, o.lower, o.digits), out = "";
+    for (var i = 0; i < len; i++) out += chars.charAt(randBelow(chars.length));
+    return { pw: out, size: chars.length };
+  }
+
+  function genEasy(count, o) {
+    count = Math.min(8, Math.max(2, count));
+    var parts = [];
+    for (var i = 0; i < count; i++) {
+      var w = WORDS[randBelow(WORDS.length)];
+      if (o.upper && !o.lower) w = w.toUpperCase();
+      else if (o.upper) w = w.charAt(0).toUpperCase() + w.slice(1);
+      else if (!o.lower) w = w.toUpperCase();
+      parts.push(w);
+    }
+    var pw = parts.join("-");
+    if (o.digits) pw += "-" + String(randBelow(100)).padStart(2, "0");
+    if (o.symbols) { var s = "!@#$%^&*"; pw += s.charAt(randBelow(s.length)); }
+    var size = 0;
+    if (o.upper) size += 26;
+    if (o.lower) size += 26;
+    if (o.digits) size += 10;
+    if (o.symbols) size += 10;
+    return { pw: pw, size: size || 26 };
+  }
+
+  function entropy(pw, size) {
+    if (!pw || size <= 1) return 0;
+    return pw.length * Math.log(size) / Math.log(2);
+  }
+
+  /* NOTE: the local accumulator must not be named `t` - it would shadow the
+     translation helper above and throw "t is not a function". */
+  function crackTime(bits) {
+    var seconds = Math.pow(2, bits) / 1e10;
+    var units = [["sec", 60], ["min", 60], ["hr", 24], ["day", 365], ["yr", 100], ["century", 10]];
+    var val = seconds, label = "sec";
+    for (var i = 0; i < units.length; i++) {
+      if (val >= units[i][1]) { val /= units[i][1]; label = units[i][0]; }
+      else break;
+    }
+    return val.toFixed(1) + " " + t("generator.unit." + label, label);
+  }
+
+  function updateStats(pw, size) {
+    var bits = entropy(pw, size), key = "generator.strength.weak", fb = "Weak", pct = 25, col = "var(--danger)";
+    if (bits >= 100)     { key = "generator.strength.excellent"; fb = "Excellent"; pct = 100; col = "var(--ok)"; }
+    else if (bits >= 80) { key = "generator.strength.strong";    fb = "Strong";    pct = 78;  col = "var(--ok)"; }
+    else if (bits >= 60) { key = "generator.strength.moderate";  fb = "Moderate";  pct = 55;  col = "var(--warn)"; }
+    else if (bits < 40)  { key = "generator.strength.very_weak"; fb = "Very weak"; pct = 15;  col = "var(--danger)"; }
+    var meter = document.getElementById("meter-fill");
+    if (meter) { meter.style.width = pct + "%"; meter.style.background = col; }
+    var el = document.getElementById("pw-stats");
+    if (el) {
+      el.textContent = t(key, fb) + " \\u00b7 ~" + bits.toFixed(1) + " " + t("generator.stats.bits", "bits") +
+                       " \\u00b7 ~" + crackTime(bits) + " " + t("generator.stats.suffix", "to brute-force (est.)");
+    }
+  }
+
+  function opts() {
+    return {
+      symbols: document.getElementById("symbols").checked,
+      upper:   document.getElementById("upper").checked,
+      lower:   document.getElementById("lower").checked,
+      digits:  document.getElementById("digits").checked
+    };
+  }
+
+  function mode() {
+    var m = document.querySelector('input[name="gmode"]:checked');
+    return m ? m.value : "secure";
+  }
+
+  function regen() {
+    var len = parseInt(document.getElementById("len").value, 10) || 16, r;
+    if (mode() === "easy") {
+      var words = Math.min(8, Math.max(2, Math.round(len / 6)));
+      document.getElementById("len-label").textContent = t("generator.words_prefix", "Words") + ": " + words;
+      r = genEasy(words, opts());
+    } else {
+      if (len < 4) len = 4;
+      document.getElementById("len-label").textContent = len;
+      r = genSecure(len, opts());
+    }
+    document.getElementById("pw-out").textContent = r.pw;
+    updateStats(r.pw, r.size);
+  }
+
+  window.SPM_regen = regen;
+  window.SPM_copyPw = function () {
+    var pw = document.getElementById("pw-out").textContent || "";
+    if (pw) window.SPM_copy(pw, t("toast.copy_success", "Copied to clipboard."));
+  };
+
+  document.addEventListener("DOMContentLoaded", function () {
+    ["len", "symbols", "upper", "lower", "digits"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener("input", regen);
+    });
+    document.querySelectorAll('input[name="gmode"]').forEach(function (el) {
+      el.addEventListener("change", regen);
+    });
+    regen();
+  });
+})();
+</script>
 """
 
-NOTES_VIEW_HTML = """<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>SPM Web – View Note</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    :root { color-scheme: dark; }
-    * { box-sizing:border-box; }
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
-      color:#f5f5f7;
-      margin:0;
-      padding:16px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      min-height:100vh;
-      animation:bgShift 20s ease-in-out infinite alternate;
-    }
-    @keyframes bgShift {
-      0% { background-position: 0% 0%; }
-      100% { background-position: 80% 40%; }
-    }
-    .glass {
-      width:min(460px, 100%);
-      padding:22px 22px 18px;
-      border-radius:24px;
-      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
-      border:1px solid rgba(255,255,255,0.16);
-      backdrop-filter: blur(26px);
-      -webkit-backdrop-filter: blur(26px);
-      box-shadow:
-        0 22px 42px rgba(0,0,0,0.9),
-        0 0 0 1px rgba(255,255,255,0.04);
-      animation: fadeUp 0.35s ease-out;
-    }
-    @keyframes fadeUp {
-      from { opacity:0; transform: translateY(10px); }
-      to   { opacity:1; transform: translateY(0); }
-    }
-    h1 {
-      margin:0 0 4px;
-      font-size:18px;
-      letter-spacing:0.1em;
-      text-transform:uppercase;
-    }
-    .sub {
-      margin:0 0 16px;
-      font-size:11px;
-      color:#a4a9c0;
-    }
-    .field {
-      margin-bottom:10px;
-      font-size:13px;
-    }
-    .label {
-      font-size:11px;
-      text-transform:uppercase;
-      letter-spacing:0.12em;
-      color:#a4a9c0;
-      margin-bottom:2px;
-    }
-    .value {
-      font-size:13px;
-    }
-    .mono {
-      font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      white-space:pre-wrap;
-    }
-    .actions {
-      margin-top:12px;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:10px;
-      font-size:12px;
-      flex-wrap:wrap;
-    }
-    .btn-danger {
-      border-radius:999px;
-      border:none;
-      padding:7px 13px;
-      font-size:11px;
-      font-weight:500;
-      letter-spacing:0.08em;
-      text-transform:uppercase;
-      cursor:pointer;
-      background:rgba(255,77,106,0.16);
-      color:#ffd0d8;
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }
-    .btn-danger:hover {
-      box-shadow:0 8px 20px rgba(255,77,106,0.4);
-      transform: translateY(-1px);
-    }
-    .link {
-      font-size:12px;
-      color:#9fa3f0;
-      text-decoration:none;
-    }
-    .link:hover {
-      text-decoration:underline;
-    }
-    .btn-secondary { border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.08); color:#f5f5f7; padding:6px 10px; font-size:12px; cursor:pointer; margin-right:6px; }
-    .toast {
-      position:fixed;
-      top:18px;
-      right:18px;
-      background:rgba(7,9,20,0.92);
-      border:1px solid rgba(159,163,240,0.45);
-      border-radius:12px;
-      padding:10px 14px;
-      font-size:12px;
-      letter-spacing:0.04em;
-      color:#f5f5f7;
-      opacity:0;
-      transform:translateY(-6px);
-      transition:opacity 0.25s ease, transform 0.25s ease;
-      pointer-events:none;
-      box-shadow:0 12px 30px rgba(0,0,0,0.55);
-      z-index:99;
-    }
-    .toast.show { opacity:1; transform:translateY(0); }
-    .toast.error { border-color:rgba(255,155,155,0.6); color:#ffd0d8; }
-  </style>
-  <script>
-    let toastTimer = null;
-    function ensureToast() {
-      let toast = document.getElementById('spm-toast');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'spm-toast';
-        toast.className = 'toast';
-        toast.setAttribute('role','status');
-        toast.setAttribute('aria-live','polite');
-        toast.setAttribute('aria-atomic','true');
-        document.body.appendChild(toast);
-      }
-      return toast;
-    }
-    function showToast(message, ok=true) {
-      const toast = ensureToast();
-      toast.textContent = message || (ok ? t('toast.copy_success','Copied to clipboard.') : t('toast.copy_fail','Copy failed.'));
-      toast.classList.toggle('error', !ok);
-      toast.classList.add('show');
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
-    }
-    function copyToClipboard(text) {
-      if (!text) return Promise.resolve();
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        return navigator.clipboard.writeText(text);
-      }
-      return new Promise(function(resolve, reject) {
-        try {
-          const ta = document.createElement('textarea');
-          ta.value = text;
-          ta.style.position = 'fixed';
-          ta.style.top = '-1000px';
-          document.body.appendChild(ta);
-          ta.focus();
-          ta.select();
-          document.execCommand('copy');
-          document.body.removeChild(ta);
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      });
-    }
-    function copyText() {
-      const text = document.getElementById('note-content').textContent || '';
-      copyToClipboard(text)
-        .then(() => showToast('Note copied.'))
-        .catch(() => showToast('Copy failed.', false));
-    }
-  </script>
-</head>
-<body>
-  <div class="glass">
-    <h1>Secure Note</h1>
-    <p class="sub">Vault: __VAULT_PATH__ · Note ID __ID__</p>
 
-    <div class="field">
-      <div class="label">Title</div>
-      <div class="value mono">__TITLE__</div>
+def generator_page():
+    content = f"""
+<div class="page-head">
+  <div>
+    <h1 class="page-title" data-i18n="generator.title">Password Generator</h1>
+    <div class="page-sub" data-i18n="section.generator_desc">Create strong passwords with length, mode, and symbol toggles.</div>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-ghost" href="/" data-i18n="link.back">Back</a>
+  </div>
+</div>
+<div class="grid2">
+  <div class="card"><div class="card-body">
+    <div class="gen-out" id="pw-out">&nbsp;</div>
+    <div class="meter"><i id="meter-fill"></i></div>
+    <div class="faint" id="pw-stats" style="margin-top:var(--sp-3);text-align:center"
+         data-i18n="generator.stats.placeholder">Adjust the options to see strength.</div>
+    <div class="form-actions" style="justify-content:center">
+      <button class="btn btn-primary" type="button" onclick="SPM_regen()" data-i18n="generator.btn.regen">Regenerate</button>
+      <button class="btn" type="button" onclick="SPM_copyPw()" data-i18n="generator.btn.copy">Copy</button>
     </div>
-    <div class="field">
-      <div class="label">Content</div>
-      <div class="value mono" id="note-content">__CONTENT__</div>
-      <button type="button" class="btn-secondary" onclick="copyText()">Copy Content</button>
-    </div>
-    <div class="field">
-      <div class="label">Created at</div>
-      <div class="value mono">__CREATED__</div>
-    </div>
+  </div></div>
 
-    <div class="actions">
-      <a href="/" class="link">← Back to list</a>
-      <form method="post" action="/notes-delete" onsubmit="return confirm('Delete this note?');">
-        <input type="hidden" name="id" value="__ID__">
-        <button type="submit" class="btn-danger" data-i18n="btn.delete">Delete</button>
+  <div class="card"><div class="card-body">
+    <div class="field">
+      <label><span data-i18n="generator.length">Length</span> &middot; <b id="len-label">16</b></label>
+      <input id="len" type="range" min="4" max="64" value="16">
+    </div>
+    <div class="field">
+      <label data-i18n="generator.mode">Mode</label>
+      <div style="display:flex;gap:var(--sp-4)">
+        <label style="display:flex;gap:6px;align-items:center;font-weight:400">
+          <input type="radio" name="gmode" value="secure" checked>
+          <span data-i18n="generator.mode_secure">Secure</span></label>
+        <label style="display:flex;gap:6px;align-items:center;font-weight:400">
+          <input type="radio" name="gmode" value="easy">
+          <span data-i18n="generator.mode_easy">Memorable</span></label>
+      </div>
+    </div>
+    <div class="switch-row"><span data-i18n="generator.opt.upper">Uppercase</span><input id="upper" type="checkbox" checked></div>
+    <div class="switch-row"><span data-i18n="generator.opt.lower">Lowercase</span><input id="lower" type="checkbox" checked></div>
+    <div class="switch-row"><span data-i18n="generator.opt.digits">Digits</span><input id="digits" type="checkbox" checked></div>
+    <div class="switch-row"><span data-i18n="generator.opt.symbols">Symbols</span><input id="symbols" type="checkbox" checked></div>
+  </div></div>
+</div>
+{GENERATOR_SCRIPT}"""
+    return render_shell(content, "generator", VERSION, VAULT_PATH, title="Password Generator")
+
+
+EXPORT_FORMATS = ["csv", "json", "tsv", "ndjson", "jsonl", "md", "html", "txt", "yaml", "yml",
+                  "xml", "sql", "ini", "psv", "rst", "toml", "org", "scsv", "csv-noheader", "jsonc"]
+
+
+def transfer_page():
+    opts = "".join(
+        f'<option value="{f}">{f}{" (default)" if f == "csv" else ""}</option>'
+        for f in EXPORT_FORMATS
+    )
+    content = f"""
+<div class="page-head">
+  <div>
+    <h1 class="page-title" data-i18n="import.title">Export / Import</h1>
+    <div class="page-sub" data-i18n="import.subtitle">Download or paste data (csv/json + extended formats).</div>
+  </div>
+</div>
+<div class="grid2">
+  <div class="card">
+    <div class="card-head"><h2 data-i18n="import.download">Download</h2></div>
+    <div class="card-body">
+      <form method="get" action="/export">
+        <div class="field">
+          <label data-i18n="import.format_label">Format</label>
+          <select class="input" name="fmt">{opts}</select>
+        </div>
+        <button class="btn btn-primary btn-block" type="submit" data-i18n="import.download">Download</button>
+      </form>
+    </div>
+    <div class="card-foot"><span data-i18n="import.supports">Supports passwords, notes, passphrases, authenticators, backup codes.</span></div>
+  </div>
+
+  <div class="card" style="position:relative" id="import-card">
+    <div class="overlay" id="import-overlay" aria-live="polite">
+      <div class="overlay-in">
+        <div class="spinner"></div>
+        <div id="import-overlay-text" data-i18n="import.overlay_upload">Uploading...</div>
+      </div>
+    </div>
+    <div class="card-head"><h2 data-i18n="import.submit">Import</h2></div>
+    <div class="card-body">
+      <form method="post" action="/import" enctype="multipart/form-data" id="import-form">
+        <div class="field">
+          <label data-i18n="import.import_label">Import format</label>
+          <select class="input" name="fmt">{opts}</select>
+        </div>
+        <div class="field">
+          <label data-i18n="import.upload_label">Upload export file</label>
+          <input class="input" type="file" name="file">
+        </div>
+        <div class="field">
+          <label data-i18n="import.paste_label">Or paste file contents</label>
+          <textarea class="input" name="data" rows="6"
+                    data-i18n-placeholder="import.placeholder" placeholder="Paste exported data here"></textarea>
+        </div>
+        <button class="btn btn-primary btn-block" type="submit" data-i18n="import.submit">Import</button>
       </form>
     </div>
   </div>
-  <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
-  """ + AUTOLOCK_SCRIPT + """
-</body>
-</html>
-"""
+</div>
+<script>
+(function () {{
+  var form = document.getElementById("import-form");
+  if (!form) return;
+  form.addEventListener("submit", function () {{
+    var ov = document.getElementById("import-overlay");
+    if (ov) ov.classList.add("on");
+    if (window.SPM_AutoLock) window.SPM_AutoLock.pause();
+  }});
+}})();
+</script>"""
+    return render_shell(content, "transfer", VERSION, VAULT_PATH, title="Export / Import")
 
-PASSPHRASE_VIEW_HTML = """<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>SPM Web – View Passphrase</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    :root { color-scheme: dark; }
-    * { box-sizing:border-box; }
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
-      color:#f5f5f7;
-      margin:0;
-      padding:16px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      min-height:100vh;
-    }
-    .glass {
-      width:min(460px, 100%);
-      padding:22px 22px 18px;
-      border-radius:24px;
-      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
-      border:1px solid rgba(255,255,255,0.16);
-      backdrop-filter: blur(26px);
-      -webkit-backdrop-filter: blur(26px);
-      box-shadow:0 22px 42px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.04);
-    }
-    h1 { margin:0 0 4px; font-size:18px; letter-spacing:0.1em; text-transform:uppercase; }
-    .sub { margin:0 0 16px; font-size:11px; color:#a4a9c0; }
-    .field { margin-bottom:10px; font-size:13px; }
-    .label { font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#a4a9c0; margin-bottom:2px; }
-    .mono { font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .actions { margin-top:12px; display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:12px; flex-wrap:wrap; }
-    .btn-soft, .btn-danger { border-radius:999px; border:none; padding:7px 13px; font-size:11px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; background:rgba(255,255,255,0.06); color:#e1e3f0; }
-    .btn-danger { background:rgba(255,77,106,0.16); color:#ffd0d8; }
-    .link { font-size:12px; color:#9fa3f0; text-decoration:none; }
-    .link:hover { text-decoration:underline; }
-    .btn-secondary { border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.08); color:#f5f5f7; padding:6px 10px; font-size:12px; cursor:pointer; margin-right:6px; }
-    .toast {
-      position:fixed;
-      top:18px;
-      right:18px;
-      background:rgba(7,9,20,0.92);
-      border:1px solid rgba(159,163,240,0.45);
-      border-radius:12px;
-      padding:10px 14px;
-      font-size:12px;
-      letter-spacing:0.04em;
-      color:#f5f5f7;
-      opacity:0;
-      transform:translateY(-6px);
-      transition:opacity 0.25s ease, transform 0.25s ease;
-      pointer-events:none;
-      box-shadow:0 12px 30px rgba(0,0,0,0.55);
-      z-index:99;
-    }
-    .toast.show { opacity:1; transform:translateY(0); }
-    .toast.error { border-color:rgba(255,155,155,0.6); color:#ffd0d8; }
-  </style>
-  <script>
-    let toastTimer = null;
-    function t(key, fallback) {
-      if (window.SPM_I18N && typeof window.SPM_I18N.t === "function") {
-        return window.SPM_I18N.t(key, fallback);
-      }
-      return fallback !== undefined ? fallback : key;
-    }
-    function ensureToast() {
-      let toast = document.getElementById('spm-toast');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'spm-toast';
-        toast.className = 'toast';
-        toast.setAttribute('role','status');
-        toast.setAttribute('aria-live','polite');
-        toast.setAttribute('aria-atomic','true');
-        document.body.appendChild(toast);
-      }
-      return toast;
-    }
-    function showToast(message, ok=true) {
-      const toast = ensureToast();
-      toast.textContent = message || (ok ? t('toast.copy_success','Copied to clipboard.') : t('toast.copy_fail','Copy failed.'));
-      toast.classList.toggle('error', !ok);
-      toast.classList.add('show');
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
-    }
-    function copyToClipboard(text) {
-      if (!text) return Promise.resolve();
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        return navigator.clipboard.writeText(text);
-      }
-      return new Promise(function(resolve, reject) {
-        try {
-          const ta = document.createElement('textarea');
-          ta.value = text;
-          ta.style.position = 'fixed';
-          ta.style.top = '-1000px';
-          document.body.appendChild(ta);
-          ta.focus();
-          ta.select();
-          document.execCommand('copy');
-          document.body.removeChild(ta);
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      });
-    }
-    function copySecret() {
-      const text = document.getElementById('pass-secret').textContent || '';
-      copyToClipboard(text)
-        .then(() => showToast(t('toast.copy_success','Copied to clipboard.'), true))
-        .catch(() => showToast(t('toast.copy_fail','Copy failed.'), false));
-    }
-  </script>
-</head>
-<body data-lang="__LANG__">
-  <div class="glass">
-    <h1 data-i18n="pass.view.title">Passphrase</h1>
-    <p class="sub"><span data-i18n="view.sub_prefix">Vault:</span> __VAULT_PATH__ · ID __ID__</p>
-    <div class="field"><div class="label" data-i18n="pass.view.label_field">Label</div><div class="mono">__LABEL__</div></div>
-    <div class="field"><div class="label" data-i18n="pass.view.created">Created</div><div class="mono">__CREATED__</div></div>
-    <div class="field"><div class="label" data-i18n="pass.view.secret">Passphrase</div><div class="mono" id="pass-secret">__SECRET__</div><button class="btn-secondary" type="button" data-i18n="btn.copy_passphrase" onclick="copySecret()">Copy</button></div>
-    <div class="actions">
-      <a href="/" class="link" data-i18n="link.back">← Back</a>
-      <div style="display:flex; gap:6px; flex-wrap:wrap;">
-        <form method="get" action="/passphrase-edit" style="display:inline;">
-          <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-soft" data-i18n="btn.edit">Edit</button>
-        </form>
-        <form method="post" action="/passphrase-delete" style="display:inline;" onsubmit="return confirm(t('confirm.delete_passphrase','Delete this passphrase?'));">
-          <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-danger" data-i18n="btn.delete">Delete</button>
-        </form>
-      </div>
-    </div>
+
+def auth_view_page(aid, label, secret, period, algo, created):
+    content = f"""
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{html.escape(label)}</h1>
+    <div class="page-sub"><span class="chip">{html.escape(period)}s</span> <span class="chip">{html.escape(algo).upper()}</span></div>
   </div>
-  <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script>window.SPM_LANG="__LANG__";</script>
-  """ + I18N_SCRIPT + """
-  """ + AUTOLOCK_SCRIPT + """
-</body>
-</html>
-"""
-
-BACKUP_VIEW_HTML = """<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>SPM Web – Backup Codes</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    :root { color-scheme: dark; }
-    * { box-sizing:border-box; }
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
-      color:#f5f5f7;
-      margin:0;
-      padding:16px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      min-height:100vh;
-    }
-    .glass {
-      width:min(520px, 100%);
-      padding:22px 22px 18px;
-      border-radius:24px;
-      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
-      border:1px solid rgba(255,255,255,0.16);
-      backdrop-filter: blur(26px);
-      -webkit-backdrop-filter: blur(26px);
-      box-shadow:0 22px 42px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.04);
-    }
-    h1 { margin:0 0 4px; font-size:18px; letter-spacing:0.1em; text-transform:uppercase; }
-    .sub { margin:0 0 16px; font-size:11px; color:#a4a9c0; }
-    pre {
-      background:rgba(255,255,255,0.05);
-      padding:12px;
-      border-radius:10px;
-      font-size:12px;
-      overflow:auto;
-    }
-    .actions { margin-top:12px; display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:12px; flex-wrap:wrap; }
-    .btn-soft, .btn-danger { border-radius:999px; border:none; padding:7px 13px; font-size:11px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; background:rgba(255,255,255,0.06); color:#e1e3f0; }
-    .btn-danger { background:rgba(255,77,106,0.16); color:#ffd0d8; }
-    .link { font-size:12px; color:#9fa3f0; text-decoration:none; }
-    .link:hover { text-decoration:underline; }
-    .btn-secondary { border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.08); color:#f5f5f7; padding:6px 10px; font-size:12px; cursor:pointer; margin-right:6px; }
-    .toast {
-      position:fixed;
-      top:18px;
-      right:18px;
-      background:rgba(7,9,20,0.92);
-      border:1px solid rgba(159,163,240,0.45);
-      border-radius:12px;
-      padding:10px 14px;
-      font-size:12px;
-      letter-spacing:0.04em;
-      color:#f5f5f7;
-      opacity:0;
-      transform:translateY(-6px);
-      transition:opacity 0.25s ease, transform 0.25s ease;
-      pointer-events:none;
-      box-shadow:0 12px 30px rgba(0,0,0,0.55);
-      z-index:99;
-    }
-    .toast.show { opacity:1; transform:translateY(0); }
-    .toast.error { border-color:rgba(255,155,155,0.6); color:#ffd0d8; }
-  </style>
-  <script>
-    let toastTimer = null;
-    function t(key, fallback) {
-      if (window.SPM_I18N && typeof window.SPM_I18N.t === "function") {
-        return window.SPM_I18N.t(key, fallback);
-      }
-      return fallback !== undefined ? fallback : key;
-    }
-    function ensureToast() {
-      let toast = document.getElementById('spm-toast');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'spm-toast';
-        toast.className = 'toast';
-        toast.setAttribute('role','status');
-        toast.setAttribute('aria-live','polite');
-        toast.setAttribute('aria-atomic','true');
-        document.body.appendChild(toast);
-      }
-      return toast;
-    }
-    function showToast(message, ok=true) {
-      const toast = ensureToast();
-      toast.textContent = message || (ok ? t('toast.copy_success','Copied to clipboard.') : t('toast.copy_fail','Copy failed.'));
-      toast.classList.toggle('error', !ok);
-      toast.classList.add('show');
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
-    }
-    function copyToClipboard(text) {
-      if (!text) return Promise.resolve();
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        return navigator.clipboard.writeText(text);
-      }
-      return new Promise(function(resolve, reject) {
-        try {
-          const ta = document.createElement('textarea');
-          ta.value = text;
-          ta.style.position = 'fixed';
-          ta.style.top = '-1000px';
-          document.body.appendChild(ta);
-          ta.focus();
-          ta.select();
-          document.execCommand('copy');
-          document.body.removeChild(ta);
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      });
-    }
-    function copyCodes() {
-      const text = document.getElementById('backup-codes').textContent || '';
-      copyToClipboard(text)
-        .then(() => showToast(t('toast.copy_success','Copied to clipboard.'), true))
-        .catch(() => showToast(t('toast.copy_fail','Copy failed.'), false));
-    }
-  </script>
-</head>
-<body data-lang="__LANG__">
-  <div class="glass">
-    <h1 data-i18n="backup.view.title">Backup Codes</h1>
-    <p class="sub"><span data-i18n="view.sub_prefix">Vault:</span> __VAULT_PATH__ · ID __ID__</p>
-    <div style="font-size:13px; margin-bottom:8px;"><span data-i18n="backup.view.label">Label:</span> <span class="mono">__LABEL__</span></div>
-    <div style="font-size:13px; margin-bottom:8px;"><span data-i18n="backup.view.created">Created:</span> <span class="mono">__CREATED__</span></div>
-    <pre id="backup-codes">__CODES__</pre>
-    <button class="btn-secondary" type="button" data-i18n="btn.copy_codes" onclick="copyCodes()">Copy Codes</button>
-    <div class="actions">
-      <a href="/" class="link" data-i18n="link.back">← Back</a>
-      <div style="display:flex; gap:6px; flex-wrap:wrap;">
-        <form method="get" action="/backup-codes-edit" style="display:inline;">
-          <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-soft" data-i18n="btn.edit">Edit</button>
-        </form>
-        <form method="post" action="/backup-codes-delete" style="display:inline;" onsubmit="return confirm(t('confirm.delete_backup','Delete these backup codes?'));">
-          <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-danger" data-i18n="btn.delete">Delete</button>
-        </form>
-      </div>
-    </div>
+  <div class="page-actions">
+    <a class="btn" href="/authenticator-edit?id={html.escape(aid)}" data-i18n="btn.edit">Edit</a>
+    <a class="btn btn-ghost" href="/authenticators" data-i18n="form.back_list">Back to list</a>
   </div>
-  <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script>window.SPM_LANG="__LANG__";</script>
-  """ + I18N_SCRIPT + """
-  """ + AUTOLOCK_SCRIPT + """
-</body>
-</html>
-"""
-
-GENERATOR_HTML = """<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>SPM Web – Password Generator</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    :root { color-scheme: dark; }
-    * { box-sizing:border-box; }
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
-      color:#f5f5f7;
-      margin:0;
-      padding:16px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      min-height:100vh;
-    }
-    .glass {
-      width:min(520px, 100%);
-      padding:22px 22px 18px;
-      border-radius:24px;
-      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
-      border:1px solid rgba(255,255,255,0.16);
-      backdrop-filter: blur(26px);
-      -webkit-backdrop-filter: blur(26px);
-      box-shadow:0 22px 42px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.04);
-    }
-    h1 { margin:0 0 4px; font-size:18px; letter-spacing:0.1em; text-transform:uppercase; }
-    .sub { margin:0 0 16px; font-size:11px; color:#a4a9c0; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
-    label { font-size:12px; color:#d0d4e0; }
-    input[type=range] { width:100%; }
-    .mono { font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .output { font-size:16px; padding:10px 12px; border-radius:12px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.16); word-break:break-all; }
-    .pill { border:1px solid rgba(255,255,255,0.14); padding:6px 10px; border-radius:12px; background:rgba(255,255,255,0.06); cursor:pointer; user-select:none; }
-    .pill.active { background:linear-gradient(135deg,#0f9bff,#5f5fff); border-color:transparent; }
-    .btn { border:none; padding:9px 14px; border-radius:14px; background:linear-gradient(135deg,#14c38e,#2f7cff); color:#fff; font-weight:600; letter-spacing:0.04em; cursor:pointer; }
-    .btn-secondary { border:1px solid rgba(255,255,255,0.14); padding:8px 12px; border-radius:12px; background:rgba(255,255,255,0.08); color:#f5f5f7; font-weight:500; }
-    .stats { font-size:12px; color:#c8cbe4; }
-    .toast {
-      position:fixed;
-      top:18px;
-      right:18px;
-      background:rgba(7,9,20,0.92);
-      border:1px solid rgba(159,163,240,0.45);
-      border-radius:12px;
-      padding:10px 14px;
-      font-size:12px;
-      letter-spacing:0.04em;
-      color:#f5f5f7;
-      opacity:0;
-      transform:translateY(-6px);
-      transition:opacity 0.25s ease, transform 0.25s ease;
-      pointer-events:none;
-      box-shadow:0 12px 30px rgba(0,0,0,0.55);
-      z-index:99;
-    }
-    .toast.show { opacity:1; transform:translateY(0); }
-    .toast.error { border-color:rgba(255,155,155,0.6); color:#ffd0d8; }
-  </style>
-</head>
-<body data-lang="__LANG__">
-  <div class="glass">
-    <h1 data-i18n="generator.title">Password Generator</h1>
-    <p class="sub"><span data-i18n="view.sub_prefix">Vault:</span> __VAULT_PATH__</p>
-    <div class="row">
-      <label for="len"><span data-i18n="generator.length">Length</span>: <span id="len-label">16</span></label>
-      <input type="range" id="len" min="4" max="64" value="16">
-    </div>
-    <div class="row">
-      <span id="mode-secure" class="pill active" data-i18n="generator.mode_secure" onclick="setMode('secure')">Secure</span>
-      <span id="mode-easy" class="pill" data-i18n="generator.mode_easy" onclick="setMode('easy')">Easy / Memorable</span>
-    </div>
-    <div class="row" style="flex-wrap:wrap; gap:10px;">
-      <label><input type="checkbox" id="upper" checked> <span data-i18n="generator.opt.upper">Uppercase</span></label>
-      <label><input type="checkbox" id="lower" checked> <span data-i18n="generator.opt.lower">Lowercase</span></label>
-      <label><input type="checkbox" id="digits" checked> <span data-i18n="generator.opt.digits">Numbers</span></label>
-      <label><input type="checkbox" id="symbols" checked> <span data-i18n="generator.opt.symbols">Symbols</span></label>
-    </div>
-    <div class="row" style="flex-direction:column; align-items:flex-start;">
-      <div class="output mono" id="pw-out">••••••</div>
-      <div class="stats" id="pw-stats" data-i18n="generator.stats.placeholder">–</div>
-    </div>
-    <div class="row">
-      <button class="btn" data-i18n="generator.btn.regen" onclick="regen()">Regenerate</button>
-      <button class="btn-secondary" data-i18n="generator.btn.copy" onclick="copyPw()">Copy</button>
-      <a href="/" class="btn-secondary" style="text-decoration:none;" data-i18n="generator.btn.back">Back</a>
-    </div>
+</div>
+<div class="card" style="max-width:520px;margin:0 auto">
+  <div class="totp">
+    <div class="totp-code" id="code">------</div>
+    <div class="totp-ring" id="ring"><i></i></div>
+    <div class="faint" id="cd" data-i18n="auth.status.no_code">Waiting for code...</div>
+    <button class="btn btn-primary" type="button" onclick="SPM_copy(document.getElementById('code').textContent)"
+            data-i18n="btn.copy_code">Copy code</button>
   </div>
-  <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script>
-    const WORDS = ["sun","moon","star","river","ocean","cloud","stone","tree","leaf","fern","fire","ember","storm","wind","breeze","shadow","light","silver","gold","amber","flame","nova","comet","aurora","pulse","echo","vapor","wave","mist","dawn","dusk","zen","sage","whale","lynx","orca","hawk","raven"];
-    let toastTimer = null;
-    function t(key, fallback) {
-      if (window.SPM_I18N && typeof window.SPM_I18N.t === "function") {
-        return window.SPM_I18N.t(key, fallback);
-      }
-      return fallback !== undefined ? fallback : key;
-    }
-    function ensureToast() {
-      let toast = document.getElementById("spm-toast");
-      if (!toast) {
-        toast = document.createElement("div");
-        toast.id = "spm-toast";
-        toast.className = "toast";
-        toast.setAttribute("role","status");
-        toast.setAttribute("aria-live","polite");
-        toast.setAttribute("aria-atomic","true");
-        document.body.appendChild(toast);
-      }
-      return toast;
-    }
-    function showToast(message, ok=true) {
-      const toast = ensureToast();
-      toast.textContent = message || (ok ? t('toast.copy_success','Copied to clipboard.') : t('toast.copy_fail','Copy failed.'));
-      toast.classList.toggle("error", !ok);
-      toast.classList.add("show");
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toast.classList.remove("show"), 2000);
-    }
-    function copyToClipboard(text) {
-      if (!text) return Promise.resolve();
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        return navigator.clipboard.writeText(text);
-      }
-      return new Promise((resolve, reject) => {
-        try {
-          const ta = document.createElement("textarea");
-          ta.value = text;
-          ta.style.position = "fixed";
-          ta.style.top = "-2000px";
-          document.body.appendChild(ta);
-          ta.focus();
-          ta.select();
-          document.execCommand("copy");
-          document.body.removeChild(ta);
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      });
-    }
-    function activeMode() {
-      if (document.getElementById('mode-easy').classList.contains('active')) return 'easy';
-      return 'secure';
-    }
-    function setMode(m) {
-      ['mode-secure','mode-easy'].forEach(id => document.getElementById(id).classList.remove('active'));
-      document.getElementById('mode-' + m).classList.add('active');
-      regen();
-    }
-    function charset(includeSymbols, includeUpper, includeLower, includeDigits) {
-      let base = "";
-      if (includeUpper) base += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-      if (includeLower) base += "abcdefghijklmnopqrstuvwxyz";
-      if (includeDigits) base += "0123456789";
-      if (includeSymbols) base += "!@#$%^&*()_-+=[]{}:;,.?/|~";
-      if (!base) base = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-      return base;
-    }
-    function genSecure(len, opts) {
-      const chars = charset(opts.symbols, opts.upper, opts.lower, opts.digits);
-      let out = "";
-      for (let i = 0; i < len; i++) {
-        const idx = Math.floor(Math.random() * chars.length);
-        out += chars[idx];
-      }
-      return { pw: out, charsetSize: chars.length };
-    }
-    function genEasy(wordsCount, opts) {
-      let count = Math.min(8, Math.max(2, wordsCount));
-      const parts = [];
-      for (let i = 0; i < count; i++) {
-        const idx = Math.floor(Math.random() * WORDS.length);
-        let w = WORDS[idx];
-        if (opts.upper && !opts.lower) {
-          w = w.toUpperCase();
-        } else if (opts.upper) {
-          w = w.charAt(0).toUpperCase() + w.slice(1);
-        } else if (!opts.lower) {
-          w = w.toUpperCase();
-        }
-        parts.push(w);
-      }
-      let pw = parts.join("-");
-      if (opts.digits) {
-        pw += "-" + String(Math.floor(Math.random() * 100)).padStart(2, "0");
-      }
-      if (opts.symbols) {
-        const syms = "!@#$%^&*";
-        pw += syms[Math.floor(Math.random() * syms.length)];
-      }
-      // Rough charset size estimate for entropy
-      let charsetSize = 0;
-      if (opts.upper) charsetSize += 26;
-      if (opts.lower) charsetSize += 26;
-      if (opts.digits) charsetSize += 10;
-      if (opts.symbols) charsetSize += 10;
-      if (charsetSize === 0) charsetSize = 26;
-      return { pw, charsetSize };
-    }
-    function entropy(pw, chars) {
-      if (!pw || chars <= 1) return 0;
-      const L = pw.length;
-      return L * Math.log(chars) / Math.log(2);
-    }
-    function crackTime(bits) {
-      const guessesPerSec = 1e10; // offline fast attacker
-      const seconds = Math.pow(2, bits) / guessesPerSec;
-      const units = [
-        ["sec", 60],
-        ["min", 60],
-        ["hr", 24],
-        ["day", 365],
-        ["yr", 100],
-        ["century", 10]
-      ];
-      let t = seconds;
-      let label = "sec";
-      for (const [name, base] of units) {
-        if (t >= base) {
-          t /= base;
-          label = name;
-        } else {
-          break;
-        }
-      }
-      const unitLabel = t(`generator.unit.${label}`, label);
-      return t.toFixed(1) + " " + unitLabel;
-    }
-    function updateStats(pw, chars) {
-      const bits = entropy(pw, chars);
-      let strengthKey = "generator.strength.weak";
-      let fallback = "Weak";
-      if (bits >= 100) { strengthKey = "generator.strength.excellent"; fallback = "Excellent"; }
-      else if (bits >= 80) { strengthKey = "generator.strength.strong"; fallback = "Strong"; }
-      else if (bits >= 60) { strengthKey = "generator.strength.moderate"; fallback = "Moderate"; }
-      else if (bits < 40) { strengthKey = "generator.strength.very_weak"; fallback = "Very weak"; }
-      const strength = t(strengthKey, fallback);
-      const time = crackTime(bits);
-      document.getElementById('pw-stats').textContent = `${strength} · ~${bits.toFixed(1)} ${t('generator.stats.bits','bits')} · ~${time} ${t('generator.stats.suffix','to brute-force (est.)')}`;
-    }
-    function regen() {
-      let lenVal = parseInt(document.getElementById('len').value, 10) || 16;
-      const mode = activeMode();
-      const opts = {
-        symbols: document.getElementById('symbols').checked,
-        upper: document.getElementById('upper').checked,
-        lower: document.getElementById('lower').checked,
-        digits: document.getElementById('digits').checked
-      };
-      let result;
-      if (mode === 'easy') {
-        const wordsCount = Math.min(8, Math.max(2, Math.round(lenVal / 6)));
-        document.getElementById('len-label').textContent = `${t('generator.words_prefix','Words')}: ${wordsCount}`;
-        result = genEasy(wordsCount, opts);
-      } else {
-        if (lenVal < 4) lenVal = 4;
-        document.getElementById('len-label').textContent = lenVal;
-        result = genSecure(lenVal, opts);
-      }
-      document.getElementById('pw-out').textContent = result.pw;
-      updateStats(result.pw, result.charsetSize);
-    }
-    function copyPw() {
-      const pw = document.getElementById('pw-out').textContent || '';
-      if (!pw) return;
-      copyToClipboard(pw)
-        .then(() => showToast(t('toast.copy_success','Copied to clipboard.'), true))
-        .catch(() => showToast(t('toast.copy_fail','Copy failed.'), false));
-    }
-    document.getElementById('len').addEventListener('input', regen);
-    regen();
-  </script>
-  <script>window.SPM_LANG="__LANG__";</script>
-  """ + I18N_SCRIPT + """
-  """ + AUTOLOCK_SCRIPT + """
-</body>
-</html>
-"""
-
-AUTH_VIEW_HTML = """<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>SPM Web – Authenticator</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    :root { color-scheme: dark; }
-    * { box-sizing:border-box; }
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      background: radial-gradient(circle at top, #202438, #050507 55%, #000 100%);
-      color:#f5f5f7;
-      margin:0;
-      padding:16px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      min-height:100vh;
-    }
-    .glass {
-      width:min(520px, 100%);
-      padding:22px 22px 18px;
-      border-radius:24px;
-      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(10,10,14,0.96));
-      border:1px solid rgba(255,255,255,0.16);
-      backdrop-filter: blur(26px);
-      -webkit-backdrop-filter: blur(26px);
-      box-shadow:0 22px 42px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.04);
-    }
-    h1 { margin:0 0 4px; font-size:18px; letter-spacing:0.1em; text-transform:uppercase; }
-    .sub { margin:0 0 16px; font-size:11px; color:#a4a9c0; }
-    .field { margin-bottom:10px; font-size:13px; }
-    .label { font-size:11px; text-transform:uppercase; letter-spacing:0.12em; color:#a4a9c0; margin-bottom:2px; }
-    .mono { font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .code {
-      font-size:28px;
-      letter-spacing:6px;
-      font-weight:700;
-      margin:12px 0 6px;
-      display:block;
-    }
-    .countdown { font-size:12px; color:#9fa3f0; }
-    .actions { margin-top:12px; display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:12px; flex-wrap:wrap; }
-    .btn-soft, .btn-danger { border-radius:999px; border:none; padding:7px 13px; font-size:11px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; background:rgba(255,255,255,0.06); color:#e1e3f0; }
-    .btn-danger { background:rgba(255,77,106,0.16); color:#ffd0d8; }
-    .link { font-size:12px; color:#9fa3f0; text-decoration:none; }
-    .link:hover { text-decoration:underline; }
-    .toast {
-      position:fixed;
-      top:18px;
-      right:18px;
-      background:rgba(7,9,20,0.92);
-      border:1px solid rgba(159,163,240,0.45);
-      border-radius:12px;
-      padding:10px 14px;
-      font-size:12px;
-      letter-spacing:0.04em;
-      color:#f5f5f7;
-      opacity:0;
-      transform:translateY(-6px);
-      transition:opacity 0.25s ease, transform 0.25s ease;
-      pointer-events:none;
-      box-shadow:0 12px 30px rgba(0,0,0,0.55);
-      z-index:99;
-    }
-    .toast.show { opacity:1; transform:translateY(0); }
-    .toast.error { border-color:rgba(255,155,155,0.6); color:#ffd0d8; }
-  </style>
-</head>
-<body data-lang="__LANG__">
-  <div class="glass">
-    <h1 data-i18n="auth.view.title">Authenticator</h1>
-    <p class="sub"><span data-i18n="view.sub_prefix">Vault:</span> __VAULT_PATH__ · ID __ID__</p>
-    <div class="field"><div class="label" data-i18n="auth.view.label">Label</div><div class="mono">__LABEL__</div></div>
-    <div class="field"><div class="label" data-i18n="auth.view.interval">Interval</div><div class="mono">__PERIOD__ <span data-i18n="auth.view.seconds_label">seconds</span></div></div>
-    <div class="field"><div class="label" data-i18n="auth.view.algo">Algorithm</div><div class="mono">__ALGO__</div></div>
-    <div class="field"><div class="label" data-i18n="auth.view.created">Created</div><div class="mono">__CREATED__</div></div>
-    <div class="field"><div class="label" data-i18n="auth.view.secret">Base32 Secret</div><div class="mono">__SECRET__</div></div>
-    <div class="field">
-      <div class="label" data-i18n="auth.view.code">Live Code</div>
-      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        <span id="code" class="code" style="margin:0;">••••••</span>
-        <button type="button" class="btn-soft" id="copy-btn" data-i18n="btn.copy_code" title="Copy code">📋 Copy</button>
-      </div>
-      <div class="countdown" id="countdown"></div>
-      <div id="copy-status" style="font-size:11px; color:#9fa3f0; min-height:14px;"></div>
-    </div>
-    <div class="actions">
-      <a href="/" class="link" data-i18n="link.back">← Back</a>
-      <div style="display:flex; gap:6px; flex-wrap:wrap;">
-        <form method="get" action="/authenticator-edit" style="display:inline;">
-          <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-soft" data-i18n="btn.edit">Edit</button>
-        </form>
-        <form method="post" action="/authenticator-delete" style="display:inline;" onsubmit="return confirm(t('confirm.delete_authenticator','Delete this authenticator?'));">
-          <input type="hidden" name="id" value="__ID__">
-          <button type="submit" class="btn-danger" data-i18n="btn.delete">Delete</button>
-        </form>
-      </div>
-    </div>
+  <div class="card-body" style="border-top:1px solid var(--border)">
+    {_secret_block(secret, "auth.view.secret", "Secret", "sec")}
+    <div class="field"><label data-i18n="auth.view.created">Created</label>
+      <div class="faint mono">{html.escape(created) or "&mdash;"}</div></div>
   </div>
-  <div id="spm-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script>
-    let toastTimer = null;
-    function t(key, fallback) {
-      if (window.SPM_I18N && typeof window.SPM_I18N.t === "function") {
-        return window.SPM_I18N.t(key, fallback);
-      }
-      return fallback !== undefined ? fallback : key;
-    }
-    function showToast(message, ok=true) {
-      const toast = document.getElementById('spm-toast');
-      if (!toast) return;
-      toast.textContent = message || (ok ? t('toast.copy_success','Copied to clipboard.') : t('toast.copy_fail','Copy failed.'));
-      toast.classList.toggle('error', !ok);
-      toast.classList.add('show');
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
-    }
-    (function() {
-      const period = Number("__PERIOD__") || 30;
-      const id = "__ID__";
-      const codeEl = document.getElementById('code');
-      const cdEl = document.getElementById('countdown');
-      const copyBtn = document.getElementById('copy-btn');
-      const copyStatus = document.getElementById('copy-status');
-      let countdownTimer, nextTimer, currentCode = "";
-      function showStatus(msg, ok=true) {
-        if (!copyStatus) return;
-        copyStatus.textContent = msg || "";
-        copyStatus.style.color = ok ? "#9fa3f0" : "#ff9b9b";
-        if (msg) {
-          setTimeout(() => { copyStatus.textContent = ""; }, 2000);
-        }
-      }
-      function copyCode() {
-        if (!currentCode) {
-          showStatus(t('auth.status.no_code','No code yet'), false);
-          return;
-        }
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(currentCode)
-            .then(() => { showStatus(t('auth.status.copy_ok','Copied!')); showToast(t('toast.copy_success','Copied to clipboard.'), true); })
-            .catch(() => fallbackCopy());
-        } else {
-          fallbackCopy();
-        }
-      }
-      function fallbackCopy() {
-        try {
-          const ta = document.createElement("textarea");
-          ta.value = currentCode;
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand("copy");
-          ta.remove();
-          showStatus(t('auth.status.copy_ok','Copied!'));
-          showToast(t('toast.copy_success','Copied to clipboard.'), true);
-        } catch (e) {
-          showStatus(t('auth.status.copy_fail','Copy failed'), false);
-          showToast(t('toast.copy_fail','Copy failed.'), false);
-        }
-      }
-      if (copyBtn) {
-        copyBtn.addEventListener("click", copyCode);
-      }
-      function scheduleTick(ms) {
-        if (nextTimer) clearTimeout(nextTimer);
-        nextTimer = setTimeout(tick, ms);
-      }
-      function tick() {
-        if (nextTimer) {
-          clearTimeout(nextTimer);
-          nextTimer = null;
-        }
-        fetch('/authenticator-code?id=' + encodeURIComponent(id))
-          .then(r => r.json())
-          .then(d => {
-            currentCode = d.code || '';
-            codeEl.textContent = currentCode || '------';
-            let remaining = d.expires_in || period;
-            const template = t('auth.countdown.refresh_in','Refreshes in {n}s');
-            cdEl.textContent = template.replace('{n}', remaining);
-            if (countdownTimer) clearInterval(countdownTimer);
-            countdownTimer = setInterval(() => {
-              remaining -= 1;
-              if (remaining <= 0) {
-                cdEl.textContent = t('auth.countdown.refreshing','Refreshing...');
-                clearInterval(countdownTimer);
-                tick();
-              } else {
-                cdEl.textContent = template.replace('{n}', remaining);
-              }
-            }, 1000);
-            const wait = Math.max(800, (remaining * 1000) - 250);
-            scheduleTick(wait);
-          })
-          .catch(() => scheduleTick(period * 1000));
-      }
-      tick();
-    })();
-  </script>
-  <script>window.SPM_LANG="__LANG__";</script>
-  """ + I18N_SCRIPT + """
-  """ + AUTOLOCK_SCRIPT + """
-</body>
-</html>
-"""
+</div>
+{REVEAL_SCRIPT}
+<script>
+(function () {{
+  var id = {jsonlib.dumps(aid)}, period = {jsonlib.dumps(int(period) if str(period).isdigit() else 30)};
+  var left = 0;
+  function t(k, fb) {{ return (window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t(k, fb) : fb; }}
+  function paint() {{
+    var ring = document.getElementById("ring");
+    if (ring) ring.style.setProperty("--pct", Math.max(0, left / period * 100));
+    var cd = document.getElementById("cd");
+    if (cd) cd.textContent = t("auth.countdown.refresh_in", "Refreshes in") + " " + Math.max(0, left) + "s";
+  }}
+  function fetchCode() {{
+    fetch("/authenticator-code?id=" + encodeURIComponent(id), {{ credentials: "same-origin" }})
+      .then(function (r) {{ return r.json(); }})
+      .then(function (d) {{
+        document.getElementById("code").textContent = d.code || "------";
+        left = d.expires_in || period;
+        paint();
+      }})
+      .catch(function () {{
+        var cd = document.getElementById("cd");
+        if (cd) cd.textContent = t("auth.status.no_code", "No code available");
+      }});
+  }}
+  fetchCode();
+  setInterval(function () {{
+    left -= 1;
+    if (left <= 0) fetchCode(); else paint();
+  }}, 1000);
+}})();
+</script>"""
+    return render_shell(content, "authenticators", VERSION, VAULT_PATH, title=label)
 
-# ---------- Helpers ----------------------------------------------------------
 
 def decrypt_vault(master: str) -> str:
     return subprocess.check_output(
@@ -8088,233 +7298,6 @@ def parse_authenticators(plaintext: str):
             items.append((idx, parts))
     return lines, items
 
-def build_rows_html(entries):
-    if not entries:
-        return "<tr><td colspan='4' class='badge-empty'><i>No entries yet. Use “Add Entry” to create one.</i></td></tr>"
-    rows = []
-    for _, parts in entries:
-        entry_id = html.escape(parts[0])
-        name     = html.escape(parts[1])
-        user     = html.escape(parts[2])
-        row = (
-            "<tr>"
-            f"<td>{entry_id}</td>"
-            f"<td>{name}</td>"
-            f"<td>{user}</td>"
-            "<td class='actions'><div class='icon-row'>"
-            f"<a class='icon-btn' href='/view?id={entry_id}' title='View'><span>👁</span></a>"
-            f"<a class='icon-btn' href='/edit?id={entry_id}' title='Edit'><span>✏</span></a>"
-            "<form class='inline' method='post' action='/delete' "
-            "onsubmit=\"return confirm('Delete this entry?');\">"
-            f"<input type='hidden' name='id' value='{entry_id}'>"
-            "<button type='submit' class='icon-btn danger' title='Delete'><span>🗑</span></button>"
-            "</form>"
-            "</div></td>"
-            "</tr>"
-        )
-        rows.append(row)
-    return "".join(rows)
-
-def build_notes_rows_html(notes):
-    if not notes:
-        return "<tr><td colspan='3' class='badge-empty'><i>No secure notes yet.</i></td></tr>"
-    rows = []
-    for _, parts in notes:
-        note_id = html.escape(parts[1])
-        title   = html.escape(parts[2])
-        row = (
-            "<tr>"
-            f"<td>{note_id}</td>"
-            f"<td>{title}</td>"
-            "<td class='actions'><div class='icon-row'>"
-            f"<a class='icon-btn' href='/notes-view?id={note_id}' title='View'><span>👁</span></a>"
-            "<form class='inline' method='post' action='/notes-delete' "
-            "onsubmit=\"return confirm('Delete this note?');\">"
-            f"<input type='hidden' name='id' value='{note_id}'>"
-            "<button type='submit' class='icon-btn danger' title='Delete'><span>🗑</span></button>"
-            "</form>"
-            "</div></td>"
-            "</tr>"
-        )
-        rows.append(row)
-    return "".join(rows)
-
-def build_passphrase_rows_html(passphrases):
-    if not passphrases:
-        return "<tr><td colspan='3' class='badge-empty'><i>No passphrases stored.</i></td></tr>"
-    rows = []
-    for _, parts in passphrases:
-        pid = html.escape(parts[1])
-        label = html.escape(parts[2])
-        row = (
-            "<tr>"
-            f"<td>{pid}</td>"
-            f"<td>{label}</td>"
-            "<td class='actions'><div class='icon-row'>"
-            f"<a class='icon-btn' href='/passphrase-view?id={pid}' title='View'><span>👁</span></a>"
-            f"<a class='icon-btn' href='/passphrase-edit?id={pid}' title='Edit'><span>✏</span></a>"
-            "<form class='inline' method='post' action='/passphrase-delete' "
-            "onsubmit=\"return confirm('Delete this passphrase?');\">"
-            f"<input type='hidden' name='id' value='{pid}'>"
-            "<button type='submit' class='icon-btn danger' title='Delete'><span>🗑</span></button>"
-            "</form>"
-            "</div></td>"
-            "</tr>"
-        )
-        rows.append(row)
-    return "".join(rows)
-
-def build_backup_rows_html(backups):
-    if not backups:
-        return "<tr><td colspan='3' class='badge-empty'><i>No backup codes stored.</i></td></tr>"
-    rows = []
-    for _, parts in backups:
-        bid = html.escape(parts[1])
-        label = html.escape(parts[2])
-        row = (
-            "<tr>"
-            f"<td>{bid}</td>"
-            f"<td>{label}</td>"
-            "<td class='actions'><div class='icon-row'>"
-            f"<a class='icon-btn' href='/backup-codes-view?id={bid}' title='View'><span>👁</span></a>"
-            f"<a class='icon-btn' href='/backup-codes-edit?id={bid}' title='Edit'><span>✏</span></a>"
-            "<form class='inline' method='post' action='/backup-codes-delete' "
-            "onsubmit=\"return confirm('Delete these backup codes?');\">"
-            f"<input type='hidden' name='id' value='{bid}'>"
-            "<button type='submit' class='icon-btn danger' title='Delete'><span>🗑</span></button>"
-            "</form>"
-            "</div></td>"
-            "</tr>"
-        )
-        rows.append(row)
-    return "".join(rows)
-
-def build_auth_rows_html(auths):
-    if not auths:
-        return "<tr><td colspan='5' class='badge-empty'><i>No authenticators stored.</i></td></tr>"
-    rows = []
-    for _, parts in auths:
-        aid = html.escape(parts[1])
-        label = html.escape(parts[2])
-        interval = html.escape(parts[4] if len(parts) > 4 else "30")
-        algo = html.escape(parts[6] if len(parts) > 6 else "sha1")
-        row = (
-            "<tr>"
-            f"<td>{aid}</td>"
-            f"<td>{label}</td>"
-            f"<td>{interval}s</td>"
-            f"<td>{algo.upper()}</td>"
-            "<td class='actions'><div class='icon-row'>"
-            f"<a class='icon-btn' href='/authenticator-view?id={aid}' title='View live'><span>👁</span></a>"
-            f"<a class='icon-btn' href='/authenticator-edit?id={aid}' title='Edit'><span>✏</span></a>"
-            "<form class='inline' method='post' action='/authenticator-delete' "
-            "onsubmit=\"return confirm('Delete this authenticator?');\">"
-            f"<input type='hidden' name='id' value='{aid}'>"
-            "<button type='submit' class='icon-btn danger' title='Delete'><span>🗑</span></button>"
-            "</form>"
-            "</div></td>"
-            "</tr>"
-        )
-        rows.append(row)
-    return "".join(rows)
-
-def build_entry_form(title, vault_path, action, values=None, message=""):
-    values = values or {}
-    def v(k): return html.escape(values.get(k, "") or "")
-    body = (
-        "<label data-i18n='entry.field.service'>Service / Name</label>"
-        f"<input type='text' name='name' value='{v('name')}' required>"
-        "<label data-i18n='entry.field.username'>Username</label>"
-        f"<input type='text' name='user' value='{v('user')}'>"
-        "<label data-i18n='entry.field.password'>Password</label>"
-        f"<input type='password' name='password' value='{v('password')}'>"
-        "<label data-i18n='entry.field.notes'>Notes</label>"
-        f"<textarea name='notes'>{v('notes')}</textarea>"
-    )
-    page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
-    page = page.replace("__VAULT_PATH__", html.escape(vault_path))
-    page = page.replace("__ACTION__", action)
-    page = page.replace("__BODY__", body)
-    page = page.replace("__MESSAGE__", message)
-    return page
-
-def build_note_form(title, vault_path, action, values=None, message=""):
-    values = values or {}
-    def v(k): return html.escape(values.get(k, "") or "")
-    body = (
-        "<label data-i18n='note.field.title'>Title</label>"
-        f"<input type='text' name='title' value='{v('title')}' required>"
-        "<label data-i18n='note.field.content'>Content</label>"
-        f"<textarea name='content'>{v('content')}</textarea>"
-    )
-    page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
-    page = page.replace("__VAULT_PATH__", html.escape(vault_path))
-    page = page.replace("__ACTION__", action)
-    page = page.replace("__BODY__", body)
-    page = page.replace("__MESSAGE__", message)
-    return page
-
-def build_passphrase_form(title, vault_path, action, values=None, message=""):
-    values = values or {}
-    def v(k): return html.escape(values.get(k, "") or "")
-    body = (
-        "<label data-i18n='pass.field.label'>Label</label>"
-        f"<input type='text' name='label' value='{v('label')}' required>"
-        "<label data-i18n='pass.field.secret_hint'>Passphrase (leave blank to auto-generate)</label>"
-        f"<input type='text' name='secret' value='{v('secret')}'>"
-    )
-    page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
-    page = page.replace("__VAULT_PATH__", html.escape(vault_path))
-    page = page.replace("__ACTION__", action)
-    page = page.replace("__BODY__", body)
-    page = page.replace("__MESSAGE__", message)
-    return page
-
-def build_backup_form(title, vault_path, action, values=None, message=""):
-    values = values or {}
-    def v(k): return html.escape(values.get(k, "") or "")
-    body = (
-        "<label data-i18n='backup.field.label'>Label</label>"
-        f"<input type='text' name='label' value='{v('label')}' required>"
-        "<label data-i18n='backup.field.codes'>Backup codes (one per line)</label>"
-        f"<textarea name='codes'>{v('codes')}</textarea>"
-    )
-    page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
-    page = page.replace("__VAULT_PATH__", html.escape(vault_path))
-    page = page.replace("__ACTION__", action)
-    page = page.replace("__BODY__", body)
-    page = page.replace("__MESSAGE__", message)
-    return page
-
-def build_auth_form(title, vault_path, action, values=None, message=""):
-    values = values or {}
-    def v(k): return html.escape(values.get(k, "") or "")
-    algo = (values.get("algo") or "sha1").lower()
-    if algo not in ("sha1","sha256","sha512"):
-        algo = "sha1"
-    body = (
-        "<label data-i18n='auth.field.label'>Label</label>"
-        f"<input type='text' name='label' value='{v('label')}' required>"
-        "<label data-i18n='auth.field.secret'>Base32 Secret</label>"
-        f"<input type='text' name='secret' value='{v('secret')}' placeholder='JBSWY3DPEHPK3PXP' required>"
-        "<label data-i18n='auth.field.period'>Refresh interval (seconds)</label>"
-        f"<input type='number' name='period' min='5' max='120' value='{v('period') or '30'}'>"
-        "<label data-i18n='auth.field.algorithm'>Algorithm</label>"
-        "<select name='algo'>"
-        f"<option value='sha1'{' selected' if algo=='sha1' else ''} data-i18n='auth.option.sha1'>SHA1 (default)</option>"
-        f"<option value='sha256'{' selected' if algo=='sha256' else ''} data-i18n='auth.option.sha256'>SHA256</option>"
-        f"<option value='sha512'{' selected' if algo=='sha512' else ''} data-i18n='auth.option.sha512'>SHA512</option>"
-        "</select>"
-    )
-    page = ENTRY_FORM_HTML.replace("__TITLE__", html.escape(title))
-    page = page.replace("__VAULT_PATH__", html.escape(vault_path))
-    page = page.replace("__ACTION__", action)
-    page = page.replace("__BODY__", body)
-    page = page.replace("__MESSAGE__", message)
-    return page
-
-# ---------- HTTP server ------------------------------------------------------
-
 class SPMServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     def __init__(self, *args, **kwargs):
@@ -8411,7 +7394,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _require_login(self):
         master = self._get_cookie_session()
         if not master:
-            page = LOGIN_HTML.replace("__MESSAGE__", "")
+            page = login_page(VERSION)
             self._send_html(200, page)
             return None
         return master
@@ -8450,7 +7433,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/login":
-            page = LOGIN_HTML.replace("__MESSAGE__", "")
+            page = login_page(VERSION)
             self._send_html(200, page)
             return
 
@@ -8482,25 +7465,81 @@ class Handler(http.server.BaseHTTPRequestHandler):
             _, passphrases = parse_passphrases(plaintext)
             _, backups = parse_backup_codes(plaintext)
             _, auths = parse_authenticators(plaintext)
-            rows_html = build_rows_html(entries)
-            notes_html = build_notes_rows_html(notes)
-            pass_rows_html = build_passphrase_rows_html(passphrases)
-            backup_rows_html = build_backup_rows_html(backups)
-            auth_rows_html = build_auth_rows_html(auths)
-            body = MAIN_HTML.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
-            body = body.replace("__FLASH__", flash)
-            body = body.replace("__ROWS__", rows_html)
-            body = body.replace("__NOTES_ROWS__", notes_html)
-            body = body.replace("__PASSPHRASE_ROWS__", pass_rows_html)
-            body = body.replace("__BACKUP_ROWS__", backup_rows_html)
-            body = body.replace("__AUTH_ROWS__", auth_rows_html)
-            body = body.replace("__VERSION__", html.escape(VERSION))
-            body = body.replace("__LANG__", html.escape(self._get_lang()))
+            counts = {
+                "passwords": len(entries), "notes": len(notes),
+                "passphrases": len(passphrases), "backups": len(backups),
+                "authenticators": len(auths),
+            }
+            recent = list(reversed(entries))[:5]
+            body = render_shell(overview_page(counts, recent), "overview",
+                                VERSION, VAULT_PATH, title="Overview",
+                                counts=counts, flash=flash)
             self._send_html(200, body)
             return
 
+        if path == "/transfer":
+            self._send_html(200, transfer_page())
+            return
+
+        if path in ("/passwords", "/notes", "/passphrases", "/authenticators", "/backup-codes"):
+            try:
+                plaintext = decrypt_vault(master)
+            except Exception:
+                self.send_response(302)
+                self.send_header("Set-Cookie", f"spm_session=deleted; Max-Age=0; {self._session_cookie_attrs()}")
+                self.send_header("Location", "/login")
+                self.end_headers()
+                return
+            _, entries = parse_entries(plaintext)
+            _, notes = parse_notes(plaintext)
+            _, passphrases = parse_passphrases(plaintext)
+            _, backups = parse_backup_codes(plaintext)
+            _, auths = parse_authenticators(plaintext)
+            counts = {
+                "passwords": len(entries), "notes": len(notes),
+                "passphrases": len(passphrases), "backups": len(backups),
+                "authenticators": len(auths),
+            }
+            spec = {
+                "/passwords": ("nav.passwords", "Passwords", "page.passwords.desc",
+                               "Login credentials stored in your vault.", "/add",
+                               "btn.add_entry", "+ Add Entry",
+                               [("table.id", "ID", "num"), ("table.name", "Name", ""),
+                                ("table.username", "Username", ""), ("table.actions", "Actions", "act")],
+                               build_rows_html(entries), "passwords"),
+                "/notes": ("nav.notes", "Secure Notes", "page.notes.desc",
+                           "Encrypted notes stored inside the same vault.", "/notes-add",
+                           "btn.add_note", "+ Add Note",
+                           [("table.id", "ID", "num"), ("table.title", "Title", ""),
+                            ("table.actions", "Actions", "act")],
+                           build_notes_rows_html(notes), "notes"),
+                "/passphrases": ("nav.passphrases", "Passphrases", "page.passphrases.desc",
+                                 "API tokens and recovery phrases.", "/passphrase-add",
+                                 "btn.add_passphrase", "+ Add Passphrase",
+                                 [("table.id", "ID", "num"), ("table.label", "Label", ""),
+                                  ("table.actions", "Actions", "act")],
+                                 build_passphrase_rows_html(passphrases), "passphrases"),
+                "/authenticators": ("nav.authenticators", "Authenticators", "page.authenticators.desc",
+                                    "Time-based one-time password codes.", "/authenticator-add",
+                                    "btn.add_authenticator", "+ Add Authenticator",
+                                    [("table.id", "ID", "num"), ("table.label", "Label", ""),
+                                     ("table.every", "Every", ""), ("table.algo", "Algo", ""),
+                                     ("table.actions", "Actions", "act")],
+                                    build_auth_rows_html(auths), "authenticators"),
+                "/backup-codes": ("nav.backup_codes", "Backup Codes", "page.backups.desc",
+                                  "One-time recovery codes for your accounts.", "/backup-codes-add",
+                                  "btn.add_backups", "+ Add Backup Codes",
+                                  [("table.id", "ID", "num"), ("table.label", "Label", ""),
+                                   ("table.actions", "Actions", "act")],
+                                  build_backup_rows_html(backups), "backup-codes"),
+            }[path]
+            content = list_page(spec[0], spec[1], spec[2], spec[3], spec[4], spec[5], spec[6], spec[7], spec[8])
+            self._send_html(200, render_shell(content, spec[9], VERSION, VAULT_PATH,
+                                              title=spec[1], counts=counts, searchable=True))
+            return
+
         if path == "/generator":
-            page = GENERATOR_HTML.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
+            page = generator_page()
             self._send_html(200, page)
             return
 
@@ -8565,14 +7604,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Entry not found")
                 return
 
-            page = VIEW_HTML
-            page = page.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
-            page = page.replace("__ID__", html.escape(found[0]))
-            page = page.replace("__NAME__", html.escape(found[1]))
-            page = page.replace("__USER__", html.escape(found[2]))
-            page = page.replace("__PASS__", html.escape(found[3]))
-            page = page.replace("__NOTES__", html.escape(found[4]))
-            page = page.replace("__CREATED__", html.escape(found[5]))
+            page = view_entry_page(found)
             self._send_html(200, page)
             return
 
@@ -8609,12 +7641,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 content = "[Decode error]"
             created = found[4]
 
-            page = NOTES_VIEW_HTML
-            page = page.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
-            page = page.replace("__ID__", html.escape(note_id))
-            page = page.replace("__TITLE__", html.escape(title))
-            page = page.replace("__CONTENT__", html.escape(content))
-            page = page.replace("__CREATED__", html.escape(created))
+            page = view_simple_page(title, "/notes", "note.field.title", title,
+                                    content, created, "note.field.content", "Content", "notes")
             self._send_html(200, page)
             return
 
@@ -8680,12 +7708,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 secret = "[Decode error]"
             created = found[4]
-            page = PASSPHRASE_VIEW_HTML
-            page = page.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
-            page = page.replace("__ID__", html.escape(pid))
-            page = page.replace("__LABEL__", html.escape(found[2]))
-            page = page.replace("__CREATED__", html.escape(created))
-            page = page.replace("__SECRET__", html.escape(secret))
+            page = view_simple_page(found[2], "/passphrases", "pass.field.label", found[2],
+                                    secret, created, "pass.view.secret", "Passphrase", "passphrases")
             self._send_html(200, page)
             return
 
@@ -8743,14 +7767,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             created = found[5] if len(found) > 5 else ""
             algo = (found[6] if len(found) > 6 else "sha1") or "sha1"
-            page = AUTH_VIEW_HTML
-            page = page.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
-            page = page.replace("__ID__", html.escape(aid))
-            page = page.replace("__LABEL__", html.escape(found[2]))
-            page = page.replace("__SECRET__", html.escape(found[3]))
-            page = page.replace("__PERIOD__", html.escape(found[4] or "30"))
-            page = page.replace("__CREATED__", html.escape(created))
-            page = page.replace("__ALGO__", html.escape(algo.upper()))
+            page = auth_view_page(aid, found[2], found[3], found[4] or "30", algo, created)
             self._send_html(200, page)
             return
 
@@ -8816,12 +7833,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 codes = "[Decode error]"
             created = found[4]
-            page = BACKUP_VIEW_HTML
-            page = page.replace("__VAULT_PATH__", html.escape(VAULT_PATH))
-            page = page.replace("__ID__", html.escape(bid))
-            page = page.replace("__LABEL__", html.escape(found[2]))
-            page = page.replace("__CREATED__", html.escape(created))
-            page = page.replace("__CODES__", html.escape(codes))
+            page = view_simple_page(found[2], "/backup-codes", "backup.field.label", found[2],
+                                    codes, created, "backup.field.codes", "Backup codes", "backup-codes")
             self._send_html(200, page)
             return
 
@@ -8904,14 +7917,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             password = data.get("password", [""])[0]
 
             if not password:
-                page = LOGIN_HTML.replace("__MESSAGE__", "<div class='msg'>Password required.</div>")
+                page = login_page(VERSION, "<div class='msg'>Password required.</div>")
                 self._send_html(200, page)
                 return
 
             try:
                 decrypt_vault(password)
             except subprocess.CalledProcessError:
-                page = LOGIN_HTML.replace("__MESSAGE__", "<div class='msg'>Invalid master password.</div>")
+                page = login_page(VERSION, "<div class='msg'>Invalid master password.</div>")
                 self._send_html(200, page)
                 return
 
@@ -8925,7 +7938,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         master = self._get_cookie_session()
         if not master:
-            page = LOGIN_HTML.replace("__MESSAGE__", "")
+            page = login_page(VERSION)
             self._send_html(200, page)
             return
 
@@ -9362,7 +8375,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             secret = (data.get("secret") or [""])[0].replace(" ", "")
             period = (data.get("period") or ["30"])[0]
             algo_in = (data.get("algo") or [""])[0].lower()
-            algo_in = (data.get("algo") or [""])[0].lower()
             algo = ((data.get("algo") or ["sha1"])[0] or "sha1").lower()
             if algo not in ("sha1","sha256","sha512"):
                 algo = "sha1"
@@ -9437,6 +8449,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             label = (data.get("label") or [""])[0].strip()
             secret = (data.get("secret") or [""])[0].replace(" ", "")
             period = (data.get("period") or ["30"])[0]
+            algo_in = (data.get("algo") or [""])[0].lower()
 
             plaintext = decrypt_vault(master)
             lines, auths = parse_authenticators(plaintext)

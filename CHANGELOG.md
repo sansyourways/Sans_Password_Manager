@@ -5,6 +5,49 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.9.0] - 2026-08-19
+
+### Changed - web interface redesign
+- The web UI is rebuilt around a persistent **app shell**: a sidebar with live
+  item counts, a sticky top bar, and a real navigation flow. The old design put
+  every section on one long scrolling page with no way to navigate between them.
+- Each vault type now has its **own page** - `/passwords`, `/notes`,
+  `/passphrases`, `/authenticators`, `/backup-codes` - plus a `/transfer` page
+  for export/import. `/` is now an **Overview** with per-type stat tiles and a
+  recently-added list.
+- **Instant search** filters the current table as you type; press `/` to jump to
+  it and `Esc` to clear.
+- Secrets on view pages start masked with explicit **reveal** and **copy**
+  buttons, instead of being printed in the page.
+- The 30-second idle auto-lock now shows a **live countdown** that turns amber in
+  the last 10 seconds, rather than logging you out with no warning.
+- Nine separate stylesheets were replaced by **one design system** (tokens,
+  components, four themes). All four themes - Dark, AMOLED, Cyberpunk, Light -
+  and all three languages are preserved; the embedded web script shrank from
+  5,183 to 4,196 lines.
+- The layout is now responsive: the sidebar collapses to a drawer under 900px,
+  and `prefers-reduced-motion` and print styles are honoured.
+
+### Fixed
+- **Editing an authenticator always failed with a 500 and silently discarded the
+  change.** `algo_in` was assigned only in the `/authenticator-add` branch but
+  read in `/authenticator-edit`; because Python scopes it to the whole `do_POST`
+  function, every edit raised `UnboundLocalError` before the vault was written.
+- The generator's strength readout never updated. Inside `crackTime()` the local
+  accumulator was named `t`, shadowing the `t()` translation helper, so calling
+  `t(...)` threw `TypeError: t is not a function` on every keystroke.
+
+### Security
+- The web generator drew passwords from `Math.random()`, a non-cryptographic
+  PRNG. It now uses `crypto.getRandomValues()` with rejection sampling, matching
+  the CSPRNG fix applied to the CLI generator in 2.8.3.
+
+### Added
+- 39 new translation keys covering the new navigation, empty states, and login
+  screen, in all three languages (181 keys each, full parity).
+
+---
+
 ## [2.8.4] - 2026-08-19
 
 ### Fixed
