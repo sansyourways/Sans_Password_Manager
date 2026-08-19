@@ -7669,7 +7669,16 @@ def auth_view_page(aid, label, secret, period, algo, created):
     var ring = document.getElementById("ring");
     if (ring) ring.style.setProperty("--pct", Math.max(0, left / period * 100));
     var cd = document.getElementById("cd");
-    if (cd) cd.textContent = t("auth.countdown.refresh_in", "Refreshes in") + " " + Math.max(0, left) + "s";
+    if (cd) {{
+      /* The catalogue strings carry an {{n}} placeholder ("Refreshes in {{n}}s",
+         "{{n}}秒で更新") and t() does no interpolation, so substitute here or the
+         placeholder renders literally next to a stray count. */
+      var secs = Math.max(0, left);
+      var tpl = t("auth.countdown.refresh_in", "Refreshes in {{n}}s");
+      cd.textContent = tpl.indexOf("{{n}}") >= 0
+        ? tpl.replace("{{n}}", secs)
+        : tpl + " " + secs + "s";
+    }}
   }}
   function fetchCode() {{
     fetch("/authenticator-code?id=" + encodeURIComponent(id), {{ credentials: "same-origin" }})

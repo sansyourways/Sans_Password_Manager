@@ -29,6 +29,16 @@ Keep-a-Changelog style format.
 - The `pagehide` teardown is no longer one-shot, so the timer is still stopped
   on a second navigation away after a back/forward-cache round trip.
 - Cleared the existing ShellCheck warning in the regression-suite format count.
+- The authenticator countdown no longer renders its raw i18n placeholder. The
+  catalogue strings carry `{n}` (`Refreshes in {n}s`, `{n}秒で更新`) but the
+  countdown appended the seconds instead of substituting, so every language
+  showed the literal placeholder next to a stray count (`Refreshes in {n}s 4s`).
+
+### Documentation
+- Regenerated the 23 Web Mode product-tour screenshots against 2.10.5 so they
+  show the inline SVG icon set rather than the replaced emoji glyphs, using a
+  larger synthetic documentation vault. Screenshots now live in
+  `docs/screenshots/web-v2.10.5/`.
 
 ## [2.10.4] - 2026-08-19
 

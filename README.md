@@ -75,7 +75,7 @@ attacker with root access.
 
 ## Product tour
 
-All screenshots below were captured in Google Chrome from SPM 2.10.2 using a
+All screenshots below were captured in Google Chrome from SPM 2.10.5 using a
 disposable vault containing only synthetic documentation data. No personal
 vault or real credential appears in these images.
 
@@ -85,17 +85,17 @@ vault or real credential appears in these images.
 
 | Secure login | Security overview |
 | --- | --- |
-| ![SPM master-password login](docs/screenshots/web-v2.10.2/01-login.png) | ![SPM vault overview and security score](docs/screenshots/web-v2.10.2/02-overview.png) |
+| ![SPM master-password login](docs/screenshots/web-v2.10.5/01-login.png) | ![SPM vault overview and security score](docs/screenshots/web-v2.10.5/02-overview.png) |
 
 ### Work with credentials and protected records
 
 | Password records | Authenticator codes |
 | --- | --- |
-| ![SPM password list](docs/screenshots/web-v2.10.2/03-passwords.png) | ![SPM TOTP authenticator view](docs/screenshots/web-v2.10.2/16-authenticator-view.png) |
+| ![SPM password list](docs/screenshots/web-v2.10.5/03-passwords.png) | ![SPM TOTP authenticator view](docs/screenshots/web-v2.10.5/16-authenticator-view.png) |
 
 | Password generator | Import and export |
 | --- | --- |
-| ![SPM password generator](docs/screenshots/web-v2.10.2/22-generator.png) | ![SPM import and export workspace](docs/screenshots/web-v2.10.2/23-transfer.png) |
+| ![SPM password generator](docs/screenshots/web-v2.10.5/22-generator.png) | ![SPM import and export workspace](docs/screenshots/web-v2.10.5/23-transfer.png) |
 
 <details>
 <summary><strong>Complete web interface gallery (23 pages)</strong></summary>
@@ -104,31 +104,31 @@ vault or real credential appears in these images.
 
 | Add | View | Edit |
 | --- | --- | --- |
-| ![Add password](docs/screenshots/web-v2.10.2/04-password-add.png) | ![View password](docs/screenshots/web-v2.10.2/05-password-view.png) | ![Edit password](docs/screenshots/web-v2.10.2/06-password-edit.png) |
+| ![Add password](docs/screenshots/web-v2.10.5/04-password-add.png) | ![View password](docs/screenshots/web-v2.10.5/05-password-view.png) | ![Edit password](docs/screenshots/web-v2.10.5/06-password-edit.png) |
 
 #### Secure notes
 
 | List | Add | View |
 | --- | --- | --- |
-| ![Secure notes list](docs/screenshots/web-v2.10.2/07-notes.png) | ![Add secure note](docs/screenshots/web-v2.10.2/08-note-add.png) | ![View secure note](docs/screenshots/web-v2.10.2/09-note-view.png) |
+| ![Secure notes list](docs/screenshots/web-v2.10.5/07-notes.png) | ![Add secure note](docs/screenshots/web-v2.10.5/08-note-add.png) | ![View secure note](docs/screenshots/web-v2.10.5/09-note-view.png) |
 
 #### Passphrases
 
 | List | Add | View | Edit |
 | --- | --- | --- | --- |
-| ![Passphrase list](docs/screenshots/web-v2.10.2/10-passphrases.png) | ![Add passphrase](docs/screenshots/web-v2.10.2/11-passphrase-add.png) | ![View passphrase](docs/screenshots/web-v2.10.2/12-passphrase-view.png) | ![Edit passphrase](docs/screenshots/web-v2.10.2/13-passphrase-edit.png) |
+| ![Passphrase list](docs/screenshots/web-v2.10.5/10-passphrases.png) | ![Add passphrase](docs/screenshots/web-v2.10.5/11-passphrase-add.png) | ![View passphrase](docs/screenshots/web-v2.10.5/12-passphrase-view.png) | ![Edit passphrase](docs/screenshots/web-v2.10.5/13-passphrase-edit.png) |
 
 #### Authenticators
 
 | List | Add | View | Edit |
 | --- | --- | --- | --- |
-| ![Authenticator list](docs/screenshots/web-v2.10.2/14-authenticators.png) | ![Add authenticator](docs/screenshots/web-v2.10.2/15-authenticator-add.png) | ![View authenticator](docs/screenshots/web-v2.10.2/16-authenticator-view.png) | ![Edit authenticator](docs/screenshots/web-v2.10.2/17-authenticator-edit.png) |
+| ![Authenticator list](docs/screenshots/web-v2.10.5/14-authenticators.png) | ![Add authenticator](docs/screenshots/web-v2.10.5/15-authenticator-add.png) | ![View authenticator](docs/screenshots/web-v2.10.5/16-authenticator-view.png) | ![Edit authenticator](docs/screenshots/web-v2.10.5/17-authenticator-edit.png) |
 
 #### Backup codes
 
 | List | Add | View | Edit |
 | --- | --- | --- | --- |
-| ![Backup-code list](docs/screenshots/web-v2.10.2/18-backup-codes.png) | ![Add backup codes](docs/screenshots/web-v2.10.2/19-backup-codes-add.png) | ![View backup codes](docs/screenshots/web-v2.10.2/20-backup-codes-view.png) | ![Edit backup codes](docs/screenshots/web-v2.10.2/21-backup-codes-edit.png) |
+| ![Backup-code list](docs/screenshots/web-v2.10.5/18-backup-codes.png) | ![Add backup codes](docs/screenshots/web-v2.10.5/19-backup-codes-add.png) | ![View backup codes](docs/screenshots/web-v2.10.5/20-backup-codes-view.png) | ![Edit backup codes](docs/screenshots/web-v2.10.5/21-backup-codes-edit.png) |
 
 </details>
 
