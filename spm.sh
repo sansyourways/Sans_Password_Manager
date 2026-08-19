@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.9.3"
+VERSION="2.9.4"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -86,6 +86,18 @@ now_iso() {
 # into the next column. Collapse both to a space before any field is written.
 sanitize_field() {
 	printf '%s' "$1" | tr '\t\r\n' '   '
+}
+
+validate_bundle_name() {
+	local name="$1"
+	case "$name" in
+		""|.|..|-*|*/*|*\\*) die "Invalid bundle name. Use a simple file name without slashes or leading dashes." ;;
+	esac
+	# Reject control characters; they make archive names and cleanup targets
+	# ambiguous even when shell quoting is otherwise correct.
+	if printf '%s' "$name" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+		die "Invalid bundle name. Control characters are not allowed."
+	fi
 }
 
 # Octal permission bits for a file, or empty if they cannot be read.
@@ -2476,6 +2488,7 @@ cmd_portable() {
 	[ -f "$VAULT_FILE" ] || die "Vault not found at '$VAULT_FILE'. Nothing to export."
 
 	local bundle_name="${1:-"spm_portable_$(date +%Y%m%d_%H%M%S)"}"
+	validate_bundle_name "$bundle_name"
 	local workdir="./$bundle_name"
 	local has_recovery="no"
 	local has_priv="no"
@@ -2503,8 +2516,10 @@ cmd_portable() {
 		has_recovery="yes"
 	fi
 
-	# Copy private key if present
-	if [ -f "$RECOVERY_PRIV_DEFAULT" ]; then
+	# Keep the recovery private key separate by default. Putting it beside the
+	# encrypted recovery blob makes possession of one archive equivalent to
+	# possession of the master password.
+	if [ "${SPM_BUNDLE_INCLUDE_RECOVERY_KEY:-0}" = "1" ] && [ -f "$RECOVERY_PRIV_DEFAULT" ]; then
 		cp "$RECOVERY_PRIV_DEFAULT" "$workdir/spm_recovery_private.pem" || die "Failed to copy private key to bundle."
 		has_priv="yes"
 	fi
@@ -2529,8 +2544,8 @@ Included files:
   - spm_vault.gpg         : encrypted password vault
   - spm_vault.gpg.recovery (optional)
                           : recovery file used with your RSA private key
-  - spm_recovery_private.pem (optional)
-                          : RSA private key (if found beside the script)
+  - spm_recovery_private.pem (explicit opt-in only)
+                          : included only with SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1
   - README.txt            : this instructions file
 
 Usage:
@@ -2546,7 +2561,8 @@ Usage:
        - ask for your master password to open the vault.
 
 Security notes:
-  - If the private key (spm_recovery_private.pem) exists beside your script, it is included here—protect this archive carefully.
+  - The recovery private key is excluded by default. Store it separately.
+  - SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1 creates a self-contained recovery archive; possession of that archive bypasses the master password.
   - With the private key + this bundle’s recovery file, you can use
     the "forgot password" feature to reset your master password.
   - Anyone who gets both your private key AND this bundle may be able
@@ -2568,8 +2584,8 @@ File yang disertakan:
   - spm_vault.gpg         : vault kata sandi terenkripsi
   - spm_vault.gpg.recovery (opsional)
                           : file pemulihan yang digunakan bersama private key RSA
-  - spm_recovery_private.pem (opsional)
-                          : private key RSA bila ditemukan
+  - spm_recovery_private.pem (hanya jika diaktifkan eksplisit)
+                          : disertakan hanya dengan SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1
   - README.txt            : file petunjuk ini
 
 Cara pakai:
@@ -2586,7 +2602,8 @@ Cara pakai:
        - menanyakan kata sandi utama (master password) untuk membuka vault.
 
 Catatan keamanan:
-  - Jika spm_recovery_private.pem tersedia di samping script, file tersebut disertakan—lindungi bundle ini baik-baik.
+  - Private key pemulihan tidak disertakan secara default. Simpan secara terpisah.
+  - SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1 membuat arsip pemulihan lengkap; siapa pun yang memiliki arsip itu dapat melewati kata sandi utama.
   - Dengan private key + file pemulihan di bundle ini, kamu bisa
     menggunakan fitur "lupa password" untuk reset master password.
   - Jika orang lain mendapatkan bundle ini DAN private key-mu,
@@ -2642,6 +2659,7 @@ cmd_save() {
 	else
 		bundle_name="spm_save_$(date +%Y%m%d_%H%M%S)"
 	fi
+	validate_bundle_name "$bundle_name"
 
 	local workdir="./$bundle_name"
 	local has_recovery="no"
@@ -2671,8 +2689,9 @@ cmd_save() {
 		has_recovery="yes"
 	fi
 
-	# Copy private key if present so backup contains full recovery material
-	if [ -f "$RECOVERY_PRIV_DEFAULT" ]; then
+	# Exclude the recovery key unless the user explicitly asks for a single
+	# self-contained (and therefore master-password-bypassing) archive.
+	if [ "${SPM_BUNDLE_INCLUDE_RECOVERY_KEY:-0}" = "1" ] && [ -f "$RECOVERY_PRIV_DEFAULT" ]; then
 		cp "$RECOVERY_PRIV_DEFAULT" "$workdir/spm_recovery_private.pem" || die "Failed to copy private key."
 		has_priv="yes"
 	fi
@@ -2698,7 +2717,7 @@ Included files:
   - spm.sh                 : executable SPM script
   - spm_vault.gpg          : encrypted vault
   - spm_vault.gpg.recovery : (optional) recovery file
-  - spm_recovery_private.pem : (optional) RSA private key if found beside the script
+  - spm_recovery_private.pem : explicit opt-in with SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1
   - README.txt             : instructions
 
 How to restore:
@@ -2710,7 +2729,8 @@ How to restore:
 
 Security notes:
   - Keep this backup offline (USB, encrypted disk, cloud with 2FA).
-  - If spm_recovery_private.pem was found, it is included in this archive—protect it carefully.
+  - The recovery private key is excluded by default and should be stored separately.
+  - With SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1, the archive can bypass the master password; protect it accordingly.
   - Anyone with both this bundle and your private key could reset the vault password.
 
 ------------------------------------------------------------
@@ -2720,7 +2740,7 @@ File yang disertakan:
   - spm.sh                   : script SPM
   - spm_vault.gpg            : vault terenkripsi
   - spm_vault.gpg.recovery   : (opsional) file pemulihan
-  - spm_recovery_private.pem : (opsional) private key RSA bila ditemukan
+  - spm_recovery_private.pem : hanya dengan SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1
   - README.txt               : petunjuk
 
 Cara mengembalikan:
@@ -2732,7 +2752,8 @@ Cara mengembalikan:
 
 Catatan keamanan:
   - Simpan backup di tempat aman (USB, disk terenkripsi, cloud dengan 2FA).
-  - Jika spm_recovery_private.pem tersedia, file tersebut disertakan—lindungi arsip ini baik-baik.
+  - Private key pemulihan tidak disertakan secara default dan harus disimpan terpisah.
+  - Dengan SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1, arsip dapat melewati kata sandi utama; lindungi dengan ketat.
   - Jika orang lain mendapatkan bundle ini + private key, mereka bisa mereset master password.
 
 EOF
@@ -4492,6 +4513,17 @@ start_web_mode() {
 		fi
 		bind_addr="127.0.0.1"
 	fi
+	case "$bind_addr" in
+		localhost|127.*|::1|\[::1\]) ;;
+		*)
+			if [ "${SPM_WEB_ALLOW_INSECURE_REMOTE:-0}" != "1" ]; then
+				printf "\nRefusing a non-loopback plain-HTTP bind (%s).\n" "$bind_addr"
+				printf "Bind to localhost and place a TLS reverse proxy in front of SPM.\n"
+				printf "For an isolated trusted network only, explicitly set SPM_WEB_ALLOW_INSECURE_REMOTE=1.\n"
+				return 1
+			fi
+			;;
+	esac
 
 	if [ "${SPM_LANG:-en}" = "id" ]; then
 		read -r -p "Port [8080]: " bind_port
@@ -4632,11 +4664,31 @@ import io
 import email.parser
 import email.policy
 import warnings
+import threading
+import tempfile
+import shutil
+import fcntl
+import ipaddress
 
 VAULT_PATH = os.environ.get("SPM_VAULT_PATH")
 BIND_ADDR  = os.environ.get("SPM_WEB_BIND", "127.0.0.1")
 PORT       = int(os.environ.get("SPM_WEB_PORT", "8080"))
 VERSION    = os.environ.get("SPM_VERSION", "")
+
+def _is_loopback_bind(value):
+    value = (value or "").strip().strip("[]")
+    if value.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
+
+if not _is_loopback_bind(BIND_ADDR) and os.environ.get("SPM_WEB_ALLOW_INSECURE_REMOTE") != "1":
+    raise SystemExit(
+        "Refusing non-loopback plain HTTP. Bind localhost behind TLS, or explicitly "
+        "set SPM_WEB_ALLOW_INSECURE_REMOTE=1 for an isolated trusted network."
+    )
 
 if not VAULT_PATH or not os.path.isfile(VAULT_PATH):
     raise SystemExit(f"Vault file not found: {VAULT_PATH!r}")
@@ -6631,8 +6683,8 @@ def view_entry_page(parts):
 </div>
 <div class="card" style="max-width:680px"><div class="card-body">
   <div class="field"><label data-i18n="view.label.username">Username</label>
-    <div class="secret"><span class="secret-val">{user or "&mdash;"}</span>
-    <button class="icon-btn" type="button" onclick="SPM_copy({jsonlib.dumps(parts[2] if len(parts)>2 else '')})" aria-label="Copy">\U0001F4CB</button></div>
+    <div class="secret"><span class="secret-val" id="username-value">{user or "&mdash;"}</span>
+    <button class="icon-btn" type="button" onclick="SPM_copy(document.getElementById('username-value').textContent)" aria-label="Copy">\U0001F4CB</button></div>
   </div>
   {_secret_block(pw, "view.label.password", "Password", "pw")}
   <div class="field"><label data-i18n="view.label.notes">Notes</label>
@@ -7068,7 +7120,11 @@ def decrypt_vault(master: str) -> str:
         os.close(pw_fd)
 
 def encrypt_vault(master: str, plaintext: str) -> None:
-    tmp_path = VAULT_PATH + ".webtmp"
+    vault_dir = os.path.dirname(os.path.abspath(VAULT_PATH)) or "."
+    vault_name = os.path.basename(VAULT_PATH)
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix=vault_name + ".webtmp.", dir=vault_dir)
+    os.close(tmp_fd)
+    os.chmod(tmp_path, 0o600)
     pw_fd = _passphrase_fd(master)
     p = subprocess.Popen(
         ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
@@ -7084,8 +7140,12 @@ def encrypt_vault(master: str, plaintext: str) -> None:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
             raise RuntimeError("Failed to encrypt vault")
-        # os.replace swaps the inode, so the vault would otherwise inherit this
-        # temp file's umask-derived mode and silently drop from 0600 to 0644.
+        # Keep one last-known-good encrypted snapshot, matching CLI writes.
+        # copy2 is inside the transaction lock, so the backup cannot capture a
+        # half-written or unrelated concurrent generation.
+        if os.path.exists(VAULT_PATH):
+            shutil.copy2(VAULT_PATH, VAULT_PATH + ".bak")
+            os.chmod(VAULT_PATH + ".bak", 0o600)
         os.chmod(tmp_path, 0o600)
         os.replace(tmp_path, VAULT_PATH)
     except subprocess.TimeoutExpired:
@@ -7095,6 +7155,8 @@ def encrypt_vault(master: str, plaintext: str) -> None:
         raise RuntimeError("Vault encryption timed out")
     finally:
         os.close(pw_fd)
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 def totp_code(secret_b32: str, period: int = 30, algo: str = "sha1") -> str:
     import hashlib, hmac, struct, base64
@@ -7567,6 +7629,12 @@ class SPMServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         super().__init__(*args, **kwargs)
         self.sessions = {}  # token -> {"master": str, "created": float, "last_seen": float}
         self.login_failures = {}  # client ip -> {"count": int, "until": float}
+        # Every mutation is a decrypt -> modify -> encrypt transaction. Without
+        # one lock around that whole sequence, concurrent requests calculate the
+        # same next ID, overwrite each other's records, and race on .webtmp.
+        self.vault_lock = threading.RLock()
+        self.vault_lock_file = open(VAULT_PATH + ".lock", "a+", encoding="utf-8")
+        os.chmod(VAULT_PATH + ".lock", 0o600)
 
 SESSION_TTL = 1800
 # Absolute lifetime: the idle TTL above slides on every request, so without
@@ -7585,6 +7653,25 @@ MAX_IMPORT_BYTES = 1024 * 1024
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("[SPM Web] " + fmt % args + "\n")
+
+    def end_headers(self):
+        # Decrypted credentials and one-time codes must never enter browser or
+        # proxy caches. Apply the baseline to every response, including JSON,
+        # downloads, redirects, and errors produced by BaseHTTPRequestHandler.
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            "connect-src 'self'; object-src 'none'; base-uri 'none'; "
+            "frame-ancestors 'none'; form-action 'self'",
+        )
+        super().end_headers()
 
     def _send_html(self, code, body):
         lang = html.escape(self._get_lang())
@@ -7618,9 +7705,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Credentials", "true")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token")
             self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
 
     def _parse_cookies(self):
         cookie = self.headers.get("Cookie", "") or ""
@@ -7705,6 +7789,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_html(200, page)
             return None
         return master
+
+    def _same_origin_post(self):
+        """Require authenticated browser writes to come from this exact origin."""
+        origin = (self.headers.get("Origin", "") or "").strip()
+        host = (self.headers.get("Host", "") or "").strip().lower()
+        if not origin or not host:
+            return False
+        try:
+            parsed = urllib.parse.urlparse(origin)
+        except ValueError:
+            return False
+        return parsed.scheme in ("http", "https") and parsed.netloc.lower() == host
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -8198,6 +8294,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_error(404, "Not found")
 
     def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path or "/"
+        if path in ("/login", "/lang"):
+            return self._do_POST()
+        # Serialize the complete authenticated read-modify-write transaction,
+        # not only the final os.replace, so no successful request is lost. The
+        # file lock extends that guarantee across two server processes.
+        with self.server.vault_lock:
+            fcntl.flock(self.server.vault_lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                return self._do_POST()
+            finally:
+                fcntl.flock(self.server.vault_lock_file.fileno(), fcntl.LOCK_UN)
+
+    def _do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path or "/"
 
@@ -8258,6 +8368,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not master:
             page = login_page(VERSION)
             self._send_html(200, page)
+            return
+
+        if not self._same_origin_post():
+            self.send_error(403, "Cross-origin write rejected")
             return
 
         raw_body_bytes = self._read_body()
@@ -8477,7 +8591,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             def respond_error(message, status=400):
                 if is_async:
-                    self.send_response(200)
+                    self.send_response(status)
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
                     self.wfile.write(jsonlib.dumps({"ok": False, "message": message}).encode("utf-8"))
@@ -8506,8 +8620,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 respond_error("No data provided.")
                 return
 
-            if body_len > 10 * 1024 * 1024:
-                respond_error("Payload too large (max 10MB).", status=413)
+            if body_len > MAX_IMPORT_BYTES:
+                respond_error("Payload too large (max 1MB).", status=413)
                 return
 
             sys.stderr.write(f'[import] Reading {body_len} bytes from request body...\n')

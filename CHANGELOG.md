@@ -5,6 +5,39 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.9.4] - 2026-08-19
+
+### Security
+- Authenticated web writes now require an exact same-origin `Origin` header.
+  This closes cross-port localhost and same-site form CSRF paths that could add,
+  edit, delete, or import vault records using an existing browser session.
+- Password-view copy controls no longer interpolate usernames inside inline
+  JavaScript. A crafted imported username could previously terminate the HTML
+  event attribute and create a stored script-injection boundary.
+- Every web response now sends `Cache-Control: no-store` plus CSP, frame,
+  MIME-sniffing, referrer, and permissions-policy headers so decrypted secrets,
+  TOTP codes, and exports are not retained by browser or proxy caches.
+- Plain-HTTP web mode now refuses non-loopback binds by default. Remote access
+  should terminate TLS at a reverse proxy bound to localhost; the explicit
+  `SPM_WEB_ALLOW_INSECURE_REMOTE=1` escape hatch is reserved for isolated,
+  trusted networks where transport interception is accepted.
+- Portable/save bundles no longer include the RSA recovery private key by
+  default. Combining that key with the recovery blob and vault in one
+  unencrypted archive made possession of the archive equivalent to knowing the
+  master password. `SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1` is the explicit opt-in.
+
+### Fixed
+- Web mutations are serialized across threads and server processes for the full
+  decrypt-modify-encrypt transaction. Parallel requests previously reused one
+  `.webtmp` path, returned empty responses, generated duplicate IDs, and silently
+  discarded successful writes. Temporary ciphertext paths are now unique,
+  atomically installed, and removed on every exit path.
+- Web writes now preserve a mode-`600` last-known-good `.bak`, matching CLI
+  writes. Import payloads consistently enforce the declared 1 MiB ceiling and
+  asynchronous failures return their actual HTTP status.
+- Portable/save bundle names now reject slashes, leading dashes, dot-directory
+  targets, and control characters before creating or recursively removing paths.
+
 ## [2.9.3] - 2026-08-19
 
 ### Changed

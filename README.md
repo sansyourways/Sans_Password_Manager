@@ -77,8 +77,8 @@ SPM is designed for users who want:
 - 🔐 **Vault terenkripsi GPG (AES-256)**  
 - 📟 **UI interaktif** (EN/ID/JP)  
 - 🖥️ **Web Mode (Localhost)** — antarmuka Console gelap bergaya transkrip, *offline-only*
-- 📦 **Portable bundle** (script + vault + recovery + private key when available)  
-- 💾 **SAVE bundle** (backup + wipe vault lokal, menyertakan private key jika tersedia)  
+- 📦 **Portable bundle** (script + vault + recovery; private key disimpan terpisah secara default)
+- 💾 **SAVE bundle** (backup + wipe vault lokal; private key tidak disertakan secara default)
 - 🧠 **Password Strength Coaching**  
 - 📝 **Secure Notes**  
 - 🔑 **Passphrase Vault** (simpan passphrase, verifikasi ulang saat melihat)  
@@ -99,8 +99,8 @@ SPM is designed for users who want:
 - 🔐 Encrypted vault (GPG AES-256)  
 - 🗂️ Clean interactive menu  
 - 🌐 Local Web Mode (dark Console transcript UI, offline only, EN/ID/JP toggle)
-- 📦 Portable bundle (ZIP; includes recovery + private key when present)  
-- 💾 SAVE bundle (backup + wipe local; includes private key when present)  
+- 📦 Portable bundle (ZIP; recovery private key excluded by default)
+- 💾 SAVE bundle (backup + wipe local; recovery private key excluded by default)
 - 🧠 Password strength analysis & coaching  
 - 📝 Secure notes
 - 🔑 Passphrase vault with re-verification on view  
@@ -398,8 +398,12 @@ Bundle includes:
 - spm.sh  
 - spm_vault.gpg  
 - spm_vault.gpg.recovery  
-- spm_recovery_private.pem (optional)  
 - Auto README file  
+
+The RSA recovery private key is deliberately excluded. Keep it in a separate
+offline location. To create a self-contained archive that can bypass the master
+password, explicitly run `SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1 ./spm.sh portable`.
+Treat that opt-in archive as plaintext-equivalent credential material.
 
 ### SAVE
 
@@ -408,14 +412,17 @@ Bundle includes:
 ```
 
 Creates encrypted backup, wipes local vault.
+The recovery private key remains separate unless
+`SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1` is explicitly set.
 
 ---
 
 ## Development & Versioning
 
-Version: **2.9.3**  
-Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Keep non-loopback web deployments behind HTTPS or a TLS reverse proxy.  
+Version: **2.9.4**
+Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds are refused by default: bind localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` is an explicit escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
+Authenticated web mutations also require an exact same-origin request and are serialized across threads/processes to prevent CSRF and lost vault writes. Decrypted web responses use `Cache-Control: no-store`.
 Uses **semantic versioning**.  
 `./spm.sh update` fetches the latest GitHub ZIP and installs to `/usr/local/bin/spm` (sudo may be required).  
 See `CHANGELOG.md` for details.
