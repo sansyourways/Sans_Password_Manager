@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.8.2"
+VERSION="2.8.3"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -18,6 +18,10 @@ REPO_API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/l
 
 # Global master password (in-memory only, per process)
 MASTER_PW=""
+# Registry of temp files holding decrypted vault material.
+# A file (not an array) because make_tmp is called via $(...) subshells,
+# whose variable writes would be discarded. Wiped by cleanup() on any exit.
+SPM_TMP_REGISTRY="${TMPDIR:-/tmp}/.spm_tmpreg.$$"
 # Language: en / id (can be pre-set via env SPM_LANG)
 SPM_LANG="${SPM_LANG:-}"
 
@@ -81,6 +85,8 @@ make_tmp() {
 	local tmp
 	tmp="$(mktemp "${TMPDIR:-/tmp}/spm.XXXXXX")"
 	chmod 600 "$tmp" 2>/dev/null || true
+	printf '%s\n' "$tmp" >>"$SPM_TMP_REGISTRY" 2>/dev/null || true
+	chmod 600 "$SPM_TMP_REGISTRY" 2>/dev/null || true
 	printf '%s\n' "$tmp"
 }
 
@@ -138,9 +144,41 @@ cleanup() {
 		MASTER_PW="$(printf '%*s' "${#MASTER_PW}" '' | tr ' ' 'X')"
 	fi
 	unset MASTER_PW 2>/dev/null || true
+
+	# Never leave decrypted vault material behind, even on error or interrupt.
+	if [ -n "${SPM_TMP_REGISTRY:-}" ] && [ -f "$SPM_TMP_REGISTRY" ]; then
+		local f
+		while IFS= read -r f; do
+			[ -n "$f" ] && secure_wipe "$f"
+		done <"$SPM_TMP_REGISTRY"
+		rm -f "$SPM_TMP_REGISTRY" 2>/dev/null || true
+	fi
+
+	# Restore terminal echo in case we died inside a hidden prompt.
+	if [ -t 0 ]; then
+		stty echo 2>/dev/null || true
+	fi
 }
 
-trap cleanup EXIT INT
+# Ctrl-C must abort the operation, not fall through with a wiped master password.
+on_interrupt() {
+	trap - INT
+	cleanup
+	printf '\n' >&2
+	exit 130
+}
+
+# SIGTERM/SIGHUP do not run the EXIT trap on their own, so handle them
+# explicitly or a killed process would strand a decrypted vault on disk.
+on_terminate() {
+	trap - TERM HUP
+	cleanup
+	exit 143
+}
+
+trap cleanup EXIT
+trap on_interrupt INT
+trap on_terminate TERM HUP
 
 # ----- Environment & auto-install -------------------------------------------
 
@@ -896,6 +934,58 @@ password_strength_report() {
 	printf "   - ID: Pertimbangkan pakai passphrase dari beberapa kata acak.\n"
 }
 
+# ----- Cryptographically secure randomness -----------------------------------
+# Password material must never come from $RANDOM (a predictable 15-bit LCG).
+# Values are drawn from a CSPRNG byte pool with rejection sampling so the
+# result is uniform (a plain "% n" would bias the low indices of the charset).
+SPM_RAND_POOL=""
+SPM_RAND_BYTE=0
+SPM_RAND_BELOW=0
+
+# Refill the hex byte pool. Returns 1 if no CSPRNG source is available.
+_spm_rand_refill() {
+	SPM_RAND_POOL=""
+	if command -v openssl >/dev/null 2>&1; then
+		SPM_RAND_POOL="$(openssl rand -hex 128 2>/dev/null | tr -d '\n')" || SPM_RAND_POOL=""
+	fi
+	if [ -z "$SPM_RAND_POOL" ] && [ -r /dev/urandom ]; then
+		SPM_RAND_POOL="$(od -An -tx1 -N128 /dev/urandom 2>/dev/null | tr -d ' \n')" || SPM_RAND_POOL=""
+	fi
+	[ -n "$SPM_RAND_POOL" ]
+}
+
+# Pull one random byte (0-255) into SPM_RAND_BYTE.
+_spm_rand_byte() {
+	if [ "${#SPM_RAND_POOL}" -lt 2 ]; then
+		_spm_rand_refill || return 1
+	fi
+	local h="${SPM_RAND_POOL:0:2}"
+	SPM_RAND_POOL="${SPM_RAND_POOL:2}"
+	SPM_RAND_BYTE=$(( 16#$h ))
+	return 0
+}
+
+# Uniform integer in [0, $1) into SPM_RAND_BELOW. Bound must be 1..256.
+# Falls back to $RANDOM only if no CSPRNG source exists at all.
+_spm_rand_below() {
+	local bound="$1" limit
+	[ "$bound" -gt 0 ] 2>/dev/null || bound=1
+	if [ "$bound" -gt 256 ]; then
+		bound=256
+	fi
+	limit=$(( 256 - (256 % bound) ))
+	while :; do
+		if ! _spm_rand_byte; then
+			SPM_RAND_BELOW=$(( RANDOM % bound ))
+			return 0
+		fi
+		if [ "$SPM_RAND_BYTE" -lt "$limit" ]; then
+			SPM_RAND_BELOW=$(( SPM_RAND_BYTE % bound ))
+			return 0
+		fi
+	done
+}
+
 generate_password() {
 	local length="${1:-16}"
 	local mode="${2:-secure}"   # secure / easy / numeric
@@ -928,7 +1018,7 @@ generate_password() {
 		[ "$words_needed" -gt 8 ] && words_needed=8
 		local parts=() idx word
 		for (( i=0; i<words_needed; i++ )); do
-			idx=$(( RANDOM % ${#WORDS[@]} ))
+			_spm_rand_below "${#WORDS[@]}"; idx="$SPM_RAND_BELOW"
 			word="${WORDS[idx]}"
 			if [ "$include_upper" = "1" ] && [ "$include_lower" != "1" ]; then
 				word="$(printf '%s' "$word" | tr '[:lower:]' '[:upper:]')"
@@ -942,11 +1032,13 @@ generate_password() {
 		local pw
 		pw="$(IFS='-'; echo "${parts[*]}")"
 		if [ "$include_digits" = "1" ]; then
-			pw="${pw}-$(printf '%02d' $((RANDOM % 100)))"
+			_spm_rand_below 100
+			pw="${pw}-$(printf '%02d' "$SPM_RAND_BELOW")"
 		fi
 		if [ "$include_symbols" = "1" ]; then
 			local syms="!@#$%^&*"
-			local s="${syms:$((RANDOM % ${#syms})):1}"
+			_spm_rand_below "${#syms}"
+			local s="${syms:$SPM_RAND_BELOW:1}"
 			pw="${pw}${s}"
 		fi
 		printf '%s\n' "$pw"
@@ -968,7 +1060,7 @@ generate_password() {
 	set_len="${#charset}"
 
 	for (( i=0; i<length; i++ )); do
-		idx="$(( RANDOM % set_len ))"
+		_spm_rand_below "$set_len"; idx="$SPM_RAND_BELOW"
 		ch="${charset:idx:1}"
 		pw+="$ch"
 	done
@@ -1788,7 +1880,9 @@ _spm_totp_code() {
 	local algo="${3:-sha1}"
 	python3 - "$secret" "$period" "$algo" <<'PY'
 import base64, hashlib, hmac, struct, time, sys
-secret = sys.stdin.read().replace(" ", "").upper()
+secret = (sys.argv[1] if len(sys.argv) > 1 else "").replace(" ", "").upper()
+if not secret:
+    sys.exit(1)
 period = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() and int(sys.argv[2]) > 0 else 30
 algo = sys.argv[3].lower() if len(sys.argv) > 3 else "sha1"
 if algo not in ("sha1", "sha256", "sha512"):
@@ -2743,7 +2837,7 @@ cmd_update() {
 
 	# Find first ZIP asset from the release payload
 	local asset_url
-	asset_url="$(printf '%s\n' "$json" | grep -E '"browser_download_url"' | grep -E '\\.zip"' | head -n1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')" || true
+	asset_url="$(printf '%s\n' "$json" | grep -E '"browser_download_url"' | grep -E '\.zip"' | head -n1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')" || true
 
 	if [ -z "$asset_url" ]; then
 		if [ "$SPM_LANG" = "id" ]; then
@@ -2755,7 +2849,7 @@ cmd_update() {
 	fi
 
 	local sha_url
-	sha_url="$(printf '%s\n' "$json" | grep -E '"browser_download_url"' | grep -E 'spm\\.sh\\.sha256"' | head -n1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')" || true
+	sha_url="$(printf '%s\n' "$json" | grep -E '"browser_download_url"' | grep -E 'spm\.sh\.sha256"' | head -n1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')" || true
 
 	if [ -z "$sha_url" ]; then
 		if [ "$SPM_LANG" = "id" ]; then
@@ -3020,8 +3114,8 @@ cmd_doctor() {
 		$1 ~ /^[0-9]+$/ { c++; if (length($4)==0) ep++; ids[$1]++ }
 		END {
 			for (i in ids) if (ids[i]>1) {dup=1}
-			if (dup) print c "|" ep "|dup";
-			else print c "|" ep "|ok";
+			if (dup) print c+0 "|" ep+0 "|dup";
+			else print c+0 "|" ep+0 "|ok";
 		}
 	' "$tmp")"
 
@@ -3040,9 +3134,17 @@ cmd_doctor() {
 	fi
 
 	if [ "$status_dup" = "dup" ]; then
-		printf "ADA\n"
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "ADA\n"
+		else
+			printf "FOUND\n"
+		fi
 	else
-		printf "tidak ada\n"
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "tidak ada\n"
+		else
+			printf "none\n"
+		fi
 	fi
 
 	if [ "$empty_pw" != "0" ]; then
@@ -8730,7 +8832,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 period = int(found[4])
             except Exception:
                 period = 30
-            code = totp_code(found[3], period, algo) or "------"
+            try:
+                code = totp_code(found[3], period, algo) or "------"
+            except Exception:
+                code = "------"
             expires_in = period - int(time.time()) % max(period, 1)
             import json
             body = jsonlib.dumps({"code": code, "expires_in": expires_in, "algo": algo})

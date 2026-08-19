@@ -5,6 +5,44 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.8.3] - 2026-08-19
+
+### Fixed
+- **Authenticator codes were completely wrong.** `_spm_totp_code` piped its Python
+  program in on stdin and then called `sys.stdin.read()` to get the secret, so the
+  secret was always empty and every TOTP code was derived from an empty HMAC key.
+  All accounts produced the same incorrect code. The secret is now read from
+  `sys.argv[1]`, and codes match RFC 6238 test vectors.
+- Adding an authenticator now actually rejects invalid Base32 secrets. The
+  validation check could never fail before, because an empty secret always decoded
+  cleanly, so malformed secrets were written to the vault.
+- The web `/authenticator-code` endpoint no longer raises on a malformed stored
+  secret; it returns `------` instead of failing the request.
+- `doctor` no longer reports a phantom "entries with EMPTY password field" warning
+  with a blank count on healthy vaults. The awk counters returned an empty string
+  rather than `0` when nothing matched.
+- `doctor` now prints the duplicate-ID verdict in English when running in English;
+  it previously printed "tidak ada"/"ADA" in both languages.
+- `update` can find its release assets again. The GitHub asset lookups used
+  `grep -E '\\.zip"'`, which in ERE matches a literal backslash that release JSON
+  never contains, so auto-update always reported "Could not find ZIP asset".
+
+### Security
+- Decrypted vault material is no longer left on disk when a command is interrupted.
+  `Ctrl-C` previously wiped the master password and let execution continue into a
+  failing re-encrypt, which exited before the temp file was wiped. Temp files are
+  now tracked in a per-process registry and wiped by the exit handler, and
+  `INT`/`TERM`/`HUP` abort cleanly instead of falling through.
+- Generated passwords now come from a CSPRNG (`openssl rand`, falling back to
+  `/dev/urandom`) instead of `$RANDOM`, a predictable 15-bit LCG. Character
+  selection uses rejection sampling, so the charset is sampled uniformly rather
+  than biased toward its first characters.
+- The terminal no longer stays in `-echo` when a hidden password prompt is
+  interrupted or hits EOF, which previously left the shell unable to display typed
+  input.
+
+---
+
 ## [2.8.2] - 2025-12-16
 
 ### Security and maintenance
