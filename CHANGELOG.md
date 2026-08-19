@@ -12,6 +12,8 @@ Keep-a-Changelog style format.
   portability, recovery, and operational-safety benefits.
 - Added a Chrome-verified visual tour covering all 23 web interface pages with
   synthetic documentation data only.
+- Added a concise badge row for the latest release, stars, downloads, Bash
+  implementation, private license, and repository activity.
 
 ## [2.10.2] - 2026-08-19
 
