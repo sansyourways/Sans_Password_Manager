@@ -28,6 +28,8 @@ Keep-a-Changelog style format.
   coordinated-disclosure targets.
 
 ### Fixed
+- Regression tests use a short isolated GnuPG home and explicitly manage their
+  agent, avoiding macOS runner socket failures without touching user keyrings.
 - Termux dependency installation now uses `pkg` instead of incorrectly invoking
   Debian's `apt-get`; PM2 setup uses the same detected environment contract.
 - CLI help is available before dependency installation and policy prompts,

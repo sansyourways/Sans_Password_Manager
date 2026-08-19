@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/spm-regression.XXXXXX")"
+GPG_TEST_HOME="$(mktemp -d /tmp/spm-gnupg.XXXXXX)"
 WEB_PID=""
 
 cleanup() {
@@ -10,7 +11,9 @@ cleanup() {
 		kill "$WEB_PID" 2>/dev/null || true
 		wait "$WEB_PID" 2>/dev/null || true
 	fi
+	gpgconf --kill gpg-agent >/dev/null 2>&1 || true
 	rm -rf "$TEST_ROOT"
+	rm -rf "$GPG_TEST_HOME"
 }
 trap cleanup EXIT INT TERM
 
@@ -18,7 +21,10 @@ export HOME="$TEST_ROOT/home"
 export XDG_CONFIG_HOME="$TEST_ROOT/config"
 export XDG_DATA_HOME="$TEST_ROOT/data"
 export PASSWORD_VAULT="$TEST_ROOT/vault.gpg"
+export GNUPGHOME="$GPG_TEST_HOME"
 mkdir -p "$HOME" "$XDG_CONFIG_HOME/spm" "$XDG_DATA_HOME"
+chmod 700 "$GNUPGHOME"
+gpgconf --launch gpg-agent
 
 AUDIT_PASSWORD="SPM-Regression-Only-42"
 PLAIN="$TEST_ROOT/plain"
