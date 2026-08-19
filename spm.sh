@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.9.6"
+VERSION="2.10.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -40,6 +40,20 @@ if [ ! -f "$SCRIPT_SRC" ]; then
 fi
 
 DEFAULT_VAULT_PATH="$HOME/.spm_vault.gpg"
+SPM_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/spm"
+SPM_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/spm"
+SPM_PROFILE_FILE="$SPM_CONFIG_DIR/vaults.tsv"
+SPM_DEFAULT_PROFILE_FILE="$SPM_CONFIG_DIR/default-profile"
+
+if [ -z "${SPM_VAULT_PROFILE:-}" ] && [ -f "$SPM_DEFAULT_PROFILE_FILE" ]; then
+	IFS= read -r SPM_VAULT_PROFILE < "$SPM_DEFAULT_PROFILE_FILE" || SPM_VAULT_PROFILE=""
+fi
+
+profile_vault_path() {
+	local profile="$1"
+	[ -f "$SPM_PROFILE_FILE" ] || return 1
+	awk -F '\t' -v name="$profile" '$1 == name { print $2; found=1; exit } END { if (!found) exit 1 }' "$SPM_PROFILE_FILE"
+}
 
 # Vault resolution logic:
 # 1) If PASSWORD_VAULT is set → use it
@@ -47,6 +61,11 @@ DEFAULT_VAULT_PATH="$HOME/.spm_vault.gpg"
 # 3) Else → use ~/.spm_vault.gpg
 if [ -n "${PASSWORD_VAULT:-}" ]; then
 	VAULT_FILE="$PASSWORD_VAULT"
+elif [ -n "${SPM_VAULT_PROFILE:-}" ]; then
+	VAULT_FILE="$(profile_vault_path "$SPM_VAULT_PROFILE")" || {
+		printf "Unknown vault profile: %s\n" "$SPM_VAULT_PROFILE" >&2
+		exit 1
+	}
 elif [ -f "./spm_vault.gpg" ]; then
 	VAULT_FILE="./spm_vault.gpg"
 else
@@ -736,11 +755,13 @@ encrypt_file_to_vault() {
 	fi
 
 	if [ -f "$VAULT_FILE" ]; then
+		archive_current_vault
 		cp "$VAULT_FILE" "${VAULT_FILE}.bak" || { secure_wipe "$tmp_cipher"; die "Failed to preserve the previous vault."; }
 		chmod 600 "${VAULT_FILE}.bak" 2>/dev/null || true
 	fi
 	mv -f "$tmp_cipher" "$VAULT_FILE" || { secure_wipe "$tmp_cipher"; die "Failed to install the encrypted vault."; }
 	chmod 600 "$VAULT_FILE" 2>/dev/null || true
+	maybe_auto_backup
 }
 
 acquire_cli_vault_lock() {
@@ -752,6 +773,66 @@ acquire_cli_vault_lock() {
 	chmod 600 "${VAULT_FILE}.lock" 2>/dev/null || true
 	flock -x 9 || die "Cannot lock vault."
 	CLI_VAULT_LOCKED=1
+}
+
+vault_scope_id() {
+	printf '%s' "$(canon_path "$VAULT_FILE")" | sha256sum | awk '{print substr($1,1,16)}'
+}
+
+history_dir() {
+	printf '%s/history/%s\n' "$SPM_DATA_DIR" "$(vault_scope_id)"
+}
+
+archive_current_vault() {
+	[ -f "$VAULT_FILE" ] || return 0
+	local dir keep stamp snapshot
+	dir="$(history_dir)"
+	keep="${SPM_HISTORY_RETENTION:-20}"
+	printf '%s' "$keep" | grep -Eq '^[1-9][0-9]*$' || keep=20
+	mkdir -p "$dir" || die "Failed to create encrypted history directory."
+	chmod 700 "$dir" 2>/dev/null || true
+	stamp="$(date -u +%Y%m%dT%H%M%S 2>/dev/null || date +%Y%m%dT%H%M%S)"
+	snapshot="$dir/${stamp}.$$.$(sha256sum "$VAULT_FILE" | awk '{print substr($1,1,12)}').gpg"
+	cp "$VAULT_FILE" "$snapshot" || die "Failed to preserve encrypted vault history."
+	chmod 600 "$snapshot" 2>/dev/null || true
+	find "$dir" -maxdepth 1 -type f -name '*.gpg' -print 2>/dev/null \
+		| while IFS= read -r item; do printf '%s\t%s\n' "$(stat -c '%Y' "$item" 2>/dev/null || stat -f '%m' "$item")" "$item"; done \
+		| sort -nr | awk -F '\t' -v keep="$keep" 'NR > keep { print $2 }' \
+		| while IFS= read -r old; do secure_wipe "$old"; done
+}
+
+auto_backup_config() {
+	printf '%s/auto-backup-%s.conf\n' "$SPM_CONFIG_DIR" "$(vault_scope_id)"
+}
+
+maybe_auto_backup() {
+	[ -f "$VAULT_FILE" ] || return 0
+	local cfg enabled target interval retention last now name digest
+	cfg="$(auto_backup_config)"
+	[ -f "$cfg" ] || return 0
+	enabled="$(sed -n '1p' "$cfg")"; [ "$enabled" = "enabled" ] || return 0
+	target="$(sed -n '2p' "$cfg")"; interval="$(sed -n '3p' "$cfg")"
+	retention="$(sed -n '4p' "$cfg")"; last="$(sed -n '5p' "$cfg")"
+	printf '%s' "$interval" | grep -Eq '^[1-9][0-9]*$' || interval=24
+	printf '%s' "$retention" | grep -Eq '^[1-9][0-9]*$' || retention=14
+	printf '%s' "$last" | grep -Eq '^[0-9]+$' || last=0
+	now="$(date +%s)"
+	[ $((now - last)) -ge $((interval * 3600)) ] || return 0
+	mkdir -p "$target" || die "Failed to create automatic-backup directory."
+	chmod 700 "$target" 2>/dev/null || true
+	name="spm-$(vault_scope_id)-$(date -u +%Y%m%dT%H%M%SZ).gpg"
+	cp "$VAULT_FILE" "$target/$name" || die "Automatic encrypted backup failed."
+	chmod 600 "$target/$name" 2>/dev/null || true
+	digest="$(sha256sum "$VAULT_FILE" | awk '{print $1}')"
+	[ "$digest" = "$(sha256sum "$target/$name" | awk '{print $1}')" ] || die "Automatic backup verification failed."
+	find "$target" -maxdepth 1 -type f -name "spm-$(vault_scope_id)-*.gpg" -print 2>/dev/null \
+		| while IFS= read -r item; do printf '%s\t%s\n' "$(stat -c '%Y' "$item" 2>/dev/null || stat -f '%m' "$item")" "$item"; done \
+		| sort -nr | awk -F '\t' -v keep="$retention" 'NR > keep { print $2 }' \
+		| while IFS= read -r old; do secure_wipe "$old"; done
+	{
+		printf 'enabled\n%s\n%s\n%s\n%s\n' "$target" "$interval" "$retention" "$now"
+	} > "$cfg"
+	chmod 600 "$cfg" 2>/dev/null || true
 }
 
 release_cli_vault_lock() {
@@ -4038,6 +4119,288 @@ PY
 	fi
 }
 
+# ----- Local-first advanced capabilities (2.10) ------------------------------
+
+cmd_security_dashboard() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found."
+	local tmp
+	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	python3 - "$tmp" <<'PY'
+import base64, collections, datetime, re, sys
+path=sys.argv[1]; today=datetime.datetime.now(datetime.timezone.utc)
+rows=[]; malformed=[]
+for raw in open(path,encoding="utf-8",errors="replace"):
+    line=raw.rstrip("\n")
+    if not line or line.startswith("#") or line.startswith("META_"): continue
+    p=line.split("\t"); tag=p[0]
+    if tag.isdigit() and len(p)>=6: rows.append((tag,p[1],p[2],p[3],p[5]))
+    elif tag=="AUTH" and (len(p)<7 or p[6] not in ("sha1","sha256","sha512") or not p[3]): malformed.append(("authenticator",p[1] if len(p)>1 else "?"))
+weak=[]; old=[]; incomplete=[]; groups=collections.defaultdict(list)
+for rid,label,user,secret,created in rows:
+    groups[secret].append(rid)
+    score=sum(bool(re.search(x,secret)) for x in (r"[a-z]",r"[A-Z]",r"\d",r"[^A-Za-z0-9]"))
+    if len(secret)<12 or score<3: weak.append(rid)
+    if not label or not user: incomplete.append(rid)
+    try:
+        stamp=datetime.datetime.fromisoformat(created.replace("Z","+00:00"))
+        if stamp.tzinfo is None: stamp=stamp.replace(tzinfo=datetime.timezone.utc)
+        if (today-stamp).days>365: old.append(rid)
+    except Exception: pass
+reused=[ids for secret,ids in groups.items() if secret and len(ids)>1]
+penalty=min(100,len(weak)*12+sum(len(x) for x in reused)*10+len(old)*4+len(incomplete)*3+len(malformed)*8)
+print("Security dashboard")
+print("==================")
+print(f"Score: {100-penalty}/100")
+print(f"Passwords: {len(rows)}")
+print("Weak IDs:", ", ".join(weak) or "none")
+print("Reused groups:", "; ".join(",".join(x) for x in reused) or "none")
+print("Older than 365 days:", ", ".join(old) or "none")
+print("Incomplete IDs:", ", ".join(incomplete) or "none")
+print("Malformed protected records:", ", ".join(f"{t}:{i}" for t,i in malformed) or "none")
+print("Secrets and fingerprints are never printed or persisted.")
+PY
+	secure_wipe "$tmp"
+}
+
+cmd_history_list() {
+	local dir
+	dir="$(history_dir)"
+	[ -d "$dir" ] || { printf 'No encrypted history snapshots.\n'; return 0; }
+	find "$dir" -maxdepth 1 -type f -name '*.gpg' -printf '%f\n' 2>/dev/null | sort -r
+}
+
+cmd_history_restore() {
+	local name="${1:-}" dir source answer staged
+	[ -n "$name" ] || die "Usage: $0 history-restore <snapshot-name>"
+	case "$name" in */*|*\\*|.|..) die "Invalid snapshot name." ;; esac
+	dir="$(history_dir)"; source="$dir/$name"
+	[ -f "$source" ] || die "History snapshot not found."
+	printf "Restore encrypted snapshot %s? (yes/NO): " "$name"; read -r answer || answer=no
+	case "$answer" in yes|y|YES|Y) ;; *) return 1 ;; esac
+	staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm_history_restore.XXXXXX")"
+	cp "$source" "$staged" || { rm -f "$staged"; die "Failed to stage history snapshot."; }
+	chmod 600 "$staged" 2>/dev/null || true
+	archive_current_vault
+	mv -f "$staged" "$VAULT_FILE" || { rm -f "$staged"; die "Failed to restore history snapshot."; }
+	printf 'History snapshot restored.\n'
+}
+
+cmd_backup_now() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found."
+	local target="${1:-$SPM_DATA_DIR/backups}" name digest
+	mkdir -p "$target" || die "Failed to create backup directory."
+	chmod 700 "$target" 2>/dev/null || true
+	name="spm-$(vault_scope_id)-$(date -u +%Y%m%dT%H%M%SZ)-$$.gpg"
+	cp "$VAULT_FILE" "$target/$name" || die "Backup failed."
+	chmod 600 "$target/$name" 2>/dev/null || true
+	digest="$(sha256sum "$VAULT_FILE" | awk '{print $1}')"
+	[ "$digest" = "$(sha256sum "$target/$name" | awk '{print $1}')" ] || die "Backup verification failed."
+	printf '%s\n' "$target/$name"
+}
+
+cmd_backup_auto() {
+	local action="${1:-status}" cfg target hours retention
+	cfg="$(auto_backup_config)"; mkdir -p "$SPM_CONFIG_DIR"; chmod 700 "$SPM_CONFIG_DIR" 2>/dev/null || true
+	case "$action" in
+		enable)
+			target="${2:-$SPM_DATA_DIR/backups}"; hours="${3:-24}"; retention="${4:-14}"
+			printf '%s' "$hours$retention" | grep -Eq '^[0-9]+$' || die "Hours and retention must be positive integers."
+			if [ "$hours" -le 0 ] || [ "$retention" -le 0 ]; then die "Hours and retention must be positive."; fi
+			mkdir -p "$target" || die "Cannot create automatic-backup directory."
+			printf 'enabled\n%s\n%s\n%s\n0\n' "$(canon_path "$target")" "$hours" "$retention" > "$cfg"
+			chmod 600 "$cfg"; maybe_auto_backup; printf 'Automatic encrypted backups enabled.\n' ;;
+		disable) printf 'disabled\n' > "$cfg"; chmod 600 "$cfg"; printf 'Automatic backups disabled.\n' ;;
+		status) [ -f "$cfg" ] && sed -n '1,4p' "$cfg" || printf 'disabled\n' ;;
+		*) die "Usage: $0 backup-auto enable [directory] [hours] [retention] | disable | status" ;;
+	esac
+}
+
+validate_profile_name() {
+	printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$' || die "Invalid profile name."
+}
+
+cmd_vault_profile() {
+	local action="${1:-list}" name path tmp
+	mkdir -p "$SPM_CONFIG_DIR"; chmod 700 "$SPM_CONFIG_DIR" 2>/dev/null || true
+	[ -f "$SPM_PROFILE_FILE" ] || : > "$SPM_PROFILE_FILE"; chmod 600 "$SPM_PROFILE_FILE"
+	case "$action" in
+		list) awk -F '\t' '{printf "%-20s %s\n",$1,$2}' "$SPM_PROFILE_FILE" ;;
+		add)
+			name="${2:-}"; path="${3:-}"; validate_profile_name "$name"; [ -n "$path" ] || die "Vault path required."
+			path="$(canon_path "$path")"; awk -F '\t' -v n="$name" '$1==n{found=1} END{exit found?0:1}' "$SPM_PROFILE_FILE" && die "Profile already exists."
+			printf '%s\t%s\n' "$name" "$path" >> "$SPM_PROFILE_FILE"; printf 'Profile added.\n' ;;
+		use)
+			name="${2:-}"; validate_profile_name "$name"; profile_vault_path "$name" >/dev/null || die "Unknown profile."
+			printf '%s\n' "$name" > "$SPM_DEFAULT_PROFILE_FILE"; chmod 600 "$SPM_DEFAULT_PROFILE_FILE"; printf 'Default profile set; restart SPM to apply.\n' ;;
+		remove)
+			name="${2:-}"; validate_profile_name "$name"; tmp="$(make_tmp)"; awk -F '\t' -v n="$name" '$1!=n' "$SPM_PROFILE_FILE" > "$tmp"; mv "$tmp" "$SPM_PROFILE_FILE"; chmod 600 "$SPM_PROFILE_FILE"
+			if [ -f "$SPM_DEFAULT_PROFILE_FILE" ] && [ "$(sed -n '1p' "$SPM_DEFAULT_PROFILE_FILE")" = "$name" ]; then rm -f "$SPM_DEFAULT_PROFILE_FILE"; fi
+			printf 'Profile removed; vault data was not deleted.\n' ;;
+		*) die "Usage: $0 vault-profile list|add <name> <path>|use <name>|remove <name>" ;;
+	esac
+}
+
+next_tag_id() {
+	local tag="$1" file="$2"
+	awk -F '\t' -v tag="$tag" '$1==tag && $2~/^[0-9]+$/ && $2>m{m=$2} END{print m+1}' "$file"
+}
+
+cmd_attachment_add() {
+	local file="${1:-}" label="${2:-}" size tmp id encoded filename mime digest created
+	[ -f "$file" ] || die "Attachment file not found."
+	size="$(wc -c < "$file" | tr -d ' ')"; [ "$size" -le 1048576 ] || die "Attachment exceeds the 1 MiB limit."
+	[ -n "$label" ] || label="$(basename "$file")"; label="$(sanitize_field "$label")"
+	filename="$(printf '%s' "$(basename "$file")" | base64 | tr -d '\n')"
+	mime="$(file -b --mime-type "$file" 2>/dev/null || printf 'application/octet-stream')"; mime="$(sanitize_field "$mime")"
+	encoded="$(base64 < "$file" | tr -d '\n')"; digest="$(sha256sum "$file" | awk '{print $1}')"; created="$(now_iso)"
+	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"; id="$(next_tag_id ATTACHMENT "$tmp")"
+	printf 'ATTACHMENT\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$label" "$filename" "$mime" "$encoded" "$digest" "$created" >> "$tmp"
+	encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"; printf 'Attachment added with ID %s.\n' "$id"
+}
+
+cmd_attachment_list() {
+	local tmp; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	awk -F '\t' '$1=="ATTACHMENT"{printf "%s\t%s\t%s\t%s\n",$2,$3,$5,$8}' "$tmp"; secure_wipe "$tmp"
+}
+
+cmd_attachment_extract() {
+	local id="${1:-}" out="${2:-}" tmp payload filename digest actual
+	printf '%s' "$id" | grep -Eq '^[0-9]+$' || die "Numeric attachment ID required."
+	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	payload="$(awk -F '\t' -v id="$id" '$1=="ATTACHMENT"&&$2==id{print $6;exit}' "$tmp")"
+	filename="$(awk -F '\t' -v id="$id" '$1=="ATTACHMENT"&&$2==id{print $4;exit}' "$tmp" | base64 -d 2>/dev/null || true)"
+	digest="$(awk -F '\t' -v id="$id" '$1=="ATTACHMENT"&&$2==id{print $7;exit}' "$tmp")"; secure_wipe "$tmp"
+	[ -n "$payload" ] || die "Attachment not found."; [ -n "$out" ] || out="./$filename"; [ ! -e "$out" ] || die "Destination already exists."
+	printf '%s' "$payload" | base64 -d > "$out" || { rm -f "$out"; die "Attachment decode failed."; }
+	actual="$(sha256sum "$out" | awk '{print $1}')"; [ "$actual" = "$digest" ] || { secure_wipe "$out"; die "Attachment integrity check failed."; }
+	chmod 600 "$out" 2>/dev/null || true; printf '%s\n' "$out"
+}
+
+cmd_tag_delete() {
+	local tag="$1" id="$2" label="$3" tmp next found=0
+	printf '%s' "$id" | grep -Eq '^[0-9]+$' || die "Numeric ID required."
+	tmp="$(make_tmp)"; next="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	while IFS= read -r line || [ -n "$line" ]; do
+		if [ "${line%%$'\t'*}" = "$tag" ] && [ "$(printf '%s' "$line" | cut -f2)" = "$id" ]; then found=1; else printf '%s\n' "$line" >> "$next"; fi
+	done < "$tmp"
+	[ "$found" = 1 ] || { secure_wipe "$tmp"; secure_wipe "$next"; die "$label not found."; }
+	encrypt_file_to_vault "$next"; secure_wipe "$tmp"; secure_wipe "$next"; printf '%s deleted.\n' "$label"
+}
+
+cmd_passkey_add() {
+	local rp="${1:-}" account="${2:-}" credential="${3:-}" notes="${4:-}" tmp id created encoded
+	if [ -z "$rp" ] || [ -z "$account" ] || [ -z "$credential" ]; then die "Usage: $0 passkey-add <rp-id> <account> <credential-id> [notes]"; fi
+	rp="$(sanitize_field "$rp")"; account="$(sanitize_field "$account")"; credential="$(sanitize_field "$credential")"; encoded="$(printf '%s' "$notes" | base64 | tr -d '\n')"; created="$(now_iso)"
+	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"; id="$(next_tag_id PASSKEY "$tmp")"
+	printf 'PASSKEY\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$rp" "$account" "$credential" "$encoded" "$created" >> "$tmp"
+	encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"; printf 'Passkey metadata added with ID %s; private key remains in the platform authenticator.\n' "$id"
+}
+
+cmd_passkey_list() {
+	local tmp; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"; awk -F '\t' '$1=="PASSKEY"{printf "%s\t%s\t%s\t%s\n",$2,$3,$4,$7}' "$tmp"; secure_wipe "$tmp"
+}
+
+sync_paths() {
+	local target="$1" channel="$2" target_id
+	printf '%s' "$channel" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' || die "Invalid sync channel."
+	target_id="$(printf '%s\t%s' "$target" "$channel" | sha256sum | awk '{print substr($1,1,16)}')"
+	mkdir -p "$SPM_CONFIG_DIR"; chmod 700 "$SPM_CONFIG_DIR" 2>/dev/null || true
+	SYNC_REMOTE="$target/spm-$channel.gpg"; SYNC_STATE="$SPM_CONFIG_DIR/sync-$target_id.base-sha256"
+}
+
+cmd_sync() {
+	local action="${1:-status}" target="${2:-}" channel="${3:-$(basename "$VAULT_FILE" .gpg)}" local_sha remote_sha base_sha staged tmp
+	[ -n "$target" ] || die "Usage: $0 sync status|push|pull <directory> [channel]"
+	mkdir -p "$target" || die "Cannot create sync target."; target="$(canon_path "$target")"; sync_paths "$target" "$channel"
+	local_sha=""; remote_sha=""; base_sha=""
+	if [ -f "$VAULT_FILE" ]; then local_sha="$(sha256sum "$VAULT_FILE" | awk '{print $1}')"; fi
+	if [ -f "$SYNC_REMOTE" ]; then remote_sha="$(sha256sum "$SYNC_REMOTE" | awk '{print $1}')"; fi
+	if [ -f "$SYNC_STATE" ]; then base_sha="$(sed -n '1p' "$SYNC_STATE")"; fi
+	case "$action" in
+		status) printf 'local=%s\nremote=%s\nbase=%s\n' "${local_sha:-missing}" "${remote_sha:-missing}" "${base_sha:-none}" ;;
+		push)
+			[ -n "$local_sha" ] || die "Local vault missing."
+			if [ -n "$remote_sha" ] && [ -n "$base_sha" ] && [ "$remote_sha" != "$base_sha" ] && [ "$local_sha" != "$base_sha" ]; then die "Sync conflict: local and remote both changed."; fi
+			staged="$(mktemp "$target/.spm-sync.XXXXXX")"; cp "$VAULT_FILE" "$staged"; chmod 600 "$staged"; mv -f "$staged" "$SYNC_REMOTE"; printf '%s\n' "$local_sha" > "$SYNC_STATE"; chmod 600 "$SYNC_STATE"; printf 'Encrypted vault pushed.\n' ;;
+		pull)
+			[ -n "$remote_sha" ] || die "Remote vault missing."
+			if [ -n "$local_sha" ] && [ -n "$base_sha" ] && [ "$local_sha" != "$base_sha" ] && [ "$remote_sha" != "$base_sha" ]; then die "Sync conflict: local and remote both changed."; fi
+			tmp="$(make_tmp)"; ensure_master_password_loaded
+			printf '%s' "$MASTER_PW" | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 --decrypt "$SYNC_REMOTE" > "$tmp" 2>/dev/null || { secure_wipe "$tmp"; die "Remote vault cannot be decrypted with this master password."; }
+			secure_wipe "$tmp"; archive_current_vault; staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm-sync.XXXXXX")"; cp "$SYNC_REMOTE" "$staged"; chmod 600 "$staged"; mv -f "$staged" "$VAULT_FILE"; printf '%s\n' "$remote_sha" > "$SYNC_STATE"; chmod 600 "$SYNC_STATE"; printf 'Encrypted vault pulled.\n' ;;
+		*) die "Usage: $0 sync status|push|pull <directory> [channel]" ;;
+	esac
+}
+
+cmd_emergency_create() {
+	local id="${1:-}" public_key="${2:-}" activation="${3:-}" output="${4:-}" tmp payload key_file kit_dir
+	printf '%s' "$id" | grep -Eq '^[0-9]+$' || die "Numeric password ID required."
+	[ -f "$public_key" ] || die "Recipient RSA public key not found."
+	[ -n "$activation" ] || die "Activation date required (YYYY-MM-DD)."; date -d "$activation" +%s >/dev/null 2>&1 || die "Invalid activation date."
+	[ -n "$output" ] || output="emergency-$id-$activation.tar.gz"; [ ! -e "$output" ] || die "Emergency archive already exists."
+	tmp="$(make_tmp)"; payload="$(make_tmp)"; key_file="$(make_tmp)"; kit_dir="$(mktemp -d "${TMPDIR:-/tmp}/spm-emergency.XXXXXX")"; chmod 700 "$kit_dir"
+	decrypt_vault_to_file "$tmp"
+	python3 - "$tmp" "$id" > "$payload" <<'PY'
+import json,sys
+for line in open(sys.argv[1],encoding="utf-8"):
+ p=line.rstrip("\n").split("\t")
+ if p and p[0]==sys.argv[2] and len(p)>=6:
+  print(json.dumps({"type":"password","label":p[1],"username":p[2],"secret":p[3],"notes":p[4],"created":p[5]},ensure_ascii=False));break
+else: raise SystemExit("record not found")
+PY
+	openssl rand -hex 32 > "$key_file"
+	openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -pass file:"$key_file" -in "$payload" -out "$kit_dir/payload.enc"
+	openssl pkeyutl -encrypt -pubin -inkey "$public_key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$key_file" -out "$kit_dir/key.enc"
+	printf 'SPM emergency kit\nactivation=%s\ncreated=%s\nnotice=Activation is advisory; offline recipients can decrypt early.\nfiles=key.enc,payload.enc\n' "$activation" "$(now_iso)" > "$kit_dir/manifest.txt"
+	chmod 600 "$kit_dir"/*; tar -czf "$output" -C "$kit_dir" manifest.txt key.enc payload.enc
+	chmod 600 "$output" 2>/dev/null || true; secure_wipe "$tmp"; secure_wipe "$payload"; secure_wipe "$key_file"; secure_wipe "$kit_dir/key.enc"; secure_wipe "$kit_dir/payload.enc"; secure_wipe "$kit_dir/manifest.txt"; rmdir "$kit_dir"
+	printf '%s\n' "$output"
+}
+
+cmd_emergency_open() {
+	local archive="${1:-}" private_key="${2:-}" output="${3:-./spm-emergency-record.json}" manifest activation activation_epoch now key_file plain_key payload_file
+	if [ ! -f "$archive" ] || [ ! -f "$private_key" ]; then
+		die "Usage: $0 emergency-open <archive> <private.pem> [output.json]"
+	fi
+	[ ! -e "$output" ] || die "Output file already exists."
+	manifest="$(tar -xOf "$archive" manifest.txt 2>/dev/null)" || die "Invalid emergency archive."
+	activation="$(printf '%s\n' "$manifest" | awk -F= '$1=="activation"{print $2;exit}')"
+	activation_epoch="$(date -d "$activation" +%s 2>/dev/null)" || die "Invalid emergency activation date."
+	now="$(date +%s)"; [ "$now" -ge "$activation_epoch" ] || die "Emergency kit is scheduled for $activation."
+	key_file="$(make_tmp)"; plain_key="$(make_tmp)"; payload_file="$(make_tmp)"
+	tar -xOf "$archive" key.enc > "$key_file" 2>/dev/null || die "Emergency key payload missing."
+	tar -xOf "$archive" payload.enc > "$payload_file" 2>/dev/null || die "Emergency record payload missing."
+	openssl pkeyutl -decrypt -inkey "$private_key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$key_file" -out "$plain_key" || die "Emergency private key does not match."
+	openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:"$plain_key" -in "$payload_file" -out "$output" || { secure_wipe "$output"; die "Emergency payload decryption failed."; }
+	chmod 600 "$output" 2>/dev/null || true; secure_wipe "$key_file"; secure_wipe "$plain_key"; secure_wipe "$payload_file"; printf '%s\n' "$output"
+}
+
+cmd_bridge_get() {
+	local id="${1:-}" host="${2:-}" tmp
+	printf '%s' "$id" | grep -Eq '^[0-9]+$' || die "Numeric record ID required."
+	[ -n "$host" ] || die "Browser hostname required."
+	IFS= read -r MASTER_PW || die "Master password required on stdin."
+	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	python3 - "$tmp" "$id" "$host" <<'PY'
+import json,re,sys,urllib.parse
+path,rid,requested=sys.argv[1:]; requested=requested.lower().strip(".")
+for line in open(path,encoding="utf-8",errors="replace"):
+ p=line.rstrip("\n").split("\t")
+ if p and p[0]==rid and len(p)>=6:
+  label,user,secret,notes=p[1:5]
+  candidates={label.lower().strip(".")}
+  for token in re.findall(r"https?://[^\s]+",notes):
+   try:candidates.add((urllib.parse.urlparse(token).hostname or "").lower().strip("."))
+   except ValueError:pass
+  if requested not in candidates:
+   print(json.dumps({"ok":False,"error":"record is not bound to this hostname"}));raise SystemExit(2)
+  print(json.dumps({"ok":True,"username":user,"password":secret}));break
+else:
+ print(json.dumps({"ok":False,"error":"record not found"}));raise SystemExit(1)
+PY
+	secure_wipe "$tmp"; MASTER_PW=""
+}
+
 cmd_help() {
 	print_banner
 
@@ -4070,6 +4433,21 @@ Perintah utama (CLI):
   ./spm.sh generate        → Generator kata sandi (panjang, mode mudah/aman/angka, simbol opsional)
   ./spm.sh web             → Mode web (pilih sementara / background via pm2)
   ./spm.sh help            → Tampilkan bantuan ini
+
+Fitur lokal 2.10:
+  ./spm.sh security                     → Dashboard keamanan vault
+  ./spm.sh history-list                 → Daftar histori vault terenkripsi
+  ./spm.sh history-restore <snapshot>   → Pulihkan snapshot setelah konfirmasi
+  ./spm.sh backup-now [dir]             → Backup terenkripsi terverifikasi
+  ./spm.sh backup-auto enable [dir] [jam] [retensi]
+  ./spm.sh vault-profile list|add|use|remove
+  ./spm.sh attachment-add <file> [label]
+  ./spm.sh attachment-list|attachment-extract|attachment-delete
+  ./spm.sh passkey-add <rp> <akun> <credential-id> [catatan]
+  ./spm.sh passkey-list|passkey-delete
+  ./spm.sh sync status|push|pull <direktori> [channel]
+  ./spm.sh emergency-create <id> <public.pem> <YYYY-MM-DD> [arsip]
+  ./spm.sh emergency-open <arsip> <private.pem> [output.json]
 
 Catatan Aman (Secure Notes):
   ./spm.sh notes-add       → Tambah catatan aman
@@ -4164,6 +4542,21 @@ Main commands (CLI):
   ./spm.sh generate        → Password generator (length, easy/secure/numeric, optional symbols/upper/lower/digits)
   ./spm.sh web             → Web mode (foreground or pm2 background)
   ./spm.sh help            → Show this help
+
+Local-first 2.10 capabilities:
+  ./spm.sh security                     → Vault security dashboard
+  ./spm.sh history-list                 → List encrypted vault history
+  ./spm.sh history-restore <snapshot>   → Restore after confirmation
+  ./spm.sh backup-now [dir]             → Verified encrypted backup
+  ./spm.sh backup-auto enable [dir] [hours] [retention]
+  ./spm.sh vault-profile list|add|use|remove
+  ./spm.sh attachment-add <file> [label]
+  ./spm.sh attachment-list|attachment-extract|attachment-delete
+  ./spm.sh passkey-add <rp> <account> <credential-id> [notes]
+  ./spm.sh passkey-list|passkey-delete
+  ./spm.sh sync status|push|pull <directory> [channel]
+  ./spm.sh emergency-create <id> <public.pem> <YYYY-MM-DD> [archive]
+  ./spm.sh emergency-open <archive> <private.pem> [output.json]
 
 Secure Notes:
   ./spm.sh notes-add       → Add secure note
@@ -6603,6 +6996,7 @@ def list_page(title_key, title, desc_key, desc, add_href, add_key, add_label, he
 # --------------------------------------------------------------------------
 def overview_page(counts, recent):
     tiles = [
+        ("◉", counts.get("security_score", 100), "overview.security_score", "Security score", "/"),
         ("\U0001F511", counts.get("passwords", 0), "nav.passwords", "Passwords", "/passwords"),
         ("\U0001F5D2", counts.get("notes", 0), "nav.notes", "Secure Notes", "/notes"),
         ("\U0001F4DD", counts.get("passphrases", 0), "nav.passphrases", "Passphrases", "/passphrases"),
@@ -8081,6 +8475,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "passphrases": len(passphrases), "backups": len(backups),
                 "authenticators": len(auths),
             }
+            secrets = {}
+            weak = old = incomplete = 0
+            now = time.time()
+            for _, item in entries:
+                secret = item[3] if len(item) > 3 else ""
+                secrets[secret] = secrets.get(secret, 0) + 1
+                classes = sum(bool(re.search(pattern, secret)) for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]"))
+                weak += int(len(secret) < 12 or classes < 3)
+                incomplete += int(not item[1] or not item[2])
+                try:
+                    old += int(now - time.mktime(time.strptime(item[5].replace("Z", ""), "%Y-%m-%dT%H:%M:%S")) > 365 * 86400)
+                except Exception:
+                    pass
+            reused = sum(n for value, n in secrets.items() if value and n > 1)
+            counts["security_score"] = max(0, 100 - min(100, weak * 12 + reused * 10 + old * 4 + incomplete * 3))
+            counts["attachments"] = sum(1 for line in plaintext.splitlines() if line.startswith("ATTACHMENT\t"))
+            counts["passkeys"] = sum(1 for line in plaintext.splitlines() if line.startswith("PASSKEY\t"))
             recent = list(reversed(entries))[:5]
             body = render_shell(overview_page(counts, recent), "overview",
                                 VERSION, VAULT_PATH, title="Overview",
@@ -9929,6 +10340,14 @@ interactive_menu() {
 # ----- Main ------------------------------------------------------------------
 
 main() {
+	# Native messaging is a machine-readable protocol: never emit language or
+	# consent prompts before its single JSON response.
+	if [ "${1:-}" = "bridge-get" ]; then
+		shift
+		acquire_cli_vault_lock
+		cmd_bridge_get "$@"
+		return
+	fi
 	ensure_requirements
 	choose_language
 	ensure_policy_consent
@@ -9942,7 +10361,7 @@ main() {
 	local cmd="$1"
 	shift || true
 	case "$cmd" in
-		update|generate|password-generate|web|web-mode|help|-h|--help) ;;
+		update|generate|password-generate|web|web-mode|help|-h|--help|vault-profile) ;;
 		*) acquire_cli_vault_lock ;;
 	esac
 
@@ -9962,6 +10381,22 @@ main() {
 		doctor)           cmd_doctor "$@" ;;
 		export)           cmd_export "$@" ;;
 		import)           cmd_import "$@" ;;
+		security|security-dashboard) cmd_security_dashboard "$@" ;;
+		history-list)    cmd_history_list "$@" ;;
+		history-restore) cmd_history_restore "$@" ;;
+		backup-now)      cmd_backup_now "$@" ;;
+		backup-auto)     cmd_backup_auto "$@" ;;
+		vault-profile)   cmd_vault_profile "$@" ;;
+		attachment-add)  cmd_attachment_add "$@" ;;
+		attachment-list) cmd_attachment_list "$@" ;;
+		attachment-extract) cmd_attachment_extract "$@" ;;
+		attachment-delete) cmd_tag_delete ATTACHMENT "${1:-}" Attachment ;;
+		passkey-add)     cmd_passkey_add "$@" ;;
+		passkey-list)    cmd_passkey_list "$@" ;;
+		passkey-delete)  cmd_tag_delete PASSKEY "${1:-}" 'Passkey metadata' ;;
+		sync)            cmd_sync "$@" ;;
+		emergency-create) cmd_emergency_create "$@" ;;
+		emergency-open)  cmd_emergency_open "$@" ;;
 		generate|password-generate) cmd_generate_password "$@" ;;
 		notes-add)        cmd_notes_add "$@" ;;
 		notes-list)       cmd_notes_list "$@" ;;

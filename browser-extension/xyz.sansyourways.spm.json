@@ -1,0 +1,7 @@
+{
+  "name": "xyz.sansyourways.spm",
+  "description": "Sans Password Manager native bridge",
+  "path": "REPLACE_WITH_ABSOLUTE_PATH/native_host.py",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://REPLACE_WITH_EXTENSION_ID/"]
+}

@@ -5,6 +5,25 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.10.0] - 2026-08-19
+
+### Added
+- Encrypted vault history with bounded retention and confirmed restoration.
+- A CLI security dashboard covering weak, reused, old, incomplete, and malformed
+  records; web overview now displays the same security score.
+- Verified manual and opportunistic automatic encrypted backups.
+- Recipient-encrypted emergency kits with an advisory activation date and a
+  matching local decrypt workflow.
+- A Chrome/Chromium native-messaging extension for explicit, exact-domain-bound
+  autofill without persistent browser-side master-password storage.
+- Encrypted attachments up to 1 MiB with digest-verified, no-overwrite extraction.
+- Named vault profiles, conflict-safe filesystem synchronization, and local
+  passkey metadata whose private key remains in the platform authenticator.
+
+### Changed
+- The vault schema recognizes backward-compatible `ATTACHMENT` and `PASSKEY`
+  records. Older SPM versions continue to ignore these tagged lines.
+
 ## [2.9.6] - 2026-08-19
 
 ### Security

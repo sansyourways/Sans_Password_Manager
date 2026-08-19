@@ -17,6 +17,8 @@ SPM is designed around the following core principles:
 - **User-controlled recovery** — recovery requires the locally generated RSA private key and recovery blob; the developer cannot recover either.
 - **Crash-safe writes** — ciphertext is staged and atomically installed, with a last-known-good encrypted backup.
 - **Concurrent-write protection** — CLI and web mutations share an advisory file lock when `flock` is available.
+- **Local-first extensions** — history, backups, attachments, and sync contain encrypted vault material; browser autofill is explicit and hostname-bound.
+- **Platform-owned passkeys** — SPM stores passkey metadata, never private passkey key material.
 
 Core vault operations are offline. The optional updater contacts GitHub Releases,
 and web mode serves the local vault UI on the address selected by the user.

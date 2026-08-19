@@ -110,6 +110,12 @@ SPM is designed for users who want:
 - 🖥️ Console web design with square ruled surfaces, green actions, amber emitted values, and no floating panels
 - 🇬🇧🇮🇩🇯🇵 Live language switcher (EN/ID/JP) in the web header with cookie persistence and instant translations across dashboard cards/import UI  
 - 📤 Vault export/import (CLI & Web) to CSV/JSON + advanced formats
+- 🛡️ Vault-wide security score with weak, reused, old, and incomplete-record findings
+- 🕘 Encrypted history, verified automatic backups, and confirmed rollback
+- 📎 Encrypted attachments with SHA-256 verification and a 1 MiB safety limit
+- 🗂️ Named vault profiles and conflict-safe local filesystem synchronization
+- 🚨 Recipient-encrypted emergency kits with advisory activation dates
+- 🔑 Platform passkey metadata and an exact-domain browser autofill bridge
 - 📜 Backup codes  
 - 🔑 RSA-based recovery  
 - 🩺 Doctor diagnostics  
@@ -419,12 +425,45 @@ The recovery private key remains separate unless
 
 ## Development & Versioning
 
-Version: **2.9.6**
+Version: **2.10.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds are refused by default: bind localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` is an explicit escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 Authenticated web mutations also require an exact same-origin request and are serialized across threads/processes to prevent CSRF and lost vault writes. Decrypted web responses use `Cache-Control: no-store`.
 All listed import formats are round-trip compatible with their matching CLI and web exports.
 Vault writes are staged and atomically installed. CLI and web processes share an advisory vault lock when `flock` is available; avoid concurrent access on systems without it. `save` verifies the archived vault before removing the local copy.
+
+### Local-first 2.10 commands
+
+```bash
+spm security
+spm history-list
+spm history-restore <snapshot-name>
+spm backup-now [directory]
+spm backup-auto enable [directory] [hours] [retention]
+spm vault-profile list
+spm vault-profile add <name> <vault-path>
+spm vault-profile use <name>
+spm attachment-add <file> [label]
+spm attachment-list
+spm attachment-extract <id> [output]
+spm passkey-add <rp-id> <account> <credential-id> [notes]
+spm passkey-list
+spm sync status|push|pull <directory> [channel]
+spm emergency-create <password-id> <recipient-public.pem> <YYYY-MM-DD> [archive]
+spm emergency-open <archive> <recipient-private.pem> [output.json]
+```
+
+Automatic backups are opportunistic: SPM checks the configured interval after
+successful vault writes. Filesystem sync stores only encrypted vault bytes and
+refuses two-sided changes instead of selecting a last writer. Emergency dates
+are enforced by `spm emergency-open` but remain advisory because a recipient
+holding the private key can use lower-level cryptographic tools. Passkey private
+keys remain non-exportable in the operating-system or hardware authenticator;
+SPM stores only discovery and recovery metadata.
+
+The unpacked Chrome/Chromium companion is in `browser-extension/`. Autofill
+requires the record label, or an HTTP(S) URL in its notes, to exactly match the
+active page hostname. See its README for native-host registration.
 Uses **semantic versioning**.  
 `./spm.sh update` fetches the latest GitHub ZIP, verifies its published SHA-256 and the extracted script syntax, then installs to `/usr/local/bin/spm` (sudo may be required).
 See `CHANGELOG.md` for details.
