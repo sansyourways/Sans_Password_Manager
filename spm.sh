@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.9.1"
+VERSION="2.9.2"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -86,6 +86,23 @@ now_iso() {
 # into the next column. Collapse both to a space before any field is written.
 sanitize_field() {
 	printf '%s' "$1" | tr '\t\r\n' '   '
+}
+
+# Octal permission bits for a file, or empty if they cannot be read.
+# GNU coreutils and BSD/macOS stat disagree on the flag, so try both.
+file_mode() {
+	local f="$1"
+	stat -c '%a' "$f" 2>/dev/null && return 0
+	stat -f '%Lp' "$f" 2>/dev/null && return 0
+	printf ''
+}
+
+# True when a mode grants any group or other bit, i.e. anything but 0x00.
+# Handles both 3-digit (600) and 4-digit (0600) stat output.
+mode_is_exposed() {
+	local mode="$1"
+	[ -n "$mode" ] || return 1
+	[ "${mode: -2}" != "00" ]
 }
 
 make_tmp() {
@@ -3285,6 +3302,54 @@ cmd_doctor() {
 			printf "[✖] File recovery tidak ditemukan di: %s\n" "$RECOVERY_FILE"
 		else
 			printf "[✖] Recovery file not found at: %s\n" "$RECOVERY_FILE"
+		fi
+	fi
+
+	# Check on-disk permissions of the sensitive files. A vault last written by
+	# a web session before 2.9.1 kept the umask default (usually 0644) instead
+	# of 0600, and that stays wrong until someone fixes it by hand.
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "\n[ ] Memeriksa izin file sensitif...\n"
+	else
+		printf "\n[ ] Checking sensitive file permissions...\n"
+	fi
+
+	local perm_bad=0
+	local perm_fix=""
+	local pf pmode
+	for pf in "$VAULT_FILE" "${VAULT_FILE}.bak" "$RECOVERY_FILE" "$RECOVERY_PRIV_DEFAULT"; do
+		[ -f "$pf" ] || continue
+		pmode="$(file_mode "$pf")"
+		if [ -z "$pmode" ]; then
+			if [ "$SPM_LANG" = "id" ]; then
+				printf "[!] Tidak bisa membaca izin: %s\n" "$pf"
+			else
+				printf "[!] Could not read permissions: %s\n" "$pf"
+			fi
+			continue
+		fi
+		if mode_is_exposed "$pmode"; then
+			perm_bad=$((perm_bad + 1))
+			perm_fix="${perm_fix}$(printf '%q' "$pf") "
+			if [ "$SPM_LANG" = "id" ]; then
+				printf "[✖] %s terbuka untuk pengguna lain (mode %s, seharusnya 600).\n" "$pf" "$pmode"
+			else
+				printf "[✖] %s is readable by other users (mode %s, expected 600).\n" "$pf" "$pmode"
+			fi
+		else
+			if [ "$SPM_LANG" = "id" ]; then
+				printf "[✔] Izin aman (%s): %s\n" "$pmode" "$pf"
+			else
+				printf "[✔] Permissions OK (%s): %s\n" "$pmode" "$pf"
+			fi
+		fi
+	done
+
+	if [ "$perm_bad" -gt 0 ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "[!] Perbaiki dengan: chmod 600 %s\n" "${perm_fix% }"
+		else
+			printf "[!] Fix with: chmod 600 %s\n" "${perm_fix% }"
 		fi
 	fi
 

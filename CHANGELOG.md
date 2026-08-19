@@ -5,6 +5,18 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.9.2] - 2026-08-19
+
+### Added
+- `./spm.sh doctor` now checks the on-disk permissions of the vault, its
+  `.bak`, the recovery file, and the RSA recovery private key. Each should be
+  `600`; anything granting group or other access is reported with its actual
+  mode and a ready-to-run `chmod 600` command naming only the offending files.
+  2.9.1 stopped web-mode writes from loosening the vault to `644`, but it could
+  not repair vaults already written that way - this makes those findable.
+  Modes like `400` are accepted; only group/other bits are flagged. The check
+  reads modes through both GNU (`stat -c`) and BSD/macOS (`stat -f`) syntax.
+
 ## [2.9.1] - 2026-08-19
 
 ### Security
