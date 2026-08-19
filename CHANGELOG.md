@@ -7,6 +7,29 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [2.10.5] - 2026-08-19
+
+### Changed
+- Web Mode now uses restrained, reduced-motion-aware effects for toast feedback,
+  the mobile navigation scrim, import progress, and changed authenticator codes.
+  The Console layout, palette, typography, and component structure are unchanged.
+- Replaced mixed emoji and text-glyph Web Mode icons with a deterministic inline
+  SVG set built on the Console 24-unit grid. Icons use square stroke terminals,
+  `currentColor`, accessible control names, and no external asset requests.
+
+### Fixed
+- Web auto-lock now performs one logout navigation, stops its interval before
+  leaving the page, and tears the timer down on `pagehide`, preventing the
+  repeated refresh/navigation loop.
+- Returning to a vault page through the back/forward cache no longer grants a
+  fresh idle window. Timers are frozen while a page is cached, so the restored
+  interval cannot observe the idle time that passed; the surviving deadline is
+  now honoured and an expired page locks immediately on restore instead of
+  resetting to a full 30 seconds.
+- The `pagehide` teardown is no longer one-shot, so the timer is still stopped
+  on a second navigation away after a back/forward-cache round trip.
+- Cleared the existing ShellCheck warning in the regression-suite format count.
+
 ## [2.10.4] - 2026-08-19
 
 ### Added

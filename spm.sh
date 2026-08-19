@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.10.4"
+VERSION="2.10.5"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -5909,6 +5909,10 @@ DESIGN_CSS = """
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --ease: cubic-bezier(.4, 0, .2, 1);
+  --motion-instant: 80ms;
+  --motion-fast: 140ms;
+  --motion-base: 200ms;
+  --motion-live: 320ms;
 }
 
 /* ---- Theme: dark (default) ---- */
@@ -6401,6 +6405,14 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .faint { color: var(--text-faint); font-size: var(--fs-sm); }
 .hidden { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.icon { inline-size:20px; block-size:20px; flex:none; fill:none; stroke:currentColor;
+  stroke-width:1.5; stroke-linecap:butt; stroke-linejoin:miter; }
+.icon-sm { inline-size:16px; block-size:16px; }
+.icon-lg { inline-size:32px; block-size:32px; stroke-width:2; }
+.brand-mark .icon { inline-size:24px; block-size:24px; stroke-width:1.75; }
+.nav-ico .icon, .icon-btn .icon { inline-size:16px; block-size:16px; }
+.stat-ico .icon { inline-size:20px; block-size:20px; }
+.empty-ico .icon { inline-size:32px; block-size:32px; stroke-width:2; }
 
 /* ============================ Responsive ============================ */
 .scrim { display: none; }
@@ -6414,10 +6426,12 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
     box-shadow: var(--shadow-lg);
   }
   body.nav-open .sidebar { transform: translateX(0); }
-  body.nav-open .scrim {
+  .scrim {
     display: block; position: fixed; inset: 0; z-index: 35;
-    background: rgba(0,0,0,.5);
+    background: rgba(0,0,0,.5); opacity: 0; pointer-events: none;
+    transition: opacity var(--motion-base) var(--ease);
   }
+  body.nav-open .scrim { opacity: 1; pointer-events: auto; }
   .menu-btn { display: inline-grid; }
   .content { padding: var(--sp-4); }
   .search kbd { display: none; }
@@ -6513,9 +6527,18 @@ body::before { content:""; position:fixed; inset:0; pointer-events:none; opacity
 .flash, .msg { border-radius:0; border-left:2px solid currentColor; }
 .secret-val, .totp-code, .gen-out, .stat-n, .num, .faint.mono { color:var(--warn); }
 #toast { left:auto; right:var(--sp-4); bottom:var(--sp-4); transform:none; border-left:2px solid var(--accent); box-shadow:none; }
-#toast.show { transform:none; }
+#toast { transform:translateY(var(--sp-2)); transition:opacity var(--motion-fast) var(--ease), transform var(--motion-base) var(--ease); }
+#toast.show { transform:translateY(0); }
 .overlay { border-radius:0; backdrop-filter:none; -webkit-backdrop-filter:none; background:var(--surface); border-left:2px solid var(--accent); }
+.overlay { display:grid; visibility:hidden; opacity:0; pointer-events:none;
+  transition:opacity var(--motion-base) var(--ease), visibility 0s linear var(--motion-base); }
+.overlay.on { visibility:visible; opacity:1; pointer-events:auto; transition-delay:0s; }
 .spinner { border-radius:0; }
+.totp-code.code-updated { animation:code-updated var(--motion-live) var(--ease); }
+@keyframes code-updated {
+  0% { opacity:.45; transform:translateY(var(--sp-1)); }
+  100% { opacity:1; transform:translateY(0); }
+}
 
 @media (max-width:620px) {
   .content, .console-hero { padding:var(--sp-4); }
@@ -6527,7 +6550,10 @@ body::before { content:""; position:fixed; inset:0; pointer-events:none; opacity
   table.t td.actions { width:100%; text-align:left; }
   .icon-row { justify-content:flex-start; }
 }
-@media (prefers-reduced-motion:reduce) { .console-hero .lede::after { animation:none; } }
+@media (prefers-reduced-motion:reduce) {
+  .console-hero .lede::after, .totp-code.code-updated { animation:none; }
+  .scrim, #toast, .overlay { transition:none; }
+}
 
 @media print { .sidebar, .topbar, .page-actions, #toast { display: none !important; } .app { grid-template-columns: 1fr; } }
 </style>
@@ -6577,7 +6603,14 @@ SHELL_SCRIPT = """
   };
 
   /* ---- mobile nav ----------------------------------------------------- */
-  window.SPM_toggleNav = function () { document.body.classList.toggle("nav-open"); };
+  function setNav(open) {
+    document.body.classList.toggle("nav-open", open);
+    var trigger = document.querySelector(".menu-btn");
+    if (trigger) trigger.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  window.SPM_toggleNav = function () {
+    setNav(!document.body.classList.contains("nav-open"));
+  };
 
   /* ---- instant table filter ------------------------------------------- */
   function wireSearch() {
@@ -6611,7 +6644,7 @@ SHELL_SCRIPT = """
       if (box) { e.preventDefault(); box.focus(); box.select(); }
     }
     if (e.key === "Escape" && document.body.classList.contains("nav-open")) {
-      document.body.classList.remove("nav-open");
+      setNav(false);
     }
   });
 
@@ -6628,8 +6661,8 @@ LOCKBAR_SCRIPT = """
 <script>
 (function () {
   var IDLE_MS = 30000, WARN_AT = 10;
-  var deadline = Date.now() + IDLE_MS, paused = false, ticker;
-  function reset() { if (!paused) deadline = Date.now() + IDLE_MS; }
+  var deadline = Date.now() + IDLE_MS, paused = false, locking = false, ticker;
+  function reset() { if (!paused && !locking) deadline = Date.now() + IDLE_MS; }
   function render() {
     var left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
     var bar = document.getElementById("lockbar");
@@ -6643,7 +6676,11 @@ LOCKBAR_SCRIPT = """
         lbl.textContent = paused ? ((window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t("lock.paused", "Lock paused") : "Lock paused") : (t + " " + left + "s");
       }
     }
-    if (!paused && left <= 0) { window.location.href = "/logout"; }
+    if (!paused && !locking && left <= 0) {
+      locking = true;
+      clearInterval(ticker);
+      window.location.replace("/logout");
+    }
   }
   window.SPM_AutoLock = {
     pause: function () { paused = true; render(); },
@@ -6655,23 +6692,69 @@ LOCKBAR_SCRIPT = """
   });
   ticker = setInterval(render, 1000);
   document.addEventListener("DOMContentLoaded", render);
+  window.addEventListener("pagehide", function () { clearInterval(ticker); });
+  window.addEventListener("pageshow", function (event) {
+    if (!event.persisted || locking) return;
+    /* Timers are frozen in the back/forward cache, so the interval never
+       observed the idle time that elapsed while the page was away. The
+       deadline is the only surviving evidence: honour it instead of
+       resetting, or returning via Back would hand back an unlocked vault. */
+    clearInterval(ticker);
+    if (Date.now() >= deadline) {
+      locking = true;
+      window.location.replace("/logout");
+      return;
+    }
+    ticker = setInterval(render, 1000);
+    render();
+  });
 })();
 </script>
 """
 
+ICON_SPRITE = """
+<svg class="icon-sprite" aria-hidden="true" width="0" height="0" style="position:absolute;overflow:hidden">
+  <symbol id="i-brand" viewBox="0 0 24 24"><path d="M4 6l5 6-5 6M12 18h8M12 6h8"/></symbol>
+  <symbol id="i-overview" viewBox="0 0 24 24"><path d="M3.5 3.5h7v7h-7zM13.5 3.5h7v7h-7zM3.5 13.5h7v7h-7zM13.5 13.5h7v7h-7z"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="4.5"/><path d="M12.5 12H21M17 12v3M20 12v2"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M4 3.5h16v17H4zM7 8h10M7 12h10M7 16h6"/></symbol>
+  <symbol id="i-phrase" viewBox="0 0 24 24"><path d="M5 5H2.5v14H5M19 5h2.5v14H19M8 9h8M8 15h8"/></symbol>
+  <symbol id="i-authenticator" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.5V12l4 2M8 3l-2-2M16 3l2-2"/></symbol>
+  <symbol id="i-backup" viewBox="0 0 24 24"><path d="M3.5 5.5h17v13h-17zM3.5 12h17M9 5.5v13M15 5.5v13"/></symbol>
+  <symbol id="i-generator" viewBox="0 0 24 24"><path d="M12 2.5V8M12 16v5.5M2.5 12H8M16 12h5.5M5.5 5.5l4 4M14.5 14.5l4 4M18.5 5.5l-4 4M9.5 14.5l-4 4"/></symbol>
+  <symbol id="i-transfer" viewBox="0 0 24 24"><path d="M7 3v17M3 7l4-4 4 4M17 21V4M13 17l4 4 4-4"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M3.5 7h17M3.5 12h17M3.5 17h17"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.1 15.1l5.4 5.4"/></symbol>
+  <symbol id="i-view" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+  <symbol id="i-hide" viewBox="0 0 24 24"><path d="M3 3l18 18M5.5 7.5C3.5 9 2.5 12 2.5 12s3.5 6 9.5 6c1.5 0 2.8-.4 4-1M9 6.5c.9-.3 1.9-.5 3-.5 6 0 9.5 6 9.5 6s-.8 1.4-2.3 2.9"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L20 8l-4-4L4 16zM15 5l4 4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3.5 6h17M6 6v14a1 1 0 001 1h10a1 1 0 001-1V6M9.5 6V4a1 1 0 011-1h3a1 1 0 011 1v2M10 10v7M14 10v7"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><path d="M8 3h13v13H8zM16 19v1a1 1 0 01-1 1H4a1 1 0 01-1-1V9a1 1 0 011-1h1"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><path d="M4.5 11h15v9.5h-15zM8 11V7.5a4 4 0 018 0V11"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 4H4v16h6M14 7l5 5-5 5M8 12h11"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2.5l8 3v6.5c0 5-3.5 8-8 9.5C7.5 20 4 17 4 12V5.5zM8.5 12l2.5 2.5 4.5-5"/></symbol>
+  <symbol id="i-empty" viewBox="0 0 24 24"><path d="M3.5 5.5h17v13h-17zM3.5 12h17M12 5.5v13"/></symbol>
+</svg>
+"""
+
+
+def _icon(name, cls="icon"):
+    return f'<svg class="{cls}" aria-hidden="true"><use href="#i-{name}"></use></svg>'
+
+
 # nav key -> (href, icon, i18n key, fallback label, counter name)
 NAV_SECTIONS = [
     ("nav.group.vault", [
-        ("overview",       "/",               "◈", "nav.overview",       "Overview",       None),
-        ("passwords",      "/passwords",      "\U0001F511", "nav.passwords",      "Passwords",      "passwords"),
-        ("notes",          "/notes",          "\U0001F5D2", "nav.notes",          "Secure Notes",   "notes"),
-        ("passphrases",    "/passphrases",    "\U0001F4DD", "nav.passphrases",    "Passphrases",    "passphrases"),
-        ("authenticators", "/authenticators", "⏱",  "nav.authenticators", "Authenticators", "authenticators"),
-        ("backup-codes",   "/backup-codes",   "\U0001F9EF", "nav.backup_codes",   "Backup Codes",   "backups"),
+        ("overview",       "/",               "overview", "nav.overview",       "Overview",       None),
+        ("passwords",      "/passwords",      "key", "nav.passwords",      "Passwords",      "passwords"),
+        ("notes",          "/notes",          "note", "nav.notes",          "Secure Notes",   "notes"),
+        ("passphrases",    "/passphrases",    "phrase", "nav.passphrases",    "Passphrases",    "passphrases"),
+        ("authenticators", "/authenticators", "authenticator", "nav.authenticators", "Authenticators", "authenticators"),
+        ("backup-codes",   "/backup-codes",   "backup", "nav.backup_codes",   "Backup Codes",   "backups"),
     ]),
     ("nav.group.tools", [
-        ("generator", "/generator", "✨", "nav.generator", "Generator",       None),
-        ("transfer",  "/transfer",  "⇅", "nav.transfer",  "Export / Import", None),
+        ("generator", "/generator", "generator", "nav.generator", "Generator",       None),
+        ("transfer",  "/transfer",  "transfer", "nav.transfer",  "Export / Import", None),
     ]),
 ]
 
@@ -6691,7 +6774,7 @@ def _nav_html(active, counts):
                     badge = f'<span class="nav-count">{n}</span>'
             out.append(
                 f'<a class="{cls}" href="{href}">'
-                f'<span class="nav-ico" aria-hidden="true">{ico}</span>'
+                f'<span class="nav-ico" aria-hidden="true">{_icon(ico)}</span>'
                 f'<span data-i18n="{i18n}">{fallback}</span>{badge}</a>'
             )
         out.append("</div>")
@@ -6720,7 +6803,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
     if searchable:
         search_html = (
             '<div class="search">'
-            '<span class="search-ico" aria-hidden="true">⌕</span>'
+            f'<span class="search-ico" aria-hidden="true">{_icon("search", "icon icon-sm")}</span>'
             '<input id="q" type="search" autocomplete="off" spellcheck="false" '
             'data-i18n-placeholder="search.placeholder" placeholder="Search this vault...">'
             '<kbd>/</kbd></div>'
@@ -6738,12 +6821,13 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
 {DESIGN_CSS}
 </head>
 <body class="theme-dark">
+{ICON_SPRITE}
 <a class="skip-link" href="#main-content">Skip to vault content</a>
 <div class="scrim" onclick="SPM_toggleNav()"></div>
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-mark" aria-hidden="true">S</div>
+      <div class="brand-mark" aria-hidden="true">{_icon("brand")}</div>
       <div class="brand-text">
         <div class="brand-name">SPM</div>
         <div class="brand-meta">v{html.escape(version)}</div>
@@ -6756,7 +6840,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
         <span class="path">{html.escape(vault_path)}</span>
       </div>
       <a class="btn btn-ghost btn-sm btn-block" href="/logout">
-        <span aria-hidden="true">⏻</span>
+        {_icon("logout", "icon icon-sm")}
         <span data-i18n="header.logout">Logout</span>
       </a>
     </div>
@@ -6764,7 +6848,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
 
   <div class="main">
     <header class="topbar">
-      <button class="icon-btn menu-btn" onclick="SPM_toggleNav()" aria-label="Menu">☰</button>
+      <button class="icon-btn menu-btn" onclick="SPM_toggleNav()" aria-label="Menu" aria-expanded="false">{_icon("menu", "icon icon-sm")}</button>
       {search_html}
       <div class="topbar-right">
         <div class="lockbar" id="lockbar" title="Idle auto-lock">
@@ -6801,7 +6885,7 @@ def _esc(v):
 def _empty(icon, title_key, title, desc_key, desc, cta_html="", colspan=4):
     return (
         f'<tr class="empty-row"><td colspan="{colspan}">'
-        f'<div class="empty"><div class="empty-ico" aria-hidden="true">{icon}</div>'
+        f'<div class="empty"><div class="empty-ico" aria-hidden="true">{_icon(icon, "icon icon-lg")}</div>'
         f'<div class="empty-t" data-i18n="{title_key}">{title}</div>'
         f'<div class="empty-d" data-i18n="{desc_key}">{desc}</div>{cta_html}</div>'
         f'</td></tr>'
@@ -6811,15 +6895,15 @@ def _empty(icon, title_key, title, desc_key, desc, cta_html="", colspan=4):
 def _actions(view_href, edit_href, delete_action, item_id, confirm_key, confirm_text):
     bits = ['<div class="icon-row">']
     if view_href:
-        bits.append(f'<a class="icon-btn" href="{view_href}" title="View" aria-label="View">\U0001F441</a>')
+        bits.append(f'<a class="icon-btn" href="{view_href}" title="View" aria-label="View">{_icon("view", "icon icon-sm")}</a>')
     if edit_href:
-        bits.append(f'<a class="icon-btn" href="{edit_href}" title="Edit" aria-label="Edit">✏</a>')
+        bits.append(f'<a class="icon-btn" href="{edit_href}" title="Edit" aria-label="Edit">{_icon("edit", "icon icon-sm")}</a>')
     if delete_action:
         bits.append(
             f'<form class="inline" method="post" action="{delete_action}" '
             f'onsubmit="return confirm(SPM_I18N.t(\'{confirm_key}\',\'{confirm_text}\'));">'
             f'<input type="hidden" name="id" value="{item_id}">'
-            f'<button type="submit" class="icon-btn danger" title="Delete" aria-label="Delete">\U0001F5D1</button>'
+            f'<button type="submit" class="icon-btn danger" title="Delete" aria-label="Delete">{_icon("trash", "icon icon-sm")}</button>'
             f'</form>'
         )
     bits.append("</div>")
@@ -6831,7 +6915,7 @@ def _actions(view_href, edit_href, delete_action, item_id, confirm_key, confirm_
 # --------------------------------------------------------------------------
 def build_rows_html(entries):
     if not entries:
-        return _empty("\U0001F511", "empty.passwords.t", "No passwords yet",
+        return _empty("key", "empty.passwords.t", "No passwords yet",
                       "empty.passwords.d", "Entries you add will appear here.",
                       '<a class="btn btn-primary btn-sm" href="/add" data-i18n="btn.add_entry">+ Add Entry</a>', 4)
     rows = []
@@ -6851,7 +6935,7 @@ def build_rows_html(entries):
 
 def build_notes_rows_html(notes):
     if not notes:
-        return _empty("\U0001F5D2", "empty.notes.t", "No secure notes",
+        return _empty("note", "empty.notes.t", "No secure notes",
                       "empty.notes.d", "Encrypted notes live inside the same vault.",
                       '<a class="btn btn-primary btn-sm" href="/notes-add" data-i18n="btn.add_note">+ Add Note</a>', 3)
     rows = []
@@ -6869,7 +6953,7 @@ def build_notes_rows_html(notes):
 
 def build_passphrase_rows_html(passphrases):
     if not passphrases:
-        return _empty("\U0001F4DD", "empty.passphrases.t", "No passphrases",
+        return _empty("phrase", "empty.passphrases.t", "No passphrases",
                       "empty.passphrases.d", "Store API tokens or recovery phrases here.",
                       '<a class="btn btn-primary btn-sm" href="/passphrase-add" data-i18n="btn.add_passphrase">+ Add Passphrase</a>', 3)
     rows = []
@@ -6887,7 +6971,7 @@ def build_passphrase_rows_html(passphrases):
 
 def build_backup_rows_html(backups):
     if not backups:
-        return _empty("\U0001F9EF", "empty.backups.t", "No backup codes",
+        return _empty("backup", "empty.backups.t", "No backup codes",
                       "empty.backups.d", "Keep one-time recovery codes safe here.",
                       '<a class="btn btn-primary btn-sm" href="/backup-codes-add" data-i18n="btn.add_backups">+ Add Backup Codes</a>', 3)
     rows = []
@@ -6905,7 +6989,7 @@ def build_backup_rows_html(backups):
 
 def build_auth_rows_html(auths):
     if not auths:
-        return _empty("⏱", "empty.auth.t", "No authenticators",
+        return _empty("authenticator", "empty.auth.t", "No authenticators",
                       "empty.auth.d", "Add a TOTP secret to generate 2FA codes.",
                       '<a class="btn btn-primary btn-sm" href="/authenticator-add" data-i18n="btn.add_authenticator">+ Add Authenticator</a>', 5)
     rows = []
@@ -6953,7 +7037,7 @@ def list_page(title_key, title, desc_key, desc, add_href, add_key, add_label, he
       <thead><tr>{ths}</tr></thead>
       <tbody>{rows_html}
         <tr class="hidden" data-empty-search>
-          <td colspan="{ncols}"><div class="empty"><div class="empty-ico">⌕</div>
+          <td colspan="{ncols}"><div class="empty"><div class="empty-ico">{_icon("search", "icon icon-lg")}</div>
           <div class="empty-t" data-i18n="search.no_results">Nothing matches your search</div></div></td>
         </tr>
       </tbody>
@@ -6967,16 +7051,16 @@ def list_page(title_key, title, desc_key, desc, add_href, add_key, add_label, he
 # --------------------------------------------------------------------------
 def overview_page(counts, recent):
     tiles = [
-        ("◉", counts.get("security_score", 100), "overview.security_score", "Security score", "/"),
-        ("\U0001F511", counts.get("passwords", 0), "nav.passwords", "Passwords", "/passwords"),
-        ("\U0001F5D2", counts.get("notes", 0), "nav.notes", "Secure Notes", "/notes"),
-        ("\U0001F4DD", counts.get("passphrases", 0), "nav.passphrases", "Passphrases", "/passphrases"),
-        ("⏱", counts.get("authenticators", 0), "nav.authenticators", "Authenticators", "/authenticators"),
-        ("\U0001F9EF", counts.get("backups", 0), "nav.backup_codes", "Backup Codes", "/backup-codes"),
+        ("shield", counts.get("security_score", 100), "overview.security_score", "Security score", "/"),
+        ("key", counts.get("passwords", 0), "nav.passwords", "Passwords", "/passwords"),
+        ("note", counts.get("notes", 0), "nav.notes", "Secure Notes", "/notes"),
+        ("phrase", counts.get("passphrases", 0), "nav.passphrases", "Passphrases", "/passphrases"),
+        ("authenticator", counts.get("authenticators", 0), "nav.authenticators", "Authenticators", "/authenticators"),
+        ("backup", counts.get("backups", 0), "nav.backup_codes", "Backup Codes", "/backup-codes"),
     ]
     stats = "".join(
         f'<a class="stat" href="{href}">'
-        f'<span class="stat-ico" aria-hidden="true">{ico}</span>'
+        f'<span class="stat-ico" aria-hidden="true">{_icon(ico)}</span>'
         f'<span><span class="stat-n">{n}</span>'
         f'<span class="stat-l" data-i18n="{k}">{lbl}</span></span></a>'
         for ico, n, k, lbl, href in tiles
@@ -7002,7 +7086,7 @@ def overview_page(counts, recent):
     else:
         recent_html = f"""
 <div class="card"><div class="empty">
-  <div class="empty-ico" aria-hidden="true">\U0001F510</div>
+  <div class="empty-ico" aria-hidden="true">{_icon("lock", "icon icon-lg")}</div>
   <div class="empty-t" data-i18n="empty.vault.t">Your vault is empty</div>
   <div class="empty-d" data-i18n="empty.vault.d">Add your first password to get started.</div>
   <a class="btn btn-primary" href="/add" data-i18n="btn.add_entry">+ Add Entry</a>
@@ -7148,8 +7232,8 @@ def _secret_block(value, label_key, label, elem_id):
   <label data-i18n="{label_key}">{label}</label>
   <div class="secret">
     <span class="secret-val masked" id="{elem_id}" data-val="{html.escape(value)}">{"•" * min(len(value), 24) if value else "&mdash;"}</span>
-    <button class="icon-btn" type="button" onclick="SPM_reveal('{elem_id}', this)" data-title-show="Show" aria-label="Show">\U0001F441</button>
-    <button class="icon-btn" type="button" onclick="SPM_copy(document.getElementById('{elem_id}').dataset.val)" aria-label="Copy">\U0001F4CB</button>
+    <button class="icon-btn" type="button" onclick="SPM_reveal('{elem_id}', this)" data-title-show="Show" aria-label="Show">{_icon("view", "icon icon-sm")}</button>
+    <button class="icon-btn" type="button" onclick="SPM_copy(document.getElementById('{elem_id}').dataset.val)" aria-label="Copy">{_icon("copy", "icon icon-sm")}</button>
   </div>
 </div>"""
 
@@ -7163,13 +7247,17 @@ window.SPM_reveal = function (id, btn) {
   if (masked) {
     el.textContent = el.dataset.val || "";
     el.classList.remove("masked");
-    btn.textContent = "\\uD83D\\uDE48";
+    btn.setAttribute("aria-label", "Hide");
+    var use = btn.querySelector("use");
+    if (use) use.setAttribute("href", "#i-hide");
     if (window.SPM_AutoLock) window.SPM_AutoLock.restart();
   } else {
     var v = el.dataset.val || "";
     el.textContent = "\\u2022".repeat(Math.min(v.length, 24));
     el.classList.add("masked");
-    btn.textContent = "\\uD83D\\uDC41";
+    btn.setAttribute("aria-label", "Show");
+    var use = btn.querySelector("use");
+    if (use) use.setAttribute("href", "#i-view");
   }
 };
 </script>
@@ -7195,7 +7283,7 @@ def view_entry_page(parts):
 <div class="card" style="max-width:680px"><div class="card-body">
   <div class="field"><label data-i18n="view.label.username">Username</label>
     <div class="secret"><span class="secret-val" id="username-value">{user or "&mdash;"}</span>
-    <button class="icon-btn" type="button" onclick="SPM_copy(document.getElementById('username-value').textContent)" aria-label="Copy">\U0001F4CB</button></div>
+    <button class="icon-btn" type="button" onclick="SPM_copy(document.getElementById('username-value').textContent)" aria-label="Copy">{_icon("copy", "icon icon-sm")}</button></div>
   </div>
   {_secret_block(pw, "view.label.password", "Password", "pw")}
   <div class="field"><label data-i18n="view.label.notes">Notes</label>
@@ -7239,11 +7327,12 @@ def login_page(version, message=""):
 {DESIGN_CSS}
 </head>
 <body class="theme-dark">
+{ICON_SPRITE}
 <a class="skip-link" href="#main-content">Skip to unlock form</a>
 <div class="login-wrap">
   <main class="login-card" id="main-content">
     <div class="login-brand">
-      <div class="brand-mark" aria-hidden="true">S</div>
+      <div class="brand-mark" aria-hidden="true">{_icon("brand")}</div>
       <h1 data-i18n="header.title">Sans Password Manager</h1>
       <p data-i18n="login.sub">Unlock your encrypted vault to continue.</p>
     </div>
@@ -7586,7 +7675,15 @@ def auth_view_page(aid, label, secret, period, algo, created):
     fetch("/authenticator-code?id=" + encodeURIComponent(id), {{ credentials: "same-origin" }})
       .then(function (r) {{ return r.json(); }})
       .then(function (d) {{
-        document.getElementById("code").textContent = d.code || "------";
+        var code = document.getElementById("code");
+        var nextCode = d.code || "------";
+        if (code && code.textContent !== nextCode) {{
+          code.textContent = nextCode;
+          code.classList.remove("code-updated");
+          if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {{
+            requestAnimationFrame(function () {{ code.classList.add("code-updated"); }});
+          }}
+        }}
         left = d.expires_in || period;
         paint();
       }})

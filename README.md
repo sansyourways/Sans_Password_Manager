@@ -272,6 +272,12 @@ Includes:
   - Language dropdown (EN/ID/JP) that translates the dashboard/import card and remembers your choice via cookie  
   - Detail pages (/view, /edit, authenticator viewer/editor, generator) inherit that language selection so every screen stays localized  
   - Dark-only Console presentation with a command-style vault status overview, visible keyboard focus, and mobile record layouts
+  - Restrained motion for causal feedback—toast arrival, mobile navigation,
+    import progress, and authenticator-code changes—with a fully static
+    `prefers-reduced-motion` experience
+  - A consistent inline SVG icon system for navigation, vault objects, status,
+    and actions; the geometric assets inherit Console colors and work fully
+    offline without icon fonts or third-party requests
 
 Console deliberately favors dense, auditable rows over spacious cards. Very long
 vault labels still wrap and can make mobile records tall; this is preferable to
@@ -509,9 +515,13 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **2.10.4**
+Version: **2.10.5**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
+The 30-second idle auto-lock performs a single logout transition and tears down
+its timer when the page is leaving, avoiding repeated navigation or refresh loops.
+Returning to a page through the back/forward cache does not extend the idle
+window: a page whose deadline already passed locks immediately on restore.
 Authenticated web mutations also require an exact same-origin request and are serialized across threads/processes to prevent CSRF and lost vault writes. Decrypted web responses use `Cache-Control: no-store`.
 All listed import formats are round-trip compatible with their matching CLI and web exports.
 Vault writes are staged and atomically installed. CLI and web processes share an advisory vault lock when `flock` is available; avoid concurrent access on systems without it. `save` verifies the archived vault before removing the local copy.

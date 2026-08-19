@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/spm-regression.XXXXXX")"
 GPG_TEST_HOME="$(mktemp -d /tmp/spm-gnupg.XXXXXX)"
 WEB_PID=""
+WEB_PORT=$((18000 + ($$ % 10000)))
 
 cleanup() {
 	if [ -n "$WEB_PID" ]; then
@@ -93,28 +94,54 @@ cmd_emergency_open "$TEST_ROOT/emergency.tar.gz" "$TEST_ROOT/private.pem" \
 grep -q 'DemoSecret42' "$TEST_ROOT/emergency.json"
 
 web_script="$(write_spm_web_script)"
+grep -q 'locking = false' "$web_script"
+grep -q 'window.location.replace("/logout")' "$web_script"
+grep -q '!event.persisted || locking' "$web_script"
+# A restore from the back/forward cache must honour the surviving deadline
+# rather than resetting it, or Back would hand back an unlocked vault.
+grep -q 'Date.now() >= deadline' "$web_script"
+if grep -q 'window.location.href = "/logout"' "$web_script"; then
+	printf 'legacy repeating auto-lock navigation is still present\n' >&2
+	exit 1
+fi
+if grep -q 'pagehide".*once: true' "$web_script"; then
+	printf 'pagehide teardown is one-shot and will leak after a bfcache round trip\n' >&2
+	exit 1
+fi
+grep -q -- '--motion-base: 200ms' "$web_script"
+grep -q 'prefers-reduced-motion:reduce' "$web_script"
 PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 -m py_compile \
 	"$web_script" "$ROOT_DIR/browser-extension/native_host.py"
 SPM_VAULT_PATH="$PASSWORD_VAULT" SPM_WEB_BIND=127.0.0.1 \
-	SPM_WEB_PORT=18777 SPM_VERSION="$VERSION" python3 "$web_script" \
+	SPM_WEB_PORT="$WEB_PORT" SPM_VERSION="$VERSION" python3 "$web_script" \
 	>"$TEST_ROOT/web.log" 2>&1 &
 WEB_PID="$!"
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-	curl -fsS -o "$TEST_ROOT/login.html" http://127.0.0.1:18777/login && break
+	curl -fsS -o "$TEST_ROOT/login.html" "http://127.0.0.1:$WEB_PORT/login" 2>/dev/null && break
 	sleep 0.25
 done
 grep -q 'Sans Password Manager' "$TEST_ROOT/login.html"
 
 curl -fsS -D "$TEST_ROOT/login.headers" -c "$TEST_ROOT/cookies" -o /dev/null \
-	-X POST -H 'Origin: http://127.0.0.1:18777' \
-	--data-urlencode "password=$AUDIT_PASSWORD" http://127.0.0.1:18777/login
+	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "password=$AUDIT_PASSWORD" "http://127.0.0.1:$WEB_PORT/login"
 grep -q '302 Found' "$TEST_ROOT/login.headers"
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/dashboard.html" \
+	"http://127.0.0.1:$WEB_PORT/"
+grep -q '<symbol id="i-brand"' "$TEST_ROOT/dashboard.html"
+grep -q '<use href="#i-key"' "$TEST_ROOT/dashboard.html"
+grep -q '<use href="#i-shield"' "$TEST_ROOT/dashboard.html"
+grep -q '<use href="#i-logout"' "$TEST_ROOT/dashboard.html"
+if grep -Eq '🔑|🗒|📝|⏱|🧯|✨|🗑|👁|📋' "$TEST_ROOT/dashboard.html"; then
+	printf 'legacy emoji icon found in generated Web Mode dashboard\n' >&2
+	exit 1
+fi
 printf 'type,id,label,username,secret,notes,created,extra\npassword,,Web import,demo,WebSecret42,synthetic,2026-01-01T00:00:00Z,\n' \
 	> "$TEST_ROOT/import.csv"
 curl -fsS -D "$TEST_ROOT/import.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
-	-X POST -H 'Origin: http://127.0.0.1:18777' -F 'fmt=csv' \
-	-F "file=@$TEST_ROOT/import.csv;type=text/csv" http://127.0.0.1:18777/import
+	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" -F 'fmt=csv' \
+	-F "file=@$TEST_ROOT/import.csv;type=text/csv" "http://127.0.0.1:$WEB_PORT/import"
 grep -qi '^Location: /?msg=import-ok' "$TEST_ROOT/import.headers"
 
 printf 'SPM regression suite passed (%s formats plus web and advanced features).\n' \
-	"$(printf '%s\n' $formats | wc -l)"
+	"$(printf '%s\n' "$formats" | awk '{ print NF }')"
