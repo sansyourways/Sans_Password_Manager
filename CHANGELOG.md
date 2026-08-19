@@ -5,6 +5,20 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.8.4] - 2026-08-19
+
+### Fixed
+- **Web login was impossible on non-loopback binds.** The session cookie was
+  always sent with the `Secure` attribute, but web mode serves plain HTTP and
+  has no TLS support. Browsers withhold `Secure` cookies from insecure origins,
+  so anyone using the "Global (0.0.0.0)" or custom-IP bind logged in, had the
+  cookie silently dropped, and was bounced straight back to the login form with
+  no error. `Secure` is now set only when the request really arrives over HTTPS
+  (`X-Forwarded-Proto: https`, i.e. behind a TLS reverse proxy). `HttpOnly` and
+  `SameSite=Strict` are unchanged and still always applied.
+
+---
+
 ## [2.8.3] - 2026-08-19
 
 ### Fixed

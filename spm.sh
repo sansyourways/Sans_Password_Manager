@@ -7,7 +7,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.8.3"
+VERSION="2.8.4"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -8340,6 +8340,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body.encode("utf-8"))
 
+    def _session_cookie_attrs(self):
+        # A "Secure" cookie is withheld by browsers on plain HTTP, and this
+        # server never speaks TLS itself. Sending it unconditionally made login
+        # impossible on the non-loopback binds (0.0.0.0 / custom IP) that web
+        # mode offers: the browser silently drops the session cookie and the
+        # user is bounced back to the login form forever. Mark it Secure only
+        # when the browser's origin really is HTTPS, i.e. behind a TLS reverse
+        # proxy that sets X-Forwarded-Proto.
+        proto = (self.headers.get("X-Forwarded-Proto", "") or "").split(",")[0].strip().lower()
+        attrs = "HttpOnly; Path=/; SameSite=Strict"
+        if proto == "https":
+            attrs += "; Secure"
+        return attrs
+
     def _add_cors(self):
         origin = self.headers.get("Origin", "")
         allowed = {"http://127.0.0.1:%d" % PORT, "http://localhost:%d" % PORT}
@@ -8430,7 +8444,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if token:
                 self.server.sessions.pop(token, None)
             self.send_response(302)
-            self.send_header("Set-Cookie", "spm_session=deleted; Max-Age=0; HttpOnly; Path=/; SameSite=Strict; Secure")
+            self.send_header("Set-Cookie", f"spm_session=deleted; Max-Age=0; {self._session_cookie_attrs()}")
             self.send_header("Location", "/login")
             self.end_headers()
             return
@@ -8458,7 +8472,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 plaintext = decrypt_vault(master)
             except Exception:
                 self.send_response(302)
-                self.send_header("Set-Cookie", "spm_session=deleted; Max-Age=0; HttpOnly; Path=/; SameSite=Strict; Secure")
+                self.send_header("Set-Cookie", f"spm_session=deleted; Max-Age=0; {self._session_cookie_attrs()}")
                 self.send_header("Location", "/login")
                 self.end_headers()
                 return
@@ -8904,7 +8918,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             token = secrets.token_hex(32)
             self.server.sessions[token] = {"master": password, "created": time.time(), "last_seen": time.time()}
             self.send_response(302)
-            self.send_header("Set-Cookie", f"spm_session={token}; HttpOnly; Path=/; SameSite=Strict; Secure")
+            self.send_header("Set-Cookie", f"spm_session={token}; {self._session_cookie_attrs()}")
             self.send_header("Location", "/")
             self.end_headers()
             return
