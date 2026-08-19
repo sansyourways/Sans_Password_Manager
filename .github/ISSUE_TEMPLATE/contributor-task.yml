@@ -1,0 +1,38 @@
+name: Contributor task proposal
+description: Propose a small, testable task suitable for a first contribution.
+title: "[Contributor task]: "
+labels: [good first issue, help wanted]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Intended outcome
+      description: Describe one observable improvement and who benefits.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Suggested scope
+      description: Identify likely files and explicitly state what should remain unchanged.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance checks
+      description: List objective tests or documentation checks that demonstrate completion.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and data handling
+      description: Explain any vault, secret, network, recovery, or compatibility implications.
+  - type: checkboxes
+    id: safe
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: This proposal contains no real credentials, vault data, keys, tokens, or undisclosed vulnerability details.
+          required: true

@@ -33,6 +33,12 @@ source <(sed '$d' "$ROOT_DIR/spm.sh")
 export MASTER_PW="$AUDIT_PASSWORD"
 export SPM_LANG="en"
 
+TERMUX_VERSION="regression" detect_env
+[ "$ENV_FLAVOR" = "termux" ]
+[ "$PKG_TYPE" = "pkg" ]
+unset TERMUX_VERSION
+detect_env
+
 numeric="$(generate_password 24 numeric 1 1 1 1)"
 printf '%s' "$numeric" | grep -Eq '^[0-9]{24}$'
 secure="$(generate_password 24 secure 1 1 1 1)"

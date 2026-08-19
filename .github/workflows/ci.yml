@@ -15,20 +15,29 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    name: verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install system test dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y curl gnupg openssl shellcheck unzip zip
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y curl gnupg openssl shellcheck unzip zip
+          else
+            brew install coreutils gnupg shellcheck
+          fi
 
       - name: Static checks
         run: |
-          bash -n spm.sh install.sh tests/regression.sh
-          shellcheck -x -S warning spm.sh install.sh tests/regression.sh
+          bash -n spm.sh install.sh tests/regression.sh tests/dco-check.sh
+          shellcheck -x -S warning spm.sh install.sh tests/regression.sh tests/dco-check.sh
 
       - name: Disposable-vault regression suite
         run: |
@@ -41,3 +50,28 @@ jobs:
           test -n "$version"
           grep -q "Current release: \*\*$version\*\*" README.md
           grep -q '"version": "'"$version"'"' browser-extension/manifest.json
+
+  termux:
+    name: termux
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run compatibility checks in the official Termux container
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/workspace:ro" \
+            termux/termux-docker@sha256:823c1f4c0b844f6f9f21e634d4e40b6fcc10dcf7309745c4d7de3add9b1a3fd2 \
+            bash -lc '
+              set -euo pipefail
+              cp -R /workspace "$HOME/spm"
+              cd "$HOME/spm"
+              bash -n spm.sh install.sh tests/regression.sh tests/dco-check.sh
+              bash spm.sh help > "$PREFIX/tmp/spm-help.txt"
+              grep -q "Sans Password Manager" "$PREFIX/tmp/spm-help.txt"
+              version="$(sed -n "s/^VERSION=\"\\([^\"]*\\)\"/\\1/p" spm.sh)"
+              bash install.sh --version "$version" \
+                --prefix "$HOME/.local" --dry-run > "$PREFIX/tmp/spm-install.txt"
+              grep -q "Dry run complete" "$PREFIX/tmp/spm-install.txt"
+            '

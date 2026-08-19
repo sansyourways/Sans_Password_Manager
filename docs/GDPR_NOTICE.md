@@ -1,157 +1,67 @@
-# GDPR Privacy Notice  
-For Sans Password Manager (SPM)  
-Effective Date: January 2025  
+# GDPR Privacy Notice for Sans Password Manager
+
+Effective date: August 2026
+
 Copyright 2025–2026 Sansyourways and contributors.
 
-Sans Password Manager (“SPM”, “the Software”) is designed from the ground up to protect user privacy.  
-SPM operates **fully offline**, performs **all encryption locally**, and does **not collect or process any personal data** under the meaning of the GDPR.
+This notice explains the data roles associated with official SPM releases. It
+is informational and does not determine the legal obligations of every user,
+organization, fork, or deployment.
 
-This GDPR Notice explains how SPM aligns with GDPR’s principles of privacy, data minimization, and user control.
+## Application data
 
----
+SPM processes vault records locally on behalf of the person operating it. The
+SPM project does not provide a hosted vault service and does not receive vault
+contents, master passwords, recovery keys, device identifiers, telemetry, or
+analytics from official releases.
 
-## 1. Data Controller
-For the purposes of GDPR, **no external Data Controller or Processor exists**, because:
+Depending on how SPM is used, the person or organization controlling the vault
+may be a controller for personal data stored in it. That operator is responsible
+for establishing an appropriate legal basis, retention policy, security
+controls, and response process for affected individuals. Running open-source
+software does not transfer those responsibilities to project maintainers.
 
-- SPM does not send data to the developer.  
-- SPM does not transmit any information over the internet.  
-- All data stays exclusively on the user’s device.
+## Data location and transfers
 
-**You, the user, are the sole Data Controller** of all data stored inside SPM.
+Vaults, backups, history, attachments, recovery material, and filesystem sync
+targets remain in locations selected by the user. SPM maintainers do not choose
+those locations or receive that data.
 
-The developer (Sansyourways) does not access, receive, process, or store user data.
+The following user-initiated activity can involve third-party infrastructure:
 
----
+- update and installation commands retrieve metadata or files from GitHub;
+- GitHub issues, pull requests, releases, and security advisories are processed
+  by GitHub;
+- support or security emails are processed by the sender's and recipient's mail
+  providers;
+- non-loopback Web Mode and externally synchronized directories use networks or
+  providers configured by the operator.
 
-## 2. Personal Data Processing
-SPM **does not process any personal data** within the meaning of Articles 4(1) and 4(2) of GDPR.
+Users and organizations must assess any international-transfer requirements
+created by their chosen GitHub, email, hosting, proxy, storage, or sync setup.
 
-SPM does not:
+## Project communications
 
-- Collect personal information  
-- Store personal information  
-- Upload or transmit data  
-- Process data on remote servers  
-- Track usage or analytics  
-- Use cookies or similar technologies  
-- Log IP addresses or identifiers  
-- Use third-party SDKs or trackers  
+When someone deliberately contacts the project, maintainers process the
+submitted name, address, message, and related technical information to respond,
+maintain security, and operate the open-source project. Do not include vaults,
+passwords, keys, tokens, or unrelated personal data.
 
-All information remains strictly **offline and local**.
+Requests concerning information submitted directly to project-maintained
+channels may be sent to support@sansyourways.xyz. Requests about data held by
+GitHub, an email provider, a fork, or an independent deployment should be sent
+to that operator.
 
----
+## Security and retention
 
-## 3. Data Stored Locally by the User
-Users may voluntarily save data inside SPM, such as:
+Official SPM releases use local encryption and do not give maintainers a means
+to recover vault data. Public GitHub contribution records and DCO sign-offs are
+retained as part of the project's permanent licensing and authorship history.
+Security reports are retained as needed to investigate, remediate, and document
+the vulnerability.
 
-- Password entries  
-- Secure notes  
-- Vault files  
-- Backup files (portable bundles / ZIPs)  
+## Changes
 
-This data is:
-
-- Created by the user  
-- Encrypted locally using GnuPG or AES  
-- Stored only on the user’s device  
-- Never transmitted or shared with the developer  
-
-Because no data is collected or processed by Sansyourways, GDPR obligations of data storage, retention, or deletion do not apply to the developer.
-
----
-
-## 4. Legal Basis for Processing
-SPM performs **no processing of personal data**, therefore:
-
-- Article 6 legal bases do not apply  
-- No consent is required  
-- No legitimate interest, contract, or compliance basis is used  
-
-All functionality is executed locally without external involvement.
-
----
-
-## 5. Data Transfers
-SPM performs **zero data transfers** to:
-
-- EU  
-- EEA  
-- Third countries  
-- Cloud services  
-- Developers  
-- External servers  
-
-Because SPM does not transmit data at all, Articles 44–50 regarding international data transfers do not apply.
-
----
-
-## 6. Third-Party Access
-SPM has **no third-party integration**.  
-No data is shared with:
-
-- Advertisers  
-- Analytics services  
-- Cloud providers  
-- SDKs  
-- API endpoints  
-- External data processors  
-
-There are no accessible backdoors, telemetry endpoints, or cloud sync features.
-
----
-
-## 7. User Rights Under GDPR
-Since the developer does not collect any personal data, the following rights:
-
-- Right of access  
-- Right to rectification  
-- Right to erasure  
-- Right to data portability  
-- Right to restrict processing  
-- Right to object  
-- Right not to be subject to automated decision-making  
-
-**do not apply to the developer**, because no data exists on our side.
-
-All rights remain under the user's own control through their device and self-managed data.
-
----
-
-## 8. Security
-SPM uses local encryption including:
-
-- GnuPG (OpenPGP)  
-- AES variants  
-- Key derivation (PBKDF2)  
-
-However, the **user is fully responsible** for:
-
-- Master password  
-- Recovery key  
-- Vault backups  
-- Storage location  
-- Device security  
-
-The developer cannot recover lost passwords or vaults.
-
----
-
-## 9. Children’s Privacy
-SPM does not collect data from any user, including children.  
-The application contains no online features.
-
----
-
-## 10. Contact Information
-For privacy, legal, or licensing inquiries:
-
-**Email:** support@sansyourways.xyz  
-**Security:** security@sansyourways.com
-
----
-
-## 11. Updates to This Notice
-We may update this GDPR Notice if required by law or if functionality changes.  
-SPM will remain offline and privacy-focused.
-
-Continued use of SPM signifies acceptance of the updated Notice.
+This notice will be updated when relevant application or project communication
+practices change. Security reports should be sent to
+security@sansyourways.xyz.

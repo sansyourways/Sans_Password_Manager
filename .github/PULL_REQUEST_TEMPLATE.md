@@ -8,8 +8,8 @@ Describe the focused implementation changes.
 
 ## Verification
 
-- [ ] `bash -n spm.sh install.sh tests/regression.sh`
-- [ ] `shellcheck -x -S warning spm.sh install.sh tests/regression.sh`
+- [ ] `bash -n spm.sh install.sh tests/regression.sh tests/dco-check.sh`
+- [ ] `shellcheck -x -S warning spm.sh install.sh tests/regression.sh tests/dco-check.sh`
 - [ ] `./tests/regression.sh`
 - [ ] User-visible documentation is updated when behavior changes
 - [ ] Release ZIP/checksum requirements are satisfied when applicable

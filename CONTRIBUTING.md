@@ -28,8 +28,8 @@ credential data.
 ## Required verification
 
 ```bash
-bash -n spm.sh install.sh tests/regression.sh
-shellcheck -x -S warning spm.sh install.sh tests/regression.sh
+bash -n spm.sh install.sh tests/regression.sh tests/dco-check.sh
+shellcheck -x -S warning spm.sh install.sh tests/regression.sh tests/dco-check.sh
 ./tests/regression.sh
 ```
 
@@ -49,6 +49,9 @@ The resulting `Signed-off-by:` trailer certifies the statements in `DCO`. It is
 not a copyright assignment. See `docs/CONTRIBUTOR_LICENSE_POLICY.md` for the
 inbound licensing policy and the limited circumstances in which maintainers may
 request a separate contributor agreement.
+
+Pull requests cannot merge until the `signed-off commits` status check confirms
+that every commit contains a DCO trailer.
 
 ## Pull requests
 

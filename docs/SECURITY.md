@@ -1,5 +1,5 @@
 # Security Policy for Sans Password Manager (SPM)
-Version 2.1 — © 2025–2026 Sansyourways
+Version 2.2 — © 2025–2026 Sansyourways
 Last Updated: August 2026
 
 SPM (Sans Password Manager) is a privacy-focused, offline, fully client-side encrypted application.  
@@ -52,13 +52,13 @@ If you discover a potential security issue, follow these rules:
 - Post the issue in GitHub issues.
 - Share vaults, passwords, or private keys.
 - Upload sensitive data for testing.
-- Test official releases with synthetic data and within systems you are
-  authorized to assess.
+- Test systems, accounts, or data you do not own or lack authorization to
+  assess.
 
 ### 📩 **Report via Email (only):**
 **security@sansyourways.xyz**
 
-You will receive acknowledgment within a reasonable timeframe.
+You should receive acknowledgment within **3 business days**.
 
 ---
 
@@ -107,13 +107,23 @@ The following are **out of scope**:
 ---
 
 ## 6. Handling of Reports
-All valid security reports will be:
+The project uses the following best-effort response targets:
 
-- Acknowledged
-- Investigated privately
-- Resolved in a future update where applicable
-- Credited (if you wish)
-- Kept confidential until fixed
+| Stage | Target |
+| --- | --- |
+| Initial acknowledgment | 3 business days |
+| Preliminary severity and scope assessment | 7 business days |
+| Critical-severity remediation target | 30 calendar days |
+| High-severity remediation target | 60 calendar days |
+| Coordinated disclosure | After a fix, or normally within 90 days |
+
+Targets may change with complexity, maintainer availability, or coordination
+needs. The reporter will receive material status updates when a target changes.
+Lower-severity findings are prioritized into a planned release based on impact
+and available maintenance capacity.
+
+Valid reports are investigated privately, credited if requested, and kept
+confidential until a fix or coordinated disclosure when reasonably possible.
 
 Good-faith source review and security research are welcome. Do not access data,
 devices, or services without authorization, and coordinate disclosure of

@@ -7,6 +7,36 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [2.10.4] - 2026-08-19
+
+### Added
+- Enforced Developer Certificate of Origin sign-offs with a dedicated pull
+  request check and a reusable local verifier.
+- Added Linux/macOS CI matrix coverage plus syntax, CLI-help, and installer
+  smoke checks in a pinned official Termux container.
+- Added a public roadmap, contributor-task issue form, and curated onboarding
+  path for `good first issue` work.
+
+### Changed
+- Updated GitHub Actions checkout steps to the Node.js 24-based v6 runtime.
+- Replaced absolute offline/GDPR claims with precise documentation of local
+  processing, user-initiated GitHub traffic, Web Mode exposure, filesystem sync,
+  and project communications.
+- Standardized all active support, security, and partnership contacts on the
+  `sansyourways.xyz` domain.
+- Defined best-effort vulnerability acknowledgment, triage, remediation, and
+  coordinated-disclosure targets.
+
+### Fixed
+- Termux dependency installation now uses `pkg` instead of incorrectly invoking
+  Debian's `apt-get`; PM2 setup uses the same detected environment contract.
+- CLI help is available before dependency installation and policy prompts,
+  allowing users to inspect SPM safely on a fresh platform.
+
+### Security
+- Release checks now include the DCO verifier, and repository rules require its
+  successful pull-request status before contributor changes can merge.
+
 ## [2.10.3] - 2026-08-19
 
 ### Changed

@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.10.3"
+VERSION="2.10.4"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -29,7 +29,7 @@ SPM_LANG="${SPM_LANG:-}"
 
 # Environment detection / package manager
 ENV_FLAVOR=""   # termux / linux / macos / other
-PKG_TYPE=""     # apt / pacman / dnf / apk / brew / none
+PKG_TYPE=""     # pkg / apt / pacman / dnf / apk / brew / none
 
 # ----- Script + vault path detection -----------------------------------------
 
@@ -292,7 +292,7 @@ trap on_terminate TERM HUP
 detect_env() {
 	if [ -n "${TERMUX_VERSION:-}" ] || [ -d "/data/data/com.termux/files/usr" ]; then
 		ENV_FLAVOR="termux"
-		PKG_TYPE="apt"
+		PKG_TYPE="pkg"
 		return
 	fi
 
@@ -348,6 +348,10 @@ install_tool() {
 	set +e
 	for pkg in $candidates; do
 		case "$PKG_TYPE" in
+			pkg)
+				pkg install -y "$pkg" >/dev/null 2>&1
+				rc=$?
+				;;
 			apt)
 				if command -v sudo >/dev/null 2>&1; then
 					sudo apt-get install -y "$pkg" >/dev/null 2>&1
@@ -4706,7 +4710,7 @@ ensure_pm2_installed() {
 	local pm2_ok=1
 
 	# Termux branch (Android)
-	if [ -n "${TERMUX_VERSION-}" ] && command -v pkg >/dev/null 2>&1; then
+	if [ "$ENV_FLAVOR" = "termux" ] && command -v pkg >/dev/null 2>&1; then
 		if [ "${SPM_LANG:-en}" = "id" ]; then
 			echo "→ Terdeteksi Termux. Menginstall nodejs..."
 		else
@@ -10324,6 +10328,14 @@ main() {
 		cmd_bridge_get "$@"
 		return
 	fi
+	# Help must remain available before dependency installation, language, or
+	# policy prompts so users can inspect the CLI on a fresh platform.
+	case "${1:-}" in
+		help|-h|--help)
+			cmd_help
+			return
+			;;
+	esac
 	ensure_requirements
 	choose_language
 	ensure_policy_consent

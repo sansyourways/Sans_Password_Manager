@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **2.10.3**
+Current release: **2.10.4**
 
 ---
 
@@ -43,6 +43,7 @@ Current release: **2.10.3**
 - [Clipboard Auto-Clean](#clipboard-auto-clean)
 - [Portable & Save Bundles](#portable--save-bundles)
 - [Contributing](#contributing)
+- [Roadmap](#roadmap)
 - [Development & Versioning](#development--versioning)
 - [Documentation & Legal](#documentation--legal)
 - [License](#license)
@@ -214,7 +215,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 2.10.3
+bash install.sh --version 2.10.4
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -492,11 +493,23 @@ disposable-vault regression suite covering all supported import/export formats,
 web uploads, backups, synchronization, attachments, passkey metadata, emergency
 kits, and password generation.
 
+CI runs the regression suite on Linux and macOS, plus syntax, CLI-help, and
+installer smoke checks in a pinned official Termux container. Pull requests
+also require a DCO sign-off check.
+
+---
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for current reliability work, safer-integration
+priorities, longer-term ecosystem ideas, and guidance for choosing a first
+issue. Roadmap entries are directions, not promised delivery dates.
+
 ---
 
 ## Development & Versioning
 
-Version: **2.10.3**
+Version: **2.10.4**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 Authenticated web mutations also require an exact same-origin request and are serialized across threads/processes to prevent CSRF and lost vault writes. Decrypted web responses use `Cache-Control: no-store`.
