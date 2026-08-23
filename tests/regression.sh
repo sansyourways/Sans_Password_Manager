@@ -269,6 +269,10 @@ grep -q 'def _write_authorized' "$web_script"
 grep -q 'hmac.compare_digest' "$web_script"
 # Stamped centrally in _send_html so a form added later cannot ship untokenised.
 grep -q '_POST_FORM_RE' "$web_script"
+# "null" is an opaque origin, not a foreign one. iOS home-screen web apps send
+# it for their own same-origin form posts, so treating it as present-and-wrong
+# rejected every write from an installed web app even with a valid token.
+grep -q 'origin.lower() != "null"' "$web_script"
 if grep -q 'if not self._same_origin_post():' "$web_script"; then
 	printf 'authenticated writes still gate on Origin alone\n' >&2
 	exit 1
