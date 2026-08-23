@@ -8,6 +8,14 @@ Keep-a-Changelog style format.
 ## [Unreleased]
 
 ### Added
+- Opt-in automatic update checking. `spm auto-update [status|off|notify|auto]`
+  and an `Auto-update settings` entry in the interactive menu let SPM check
+  GitHub Releases at startup, at most once every 24 hours, and either report a
+  newer release or install it without asking. It is **off by default** and never
+  enabled implicitly: the privacy policy limits network activity to features the
+  user initiates, so enabling it is what makes the check user-initiated. The
+  check only runs on an interactive terminal, times out after a few seconds, and
+  is skipped silently when offline, so it can never delay reaching a vault.
 - `install.sh` now checks whether `PREFIX/bin` is on `PATH` and, when it is not,
   appends it to the shell profile that matches your login shell so `spm` runs
   from any directory. The line is marked and written once, so reinstalling never
@@ -20,6 +28,17 @@ Keep-a-Changelog style format.
   sheet, `Add to Home Screen`, the `Open as Web App` toggle, and the resulting
   Home Screen icon, with notes on the separate cookie jar, the missing address
   bar, and restricting any non-localhost bind.
+
+### Fixed
+- The updater no longer overwrites the installed script in place. Bash reads a
+  script lazily as it runs, so replacing the bytes underneath a live instance
+  could make it execute garbage; automatic updates would have made that the
+  common case. The new build is staged alongside the target and renamed over it,
+  leaving any running process on the old inode.
+- Update checks compare versions by version order rather than string equality,
+  so a release such as 2.10.10 is correctly seen as newer than 2.10.9.
+
+### Changed
 - The iOS walkthrough now requires PM2 background mode at step 1 and explains
   why: the Home Screen icon only opens the server, it does not start one, so the
   foreground option dies with the terminal and leaves the icon opening a dead

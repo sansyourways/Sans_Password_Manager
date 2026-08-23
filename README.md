@@ -33,6 +33,7 @@ Current release: **2.10.6**
 - [Requirements](#requirements)
 - [Installation](#installation)
   - [Running `spm` from anywhere](#running-spm-from-anywhere)
+  - [Staying up to date](#staying-up-to-date)
 - [Usage](#usage)
   - [Interactive Menu](#interactive-menu)
   - [Web Mode](#web-mode)
@@ -264,6 +265,39 @@ Confirm it worked:
 command -v spm
 spm help
 ```
+
+### Staying up to date
+
+`spm update` checks GitHub Releases and installs the latest version on demand.
+The download is SHA-256 verified and syntax-checked before it replaces the
+installed script.
+
+SPM can also check on its own at startup. This is **off by default** and never
+enabled implicitly, because the privacy policy limits network activity to things
+the user chooses to switch on:
+
+```bash
+spm auto-update status    # show the current mode
+spm auto-update notify    # check daily, ask before installing
+spm auto-update auto      # check daily, install without asking
+spm auto-update off       # never check on its own
+```
+
+The same three modes are available from the interactive menu under
+**Auto-update settings**, which also shows when the last check ran and offers a
+one-off *Check now*.
+
+| Mode | Behaviour |
+|---|---|
+| `off` *(default)* | SPM never contacts GitHub unless you run `spm update` |
+| `notify` | Checks at startup, at most once a day, and asks before installing |
+| `auto` | Checks at startup, at most once a day, and installs without asking |
+
+The check is deliberately unobtrusive: it runs only on an interactive terminal,
+never during scripted use, times out after a few seconds, and is silently
+skipped when you are offline or GitHub is unreachable — being unable to reach
+the network never delays access to your vault. Set `SPM_UPDATE_TIMEOUT` to
+change the timeout.
 
 ### From source
 
