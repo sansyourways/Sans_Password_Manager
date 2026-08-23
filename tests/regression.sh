@@ -190,6 +190,24 @@ if printf '%s' "$vhost_tls" | grep -q 'spm-cloudflare-realip'; then
 	exit 1
 fi
 
+# dig|grep exits 1 when a name has no A record. Under pipefail that failed the
+# assignment, and every real call site happens to run with errexit suppressed,
+# so the bug hid rather than crashed. Keep the guard.
+grep -qE 'dig \+short A .* \|\| true' "$ROOT_DIR/spm.sh"
+# A name that does not resolve cannot be certified, and failed validations
+# count against the rate limit, so the flow must stop rather than call certbot.
+grep -q 'That name cannot be certified until it resolves' "$ROOT_DIR/spm.sh"
+# Cloudflare's "Always Use HTTPS" redirects the HTTP-01 challenge to a
+# certificate that does not exist yet, and its bot challenge answers the
+# validator with an interstitial. Both must be named, not left to certbot's
+# "unauthorized".
+grep -q 'domain_preflight_challenge' "$ROOT_DIR/spm.sh"
+grep -q 'Always Use HTTPS' "$ROOT_DIR/spm.sh"
+grep -q '/.well-known/acme-challenge/\*' "$ROOT_DIR/spm.sh"
+# "systemctl reload" returns before the new workers serve, so a single probe
+# can be answered by the old configuration and report a false failure.
+grep -q 'for attempt in 1 2 3 4 5; do' "$ROOT_DIR/spm.sh"
+
 # certbot picks the lineage directory from the name set unless it is pinned, so
 # an unpinned request can land in <domain>-0001 while the vhost still points at
 # <domain> and nginx then fails to start.
