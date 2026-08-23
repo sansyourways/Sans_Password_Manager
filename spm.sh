@@ -5943,6 +5943,7 @@ import urllib.parse
 import subprocess
 import os
 import secrets
+import hmac
 import html
 import sys
 import time
@@ -9217,10 +9218,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         )
         super().end_headers()
 
+    _POST_FORM_RE = re.compile(r'(<form\b[^>]*\bmethod="post"[^>]*>)', re.IGNORECASE)
+
     def _send_html(self, code, body):
         lang = html.escape(self._get_lang())
         if "__LANG__" in body:
             body = body.replace("__LANG__", lang)
+        # Stamp every POST form centrally rather than in each builder, so a
+        # form added later cannot silently ship without a token.
+        csrf = self._session_csrf()
+        if csrf:
+            field = '<input type="hidden" name="csrf" value="%s">' % csrf
+            body = self._POST_FORM_RE.sub(lambda m: m.group(1) + field, body)
         self.send_response(code)
         self._add_cors()
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -9320,6 +9329,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         session["last_seen"] = now
         return session.get("master", "")
 
+    def _session_csrf(self):
+        token = self._parse_cookies().get("spm_session")
+        if not token:
+            return ""
+        session = self.server.sessions.get(token) or {}
+        return session.get("csrf", "")
+
     def _read_body(self, limit=MAX_POST_BYTES):
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -9342,6 +9358,40 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_html(200, page)
             return None
         return master
+
+    def _body_csrf(self, raw_body_bytes, data):
+        token = (data.get("csrf") or [""])[0].strip()
+        if token:
+            return token
+        # The import form is multipart, so its fields are not in parse_qs.
+        ctype = self.headers.get("Content-Type", "") or ""
+        if "multipart/form-data" in ctype.lower():
+            try:
+                fields = parse_multipart(raw_body_bytes, ctype)
+            except Exception:
+                return ""
+            raw = fields.get("csrf")
+            if isinstance(raw, bytes):
+                return raw.decode("utf-8", errors="ignore").strip()
+        return ""
+
+    def _write_authorized(self, raw_body_bytes, data):
+        """Authorise an authenticated write.
+
+        Origin is checked when the browser sends it. Safari omits Origin on
+        same-origin form submissions, which made every write fail with a 403,
+        and Referer cannot cover the gap because this server sends
+        Referrer-Policy: no-referrer. So a per-session CSRF token in the form
+        is the primary defence and the Origin check is the second layer.
+        """
+        origin = (self.headers.get("Origin", "") or "").strip()
+        if origin:
+            # Present but wrong is a genuine cross-origin attempt: refuse it
+            # regardless of what token the body carries.
+            return self._same_origin_post()
+        expected = self._session_csrf()
+        supplied = self._body_csrf(raw_body_bytes, data)
+        return bool(expected) and hmac.compare_digest(expected, supplied)
 
     def _same_origin_post(self):
         """Require authenticated browser writes to come from this exact origin."""
@@ -9948,7 +9998,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             self._clear_login_failures()
             token = secrets.token_hex(32)
-            self.server.sessions[token] = {"master": password, "created": time.time(), "last_seen": time.time()}
+            self.server.sessions[token] = {
+                "master": password,
+                "csrf": secrets.token_hex(32),
+                "created": time.time(),
+                "last_seen": time.time(),
+            }
             self.send_response(302)
             self.send_header("Set-Cookie", f"spm_session={token}; {self._session_cookie_attrs()}")
             self.send_header("Location", "/")
@@ -9961,15 +10016,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_html(200, page)
             return
 
-        if not self._same_origin_post():
-            self.send_error(403, "Cross-origin write rejected")
-            return
-
         raw_body_bytes = self._read_body()
         if raw_body_bytes is None:
             return
         raw_body = raw_body_bytes.decode("utf-8", errors="ignore")
         data = urllib.parse.parse_qs(raw_body)
+
+        if not self._write_authorized(raw_body_bytes, data):
+            self.send_error(403, "Cross-origin write rejected")
+            return
 
         if path == "/add":
             name = (data.get("name") or [""])[0].strip()

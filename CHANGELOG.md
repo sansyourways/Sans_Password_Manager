@@ -7,6 +7,20 @@ Keep-a-Changelog style format.
 
 ## [2.10.9] - 2026-08-23
 
+### Fixed
+- Adding or editing anything in Web Mode from an iPhone failed with
+  `403 Cross-origin write rejected`. Authenticated writes were authorised by
+  comparing the `Origin` header against `Host`, but Safari omits `Origin` on
+  same-origin form submissions, so the check saw no origin and refused. Logging
+  in still worked, because that path runs before the check -- which is why the
+  vault looked fine until the first write.
+- Writes now carry a per-session CSRF token, generated at login and stamped
+  into every POST form centrally in `_send_html`, so a form added later cannot
+  ship without one. `Origin` is still enforced when the browser sends it: a
+  present-but-foreign origin is refused whatever token the body carries. The
+  `Referer` header could not cover the gap, because Web Mode sends
+  `Referrer-Policy: no-referrer`.
+
 ### Added
 - The domain flow can prove ownership with a DNS TXT record through the
   Cloudflare API instead of a file served over HTTP. Behind a CDN the HTTP
