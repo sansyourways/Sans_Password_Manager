@@ -143,8 +143,18 @@ Users are fully responsible for:
 - Managing encryption keys  
 - Protecting their device from malware  
 - Securing their filesystem permissions  
+- Anything reachable from the internet, including a Web Mode instance published
+  on a domain  
 
 Because SPM does not collect data or hold keys, **the developer cannot restore lost vaults**.
+
+Publishing Web Mode on a domain widens the trust boundary considerably. The
+vault stays bound to `127.0.0.1` behind nginx, so nginx and TLS are the only
+things standing between the internet and a master-password prompt. Prefer a
+DNS-only record: a CDN or reverse proxy that terminates TLS at its own edge can
+read every request in plaintext, the login POST included. Certificates are
+logged to public Certificate Transparency, so the hostname is discoverable —
+obscurity is not part of the protection.
 
 ---
 

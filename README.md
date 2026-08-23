@@ -37,6 +37,7 @@ Current release: **2.10.6**
 - [Usage](#usage)
   - [Interactive Menu](#interactive-menu)
   - [Web Mode](#web-mode)
+  - [Publish Web Mode on a domain with HTTPS](#publish-web-mode-on-a-domain-with-https)
   - [Install Web Mode as an iOS app](#install-web-mode-as-an-ios-app)
   - [CLI Commands](#cli-commands)
   - [Secure Notes](#secure-notes)
@@ -362,6 +363,79 @@ Includes:
 Console deliberately favors dense, auditable rows over spacious cards. Very long
 vault labels still wrap and can make mobile records tall; this is preferable to
 shrinking text or forcing page-level horizontal scrolling.
+
+---
+
+### Publish Web Mode on a domain with HTTPS
+
+Choosing bind option **4) Domain/subdomain with HTTPS** puts nginx in front of
+the vault: nginx terminates TLS on the public interface, and the vault itself is
+bound to `127.0.0.1` where nothing on the network can reach it directly. SPM
+writes the vhost, obtains a Lets Encrypt certificate, and reloads nginx for you.
+
+```
+./spm.sh web
+  → 2) Run in background using PM2
+  → 4) Domain/subdomain with HTTPS (nginx + Lets Encrypt)
+```
+
+You are asked for:
+
+| Prompt | Notes |
+| --- | --- |
+| Domain or subdomain | e.g. `vault.example.com`. A scheme or trailing path is stripped. |
+| Also cover `www.`? | Both names go on one certificate. |
+| Proxied through Cloudflare? | Answer honestly — it changes the generated config, not just a message. |
+| Contact email | Passed to Lets Encrypt for expiry notices. Blank registers without one. |
+| Port | The loopback port nginx proxies to. |
+
+**Before you start**, the DNS record for every name must already resolve to this
+host (or to Cloudflare, if proxied), and ports 80 and 443 must be reachable from
+the internet. Port 80 is required even though the site ends up on 443: it is how
+the ACME HTTP-01 challenge is answered. SPM prints what each name resolves to
+and compares it against this host's address before it asks Lets Encrypt for
+anything.
+
+Setup runs in three phases, because nginx must already answer on port 80 to
+serve the challenge, while a TLS server block naming a certificate that does not
+exist yet fails `nginx -t`:
+
+1. an HTTP-only vhost serving `/.well-known/acme-challenge/`
+2. `certbot certonly --webroot` for every name
+3. the real vhost — HTTP redirects to HTTPS, HTTPS reverse-proxies to the vault
+
+Every install is validated with `nginx -t` before the reload, and a
+configuration that fails validation is rolled back to whatever was there before,
+so a bad generate can never take down other sites on the same host.
+
+Set `SPM_ACME_DRY_RUN=1` to exercise the whole challenge path against Lets
+Encrypt's staging behaviour without spending a certificate against the rate
+limit. A dry run stops before enabling TLS and restores the previous vhost.
+
+#### If the domain is behind Cloudflare
+
+Answering yes has consequences worth stating plainly, and SPM asks you to
+confirm them:
+
+- **Cloudflare can read every request in plaintext.** It terminates TLS at its
+  edge and re-encrypts to your host, so the login POST carrying your master
+  password and every secret the vault renders pass through it decrypted.
+  End-to-end encryption between your browser and your host requires DNS-only
+  mode (grey cloud).
+- SPM installs a real-IP snippet so nginx logs and rate limits see the visitor's
+  address from `CF-Connecting-IP` rather than a Cloudflare edge address.
+- Set your zone's SSL/TLS mode to **Full (strict)** afterwards so the edge
+  verifies the certificate SPM just issued instead of accepting any origin.
+- **Universal SSL does not cover `www.vault.example.com`.** Cloudflare's free
+  certificate covers the apex and *one* level of subdomain, so a `www.` alias on
+  an already-nested subdomain has no certificate at the edge and browsers fail
+  the handshake. SPM detects this and offers to drop the alias. Advanced
+  Certificate Manager or a custom certificate lifts the limit.
+- If Bot Fight Mode or a managed challenge is enabled on the zone, the edge
+  answers with a challenge page before the vault is reached. Exempt the hostname
+  if logins stall.
+
+The choice is saved, so the next run offers the same domain again.
 
 ---
 

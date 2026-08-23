@@ -8,6 +8,22 @@ Keep-a-Changelog style format.
 ## [Unreleased]
 
 ### Added
+- Web Mode can publish itself on a domain or subdomain over HTTPS. A fourth
+  bind option writes an nginx vhost, obtains a Let's Encrypt certificate with
+  `certbot --webroot`, and reloads nginx, leaving the vault bound to
+  `127.0.0.1` behind the proxy rather than exposed on the network. Setup runs
+  in three phases because nginx must answer on port 80 for the ACME challenge
+  before a TLS block naming the certificate can pass `nginx -t`; every install
+  is validated and rolled back on failure, so a bad generate cannot take down
+  other sites on the host. `SPM_ACME_DRY_RUN=1` exercises the challenge path
+  without spending a certificate and restores the previous vhost afterwards.
+- The domain flow asks whether the name is proxied through Cloudflare. Saying
+  yes requires confirming that Cloudflare can read every request in plaintext,
+  including the login POST carrying the master password, and installs a
+  `set_real_ip_from` snippet so nginx sees the visitor address from
+  `CF-Connecting-IP`. It also detects that Cloudflare's Universal SSL does not
+  cover a `www.` alias one level below an already-nested subdomain and offers
+  to drop the alias rather than publish a name the edge cannot serve.
 - Opt-in automatic update checking. `spm auto-update [status|off|notify|auto]`
   and an `Auto-update settings` entry in the interactive menu let SPM check
   GitHub Releases at startup, at most once every 24 hours, and either report a

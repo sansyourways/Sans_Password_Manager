@@ -36,6 +36,15 @@ occurs only for features or deployment choices initiated by the user:
 - Web Mode communicates between the user's browser and the locally operated SPM
   web process. It defaults to loopback, but a user may explicitly bind it to a
   non-loopback address or place it behind a reverse proxy.
+- Choosing the domain/HTTPS bind in Web Mode runs `certbot` against Let's
+  Encrypt on the user's behalf. The domain names being certified, this host's
+  IP address, and the contact email if one is supplied are sent to Let's
+  Encrypt, and the issued certificate is published in public Certificate
+  Transparency logs, where the hostname becomes permanently searchable by
+  anyone. If the domain is proxied through Cloudflare, Cloudflare terminates
+  TLS at its edge and can read every request in plaintext, including the login
+  POST carrying the master password. Both are opt-in deployment choices, and
+  the Cloudflare case requires an explicit typed confirmation.
 - Filesystem synchronization reads and writes the directory selected by the
   user. If that directory is provided by third-party synchronization software,
   that provider's privacy terms apply independently.
