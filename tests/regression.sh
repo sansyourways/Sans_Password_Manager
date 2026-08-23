@@ -208,13 +208,29 @@ grep -q '/.well-known/acme-challenge/\*' "$ROOT_DIR/spm.sh"
 # can be answered by the old configuration and report a false failure.
 grep -q 'for attempt in 1 2 3 4 5; do' "$ROOT_DIR/spm.sh"
 
+# DNS-01. Behind a CDN the HTTP challenge has to survive the edge's redirect
+# and bot rules; a TXT record bypasses all of it, so the generator must be able
+# to ask certbot for DNS validation instead.
+grep -q 'domain_dns01_available' "$ROOT_DIR/spm.sh"
+grep -q -- '--dns-cloudflare-credentials' "$ROOT_DIR/spm.sh"
+# The token must never reach the terminal, the shell history or the process
+# list, so it is read with -s and written straight to a 0600 file.
+grep -q 'read -rs token' "$ROOT_DIR/spm.sh"
+grep -qF 'chmod 0600 "$SPM_CF_CREDENTIALS"' "$ROOT_DIR/spm.sh"
+# DNS validation needs no reachable port 80, so it must not install the
+# phase-one HTTP vhost -- that is what makes it safe against a live domain.
+grep -q 'Phase 1/2: proving ownership with a DNS TXT record' "$ROOT_DIR/spm.sh"
+grep -q 'Phase 2/2: enabling TLS and the reverse proxy' "$ROOT_DIR/spm.sh"
+# A name with no A record can still be certified over DNS-01.
+grep -q 'DNS validation does not need an A record' "$ROOT_DIR/spm.sh"
+
 # certbot picks the lineage directory from the name set unless it is pinned, so
 # an unpinned request can land in <domain>-0001 while the vhost still points at
 # <domain> and nginx then fails to start.
 grep -q -- '--cert-name "\${names%% \*}"' "$ROOT_DIR/spm.sh"
 # A dry run must stop before the TLS rewrite: no certificate exists after one,
 # and phase three would fail validation.
-grep -q 'Dry run complete: the challenge path works' "$ROOT_DIR/spm.sh"
+grep -q 'Dry run complete: the %s challenge works' "$ROOT_DIR/spm.sh"
 # /etc/letsencrypt/live is mode 0700, so an unprivileged -f test reports every
 # certificate as missing.
 grep -q 'sudo test -f "/etc/letsencrypt/live/\$domain/fullchain.pem"' "$ROOT_DIR/spm.sh"

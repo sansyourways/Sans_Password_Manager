@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.10.8"
+VERSION="2.10.9"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -4920,6 +4920,7 @@ ensure_pm2_installed() {
 
 SPM_WEB_DOMAIN_FILE="$SPM_CONFIG_DIR/web-domain.conf"
 SPM_ACME_WEBROOT="${SPM_ACME_WEBROOT:-/var/www/html}"
+SPM_CF_CREDENTIALS="${SPM_CF_CREDENTIALS:-$SPM_CONFIG_DIR/cloudflare.ini}"
 
 nginx_bin() {
 	if command -v nginx >/dev/null 2>&1; then command -v nginx; return 0; fi
@@ -5213,14 +5214,82 @@ domain_reload_nginx() {
 	fi
 }
 
+# DNS-01 proves ownership with a TXT record instead of a file fetched over
+# HTTP. That matters behind a CDN: "Always Use HTTPS", bot protection and WAF
+# rules all sit on the HTTP path and none of them can interfere with a DNS
+# lookup. It is also the only method that works when port 80 is unreachable.
+domain_dns01_available() {
+	certbot plugins 2>/dev/null | grep -q 'dns-cloudflare'
+}
+
+domain_dns01_install_plugin() {
+	local answer
+	printf 'The certbot Cloudflare DNS plugin is not installed.\n'
+	if [ "$PKG_TYPE" = "unknown" ]; then
+		printf 'Install python3-certbot-dns-cloudflare manually, then run this again.\n'
+		return 1
+	fi
+	printf 'Install it now with %s? (yes/NO): ' "$PKG_TYPE"
+	read -r answer || answer="no"
+	case "$answer" in yes|y|Y|YES) ;; *) printf 'Cancelled.\n'; return 1 ;; esac
+	case "$PKG_TYPE" in
+		apt) sudo apt-get update && sudo apt-get install -y python3-certbot-dns-cloudflare ;;
+		dnf) sudo dnf install -y python3-certbot-dns-cloudflare ;;
+		yum) sudo yum install -y python3-certbot-dns-cloudflare ;;
+		pacman) sudo pacman -S --noconfirm certbot-dns-cloudflare ;;
+		apk) sudo apk add --no-cache py3-certbot-dns-cloudflare ;;
+		brew) brew install certbot-dns-cloudflare ;;
+		*) printf 'No package known for %s; install it manually.\n' "$PKG_TYPE"; return 1 ;;
+	esac || { printf 'Installation failed.\n'; return 1; }
+	domain_dns01_available
+}
+
+# The token is written straight to a 0600 file and never echoed, so it stays
+# out of the terminal, out of shell history and out of the process list.
+domain_dns01_credentials() {
+	local token confirm tmp
+	if [ -f "$SPM_CF_CREDENTIALS" ]; then
+		printf 'Using the saved Cloudflare API token at %s\n' "$SPM_CF_CREDENTIALS"
+		printf 'Replace it? (yes/NO): '
+		read -r confirm || confirm="no"
+		case "$confirm" in yes|y|Y|YES) ;; *) return 0 ;; esac
+	fi
+	printf '\n'
+	printf 'A Cloudflare API token is needed to write the validation TXT record.\n'
+	printf 'Create one at Cloudflare > My Profile > API Tokens with exactly:\n'
+	printf '  Zone > Zone > Read      and      Zone > DNS > Edit\n'
+	printf 'scoped to this zone. Nothing broader is required, and a broader token\n'
+	printf 'would let anything holding this file repoint your whole domain.\n\n'
+	printf 'Paste the token (input stays hidden): '
+	read -rs token || token=""
+	printf '\n'
+	[ -n "$token" ] || { printf 'Nothing entered.\n'; return 1; }
+
+	mkdir -p "$SPM_CONFIG_DIR"
+	tmp="$(mktemp "$SPM_CONFIG_DIR/.cf.XXXXXX")" || return 1
+	chmod 0600 "$tmp"
+	printf 'dns_cloudflare_api_token = %s\n' "$token" > "$tmp"
+	token=""
+	mv -f "$tmp" "$SPM_CF_CREDENTIALS"
+	chmod 0600 "$SPM_CF_CREDENTIALS"
+	printf 'Saved to %s (0600). Renewals reuse it, so keep it.\n' "$SPM_CF_CREDENTIALS"
+}
+
 domain_issue_certificate() {
-	local names="$1" email="$2" name args=()
-	sudo mkdir -p "$SPM_ACME_WEBROOT"
+	local names="$1" email="$2" method="${3:-http}" name args=()
 	# --cert-name pins the lineage to the primary name. Without it a changed
 	# name set makes certbot invent "<domain>-0001", and the vhost's
 	# hardcoded /etc/letsencrypt/live/<domain>/ path would then be stale.
-	args=(certonly --webroot -w "$SPM_ACME_WEBROOT" --cert-name "${names%% *}"
+	args=(certonly --cert-name "${names%% *}"
 		--non-interactive --agree-tos --keep-until-expiring)
+	if [ "$method" = "dns-cloudflare" ]; then
+		args+=(--dns-cloudflare
+			--dns-cloudflare-credentials "$SPM_CF_CREDENTIALS"
+			--dns-cloudflare-propagation-seconds "${SPM_ACME_DNS_WAIT:-30}")
+	else
+		sudo mkdir -p "$SPM_ACME_WEBROOT"
+		args+=(--webroot -w "$SPM_ACME_WEBROOT")
+	fi
 	for name in $names; do args+=(-d "$name"); done
 	# Let's Encrypt rate-limits duplicate certificates; a dry run exercises the
 	# whole challenge path without spending one.
@@ -5236,7 +5305,7 @@ domain_issue_certificate() {
 # Returns 0 with SPM_DOMAIN_READY set when the domain is serving TLS and the
 # caller should bind the vault to loopback behind it.
 domain_setup_flow() {
-	local port="$1" domain names proxied answer email body prior dns_ok
+	local port="$1" domain names proxied answer email body prior dns_ok method
 	SPM_DOMAIN_READY=""
 
 	domain="$(domain_get DOMAIN "")"
@@ -5304,11 +5373,47 @@ domain_setup_flow() {
 	fi
 
 	domain_require_tools || return 1
+
+	# Behind a proxy the HTTP challenge has to survive the CDN's redirect and
+	# bot rules; a TXT record does not, so it is the sane default there.
+	method="$(domain_get METHOD http)"
+	printf '\nHow should ownership be proved?\n'
+	printf '  1) HTTP file on port 80 (works for a plain DNS record)\n'
+	printf '  2) DNS TXT record via the Cloudflare API (works behind a proxy)\n'
+	if [ "$proxied" = "1" ]; then
+		printf 'Choice [2]: '
+		read -r answer || answer="2"
+		[ -n "$answer" ] || answer="2"
+	else
+		printf 'Choice [1]: '
+		read -r answer || answer="1"
+		[ -n "$answer" ] || answer="1"
+	fi
+	case "$answer" in
+		2) method="dns-cloudflare" ;;
+		*) method="http" ;;
+	esac
+
+	if [ "$method" = "dns-cloudflare" ]; then
+		if ! domain_dns01_available && ! domain_dns01_install_plugin; then
+			return 1
+		fi
+		domain_dns01_credentials || return 1
+	fi
+
 	printf '\n'
 	dns_ok=1
 	for answer in $names; do
 		domain_dns_report "$answer" "$proxied" || dns_ok=0
 	done
+	if [ "$dns_ok" -eq 0 ] && [ "$method" = "dns-cloudflare" ]; then
+		# DNS-01 certifies a name that does not resolve yet -- only the TXT
+		# record matters. Worth saying, because the A record still has to
+		# exist before anyone can reach the vault.
+		printf '\nDNS validation does not need an A record, so the certificate can be\n'
+		printf 'issued now. Create the record before you try to reach the vault.\n'
+		dns_ok=1
+	fi
 	if [ "$dns_ok" -eq 0 ]; then
 		# ACME validates over the public internet, so a name that does not
 		# resolve cannot be certified. Failed validations count against the
@@ -5333,30 +5438,45 @@ domain_setup_flow() {
 		sudo cp "/etc/nginx/sites-available/$domain" "$prior"
 	fi
 
-	printf '\nPhase 1/3: serving the ACME challenge on port 80...\n'
-	body="$(domain_render_vhost "$names" "$port" "$proxied" http)"
-	domain_install_vhost "$domain" "$body" || { [ -z "$prior" ] || rm -f "$prior"; return 1; }
+	if [ "$method" = "dns-cloudflare" ]; then
+		# No HTTP phase at all: nothing has to be reachable on port 80, so the
+		# existing site (if any) is left untouched until the certificate is in
+		# hand. That is what makes this safe to run against a live domain.
+		printf '\nPhase 1/2: proving ownership with a DNS TXT record...\n'
+		if ! domain_issue_certificate "$names" "$email" "$method"; then
+			printf '\nCertificate request failed. Nothing was changed.\n'
+			printf 'Check that the token has Zone:Read and DNS:Edit on this zone.\n'
+			[ -z "$prior" ] || rm -f "$prior"
+			return 1
+		fi
+	else
+		printf '\nPhase 1/3: serving the ACME challenge on port 80...\n'
+		body="$(domain_render_vhost "$names" "$port" "$proxied" http)"
+		domain_install_vhost "$domain" "$body" || { [ -z "$prior" ] || rm -f "$prior"; return 1; }
 
-	if ! domain_preflight_challenge "$domain" "$proxied"; then
-		printf '\nStopping before the certificate request: a failed validation counts\n'
-		printf 'against the rate limit. The HTTP-only site stays in place, so fix the\n'
-		printf 'above and run this again.\n'
-		[ -z "$prior" ] || rm -f "$prior"
-		return 1
-	fi
+		if ! domain_preflight_challenge "$domain" "$proxied"; then
+			printf '\nStopping before the certificate request: a failed validation counts\n'
+			printf 'against the rate limit. The HTTP-only site stays in place, so fix the\n'
+			printf 'above and run this again.\n'
+			printf 'DNS validation avoids all of this -- choose option 2 next time.\n'
+			[ -z "$prior" ] || rm -f "$prior"
+			return 1
+		fi
 
-	printf 'Phase 2/3: requesting a certificate for %s...\n' "$domain"
-	if ! domain_issue_certificate "$names" "$email"; then
-		printf '\nCertificate request failed. The HTTP-only site is still in place, so\n'
-		printf 'you can fix DNS or firewall reachability and run this again.\n'
-		[ -z "$prior" ] || rm -f "$prior"
-		return 1
+		printf 'Phase 2/3: requesting a certificate for %s...\n' "$domain"
+		if ! domain_issue_certificate "$names" "$email" "$method"; then
+			printf '\nCertificate request failed. The HTTP-only site is still in place, so\n'
+			printf 'you can fix DNS or firewall reachability and run this again.\n'
+			[ -z "$prior" ] || rm -f "$prior"
+			return 1
+		fi
 	fi
 
 	[ "$proxied" = "1" ] && domain_write_cloudflare_realip || true
 
 	if [ "${SPM_ACME_DRY_RUN:-0}" = "1" ]; then
-		printf '\nDry run complete: the challenge path works. No certificate was\n'
+		printf '\nDry run complete: the %s challenge works. No certificate was\n' \
+			"$([ "$method" = "dns-cloudflare" ] && printf 'DNS' || printf 'HTTP')"
 		printf 'issued and TLS was not enabled. Re-run without SPM_ACME_DRY_RUN\n'
 		printf 'to finish.\n'
 		if [ -n "$prior" ]; then
@@ -5371,11 +5491,15 @@ domain_setup_flow() {
 	# fails for an unprivileged caller even when the certificate is there.
 	if ! sudo test -f "/etc/letsencrypt/live/$domain/fullchain.pem"; then
 		printf '\nNo certificate found at /etc/letsencrypt/live/%s/fullchain.pem.\n' "$domain"
-		printf 'The HTTP-only site is still in place; TLS was not enabled.\n'
+		printf 'TLS was not enabled.\n'
 		return 1
 	fi
 
-	printf 'Phase 3/3: enabling TLS and the reverse proxy...\n'
+	if [ "$method" = "dns-cloudflare" ]; then
+		printf 'Phase 2/2: enabling TLS and the reverse proxy...\n'
+	else
+		printf 'Phase 3/3: enabling TLS and the reverse proxy...\n'
+	fi
 	body="$(domain_render_vhost "$names" "$port" "$proxied" https)"
 	domain_install_vhost "$domain" "$body" || return 1
 
@@ -5383,6 +5507,7 @@ domain_setup_flow() {
 	domain_put NAMES "$names" || true
 	domain_put CLOUDFLARE "$proxied" || true
 	domain_put PORT "$port" || true
+	domain_put METHOD "$method" || true
 	SPM_DOMAIN_READY="$domain"
 	printf '\nPublished: https://%s/\n' "$domain"
 	printf 'The vault listens on 127.0.0.1:%s only; nginx handles the public side.\n' "$port"

@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **2.10.8**
+Current release: **2.10.9**
 
 ---
 
@@ -219,7 +219,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 2.10.8
+bash install.sh --version 2.10.9
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -231,7 +231,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 2.10.8 at /home/you/.local/bin/spm
+Installed SPM 2.10.9 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -386,8 +386,39 @@ You are asked for:
 | Domain or subdomain | e.g. `vault.example.com`. A scheme or trailing path is stripped. |
 | Also cover `www.`? | Both names go on one certificate. |
 | Proxied through Cloudflare? | Answer honestly — it changes the generated config, not just a message. |
+| How to prove ownership | HTTP file on port 80, or a DNS TXT record via the Cloudflare API. |
 | Contact email | Passed to Lets Encrypt for expiry notices. Blank registers without one. |
 | Port | The loopback port nginx proxies to. |
+
+#### Choosing the validation method
+
+**HTTP (default for a plain DNS record)** answers a challenge file on port 80.
+It needs port 80 reachable from the internet and nothing in front rewriting or
+challenging that request.
+
+**DNS (default behind Cloudflare)** writes a TXT record through the Cloudflare
+API instead. Nothing has to be reachable on port 80, and the CDN cannot
+interfere because no HTTP request is involved — which makes it the only method
+that reliably works behind a proxy. It also certifies a name whose A record
+does not exist yet, and it never touches your existing site: no HTTP vhost is
+installed until the certificate is already in hand.
+
+DNS validation asks once for a Cloudflare API token needing exactly:
+
+| Group | Access |
+| --- | --- |
+| Zone → Zone | Read |
+| Zone → DNS | Edit |
+
+Nothing broader is required, and a broader token would let anything holding
+that file repoint your entire domain. The token is read with hidden input and
+written straight to `~/.config/spm/cloudflare.ini` at mode `0600` — it never
+appears on screen, in shell history, or in the process list. **Keep that file:**
+certbot reads it again at every renewal, so deleting it breaks unattended
+renewal. Renewals then work regardless of your CDN settings.
+
+Only Cloudflare is wired up today. Other DNS providers have certbot plugins,
+but SPM does not drive them yet.
 
 **Before you start**, the DNS record for every name must already resolve to this
 host (or to Cloudflare, if proxied), and ports 80 and 443 must be reachable from
@@ -396,13 +427,17 @@ the ACME HTTP-01 challenge is answered. SPM prints what each name resolves to
 and compares it against this host's address before it asks Lets Encrypt for
 anything.
 
-Setup runs in three phases, because nginx must already answer on port 80 to
-serve the challenge, while a TLS server block naming a certificate that does not
-exist yet fails `nginx -t`:
+With HTTP validation, setup runs in three phases, because nginx must already
+answer on port 80 to serve the challenge, while a TLS server block naming a
+certificate that does not exist yet fails `nginx -t`:
 
 1. an HTTP-only vhost serving `/.well-known/acme-challenge/`
 2. `certbot certonly --webroot` for every name
 3. the real vhost — HTTP redirects to HTTPS, HTTPS reverse-proxies to the vault
+
+With DNS validation there are only two, because nothing needs to be served for
+the challenge: the certificate is obtained first, then the finished vhost goes
+in. Your existing site stays untouched until the certificate exists.
 
 Every install is validated with `nginx -t` before the reload, and a
 configuration that fails validation is rolled back to whatever was there before,
@@ -435,8 +470,9 @@ confirm them:
   answers with a challenge page before the vault is reached. Exempt the hostname
   if logins stall.
 
-**Two Cloudflare settings break certificate issuance outright**, and both are on
-by default in many zones. SPM fetches the challenge file through the public
+**Two Cloudflare settings break *HTTP* issuance outright**, and both are on by
+default in many zones. Neither affects DNS validation, which is the simplest
+reason to choose it behind a proxy. SPM fetches the challenge file through the public
 internet before calling certbot and names whichever one it hits, rather than
 leaving you with certbot's bare `unauthorized`:
 
@@ -769,7 +805,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **2.10.8**
+Version: **2.10.9**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
