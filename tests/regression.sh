@@ -123,11 +123,13 @@ SHELL=/bin/bash
 uname() { printf 'Darwin\n'; }
 [ "$(profile_for_shell)" = "$HOME/.bash_profile" ]
 uname() { printf 'Linux\n'; }
+original_path="$PATH"
 PATH=/usr/bin:/bin
 ensure_on_path "$TEST_ROOT/first prefix/bin" >/dev/null
 ensure_on_path "$TEST_ROOT/second-prefix/bin" >/dev/null
 grep -Fqx "export PATH='$TEST_ROOT/first prefix/bin':\$PATH" "$HOME/.bashrc"
 grep -Fqx "export PATH='$TEST_ROOT/second-prefix/bin':\$PATH" "$HOME/.bashrc"
+PATH="$original_path"
 unset -f uname
 
 # Password generation must fail closed instead of falling back to Bash's small,
