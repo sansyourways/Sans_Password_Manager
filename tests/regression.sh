@@ -7,7 +7,7 @@ GPG_TEST_HOME="$(mktemp -d /tmp/spm-gnupg.XXXXXX)"
 WEB_PID=""
 WEB_PORT=$((18000 + ($$ % 10000)))
 
-cleanup() {
+harness_cleanup() {
 	local status="${1:-0}"
 	if [ "$status" -ne 0 ] && [ -f "$TEST_ROOT/web.log" ]; then
 		printf '\n--- Web Mode regression log ---\n' >&2
@@ -21,7 +21,7 @@ cleanup() {
 	rm -rf "$TEST_ROOT"
 	rm -rf "$GPG_TEST_HOME"
 }
-trap 'status=$?; cleanup "$status"; exit "$status"' EXIT INT TERM
+trap 'status=$?; harness_cleanup "$status"; exit "$status"' EXIT INT TERM
 
 export HOME="$TEST_ROOT/home"
 export XDG_CONFIG_HOME="$TEST_ROOT/config"
@@ -47,7 +47,7 @@ sed '$d' "$ROOT_DIR/spm.sh" > "$SPM_LIBRARY"
 source "$SPM_LIBRARY"
 # The application library installs its own cleanup traps. Restore the harness
 # trap so failures retain the generated Web Mode server log before disposal.
-trap 'status=$?; cleanup "$status"; exit "$status"' EXIT INT TERM
+trap 'status=$?; harness_cleanup "$status"; exit "$status"' EXIT INT TERM
 export MASTER_PW="$AUDIT_PASSWORD"
 export SPM_LANG="en"
 
