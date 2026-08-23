@@ -5,7 +5,7 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
-## [Unreleased]
+## [2.10.7] - 2026-08-23
 
 ### Added
 - Web Mode can publish itself on a domain or subdomain over HTTPS. A fourth
