@@ -35,6 +35,7 @@ Current release: **2.10.6**
 - [Usage](#usage)
   - [Interactive Menu](#interactive-menu)
   - [Web Mode](#web-mode)
+  - [Install Web Mode as an iOS app](#install-web-mode-as-an-ios-app)
   - [CLI Commands](#cli-commands)
   - [Secure Notes](#secure-notes)
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
@@ -282,6 +283,62 @@ Includes:
 Console deliberately favors dense, auditable rows over spacious cards. Very long
 vault labels still wrap and can make mobile records tall; this is preferable to
 shrinking text or forcing page-level horizontal scrolling.
+
+---
+
+### Install Web Mode as an iOS app
+
+Web Mode ships an app icon and a web app manifest, so iPhone and iPad can add it
+to the Home Screen and launch it like a native app — full screen, with no Safari
+address bar. Nothing is installed from an app store and nothing leaves your host;
+the icon simply opens the same local server.
+
+Start Web Mode in background mode first, and note the address it is served on:
+
+```bash
+./spm.sh web
+```
+
+**1. Open the vault in Safari, then tap the address bar menu and choose Share.**
+
+Safari is required. Chrome, Firefox, and other iOS browsers cannot add a web app
+to the Home Screen.
+
+![Safari menu with the Share item highlighted](docs/screenshots/ios-install/1-share.jpg)
+
+**2. Scroll the share sheet and tap _Add to Home Screen_.**
+
+![iOS share sheet showing the Add to Home Screen action](docs/screenshots/ios-install/2-add-to-home-screen.jpg)
+
+**3. Leave _Open as Web App_ enabled, then tap _Add_.**
+
+The icon and the name `SPM` are filled in automatically from the manifest. Keep
+the toggle on: it is what makes the vault open full screen instead of in a Safari
+tab. The address shown here is your own host — the example below is redacted.
+
+![Add to Home Screen sheet with the Open as Web App toggle enabled](docs/screenshots/ios-install/3-open-as-web-app.jpg)
+
+**4. The vault now has an icon on your Home Screen.**
+
+![SPM icon on an iOS Home Screen](docs/screenshots/ios-install/4-home-screen-icon.jpg)
+
+#### Notes
+
+- **You will be asked to unlock again on first launch.** iOS gives Home Screen
+  web apps their own cookie storage, separate from Safari, so the app does not
+  inherit an existing Safari session.
+- **There is no address bar in the installed app**, so you cannot visually
+  confirm the origin the way you can in a tab. Only install from an address you
+  trust.
+- **The icon is cached when you add it.** If you upgrade SPM and the artwork
+  changes, remove the Home Screen icon and add it again to pick up the new one.
+- **Serving outside localhost is your decision to make.** `./spm.sh web` binds to
+  localhost by default and requires an explicit confirmation to bind elsewhere.
+  SPM speaks plain HTTP and never edits firewall rules, so anything reachable
+  beyond your own machine should be restricted to trusted clients — ideally over
+  a VPN or an SSH tunnel rather than an open port.
+- Android and desktop Chrome read the same manifest and offer an equivalent
+  *Install app* / *Add to Home screen* action.
 
 ---
 
