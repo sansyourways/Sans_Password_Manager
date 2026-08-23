@@ -5,6 +5,24 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.10.9] - 2026-08-23
+
+### Added
+- The domain flow can prove ownership with a DNS TXT record through the
+  Cloudflare API instead of a file served over HTTP. Behind a CDN the HTTP
+  challenge has to survive the edge's redirects and bot rules; a DNS lookup
+  cannot be interfered with, which makes this the only method that reliably
+  works for a proxied domain. It is the default when the domain is proxied,
+  and it also certifies a name whose A record does not exist yet. Renewals
+  are unattended and unaffected by CDN settings.
+- DNS validation runs in two phases rather than three: no HTTP vhost is
+  installed at all, so an existing live site is untouched until the
+  certificate is in hand.
+- The Cloudflare API token is read with hidden input and written straight to
+  `~/.config/spm/cloudflare.ini` at mode `0600`, so it never reaches the
+  terminal, the shell history, or the process list. SPM asks for a token
+  scoped to `Zone:Read` and `DNS:Edit` only.
+
 ## [2.10.8] - 2026-08-23
 
 ### Fixed
