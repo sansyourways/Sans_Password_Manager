@@ -27,6 +27,12 @@ occurs only for features or deployment choices initiated by the user:
 
 - `spm update`, `install.sh`, and release checks contact GitHub to retrieve
   release metadata or artifacts.
+- The startup release check is disabled by default. If the user turns it on
+  (`spm auto-update notify|auto`, or the auto-update entry in the interactive
+  menu), SPM requests the latest release metadata from GitHub when it starts,
+  at most once every 24 hours. Only the request itself is sent; no vault
+  contents, identifiers, or usage data accompany it. Turning it back off
+  (`spm auto-update off`) stops the check.
 - Web Mode communicates between the user's browser and the locally operated SPM
   web process. It defaults to loopback, but a user may explicitly bind it to a
   non-loopback address or place it behind a reverse proxy.

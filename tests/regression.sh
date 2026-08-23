@@ -93,6 +93,52 @@ cmd_emergency_open "$TEST_ROOT/emergency.tar.gz" "$TEST_ROOT/private.pem" \
 	"$TEST_ROOT/emergency.json" >/dev/null
 grep -q 'DemoSecret42' "$TEST_ROOT/emergency.json"
 
+# Auto-update preference. It must stay opt-in: the privacy policy states that
+# network activity happens only for features the user initiates, so a default
+# of anything but "off" would make that claim untrue.
+[ "$(autoupdate_mode)" = "off" ]
+autoupdate_put MODE notify
+[ "$(autoupdate_mode)" = "notify" ]
+autoupdate_put MODE auto
+[ "$(autoupdate_mode)" = "auto" ]
+autoupdate_put MODE nonsense
+[ "$(autoupdate_mode)" = "off" ]
+autoupdate_put MODE off
+[ "$(stat -c '%a' "$SPM_AUTOUPDATE_FILE" 2>/dev/null || stat -f '%Lp' "$SPM_AUTOUPDATE_FILE")" = "600" ]
+
+# String comparison is not enough here: 2.10.10 sorts before 2.10.9 lexically,
+# so a lexical check would stop offering updates after the ninth patch.
+version_is_newer 2.10.7 2.10.6
+version_is_newer 2.10.10 2.10.9
+version_is_newer 2.11.0 2.10.99
+if version_is_newer 2.10.6 2.10.6; then
+	printf 'version_is_newer reported an equal version as newer\n' >&2
+	exit 1
+fi
+if version_is_newer 2.9.6 2.10.0; then
+	printf 'version_is_newer mis-ordered a minor bump\n' >&2
+	exit 1
+fi
+
+# Being off, non-interactive, or offline must never block access to the vault.
+autoupdate_put MODE off
+autoupdate_startup_check </dev/null
+autoupdate_put MODE notify
+autoupdate_put LAST_CHECK 0
+autoupdate_startup_check </dev/null
+autoupdate_put LAST_CHECK not-a-number
+autoupdate_put INTERVAL garbage
+autoupdate_startup_check </dev/null
+autoupdate_put MODE off
+
+# The updater must never overwrite its target in place: Bash reads a script
+# lazily, so replacing bytes under a running instance can execute garbage.
+if grep -qE '(sudo )?cp "\$new_spm" "\$target"' "$ROOT_DIR/spm.sh"; then
+	printf 'cmd_update still writes over the install target in place\n' >&2
+	exit 1
+fi
+grep -q 'mv -f "$staged" "$target"' "$ROOT_DIR/spm.sh"
+
 web_script="$(write_spm_web_script)"
 grep -q 'locking = false' "$web_script"
 grep -q 'window.location.replace("/logout")' "$web_script"

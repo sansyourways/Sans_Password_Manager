@@ -46,6 +46,7 @@ SPM_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/spm"
 SPM_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/spm"
 SPM_PROFILE_FILE="$SPM_CONFIG_DIR/vaults.tsv"
 SPM_DEFAULT_PROFILE_FILE="$SPM_CONFIG_DIR/default-profile"
+SPM_AUTOUPDATE_FILE="$SPM_CONFIG_DIR/auto-update.conf"
 
 if [ -z "${SPM_VAULT_PROFILE:-}" ] && [ -f "$SPM_DEFAULT_PROFILE_FILE" ]; then
 	IFS= read -r SPM_VAULT_PROFILE < "$SPM_DEFAULT_PROFILE_FILE" || SPM_VAULT_PROFILE=""
@@ -3033,6 +3034,128 @@ cmd_restore() {
 
 # ----- Update / Forgot / Doctor ----------------------------------------------
 
+# ----- Auto-update preference ------------------------------------------------
+#
+# Off by default and never enabled implicitly. The privacy policy promises that
+# network activity happens "only for features or deployment choices initiated
+# by the user", so the automatic release check has to be something the user
+# switches on rather than something they discover running.
+
+autoupdate_get() {
+	local key="$1" default="${2:-}" val=""
+	if [ -f "$SPM_AUTOUPDATE_FILE" ]; then
+		val="$(sed -n "s/^${key}=//p" "$SPM_AUTOUPDATE_FILE" 2>/dev/null | tail -n1)"
+	fi
+	if [ -n "$val" ]; then printf '%s' "$val"; else printf '%s' "$default"; fi
+}
+
+autoupdate_put() {
+	local key="$1" val="$2" tmp
+	mkdir -p "$SPM_CONFIG_DIR" 2>/dev/null || return 1
+	chmod 700 "$SPM_CONFIG_DIR" 2>/dev/null || true
+	tmp="$(mktemp "$SPM_CONFIG_DIR/.auto-update.XXXXXX" 2>/dev/null)" || return 1
+	if [ -f "$SPM_AUTOUPDATE_FILE" ]; then
+		grep -v "^${key}=" "$SPM_AUTOUPDATE_FILE" > "$tmp" 2>/dev/null || true
+	fi
+	printf '%s=%s\n' "$key" "$val" >> "$tmp"
+	mv -f "$tmp" "$SPM_AUTOUPDATE_FILE" || { rm -f "$tmp"; return 1; }
+	chmod 600 "$SPM_AUTOUPDATE_FILE" 2>/dev/null || true
+}
+
+autoupdate_mode() {
+	case "$(autoupdate_get MODE off)" in
+		notify) printf 'notify' ;;
+		auto) printf 'auto' ;;
+		*) printf 'off' ;;
+	esac
+}
+
+# True when $1 is strictly newer than $2. Plain string equality was enough for
+# "is this the same release", but not for "is there a newer one": 2.10.10 sorts
+# before 2.10.9 lexically.
+version_is_newer() {
+	[ "$1" != "$2" ] || return 1
+	[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
+}
+
+autoupdate_latest_tag() {
+	command -v curl >/dev/null 2>&1 || return 1
+	local json
+	json="$(curl -fsSL --max-time "${SPM_UPDATE_TIMEOUT:-6}" "$REPO_API_URL" 2>/dev/null)" || return 1
+	printf '%s\n' "$json" | grep -m1 '"tag_name"' |
+		sed -E 's/.*"tag_name": *"v?([^"]+)".*/\1/'
+}
+
+# Called once at startup. Silent and non-fatal in every failure mode: being
+# offline, rate-limited, or unable to parse the response must never stop
+# someone reaching their vault.
+autoupdate_startup_check() {
+	local mode; mode="$(autoupdate_mode)"
+	[ "$mode" = "off" ] && return 0
+	# Only ever speak up on a real terminal; scripted use stays untouched.
+	[ -t 0 ] && [ -t 1 ] || return 0
+
+	local now last interval
+	now="$(date +%s 2>/dev/null)" || return 0
+	last="$(autoupdate_get LAST_CHECK 0)"
+	interval="$(autoupdate_get INTERVAL 86400)"
+	case "$last" in ''|*[!0-9]*) last=0 ;; esac
+	case "$interval" in ''|*[!0-9]*) interval=86400 ;; esac
+	[ "$((now - last))" -ge "$interval" ] || return 0
+
+	local latest
+	latest="$(autoupdate_latest_tag)" || return 0
+	[ -n "$latest" ] || return 0
+	autoupdate_put LAST_CHECK "$now" || true
+	autoupdate_put LAST_SEEN "$latest" || true
+	version_is_newer "$latest" "$VERSION" || return 0
+
+	clear 2>/dev/null || true
+	print_banner
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "Versi baru tersedia: %s (terpasang: %s)\n\n" "$latest" "$VERSION"
+	else
+		printf "A newer release is available: %s (installed: %s)\n\n" "$latest" "$VERSION"
+	fi
+
+	if [ "$mode" = "auto" ]; then
+		SPM_UPDATE_ASSUME_YES=1 cmd_update || true
+	else
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "Perbarui sekarang? (yes/NO): "
+		else
+			printf "Update now? (yes/NO): "
+		fi
+		local reply; read -r reply || reply="no"
+		case "$reply" in
+			yes|y|Y|YES) SPM_UPDATE_ASSUME_YES=1 cmd_update || true ;;
+			*) return 0 ;;
+		esac
+	fi
+	pause_menu
+}
+
+cmd_autoupdate() {
+	local action="${1:-status}"
+	case "$action" in
+		off|notify|auto)
+			autoupdate_put MODE "$action" || die "Could not write $SPM_AUTOUPDATE_FILE."
+			printf 'Auto-update mode: %s\n' "$action"
+			;;
+		status)
+			printf 'Auto-update mode : %s\n' "$(autoupdate_mode)"
+			printf 'Check interval   : %s seconds\n' "$(autoupdate_get INTERVAL 86400)"
+			printf 'Last check       : %s\n' "$(autoupdate_get LAST_CHECK never)"
+			printf 'Last seen release: %s\n' "$(autoupdate_get LAST_SEEN unknown)"
+			printf 'Config file      : %s\n' "$SPM_AUTOUPDATE_FILE"
+			;;
+		*)
+			printf 'Usage: spm auto-update [status|off|notify|auto]\n' >&2
+			return 2
+			;;
+	esac
+}
+
 cmd_update() {
 	require_cmd curl
 	require_cmd sha256sum
@@ -3126,7 +3249,12 @@ cmd_update() {
 	fi
 
 	local conf
-	read -r conf || conf="no"
+	if [ "${SPM_UPDATE_ASSUME_YES:-0}" = "1" ]; then
+		conf="yes"
+		printf 'yes (auto-update is enabled)\n'
+	else
+		read -r conf || conf="no"
+	fi
 	if [ "$conf" != "yes" ] && [ "$conf" != "y" ]; then
 		return 0
 	fi
@@ -3247,15 +3375,26 @@ cmd_update() {
 		printf "Installing to %s (sudo may be required)...\n" "$target"
 	fi
 
-	if command -v sudo >/dev/null 2>&1; then
-		if ! sudo cp "$new_spm" "$target"; then
-			rm -rf "$tmpdir"
-			return 1
+	# Never write over $target in place. Bash reads a script lazily as it runs,
+	# so replacing the bytes underneath a live instance can make it execute
+	# garbage -- and auto-update makes that the common case rather than a rare
+	# one. Staging a sibling and renaming swaps the path atomically; anything
+	# already running stays on the old inode until it exits.
+	local staged="${target}.new.$$" sudo_cmd=""
+	if [ ! -w "$(dirname "$target")" ] && command -v sudo >/dev/null 2>&1; then
+		sudo_cmd="sudo"
+	fi
+	if ! $sudo_cmd cp "$new_spm" "$staged" ||
+		! $sudo_cmd chmod 0755 "$staged" ||
+		! $sudo_cmd mv -f "$staged" "$target"; then
+		$sudo_cmd rm -f "$staged" 2>/dev/null || true
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "Gagal memasang ke %s.\n" "$target"
+		else
+			printf "Failed to install to %s.\n" "$target"
 		fi
-		sudo chmod +x "$target" >/dev/null 2>&1 || true
-	else
-		cp "$new_spm" "$target"
-		chmod +x "$target" >/dev/null 2>&1 || true
+		rm -rf "$tmpdir"
+		return 1
 	fi
 
 	rm -rf "$tmpdir"
@@ -4478,6 +4617,8 @@ Perintah utama (CLI):
   ./spm.sh import [fmt] <file>
                             → Impor data (password/catatan/passphrase/authenticator/kode backup) dari csv/json dan format lain
   ./spm.sh update          → Cek & auto-install rilis terbaru dari GitHub
+  ./spm.sh auto-update [status|off|notify|auto]
+                           → Aktifkan cek rilis harian saat mulai
   ./spm.sh forgot          → Reset kata sandi utama dengan private key
   ./spm.sh doctor          → Health / integrity check vault
   ./spm.sh generate        → Generator kata sandi (panjang, mode mudah/aman/angka, simbol opsional)
@@ -10315,6 +10456,66 @@ interactive_menu_authenticators() {
 }
 
 
+interactive_menu_autoupdate() {
+	local mode choice
+	while true; do
+		clear
+		print_banner
+		mode="$(autoupdate_mode)"
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "Update otomatis\n\n"
+			printf "Mode sekarang : %s\n" "$mode"
+			printf "Cek terakhir  : %s\n" "$(autoupdate_get LAST_CHECK belum)"
+			printf "Rilis terbaru : %s\n\n" "$(autoupdate_get LAST_SEEN '-')"
+			printf "  1) Mati      - tidak pernah menghubungi GitHub sendiri\n"
+			printf "  2) Beritahu  - cek harian, tanya dulu sebelum memasang\n"
+			printf "  3) Otomatis  - cek harian, langsung pasang rilis baru\n"
+			printf "  4) Cek sekarang\n"
+			printf "  0) Kembali\n\n"
+			printf "Pilih: "
+		else
+			printf "Auto-update\n\n"
+			printf "Current mode : %s\n" "$mode"
+			printf "Last check   : %s\n" "$(autoupdate_get LAST_CHECK never)"
+			printf "Latest seen  : %s\n\n" "$(autoupdate_get LAST_SEEN '-')"
+			printf "  1) Off       - never contact GitHub on its own\n"
+			printf "  2) Notify    - check daily, ask before installing\n"
+			printf "  3) Automatic - check daily, install new releases without asking\n"
+			printf "  4) Check now\n"
+			printf "  0) Back\n\n"
+			printf "Choice: "
+		fi
+		read -r choice || choice="0"
+		case "$choice" in
+			1) autoupdate_put MODE off || true ;;
+			2|3)
+				if [ "$choice" = "2" ]; then
+					autoupdate_put MODE notify || true
+				else
+					autoupdate_put MODE auto || true
+				fi
+				# A mode change should take effect on the next launch rather
+				# than whenever the daily window happens to reopen.
+				autoupdate_put LAST_CHECK 0 || true
+				if [ "$SPM_LANG" = "id" ]; then
+					printf "\nSPM akan menghubungi GitHub Releases saat mulai, paling sering sekali sehari.\n"
+				else
+					printf "\nSPM will contact GitHub Releases at startup, at most once a day.\n"
+				fi
+				pause_menu
+				;;
+			4)
+				clear
+				cmd_update || true
+				autoupdate_put LAST_CHECK "$(date +%s 2>/dev/null || printf 0)" || true
+				pause_menu
+				;;
+			0) return ;;
+			*) ;;
+		esac
+	done
+}
+
 interactive_menu() {
 	while true; do
 		clear
@@ -10349,6 +10550,7 @@ interactive_menu() {
 			printf " 19) Doctor / Health check\n"
 			printf " 20) Mode web\n"
 			printf " 21) Restore vault dari bundle portable/save\n"
+			printf " 22) Pengaturan update otomatis [%s]\n" "$(autoupdate_mode)"
 			printf "  0) Keluar\n\n"
 			printf "Pilih menu: "
 		else
@@ -10381,6 +10583,7 @@ interactive_menu() {
 			printf " 19) Doctor / Health check\n"
 			printf " 20) Web mode\n"
 			printf " 21) Restore vault from bundle\n"
+			printf " 22) Auto-update settings [%s]\n" "$(autoupdate_mode)"
 			printf "  0) Exit\n\n"
 			printf "Choose an option: "
 		fi
@@ -10518,6 +10721,7 @@ interactive_menu() {
 				acquire_cli_vault_lock
 				;;
 			21) clear; cmd_restore || true; pause_menu ;;
+			22) interactive_menu_autoupdate ;;
 			0)
 				if [ "$SPM_LANG" = "id" ]; then
 					printf "Keluar...\n"
@@ -10562,6 +10766,7 @@ main() {
 	ensure_policy_consent
 
 	if [ $# -eq 0 ]; then
+		autoupdate_startup_check
 		acquire_cli_vault_lock
 		interactive_menu
 		return
@@ -10570,7 +10775,7 @@ main() {
 	local cmd="$1"
 	shift || true
 	case "$cmd" in
-		update|generate|password-generate|web|web-mode|help|-h|--help|vault-profile) ;;
+		update|auto-update|generate|password-generate|web|web-mode|help|-h|--help|vault-profile) ;;
 		*) acquire_cli_vault_lock ;;
 	esac
 
@@ -10586,6 +10791,7 @@ main() {
 		save)             cmd_save "$@" ;;
 		restore)          cmd_restore "$@" ;;
 		update)           cmd_update "$@" ;;
+		auto-update)      cmd_autoupdate "$@" ;;
 		forgot|forgotten) cmd_forgot "$@" ;;
 		doctor)           cmd_doctor "$@" ;;
 		export)           cmd_export "$@" ;;

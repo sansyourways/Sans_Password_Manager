@@ -21,7 +21,11 @@ SPM is designed around the following core principles:
 - **Platform-owned passkeys** — SPM stores passkey metadata, never private passkey key material.
 
 Core vault operations are offline. The optional updater contacts GitHub Releases,
-and web mode serves the local vault UI on the address selected by the user.
+and web mode serves the local vault UI on the address selected by the user. The
+startup release check is off unless the user enables it, and downloaded releases
+are SHA-256 verified and syntax-checked before they replace the installed
+script, which is swapped in by rename so a running instance is never rewritten
+underneath itself.
 
 ---
 
