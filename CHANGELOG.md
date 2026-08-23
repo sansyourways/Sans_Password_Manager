@@ -7,6 +7,12 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+### Added
+- README walkthrough for installing Web Mode as an iOS app: the Safari share
+  sheet, `Add to Home Screen`, the `Open as Web App` toggle, and the resulting
+  Home Screen icon, with notes on the separate cookie jar, the missing address
+  bar, and restricting any non-localhost bind.
+
 ## [2.10.6] - 2026-08-23
 
 ### Added
