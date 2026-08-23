@@ -7,7 +7,12 @@ GPG_TEST_HOME="$(mktemp -d /tmp/spm-gnupg.XXXXXX)"
 WEB_PID=""
 WEB_PORT=$((18000 + ($$ % 10000)))
 
-cleanup() {
+harness_cleanup() {
+	local status="${1:-0}"
+	if [ "$status" -ne 0 ] && [ -f "$TEST_ROOT/web.log" ]; then
+		printf '\n--- Web Mode regression log ---\n' >&2
+		sed -n '1,240p' "$TEST_ROOT/web.log" >&2
+	fi
 	if [ -n "$WEB_PID" ]; then
 		kill "$WEB_PID" 2>/dev/null || true
 		wait "$WEB_PID" 2>/dev/null || true
@@ -16,7 +21,7 @@ cleanup() {
 	rm -rf "$TEST_ROOT"
 	rm -rf "$GPG_TEST_HOME"
 }
-trap cleanup EXIT INT TERM
+trap 'status=$?; harness_cleanup "$status"; exit "$status"' EXIT INT TERM
 
 export HOME="$TEST_ROOT/home"
 export XDG_CONFIG_HOME="$TEST_ROOT/config"
@@ -40,6 +45,9 @@ SPM_LIBRARY="$TEST_ROOT/spm-library.sh"
 sed '$d' "$ROOT_DIR/spm.sh" > "$SPM_LIBRARY"
 # shellcheck source=/dev/null
 source "$SPM_LIBRARY"
+# The application library installs its own cleanup traps. Restore the harness
+# trap so failures retain the generated Web Mode server log before disposal.
+trap 'status=$?; harness_cleanup "$status"; exit "$status"' EXIT INT TERM
 export MASTER_PW="$AUDIT_PASSWORD"
 export SPM_LANG="en"
 
@@ -104,6 +112,35 @@ autoupdate_put MODE auto
 autoupdate_put MODE nonsense
 [ "$(autoupdate_mode)" = "off" ]
 autoupdate_put MODE off
+
+# Installer PATH mutation must be path-specific and macOS Bash must use the
+# login-shell profile even when it does not exist yet.
+INSTALL_LIBRARY="$TEST_ROOT/install-library.sh"
+sed -n '1,111p' "$ROOT_DIR/install.sh" > "$INSTALL_LIBRARY"
+# shellcheck source=/dev/null
+source "$INSTALL_LIBRARY"
+SHELL=/bin/bash
+uname() { printf 'Darwin\n'; }
+[ "$(profile_for_shell)" = "$HOME/.bash_profile" ]
+uname() { printf 'Linux\n'; }
+original_path="$PATH"
+PATH=/usr/bin:/bin
+ensure_on_path "$TEST_ROOT/first prefix/bin" >/dev/null
+ensure_on_path "$TEST_ROOT/second-prefix/bin" >/dev/null
+grep -Fqx "export PATH='$TEST_ROOT/first prefix/bin':\$PATH" "$HOME/.bashrc"
+grep -Fqx "export PATH='$TEST_ROOT/second-prefix/bin':\$PATH" "$HOME/.bashrc"
+PATH="$original_path"
+unset -f uname
+
+# Password generation must fail closed instead of falling back to Bash's small,
+# predictable $RANDOM generator.
+if sed -n '/_spm_rand_below()/,/^}/p' "$ROOT_DIR/spm.sh" | grep -q 'RANDOM %'; then
+	printf 'password generation still falls back to predictable $RANDOM\n' >&2
+	exit 1
+fi
+# Python before 3.11 has no tomllib; the importer must carry a local fallback.
+grep -q 'except ModuleNotFoundError:' "$ROOT_DIR/spm.sh"
+grep -q 'Invalid TOML key' "$ROOT_DIR/spm.sh"
 [ "$(stat -c '%a' "$SPM_AUTOUPDATE_FILE" 2>/dev/null || stat -f '%Lp' "$SPM_AUTOUPDATE_FILE")" = "600" ]
 
 # String comparison is not enough here: 2.10.10 sorts before 2.10.9 lexically,
@@ -207,6 +244,15 @@ grep -q '/.well-known/acme-challenge/\*' "$ROOT_DIR/spm.sh"
 # "systemctl reload" returns before the new workers serve, so a single probe
 # can be answered by the old configuration and report a false failure.
 grep -q 'for attempt in 1 2 3 4 5; do' "$ROOT_DIR/spm.sh"
+# Failure to stage the probe is a failed preflight, never permission to spend an
+# ACME attempt without evidence that the challenge path works.
+if grep -q 'sudo mkdir -p "\$dir" || return 0' "$ROOT_DIR/spm.sh" ||
+	grep -q 'sudo tee "\$dir/\$token" >/dev/null || return 0' "$ROOT_DIR/spm.sh"; then
+	printf 'ACME probe setup still fails open\n' >&2
+	exit 1
+fi
+grep -q 'domain_restore_vhost "\$domain" "\$prior" "\$had_available" "\$enabled_target"' "$ROOT_DIR/spm.sh"
+grep -q "Type 'replace' to continue" "$ROOT_DIR/spm.sh"
 
 # DNS-01. Behind a CDN the HTTP challenge has to survive the edge's redirect
 # and bot rules; a TXT record bypasses all of it, so the generator must be able
@@ -277,6 +323,10 @@ if grep -q 'if not self._same_origin_post():' "$web_script"; then
 	printf 'authenticated writes still gate on Origin alone\n' >&2
 	exit 1
 fi
+grep -q 'self.auth_lock = threading.RLock()' "$web_script"
+grep -q 'X-Real-IP' "$web_script"
+grep -q '_sweep_login_failures_locked' "$web_script"
+grep -q 'Stored passphrase cannot be decoded; vault was not changed' "$web_script"
 PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 -m py_compile \
 	"$web_script" "$ROOT_DIR/browser-extension/native_host.py"
 SPM_VAULT_PATH="$PASSWORD_VAULT" SPM_WEB_BIND=127.0.0.1 \
@@ -318,7 +368,13 @@ grep -qi '^Content-Type: application/manifest+json' "$TEST_ROOT/manifest.headers
 python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m["display"]=="standalone", m["display"]; assert m["icons"][0]["src"]=="/apple-touch-icon.png"' \
 	"$TEST_ROOT/manifest.json"
 
+printf 'Web regression: proxy-aware login isolation\n'
+for _ in 1 2 3 4 5; do
+	curl -sS -o /dev/null -X POST -H 'X-Real-IP: 198.51.100.10' \
+		--data-urlencode 'password=definitely-wrong' "http://127.0.0.1:$WEB_PORT/login"
+done
 curl -fsS -D "$TEST_ROOT/login.headers" -c "$TEST_ROOT/cookies" -o /dev/null \
+	-H 'X-Real-IP: 198.51.100.11' \
 	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
 	--data-urlencode "password=$AUDIT_PASSWORD" "http://127.0.0.1:$WEB_PORT/login"
 grep -q '302 Found' "$TEST_ROOT/login.headers"
@@ -333,6 +389,20 @@ if grep -Eq '🔑|🗒|📝|⏱|🧯|✨|🗑|👁|📋' "$TEST_ROOT/dashboard.h
 	printf 'legacy emoji icon found in generated Web Mode dashboard\n' >&2
 	exit 1
 fi
+# A blank secret on edit means preserve the existing passphrase. The prior bug
+# indexed the filtered passphrase array with the absolute vault line number and
+# silently replaced the secret with a random value.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/passphrase-edit.html" \
+	"http://127.0.0.1:$WEB_PORT/passphrase-edit?id=1"
+csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' "$TEST_ROOT/passphrase-edit.html" | head -n1)"
+[ "${#csrf}" -eq 64 ]
+curl -fsS -D "$TEST_ROOT/passphrase-edit.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
+	-X POST --data-urlencode "csrf=$csrf" --data-urlencode 'label=Renamed words' \
+	--data-urlencode 'secret=' "http://127.0.0.1:$WEB_PORT/passphrase-edit?id=1"
+grep -q '302 Found' "$TEST_ROOT/passphrase-edit.headers"
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
+	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" > "$TEST_ROOT/passphrase-after"
+[ "$(awk -F '\t' '$1=="PASSPHRASE"&&$2==1{print $4}' "$TEST_ROOT/passphrase-after" | base64 -d)" = 'horse-battery' ]
 printf 'type,id,label,username,secret,notes,created,extra\npassword,,Web import,demo,WebSecret42,synthetic,2026-01-01T00:00:00Z,\n' \
 	> "$TEST_ROOT/import.csv"
 curl -fsS -D "$TEST_ROOT/import.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
