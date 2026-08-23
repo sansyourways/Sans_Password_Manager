@@ -8,6 +8,11 @@ WEB_PID=""
 WEB_PORT=$((18000 + ($$ % 10000)))
 
 cleanup() {
+	local status="${1:-0}"
+	if [ "$status" -ne 0 ] && [ -f "$TEST_ROOT/web.log" ]; then
+		printf '\n--- Web Mode regression log ---\n' >&2
+		sed -n '1,240p' "$TEST_ROOT/web.log" >&2
+	fi
 	if [ -n "$WEB_PID" ]; then
 		kill "$WEB_PID" 2>/dev/null || true
 		wait "$WEB_PID" 2>/dev/null || true
@@ -16,7 +21,7 @@ cleanup() {
 	rm -rf "$TEST_ROOT"
 	rm -rf "$GPG_TEST_HOME"
 }
-trap cleanup EXIT INT TERM
+trap 'status=$?; cleanup "$status"; exit "$status"' EXIT INT TERM
 
 export HOME="$TEST_ROOT/home"
 export XDG_CONFIG_HOME="$TEST_ROOT/config"
