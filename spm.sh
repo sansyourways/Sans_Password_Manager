@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.10.5"
+VERSION="2.10.6"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -6556,6 +6556,15 @@ body::before { content:""; position:fixed; inset:0; pointer-events:none; opacity
 }
 
 @media print { .sidebar, .topbar, .page-actions, #toast { display: none !important; } .app { grid-template-columns: 1fr; } }
+
+/* Launched from an iOS home screen there is no browser chrome, so the home
+   indicator and the status bar sit on top of the page unless the safe area
+   insets are honoured. Scoped to standalone so tab rendering is untouched. */
+@media (display-mode: standalone) {
+  body { padding-bottom: env(safe-area-inset-bottom); }
+  .topbar { padding-top: env(safe-area-inset-top); }
+  .sidebar { padding-top: calc(var(--sp-4) + env(safe-area-inset-top)); }
+}
 </style>
 """
 
@@ -6737,6 +6746,60 @@ ICON_SPRITE = """
 </svg>
 """
 
+# The home screen / tab icon is the login page brand mark, reproduced from the
+# CSS above rather than redrawn: a 52x52 box with a 14px radius and a 1px
+# #5fd095 border over --bg, holding the 24x24 #i-brand glyph at stroke-width
+# 1.75. Regenerate the PNG with tools/make-app-icon.sh.
+#
+# The sprite symbols cannot be reused here. They carry geometry only and
+# inherit stroke:currentColor from DESIGN_CSS, which does not exist once the
+# icon is fetched as a standalone file.
+FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52" width="52" height="52">
+  <rect width="52" height="52" fill="#0a0e0c"/>
+  <rect x="0.5" y="0.5" width="51" height="51" rx="14" fill="none" stroke="#5fd095" stroke-width="1"/>
+  <g transform="translate(14 14)" fill="none" stroke="#5fd095" stroke-width="1.75"
+     stroke-linecap="butt" stroke-linejoin="miter">
+    <path d="M4 6l5 6-5 6M12 18h8M12 6h8"/>
+  </g>
+</svg>
+"""
+
+# Same mark at 512x512, drawn at 70% of the canvas on the page background.
+# The padding is required, not decoration: iOS masks home screen icons with a
+# superellipse, so a mark drawn edge to edge loses its border at the corners.
+# The same padding satisfies the Android maskable safe zone, so one asset
+# serves both "any" and "maskable".
+APP_ICON_PNG_B64 = (
+    "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"
+)
+APP_ICON_PNG = base64.b64decode(APP_ICON_PNG_B64)
+
+MANIFEST_JSON = """{
+  "name": "Sans Password Manager",
+  "short_name": "SPM",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0e0c",
+  "theme_color": "#0a0e0c",
+  "icons": [
+    {"src": "/apple-touch-icon.png", "sizes": "512x512", "type": "image/png",
+     "purpose": "any maskable"}
+  ]
+}
+"""
+
+# render_shell() and login_page() each carry their own <head>; interpolate this
+# into both so the two cannot drift apart.
+HEAD_ICONS = """<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0a0e0c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="SPM">"""
+
 
 def _icon(name, cls="icon"):
     return f'<svg class="{cls}" aria-hidden="true"><use href="#i-{name}"></use></svg>'
@@ -6815,9 +6878,10 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <title>{html.escape(title)} · SPM</title>
+{HEAD_ICONS}
 {DESIGN_CSS}
 </head>
 <body class="theme-dark">
@@ -7321,9 +7385,10 @@ def login_page(version, message=""):
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <title>Unlock Vault · SPM</title>
+{HEAD_ICONS}
 {DESIGN_CSS}
 </head>
 <body class="theme-dark">
@@ -8362,6 +8427,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body.encode("utf-8"))
 
+    def _send_asset(self, content_type, body):
+        # Static bytes: no session, no language substitution, and no CORS
+        # headers, unlike _send_html above.
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _session_cookie_attrs(self):
         # A "Secure" cookie is withheld by browsers on plain HTTP, and this
         # server never speaks TLS itself. Sending it unconditionally made login
@@ -8517,6 +8591,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/login":
             page = login_page(VERSION)
             self._send_html(200, page)
+            return
+
+        # These must answer above the login gate. Unknown paths fall through to
+        # _require_login(), which replies with the login page as HTTP 200
+        # rather than redirecting, so an icon request would be answered with
+        # HTML and iOS would fall back to screenshotting the page instead of
+        # showing the mark. /favicon.ico and the -precomposed alias are
+        # requested unprompted by Safari, so both are handled here too.
+        if path in ("/apple-touch-icon.png",
+                    "/apple-touch-icon-precomposed.png",
+                    "/favicon.ico"):
+            self._send_asset("image/png", APP_ICON_PNG)
+            return
+
+        if path == "/favicon.svg":
+            self._send_asset("image/svg+xml", FAVICON_SVG.encode("utf-8"))
+            return
+
+        if path == "/manifest.webmanifest":
+            self._send_asset("application/manifest+json",
+                             MANIFEST_JSON.encode("utf-8"))
             return
 
         master = self._require_login()

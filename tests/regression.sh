@@ -109,6 +109,10 @@ if grep -q 'pagehide".*once: true' "$web_script"; then
 	exit 1
 fi
 grep -q -- '--motion-base: 200ms' "$web_script"
+grep -q 'rel="apple-touch-icon"' "$web_script"
+grep -q 'rel="manifest" href="/manifest.webmanifest"' "$web_script"
+grep -q 'APP_ICON_PNG = base64.b64decode' "$web_script"
+grep -q 'display-mode: standalone' "$web_script"
 grep -q 'prefers-reduced-motion:reduce' "$web_script"
 PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 -m py_compile \
 	"$web_script" "$ROOT_DIR/browser-extension/native_host.py"
@@ -121,6 +125,35 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 	sleep 0.25
 done
 grep -q 'Sans Password Manager' "$TEST_ROOT/login.html"
+grep -q 'rel="apple-touch-icon"' "$TEST_ROOT/login.html"
+
+# The icon routes are deliberately fetched with no session cookie. Unknown
+# paths fall through to the login gate, which answers HTTP 200 with the login
+# page, so a misplaced route would serve HTML to iOS and it would go back to
+# screenshotting the page instead of showing the mark.
+for icon_path in /apple-touch-icon.png /apple-touch-icon-precomposed.png /favicon.ico; do
+	curl -fsS -D "$TEST_ROOT/icon.headers" -o "$TEST_ROOT/icon.png" \
+		"http://127.0.0.1:$WEB_PORT$icon_path"
+	if ! grep -qi '^Content-Type: image/png' "$TEST_ROOT/icon.headers"; then
+		printf '%s is not served as image/png (login gate leak?)\n' "$icon_path" >&2
+		exit 1
+	fi
+	if [ "$(head -c 4 "$TEST_ROOT/icon.png" | od -An -tx1 | tr -d ' \n')" != "89504e47" ]; then
+		printf '%s did not return PNG data\n' "$icon_path" >&2
+		exit 1
+	fi
+done
+
+curl -fsS -D "$TEST_ROOT/favicon.headers" -o "$TEST_ROOT/favicon.svg" \
+	"http://127.0.0.1:$WEB_PORT/favicon.svg"
+grep -qi '^Content-Type: image/svg+xml' "$TEST_ROOT/favicon.headers"
+grep -q '#5fd095' "$TEST_ROOT/favicon.svg"
+
+curl -fsS -D "$TEST_ROOT/manifest.headers" -o "$TEST_ROOT/manifest.json" \
+	"http://127.0.0.1:$WEB_PORT/manifest.webmanifest"
+grep -qi '^Content-Type: application/manifest+json' "$TEST_ROOT/manifest.headers"
+python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m["display"]=="standalone", m["display"]; assert m["icons"][0]["src"]=="/apple-touch-icon.png"' \
+	"$TEST_ROOT/manifest.json"
 
 curl -fsS -D "$TEST_ROOT/login.headers" -c "$TEST_ROOT/cookies" -o /dev/null \
 	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
@@ -129,6 +162,7 @@ grep -q '302 Found' "$TEST_ROOT/login.headers"
 curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/dashboard.html" \
 	"http://127.0.0.1:$WEB_PORT/"
 grep -q '<symbol id="i-brand"' "$TEST_ROOT/dashboard.html"
+grep -q 'rel="apple-touch-icon"' "$TEST_ROOT/dashboard.html"
 grep -q '<use href="#i-key"' "$TEST_ROOT/dashboard.html"
 grep -q '<use href="#i-shield"' "$TEST_ROOT/dashboard.html"
 grep -q '<use href="#i-logout"' "$TEST_ROOT/dashboard.html"

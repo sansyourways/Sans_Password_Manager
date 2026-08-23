@@ -7,6 +7,26 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [2.10.6] - 2026-08-23
+
+### Added
+- Web Mode now serves an app icon, a favicon, and a web app manifest, so adding
+  the vault to an iOS home screen shows the login page brand mark instead of a
+  screenshot of the page. The artwork is that mark reproduced from the CSS: a
+  52x52 box with a 14px radius and a 1px `#5fd095` border holding the `i-brand`
+  glyph, drawn at 70% of the canvas so Apple's icon mask and Android's maskable
+  safe zone both leave the border intact. Regenerate with
+  `tools/make-app-icon.sh`.
+- Launching from the home screen opens standalone, with no browser chrome, and
+  page content is inset from the status bar and home indicator.
+
+### Fixed
+- `/apple-touch-icon.png`, `/favicon.ico`, `/favicon.svg`, and
+  `/manifest.webmanifest` are answered before the login gate. Unknown paths fall
+  through to that gate, which replies with the login page as HTTP 200 rather
+  than redirecting, so these requests were previously served HTML with a
+  `text/html` content type.
+
 ## [2.10.5] - 2026-08-19
 
 ### Changed
