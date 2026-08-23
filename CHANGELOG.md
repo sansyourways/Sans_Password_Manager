@@ -8,10 +8,22 @@ Keep-a-Changelog style format.
 ## [Unreleased]
 
 ### Added
+- `install.sh` now checks whether `PREFIX/bin` is on `PATH` and, when it is not,
+  appends it to the shell profile that matches your login shell so `spm` runs
+  from any directory. The line is marked and written once, so reinstalling never
+  duplicates it. Skipped when already on `PATH`, under `--no-modify-path` or
+  `SPM_NO_MODIFY_PATH=1`, and when running as root, where `$HOME` may belong to
+  root rather than to the person installing.
+- README section covering `PATH` setup, the profile chosen per shell, and the
+  manual equivalent for source installs.
 - README walkthrough for installing Web Mode as an iOS app: the Safari share
   sheet, `Add to Home Screen`, the `Open as Web App` toggle, and the resulting
   Home Screen icon, with notes on the separate cookie jar, the missing address
   bar, and restricting any non-localhost bind.
+- The iOS walkthrough now requires PM2 background mode at step 1 and explains
+  why: the Home Screen icon only opens the server, it does not start one, so the
+  foreground option dies with the terminal and leaves the icon opening a dead
+  page. Also covers `pm2 save` / `pm2 startup` for surviving a reboot.
 
 ## [2.10.6] - 2026-08-23
 

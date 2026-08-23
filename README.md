@@ -32,6 +32,7 @@ Current release: **2.10.6**
 - [Architecture & Security Model](#architecture--security-model)
 - [Requirements](#requirements)
 - [Installation](#installation)
+  - [Running `spm` from anywhere](#running-spm-from-anywhere)
 - [Usage](#usage)
   - [Interactive Menu](#interactive-menu)
   - [Web Mode](#web-mode)
@@ -220,6 +221,50 @@ bash install.sh --version 2.10.6
 bash install.sh --prefix "$HOME/.local"
 ```
 
+### Running `spm` from anywhere
+
+The installer puts the CLI at `PREFIX/bin/spm` — `/usr/local/bin/spm` by
+default, which is already on `PATH` on most systems. When it is not, the
+installer says so and adds it to your shell profile for you, so a new terminal
+can run `spm` from any directory:
+
+```text
+Installed SPM 2.10.6 at /home/you/.local/bin/spm
+PATH        : added /home/you/.local/bin to /home/you/.bashrc
+                run "exec /bin/bash" or open a new terminal to pick it up
+```
+
+The line it appends is marked with a comment and written only once, so
+reinstalling or upgrading never duplicates it. The profile is chosen from your
+login shell:
+
+| Shell | File written |
+|---|---|
+| bash | `~/.bashrc`, or `~/.bash_profile` on macOS |
+| zsh | `$ZDOTDIR/.zshrc`, else `~/.zshrc` |
+| fish | `~/.config/fish/conf.d/spm.fish` (uses `fish_add_path`) |
+| anything else | `~/.profile` |
+
+Nothing is written when the directory is already on `PATH`, when you pass
+`--no-modify-path`, when `SPM_NO_MODIFY_PATH=1` is set, or when the installer
+runs as root — under `sudo`, `$HOME` may belong to root rather than to you, so
+the installer prints the line to add instead of editing the wrong account's
+profile.
+
+To do it by hand, or if you installed from source, add the directory yourself:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+exec "$SHELL"
+```
+
+Confirm it worked:
+
+```bash
+command -v spm
+spm help
+```
+
 ### From source
 
 ```bash
@@ -291,26 +336,51 @@ shrinking text or forcing page-level horizontal scrolling.
 Web Mode ships an app icon and a web app manifest, so iPhone and iPad can add it
 to the Home Screen and launch it like a native app — full screen, with no Safari
 address bar. Nothing is installed from an app store and nothing leaves your host;
-the icon simply opens the same local server.
+the icon simply opens the same local server that is already running.
 
-Start Web Mode in background mode first, and note the address it is served on:
+**1. Start Web Mode in background mode — this is not optional.**
 
 ```bash
 ./spm.sh web
 ```
 
-**1. Open the vault in Safari, then tap the address bar menu and choose Share.**
+```text
+Choose mode:
+  1) Temporary (foreground, Ctrl+C to stop)
+  2) Run in background using PM2      <- choose this
+  3) Stop background web server (PM2)
+  0) Back
+```
+
+Choose **2**. The Home Screen icon is only a bookmark: it opens the server, it
+does not start it. Option 1 runs the server in the foreground, tied to the shell
+you launched it from, so it stops on `Ctrl+C` and dies the moment you close the
+terminal or drop an SSH session — and the icon would then open a page that fails
+to load. Option 2 hands the server to PM2, which keeps it running after you log
+out. Use option 3 when you want to stop it.
+
+Note the address it prints; that is what you open in Safari.
+
+If you want the server to come back after a reboot, tell PM2 to remember it —
+SPM starts the process but does not persist it for you:
+
+```bash
+pm2 save
+pm2 startup   # prints a command to run once, as root
+```
+
+**2. Open the vault in Safari, then tap the address bar menu and choose Share.**
 
 Safari is required. Chrome, Firefox, and other iOS browsers cannot add a web app
 to the Home Screen.
 
 ![Safari menu with the Share item highlighted](docs/screenshots/ios-install/1-share.jpg)
 
-**2. Scroll the share sheet and tap _Add to Home Screen_.**
+**3. Scroll the share sheet and tap _Add to Home Screen_.**
 
 ![iOS share sheet showing the Add to Home Screen action](docs/screenshots/ios-install/2-add-to-home-screen.jpg)
 
-**3. Leave _Open as Web App_ enabled, then tap _Add_.**
+**4. Leave _Open as Web App_ enabled, then tap _Add_.**
 
 The icon and the name `SPM` are filled in automatically from the manifest. Keep
 the toggle on: it is what makes the vault open full screen instead of in a Safari
@@ -318,7 +388,7 @@ tab. The address shown here is your own host — the example below is redacted.
 
 ![Add to Home Screen sheet with the Open as Web App toggle enabled](docs/screenshots/ios-install/3-open-as-web-app.jpg)
 
-**4. The vault now has an icon on your Home Screen.**
+**5. The vault now has an icon on your Home Screen.**
 
 ![SPM icon on an iOS Home Screen](docs/screenshots/ios-install/4-home-screen-icon.jpg)
 
@@ -330,6 +400,9 @@ tab. The address shown here is your own host — the example below is redacted.
 - **There is no address bar in the installed app**, so you cannot visually
   confirm the origin the way you can in a tab. Only install from an address you
   trust.
+- **The icon does not start the server.** If Web Mode is not running when you
+  tap the icon, the page simply fails to load. This is why step 1 uses PM2
+  background mode rather than the foreground option.
 - **The icon is cached when you add it.** If you upgrade SPM and the artwork
   changes, remove the Home Screen icon and add it again to pick up the new one.
 - **Serving outside localhost is your decision to make.** `./spm.sh web` binds to
