@@ -45,6 +45,9 @@ SPM_LIBRARY="$TEST_ROOT/spm-library.sh"
 sed '$d' "$ROOT_DIR/spm.sh" > "$SPM_LIBRARY"
 # shellcheck source=/dev/null
 source "$SPM_LIBRARY"
+# The application library installs its own cleanup traps. Restore the harness
+# trap so failures retain the generated Web Mode server log before disposal.
+trap 'status=$?; cleanup "$status"; exit "$status"' EXIT INT TERM
 export MASTER_PW="$AUDIT_PASSWORD"
 export SPM_LANG="en"
 
@@ -363,6 +366,7 @@ grep -qi '^Content-Type: application/manifest+json' "$TEST_ROOT/manifest.headers
 python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m["display"]=="standalone", m["display"]; assert m["icons"][0]["src"]=="/apple-touch-icon.png"' \
 	"$TEST_ROOT/manifest.json"
 
+printf 'Web regression: proxy-aware login isolation\n'
 for _ in 1 2 3 4 5; do
 	curl -sS -o /dev/null -X POST -H 'X-Real-IP: 198.51.100.10' \
 		--data-urlencode 'password=definitely-wrong' "http://127.0.0.1:$WEB_PORT/login"
