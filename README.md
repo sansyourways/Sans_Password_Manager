@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **2.10.7**
+Current release: **2.10.8**
 
 ---
 
@@ -219,7 +219,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 2.10.7
+bash install.sh --version 2.10.8
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -231,7 +231,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 2.10.7 at /home/you/.local/bin/spm
+Installed SPM 2.10.8 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -434,6 +434,22 @@ confirm them:
 - If Bot Fight Mode or a managed challenge is enabled on the zone, the edge
   answers with a challenge page before the vault is reached. Exempt the hostname
   if logins stall.
+
+**Two Cloudflare settings break certificate issuance outright**, and both are on
+by default in many zones. SPM fetches the challenge file through the public
+internet before calling certbot and names whichever one it hits, rather than
+leaving you with certbot's bare `unauthorized`:
+
+- **Always Use HTTPS** redirects the plain-HTTP ACME challenge to HTTPS — but
+  the certificate does not exist yet, so that request cannot succeed. Turn it
+  off until issuance completes.
+- **Bot Fight Mode / Browser Integrity Check / WAF** answer Let's Encrypt's
+  validator with a challenge page, which it cannot solve. Add a Configuration
+  Rule disabling them for `/.well-known/acme-challenge/*`, or set the record to
+  DNS-only (grey cloud) until the certificate is issued.
+
+Because the check runs before the request, a zone misconfiguration costs you
+nothing against the Let's Encrypt rate limit.
 
 The choice is saved, so the next run offers the same domain again.
 
@@ -753,7 +769,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **2.10.7**
+Version: **2.10.8**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down

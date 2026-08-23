@@ -5,6 +5,25 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.10.8] - 2026-08-23
+
+### Fixed
+- The domain flow now checks that the ACME challenge file is actually
+  reachable from the internet before calling certbot, and names the cause when
+  it is not. Cloudflare's "Always Use HTTPS" redirects the plain-HTTP challenge
+  to a certificate that does not exist yet, and its bot protection answers
+  Let's Encrypt's validator with a challenge page it cannot solve; both
+  previously surfaced only as certbot's bare `unauthorized`, after the attempt
+  had already been spent against the rate limit. The probe retries, because
+  `systemctl reload` returns before the new nginx workers are serving.
+- A domain whose name has no A record no longer marches into a doomed
+  certificate request. The flow reports the missing record and stops, since a
+  failed validation counts against the rate limit.
+- Guarded a `dig | grep` pipeline that exits non-zero when a name does not
+  resolve. Under `pipefail` that failed the assignment; every current call site
+  runs with `errexit` suppressed, so it hid rather than crashed, but it would
+  have taken down any caller that did not.
+
 ## [2.10.7] - 2026-08-23
 
 ### Added
