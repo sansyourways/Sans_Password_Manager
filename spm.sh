@@ -6102,7 +6102,7 @@ p  { margin: 0; }
   font-size: var(--fs-xs); color: var(--text-dim); min-width: 0;
 }
 .vault-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; box-shadow: 0 0 0 3px var(--ok-soft); }
-.vault-chip .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 10px; }
+.vault-chip .path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 10px; }
 
 .main { display: flex; flex-direction: column; min-width: 0; }
 
@@ -6442,7 +6442,11 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 }
 @media (max-width: 620px) {
   .topbar { padding: 0 var(--sp-3); gap: var(--sp-2); }
-  .lockbar .track, .vault-chip .path { display: none; }
+  /* Only the lockbar track is in the narrow main column. The vault chip
+     sits in the sidebar drawer, which is a fixed 272px panel, so hiding
+     its path here left an empty box holding a lone status dot. The path
+     already ellipsises, which is the right degradation. */
+  .lockbar .track { display: none; }
   .totp-code { font-size: 34px; }
   .stats { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--sp-3); }
   .stat { padding: var(--sp-3) var(--sp-4); gap: var(--sp-3); }
@@ -6557,14 +6561,30 @@ body::before { content:""; position:fixed; inset:0; pointer-events:none; opacity
 
 @media print { .sidebar, .topbar, .page-actions, #toast { display: none !important; } .app { grid-template-columns: 1fr; } }
 
-/* Launched from an iOS home screen there is no browser chrome, so the home
-   indicator and the status bar sit on top of the page unless the safe area
-   insets are honoured. Scoped to standalone so tab rendering is untouched. */
-@media (display-mode: standalone) {
-  body { padding-bottom: env(safe-area-inset-bottom); }
-  .topbar { padding-top: env(safe-area-inset-top); }
-  .sidebar { padding-top: calc(var(--sp-4) + env(safe-area-inset-top)); }
+/* viewport-fit=cover lets the page paint under the status bar, the notch and
+   the home indicator, and a home screen launch has no browser chrome holding
+   them off. env() resolves to 0 wherever the browser already reserves that
+   space, so these are unconditional rather than scoped to standalone.
+
+   The sidebar needs insets of its own: under 900px it is position:fixed, so
+   padding on body does not reach it. It also cannot keep height:100vh, which
+   on iOS measures the largest possible viewport rather than the visible one
+   and pushed .sidebar-foot -- the vault chip and the logout button -- off the
+   bottom of the screen. 100dvh tracks the viewport actually on display, and
+   browsers without dvh keep the 100vh above. */
+.sidebar {
+  height: 100dvh;
+  padding-top: calc(var(--sp-4) + env(safe-area-inset-top));
+  padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom));
+  padding-left: calc(var(--sp-4) + env(safe-area-inset-left));
 }
+/* The topbar sets an explicit height and box-sizing is border-box, so the
+   inset has to grow the box or it would eat into the row and squash it. */
+.topbar {
+  height: calc(var(--topbar-h) + env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top);
+}
+body { padding-bottom: env(safe-area-inset-bottom); }
 </style>
 """
 

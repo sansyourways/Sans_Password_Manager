@@ -112,7 +112,11 @@ grep -q -- '--motion-base: 200ms' "$web_script"
 grep -q 'rel="apple-touch-icon"' "$web_script"
 grep -q 'rel="manifest" href="/manifest.webmanifest"' "$web_script"
 grep -q 'APP_ICON_PNG = base64.b64decode' "$web_script"
-grep -q 'display-mode: standalone' "$web_script"
+# The mobile sidebar is position:fixed, so it needs its own safe-area inset,
+# and height:100vh measures the largest viewport on iOS rather than the visible
+# one, which pushed the vault chip and logout button off the bottom.
+grep -q 'height: 100dvh' "$web_script"
+grep -q 'padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom))' "$web_script"
 grep -q 'prefers-reduced-motion:reduce' "$web_script"
 PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 -m py_compile \
 	"$web_script" "$ROOT_DIR/browser-extension/native_host.py"

@@ -26,6 +26,16 @@ Keep-a-Changelog style format.
   through to that gate, which replies with the login page as HTTP 200 rather
   than redirecting, so these requests were previously served HTML with a
   `text/html` content type.
+- The mobile navigation drawer no longer cuts off its footer. It is
+  `position: fixed`, so padding on `body` never reached it, and `height: 100vh`
+  measures the largest possible viewport on iOS rather than the visible one,
+  which pushed the vault chip and the logout button below the bottom of the
+  screen when launched from the home screen. It now uses `100dvh` and carries
+  its own safe-area insets.
+- The vault path is shown again in the drawer footer. A `max-width: 620px` rule
+  hid it, but the chip lives in the drawer, which is a fixed 272px panel whose
+  width does not follow the viewport, so the rule left an empty box holding a
+  lone status dot. The path now ellipsises instead.
 
 ## [2.10.5] - 2026-08-19
 
