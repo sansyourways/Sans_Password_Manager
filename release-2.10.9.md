@@ -28,4 +28,19 @@ Keep that file — certbot reads it again at every renewal.
 Only Cloudflare is wired up. Other DNS providers have certbot plugins, but SPM
 does not drive them yet.
 
+## Also fixed: writes from an iPhone
+
+Adding or editing anything in Web Mode from an iPhone failed with
+`403 Cross-origin write rejected`. Authenticated writes were authorised by
+comparing `Origin` against `Host`, and Safari omits `Origin` on same-origin
+form submissions -- so the check saw no origin and refused. Logging in still
+worked, because that path runs before the check, which is why the vault looked
+fine until the first write.
+
+Writes now carry a per-session CSRF token, generated at login and stamped into
+every POST form centrally so a form added later cannot ship without one.
+`Origin` is still enforced when the browser sends it, and a present-but-foreign
+origin is refused whatever token the body carries. `Referer` could not cover
+the gap, because Web Mode sends `Referrer-Policy: no-referrer`.
+
 There are no vault-format, encryption, or CLI behavior changes.

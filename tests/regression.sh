@@ -260,6 +260,19 @@ grep -q 'APP_ICON_PNG = base64.b64decode' "$web_script"
 grep -q 'height: 100dvh' "$web_script"
 grep -q 'padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom))' "$web_script"
 grep -q 'prefers-reduced-motion:reduce' "$web_script"
+# Safari omits Origin on same-origin form submissions, so an Origin-only check
+# rejected every authenticated write from an iPhone with a 403. Referer cannot
+# cover the gap because this server sends Referrer-Policy: no-referrer, so a
+# per-session CSRF token carries the check and Origin is the second layer.
+grep -q '"csrf": secrets.token_hex(32)' "$web_script"
+grep -q 'def _write_authorized' "$web_script"
+grep -q 'hmac.compare_digest' "$web_script"
+# Stamped centrally in _send_html so a form added later cannot ship untokenised.
+grep -q '_POST_FORM_RE' "$web_script"
+if grep -q 'if not self._same_origin_post():' "$web_script"; then
+	printf 'authenticated writes still gate on Origin alone\n' >&2
+	exit 1
+fi
 PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 -m py_compile \
 	"$web_script" "$ROOT_DIR/browser-extension/native_host.py"
 SPM_VAULT_PATH="$PASSWORD_VAULT" SPM_WEB_BIND=127.0.0.1 \
