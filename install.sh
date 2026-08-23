@@ -54,13 +54,19 @@ profile_for_shell() {
 		bash)
 			# macOS terminals start login shells, which read .bash_profile and
 			# never .bashrc; most Linux terminals do the opposite.
-			if [ "$(uname -s)" = "Darwin" ] && [ -f "$HOME/.bash_profile" ]; then
+			if [ "$(uname -s)" = "Darwin" ]; then
 				printf '%s\n' "$HOME/.bash_profile"
 			else
 				printf '%s\n' "$HOME/.bashrc"
 			fi ;;
 		*) printf '%s\n' "$HOME/.profile" ;;
 	esac
+}
+
+shell_quote() {
+	# POSIX and Fish both accept single-quoted path literals. Replace every
+	# embedded quote with: close quote, escaped quote, reopen quote.
+	printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
 ensure_on_path() {
@@ -83,8 +89,12 @@ ensure_on_path() {
 		return 0
 	fi
 	profile="$(profile_for_shell)"
-	marker="# added by the Sans Password Manager installer"
-	if [ -f "$profile" ] && grep -Fq "$marker" "$profile"; then
+	case "$profile" in
+		*.fish) line="fish_add_path -- $(shell_quote "$dir")" ;;
+		*) line="export PATH=$(shell_quote "$dir"):\$PATH" ;;
+	esac
+	marker="# added by the Sans Password Manager installer: $dir"
+	if [ -f "$profile" ] && grep -Fqx "$line" "$profile"; then
 		printf 'PATH        : %s already configured in %s; restart your shell\n' "$dir" "$profile"
 		return 0
 	fi
@@ -92,10 +102,6 @@ ensure_on_path() {
 		printf 'PATH        : could not create %s; add %s to PATH yourself\n' "$(dirname "$profile")" "$dir" >&2
 		return 0
 	}
-	case "$profile" in
-		*.fish) line="fish_add_path $dir" ;;
-		*) line="export PATH=\"$dir:\$PATH\"" ;;
-	esac
 	printf '\n%s\n%s\n' "$marker" "$line" >>"$profile" || {
 		printf 'PATH        : could not write %s; add %s to PATH yourself\n' "$profile" "$dir" >&2
 		return 0
@@ -110,6 +116,11 @@ for command_name in curl sha256sum unzip bash mktemp; do
 		exit 1
 	}
 done
+
+if printf '%s' "$PREFIX" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+	printf 'Invalid prefix: control characters are not allowed.\n' >&2
+	exit 2
+fi
 
 if [ "$VERSION" = "latest" ]; then
 	api_url="https://api.github.com/repos/$REPO/releases/latest"

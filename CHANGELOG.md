@@ -5,6 +5,35 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.10.11] - 2026-08-24
+
+### Security
+- Password generation now fails closed when neither OpenSSL nor
+  `/dev/urandom` is available instead of falling back to Bash's predictable
+  `$RANDOM` generator.
+- Web login throttling is synchronized across request threads, expires stale
+  state, bounds memory usage, and distinguishes visitors behind the local
+  nginx proxy using its validated `X-Real-IP` header.
+- Installer PATH entries are quoted safely and deduplicated by their exact
+  destination rather than a shared marker.
+
+### Fixed
+- Editing a passphrase with the secret field left blank now preserves the
+  correct stored secret. An unreadable stored value stops without modifying
+  the vault instead of silently replacing it.
+- Failed HTTP certificate setup restores the complete prior nginx state;
+  challenge staging failures now stop the flow, and replacing a non-SPM vhost
+  requires explicit confirmation.
+- Bash installs on macOS now target `.bash_profile` even when the file does not
+  exist yet.
+- TOML imports work on Python 3.10 and older through a dependency-free parser
+  for SPM's exported TOML subset.
+
+### Tests
+- Added regressions for blank passphrase edits, proxy-aware login isolation,
+  ACME fail-closed behavior, installer profile/PATH handling, secure random
+  generation, and the TOML compatibility path.
+
 ## [2.10.10] - 2026-08-24
 
 ### Fixed
