@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.10.9"
+VERSION="2.10.10"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -9385,9 +9385,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         is the primary defence and the Origin check is the second layer.
         """
         origin = (self.headers.get("Origin", "") or "").strip()
-        if origin:
-            # Present but wrong is a genuine cross-origin attempt: refuse it
-            # regardless of what token the body carries.
+        # "null" is an opaque origin, not a foreign one: iOS home-screen web
+        # apps send it for their own same-origin form posts, and so do
+        # sandboxed contexts. It carries no information about the sender, so
+        # treat it like an absent origin and let the token decide -- an
+        # attacker in a sandboxed frame still cannot read the token.
+        if origin and origin.lower() != "null":
+            # Present, parseable and wrong is a genuine cross-origin attempt:
+            # refuse it regardless of what token the body carries.
             return self._same_origin_post()
         expected = self._session_csrf()
         supplied = self._body_csrf(raw_body_bytes, data)

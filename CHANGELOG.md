@@ -5,6 +5,20 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.10.10] - 2026-08-24
+
+### Fixed
+- Writes from an iPhone home-screen web app still failed with
+  `403 Cross-origin write rejected` after 2.10.9. Safari sends
+  `Origin: null` for a standalone web app's own same-origin form posts, and
+  the new check treated any non-empty `Origin` as a real origin to match
+  against `Host` — so it took the strict path and refused before ever looking
+  at the CSRF token. `null` is an *opaque* origin: it says the browser will
+  not name the sender, not that the sender is foreign. It is now treated like
+  an absent origin, letting the per-session token decide, which is safe
+  because a sandboxed or cross-origin context cannot read that token.
+  Confirmed from the live request: `POST /add origin="null" -> 403`.
+
 ## [2.10.9] - 2026-08-23
 
 ### Fixed
