@@ -139,6 +139,68 @@ if grep -qE '(sudo )?cp "\$new_spm" "\$target"' "$ROOT_DIR/spm.sh"; then
 fi
 grep -q 'mv -f "$staged" "$target"' "$ROOT_DIR/spm.sh"
 
+# Web Mode domain/TLS binding. These exercise the generators only -- nothing
+# here touches /etc/nginx, runs certbot, or reaches the network.
+domain_is_valid vault.example.com
+domain_is_valid example.co.uk
+if domain_is_valid "not a domain"; then
+	printf 'domain_is_valid accepted a string with spaces\n' >&2
+	exit 1
+fi
+if domain_is_valid "http://example.com/path"; then
+	printf 'domain_is_valid accepted a URL\n' >&2
+	exit 1
+fi
+
+vhost_http="$(domain_render_vhost "vault.example.com www.vault.example.com" 8777 0 http)"
+printf '%s' "$vhost_http" | grep -q 'server_name vault.example.com www.vault.example.com;'
+printf '%s' "$vhost_http" | grep -q 'location /.well-known/acme-challenge/'
+# Phase one runs before any certificate exists, so a TLS block here would make
+# "nginx -t" fail and take the whole reload down with it.
+if printf '%s' "$vhost_http" | grep -q 'listen 443'; then
+	printf 'the pre-certificate vhost already references TLS\n' >&2
+	exit 1
+fi
+if printf '%s' "$vhost_http" | grep -q 'ssl_certificate'; then
+	printf 'the pre-certificate vhost references a certificate that cannot exist yet\n' >&2
+	exit 1
+fi
+
+vhost_tls="$(domain_render_vhost "vault.example.com www.vault.example.com" 8777 0 https)"
+printf '%s' "$vhost_tls" | grep -q 'ssl_certificate     /etc/letsencrypt/live/vault.example.com/fullchain.pem;'
+printf '%s' "$vhost_tls" | grep -q 'return 301 https://\$host\$request_uri;'
+printf '%s' "$vhost_tls" | grep -q 'add_header Strict-Transport-Security'
+# The vault must stay on loopback behind the proxy; a public bind here would
+# expose it beside nginx rather than behind it.
+printf '%s' "$vhost_tls" | grep -q 'proxy_pass http://127.0.0.1:8777;'
+# Without this the server cannot tell it is behind TLS and drops the Secure
+# flag from the session cookie.
+printf '%s' "$vhost_tls" | grep -q 'proxy_set_header X-Forwarded-Proto \$scheme;'
+# The vault already sends these on every response. Sending them again from
+# nginx duplicates the header, and browsers may then ignore X-Frame-Options
+# outright instead of honouring it.
+for header in X-Frame-Options X-Content-Type-Options Referrer-Policy; do
+	if printf '%s' "$vhost_tls" | grep -q "add_header $header"; then
+		printf 'vhost duplicates the %s header the vault already sends\n' "$header" >&2
+		exit 1
+	fi
+done
+if printf '%s' "$vhost_tls" | grep -q 'spm-cloudflare-realip'; then
+	printf 'a DNS-only vhost trusts Cloudflare forwarded addresses\n' >&2
+	exit 1
+fi
+
+# certbot picks the lineage directory from the name set unless it is pinned, so
+# an unpinned request can land in <domain>-0001 while the vhost still points at
+# <domain> and nginx then fails to start.
+grep -q -- '--cert-name "\${names%% \*}"' "$ROOT_DIR/spm.sh"
+# A dry run must stop before the TLS rewrite: no certificate exists after one,
+# and phase three would fail validation.
+grep -q 'Dry run complete: the challenge path works' "$ROOT_DIR/spm.sh"
+# /etc/letsencrypt/live is mode 0700, so an unprivileged -f test reports every
+# certificate as missing.
+grep -q 'sudo test -f "/etc/letsencrypt/live/\$domain/fullchain.pem"' "$ROOT_DIR/spm.sh"
+
 web_script="$(write_spm_web_script)"
 grep -q 'locking = false' "$web_script"
 grep -q 'window.location.replace("/logout")' "$web_script"
