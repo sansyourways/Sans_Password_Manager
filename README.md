@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **2.10.12**
+Current release: **2.10.13**
 
 ---
 
@@ -226,7 +226,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 2.10.12
+bash install.sh --version 2.10.13
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -238,7 +238,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 2.10.12 at /home/you/.local/bin/spm
+Installed SPM 2.10.13 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -715,6 +715,25 @@ Validates:
 - Secure notes integrity  
 - Recovery metadata  
 - RSA key pairing  
+- **Split records** — entries containing a character that Python's
+  `splitlines()` treats as a line break (`U+000B`, `U+000C`, `U+001C`–`U+001E`,
+  `U+0085`, `U+2028`, `U+2029`). Such an entry was written as one record but is
+  read back as two, so it vanishes from Web Mode while still listing correctly
+  in the CLI — the CLI splits on newline only. Releases before 2.10.12 could
+  create these; the scan finds any you already have.
+
+  The scan is read-only. It prints the record type, id, label and the character
+  by Unicode name, never the secret field, and leaves the vault untouched. To
+  repair one, re-save it from the CLI (`spm edit <id>`, or the matching
+  `*-edit` command for notes, passphrases, backup codes and authenticators) so
+  the field passes through the current sanitiser:
+
+  ```
+  [!] 1 record(s) contain a line-break character; 0 leftover fragment(s):
+        line 3     PASSWORD      id=2     My␣Bank            U+2028 LINE SEPARATOR
+      These entries are invisible in Web Mode. The vault was NOT changed.
+  ```
+
 - File permissions on the vault, its `.bak`, the recovery file, and **every
   copy of the RSA private key** — each should be `600`. Anything readable by
   group or others is reported with a ready-to-run `chmod` command. Vaults last
@@ -815,7 +834,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **2.10.12**
+Version: **2.10.13**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down

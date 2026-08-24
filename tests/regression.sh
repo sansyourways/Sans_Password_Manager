@@ -482,5 +482,38 @@ PYCHK
 # that the running version was current.
 grep -cF 's/.*"tag_name": *"v?([^"]+)".*/\1/' "$ROOT_DIR/spm.sh" | grep -qx 2
 
+# doctor's split-record scan: it must find a record carrying a line-break
+# character, name the character, never print the secret field, and leave the
+# vault byte-identical.
+printf 'META_RECOVERY_PUBKEY\tdGVzdA==\t-\t-\t-\t-\n' > "$TEST_ROOT/broken-plain"
+printf '1\tHealthy\talice\tCleanSecret1\tnotes\t2026-01-01T00:00:00Z\n' >> "$TEST_ROOT/broken-plain"
+printf '2\tMy\342\200\250Bank\tbob\tHiddenSecret2\tnotes\t2026-01-01T00:00:00Z\n' >> "$TEST_ROOT/broken-plain"
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+	--symmetric --cipher-algo AES256 -o "$TEST_ROOT/broken.gpg" "$TEST_ROOT/broken-plain"
+chmod 600 "$TEST_ROOT/broken.gpg"
+broken_before="$(sha256sum "$TEST_ROOT/broken.gpg" | cut -d' ' -f1)"
+doctor_scan_broken_records "$TEST_ROOT/broken-plain" > "$TEST_ROOT/scan.out"
+grep -q '^BROKEN' "$TEST_ROOT/scan.out"
+grep -q 'U+2028' "$TEST_ROOT/scan.out"
+# Built with awk rather than a \t escape: the pattern must match a literal tab
+# whichever grep implementation is on PATH.
+awk -F '\t' '$1=="SUMMARY" && $2==1 && $3==0 { found=1 } END { exit found?0:1 }' \
+	"$TEST_ROOT/scan.out"
+# The clean record must not be reported, and no secret may appear in the output.
+# Written as `if !`, not `grep ... && { exit 1; }`: under errexit the latter
+# aborts the suite when grep simply finds nothing.
+if grep -q 'Healthy' "$TEST_ROOT/scan.out"; then
+	printf 'scan flagged a clean record\n' >&2; exit 1
+fi
+if grep -qE 'HiddenSecret2|CleanSecret1' "$TEST_ROOT/scan.out"; then
+	printf 'doctor scan leaked a secret field\n' >&2; exit 1
+fi
+[ "$(sha256sum "$TEST_ROOT/broken.gpg" | cut -d' ' -f1)" = "$broken_before" ] \
+	|| { printf 'doctor scan modified the vault\n' >&2; exit 1; }
+# a vault with no break characters reports nothing
+doctor_scan_broken_records "$PLAIN" > "$TEST_ROOT/scan-clean.out"
+awk -F '\t' '$1=="SUMMARY" && $2==0 && $3==0 { found=1 } END { exit found?0:1 }' \
+	"$TEST_ROOT/scan-clean.out"
+
 printf 'SPM regression suite passed (%s formats plus web and advanced features).\n' \
 	"$(printf '%s\n' "$formats" | awk '{ print NF }')"
