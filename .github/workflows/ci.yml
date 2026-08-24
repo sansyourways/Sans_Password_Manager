@@ -38,6 +38,8 @@ jobs:
         run: |
           bash -n spm.sh install.sh tests/regression.sh tests/dco-check.sh
           shellcheck -x -S warning spm.sh install.sh tests/regression.sh tests/dco-check.sh
+          # Cheapest gate there is, and it was not being enforced.
+          git diff --check "$(git rev-list --max-parents=0 HEAD | tail -n1)"..HEAD
 
       - name: Disposable-vault regression suite
         run: |

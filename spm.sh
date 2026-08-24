@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.10.11"
+VERSION="2.10.12"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -23,7 +23,15 @@ MASTER_PW=""
 # Registry of temp files holding decrypted vault material.
 # A file (not an array) because make_tmp is called via $(...) subshells,
 # whose variable writes would be discarded. Wiped by cleanup() on any exit.
-SPM_TMP_REGISTRY="${TMPDIR:-/tmp}/.spm_tmpreg.$$"
+# Deliberately not "${TMPDIR:-/tmp}/.spm_tmpreg.$$": that path is guessable, and
+# cleanup() feeds every line of this file to shred. A local user who pre-created
+# it chose which files SPM destroyed. mktemp gives an unpredictable name and
+# fails if it somehow exists. Created here rather than on first use because
+# make_tmp runs inside command substitution, where an assignment would be lost.
+SPM_TMP_REGISTRY="$(mktemp "${TMPDIR:-/tmp}/.spm_tmpreg.XXXXXX" 2>/dev/null)" || SPM_TMP_REGISTRY=""
+if [ -n "$SPM_TMP_REGISTRY" ]; then
+	chmod 600 "$SPM_TMP_REGISTRY" 2>/dev/null || true
+fi
 # Language: en / id (can be pre-set via env SPM_LANG)
 SPM_LANG="${SPM_LANG:-}"
 
@@ -107,7 +115,12 @@ now_iso() {
 # stored whole but read back truncated at the TAB, with the remainder bleeding
 # into the next column. Collapse both to a space before any field is written.
 sanitize_field() {
-	printf '%s' "$1" | tr '\t\r\n' '   '
+	# Collapse every character Python's splitlines() honours, not just the three
+	# ASCII ones: the web server reads this vault back with splitlines(), so a
+	# field holding U+2028 was written here and silently split there.
+	printf '%s' "$1" \
+		| tr '\t\r\n\v\f\034\035\036' '        ' \
+		| sed 's/\xc2\x85/ /g; s/\xe2\x80\xa8/ /g; s/\xe2\x80\xa9/ /g'
 }
 
 validate_bundle_name() {
@@ -191,10 +204,10 @@ sensitive_files() {
 make_tmp() {
 	require_cmd mktemp
 	local tmp
+	[ -n "${SPM_TMP_REGISTRY:-}" ] || die "Temporary-file registry is unavailable; refusing to write decrypted data."
 	tmp="$(mktemp "${TMPDIR:-/tmp}/spm.XXXXXX")"
 	chmod 600 "$tmp" 2>/dev/null || true
 	printf '%s\n' "$tmp" >>"$SPM_TMP_REGISTRY" 2>/dev/null || true
-	chmod 600 "$SPM_TMP_REGISTRY" 2>/dev/null || true
 	printf '%s\n' "$tmp"
 }
 
@@ -211,27 +224,27 @@ secure_wipe() {
 
 print_banner() {
 	cat <<'EOF'
-                                                             
-      *******            ***** **         *****   **    **   
-    *       ***       ******  ****     ******  ***** *****   
-   *         **      **   *  *  ***   **   *  *  ***** ***** 
-   **        *      *    *  *    *** *    *  *   * **  * **  
-    ***                 *  *      **     *  *    *     *     
-   ** ***              ** **      **    ** **    *     *     
-    *** ***            ** **      **    ** **    *     *     
-      *** ***        **** **      *     ** **    *     *     
-        *** ***     * *** **     *      ** **    *     *     
-          ** ***       ** *******       ** **    *     **    
-           ** **       ** ******        *  **    *     **    
-            * *        ** **               *     *      **   
-  ***        *         ** **           ****      *      **   
- *  *********          ** **          *  *****           **  
-*     *****       **   ** **         *     **                
-*                ***   *  *          *                       
- **               ***    *            **                     
-                   ******                                    
-                     ***                                     
-                                                             
+
+      *******            ***** **         *****   **    **
+    *       ***       ******  ****     ******  ***** *****
+   *         **      **   *  *  ***   **   *  *  ***** *****
+   **        *      *    *  *    *** *    *  *   * **  * **
+    ***                 *  *      **     *  *    *     *
+   ** ***              ** **      **    ** **    *     *
+    *** ***            ** **      **    ** **    *     *
+      *** ***        **** **      *     ** **    *     *
+        *** ***     * *** **     *      ** **    *     *
+          ** ***       ** *******       ** **    *     **
+           ** **       ** ******        *  **    *     **
+            * *        ** **               *     *      **
+  ***        *         ** **           ****      *      **
+ *  *********          ** **          *  *****           **
+*     *****       **   ** **         *     **
+*                ***   *  *          *
+ **               ***    *            **
+                   ******
+                     ***
+
 EOF
 	local year
 	year="$(date +%Y 2>/dev/null || echo "2025")"
@@ -766,8 +779,12 @@ encrypt_file_to_vault() {
 		cp "$VAULT_FILE" "${VAULT_FILE}.bak" || { secure_wipe "$tmp_cipher"; die "Failed to preserve the previous vault."; }
 		chmod 600 "${VAULT_FILE}.bak" 2>/dev/null || true
 	fi
+	# The rename is atomic but not durable on its own: flush the ciphertext first
+	# so a crash cannot leave the new name pointing at unwritten blocks.
+	sync "$tmp_cipher" 2>/dev/null || sync 2>/dev/null || true
 	mv -f "$tmp_cipher" "$VAULT_FILE" || { secure_wipe "$tmp_cipher"; die "Failed to install the encrypted vault."; }
 	chmod 600 "$VAULT_FILE" 2>/dev/null || true
+	sync "$vault_dir" 2>/dev/null || sync 2>/dev/null || true
 	if ! ( maybe_auto_backup ); then
 		printf 'Warning: vault write succeeded, but the automatic backup failed.\n' >&2
 	fi
@@ -1645,7 +1662,12 @@ cmd_edit() {
 		printf "# Meta row     : META_RECOVERY_PUBKEY...\n" >&2
 	fi
 
-	"$EDITOR_CMD" "$tmp"
+	# EDITOR commonly carries arguments ("code --wait"); running the whole value
+	# as one executable name made every such configuration fail.
+	local editor_argv=()
+	read -r -a editor_argv <<<"$EDITOR_CMD"
+	[ "${#editor_argv[@]}" -gt 0 ] || editor_argv=(nano)
+	"${editor_argv[@]}" "$tmp"
 
 	encrypt_file_to_vault "$tmp"
 	secure_wipe "$tmp"
@@ -3186,7 +3208,9 @@ cmd_update() {
 	fi
 
 	local latest_tag html_url
-	latest_tag="$(printf '%s\n' "$json" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')" || true
+	# The leading "v" has to come off here too: without it the comparison below
+	# never matched and every run offered to reinstall the running version.
+	latest_tag="$(printf '%s\n' "$json" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"v?([^"]+)".*/\1/')" || true
 	html_url="$(printf '%s\n' "$json" | grep -m1 '"html_url"' | sed -E 's/.*"html_url": *"([^"]+)".*/\1/')" || true
 
 	if [ -z "$latest_tag" ]; then
@@ -3268,9 +3292,12 @@ cmd_update() {
 	fi
 
 	local tmpdir
+	# No predictable fallback here: "mkdir -p" succeeds on a directory somebody
+	# else already owns, and the release would then be unpacked from it. Refusing
+	# to self-update is the safe outcome.
 	if ! tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/spm_update.XXXXXX" 2>/dev/null)"; then
-		tmpdir="${TMPDIR:-/tmp}/spm_update.$$"
-		mkdir -p "$tmpdir"
+		printf 'Could not create a private temporary directory; update aborted.\n' >&2
+		return 1
 	fi
 	local zip_path="$tmpdir/spm_latest.zip"
 	local sha_path="$tmpdir/archive.sha256"
@@ -3999,16 +4026,42 @@ from html.parser import HTMLParser
 fmt, src_path, vault_path = sys.argv[1:]
 
 def load_vault_lines(path):
-    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return [ln.rstrip("\n") for ln in f]
 
 lines = load_vault_lines(vault_path)
 
+# Every character str.splitlines() treats as a line break. Stripping only
+# \t \r \n left eight more that pass through and split a record on read, so the
+# entry silently vanished from the vault. Keep this in step with _VAULT_BREAKS
+# in the web server.
+_VAULT_BREAKS = "\t\r\n\v\f\x1c\x1d\x1e\x85\u2028\u2029"
+
+def _read_text(path):
+    # errors="ignore" silently dropped every non-UTF-8 byte, so a cp1252 export
+    # imported as success with characters missing from the stored secrets.
+    # Fail closed and say exactly how to convert instead.
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        line = raw.count(b"\n", 0, exc.start) + 1
+        raise SystemExit(
+            "Import aborted: %s is not valid UTF-8 (byte 0x%02x at line %d).\n"
+            "Nothing was written to the vault. Convert it first, for example:\n"
+            "  iconv -f WINDOWS-1252 -t UTF-8 %s > converted.csv"
+            % (path, raw[exc.start], line, path)
+        )
+
 def _vf(value):
     # Vault records are TAB-delimited and line-based, so a field holding a raw
-    # TAB or newline splits the record. Quoted multi-line notes are ordinary in
-    # CSV exports from other managers, and used to land as extra broken rows.
-    return str(value or "").replace("\t", " ").replace("\r", " ").replace("\n", " ")
+    # separator splits the record. Quoted multi-line notes are ordinary in CSV
+    # exports from other managers, and used to land as extra broken rows.
+    text = str(value or "")
+    for ch in _VAULT_BREAKS:
+        text = text.replace(ch, " ")
+    return text
 
 def next_id(tag):
     max_id = 0
@@ -4094,23 +4147,22 @@ def add_auth(r):
     ]))
 
 def parse_structured():
-    with open(src_path, "r", encoding="utf-8", errors="ignore") as f:
-        return json.load(f)
+    return json.loads(_read_text(src_path))
 
 def parse_rows():
     if fmt in ("json","jsonc"):
         return parse_structured()
     if fmt in ("ndjson","jsonl"):
         out = []
-        with open(src_path, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
+        for line in _read_text(src_path).splitlines():
+            if True:
                 line=line.strip()
                 if not line: continue
                 out.append(json.loads(line))
         return out
     delim = "," if fmt in ("csv","csv-noheader","jsonc") else ";" if fmt=="scsv" else "\t" if fmt=="tsv" else "|"
     rows=[]
-    with open(src_path,"r",encoding="utf-8",errors="ignore",newline="") as f:
+    with io.StringIO(_read_text(src_path), newline="") as f:
         reader = csv.DictReader(f, delimiter=delim) if fmt!="csv-noheader" else csv.reader(f, delimiter=delim)
         if fmt=="csv-noheader":
             for row in reader:
@@ -4129,8 +4181,7 @@ def parse_rows():
     return rows
 
 def parse_advanced_rows():
-    with open(src_path, "r", encoding="utf-8", errors="ignore") as f:
-        content = f.read()
+    content = _read_text(src_path)
     if fmt in ("txt",):
         return list(csv.DictReader(io.StringIO(content), delimiter=","))
     if fmt in ("md", "markdown", "org", "rst"):
@@ -4244,6 +4295,7 @@ if not rows:
     raise ValueError("No records detected in import.")
 
 added = 0
+skipped = {}
 for row in rows:
     t = (row.get("type","") or "").lower()
     if t in ("password","pass"):
@@ -4261,9 +4313,19 @@ for row in rows:
     elif t in ("authenticator","auth"):
         add_auth(row)
         added += 1
+    else:
+        # Rows used to be dropped in silence, so a partial import looked
+        # identical to a complete one. Name the types that were not understood.
+        skipped[t or "(blank)"] = skipped.get(t or "(blank)", 0) + 1
 
 if added == 0:
     raise ValueError("No supported records found in import.")
+
+sys.stderr.write("Imported %d of %d record(s).\n" % (added, len(rows)))
+if skipped:
+    detail = ", ".join("%s x%d" % (k, v) for k, v in sorted(skipped.items()))
+    sys.stderr.write("Skipped %d record(s) with unrecognised type: %s\n"
+                     % (sum(skipped.values()), detail))
 
 with open(vault_path, "w", encoding="utf-8") as f:
     for ln in lines:
@@ -6015,6 +6077,7 @@ import tempfile
 import shutil
 import fcntl
 import ipaddress
+import hashlib
 
 VAULT_PATH = os.environ.get("SPM_VAULT_PATH")
 BIND_ADDR  = os.environ.get("SPM_WEB_BIND", "127.0.0.1")
@@ -6050,11 +6113,17 @@ def sanitize_lang(value):
         return value
     return DEFAULT_WEB_LANG
 
+# str.splitlines() breaks on eleven characters; collapsing only \t \r \n let the
+# other eight split a record when it was read back, dropping the entry.
+_VAULT_BREAKS = "\t\r\n\v\f\x1c\x1d\x1e\x85\u2028\u2029"
+
 def _vf(value):
-    # Vault records are TAB-delimited and line-based. Tabs were already being
-    # stripped here, but a newline slipped through and split one entry into two
-    # broken records, so collapse both.
-    return str(value or "").replace("\t", " ").replace("\r", " ").replace("\n", " ")
+    # Vault records are TAB-delimited and line-based, so any character that
+    # splitlines() honours has to be collapsed before the record is written.
+    text = str(value or "")
+    for ch in _VAULT_BREAKS:
+        text = text.replace(ch, " ")
+    return text
 
 def fetch_latest_version():
     now = time.time()
@@ -6720,6 +6789,34 @@ I18N_SCRIPT = """
     getLang: function() { return current; },
     apply: applyTranslations
   };
+})();
+
+// Inline handlers were removed so the CSP no longer needs 'unsafe-inline'.
+// One delegated listener covers every control, including markup added later.
+(function () {
+  document.addEventListener("click", function (ev) {
+    const el = ev.target.closest("[data-act]");
+    if (!el) return;
+    const act = el.getAttribute("data-act");
+    const id = el.getAttribute("data-target");
+    const node = id ? document.getElementById(id) : null;
+    if (act === "nav") { if (window.SPM_toggleNav) SPM_toggleNav(); }
+    else if (act === "reveal") { if (window.SPM_reveal) SPM_reveal(id, el); }
+    else if (act === "copy-val") { if (node && window.SPM_copy) SPM_copy(node.dataset.val); }
+    else if (act === "copy-text") { if (node && window.SPM_copy) SPM_copy(node.textContent); }
+    else if (act === "regen") { if (window.SPM_regen) SPM_regen(); }
+    else if (act === "copy-pw") { if (window.SPM_copyPw) SPM_copyPw(); }
+    else return;
+    ev.preventDefault();
+  });
+  document.addEventListener("submit", function (ev) {
+    const form = ev.target.closest("form[data-confirm-key]");
+    if (!form) return;
+    const key = form.getAttribute("data-confirm-key");
+    const fallback = form.getAttribute("data-confirm-text") || "";
+    const text = window.SPM_I18N ? SPM_I18N.t(key, fallback) : fallback;
+    if (!confirm(text)) ev.preventDefault();
+  });
 })();
 </script>
 """
@@ -7743,7 +7840,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
 <body class="theme-dark">
 {ICON_SPRITE}
 <a class="skip-link" href="#main-content">Skip to vault content</a>
-<div class="scrim" onclick="SPM_toggleNav()"></div>
+<div class="scrim" data-act="nav"></div>
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
@@ -7768,7 +7865,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
 
   <div class="main">
     <header class="topbar">
-      <button class="icon-btn menu-btn" onclick="SPM_toggleNav()" aria-label="Menu" aria-expanded="false">{_icon("menu", "icon icon-sm")}</button>
+      <button class="icon-btn menu-btn" data-act="nav" aria-label="Menu" aria-expanded="false">{_icon("menu", "icon icon-sm")}</button>
       {search_html}
       <div class="topbar-right">
         <div class="lockbar" id="lockbar" title="Idle auto-lock">
@@ -7821,7 +7918,7 @@ def _actions(view_href, edit_href, delete_action, item_id, confirm_key, confirm_
     if delete_action:
         bits.append(
             f'<form class="inline" method="post" action="{delete_action}" '
-            f'onsubmit="return confirm(SPM_I18N.t(\'{confirm_key}\',\'{confirm_text}\'));">'
+            f'data-confirm-key="{confirm_key}" data-confirm-text="{html.escape(confirm_text, quote=True)}">'
             f'<input type="hidden" name="id" value="{item_id}">'
             f'<button type="submit" class="icon-btn danger" title="Delete" aria-label="Delete">{_icon("trash", "icon icon-sm")}</button>'
             f'</form>'
@@ -8152,8 +8249,8 @@ def _secret_block(value, label_key, label, elem_id):
   <label data-i18n="{label_key}">{label}</label>
   <div class="secret">
     <span class="secret-val masked" id="{elem_id}" data-val="{html.escape(value)}">{"•" * min(len(value), 24) if value else "&mdash;"}</span>
-    <button class="icon-btn" type="button" onclick="SPM_reveal('{elem_id}', this)" data-title-show="Show" aria-label="Show">{_icon("view", "icon icon-sm")}</button>
-    <button class="icon-btn" type="button" onclick="SPM_copy(document.getElementById('{elem_id}').dataset.val)" aria-label="Copy">{_icon("copy", "icon icon-sm")}</button>
+    <button class="icon-btn" type="button" data-act="reveal" data-target="{elem_id}" data-title-show="Show" aria-label="Show">{_icon("view", "icon icon-sm")}</button>
+    <button class="icon-btn" type="button" data-act="copy-val" data-target="{elem_id}" aria-label="Copy">{_icon("copy", "icon icon-sm")}</button>
   </div>
 </div>"""
 
@@ -8203,7 +8300,7 @@ def view_entry_page(parts):
 <div class="card" style="max-width:680px"><div class="card-body">
   <div class="field"><label data-i18n="view.label.username">Username</label>
     <div class="secret"><span class="secret-val" id="username-value">{user or "&mdash;"}</span>
-    <button class="icon-btn" type="button" onclick="SPM_copy(document.getElementById('username-value').textContent)" aria-label="Copy">{_icon("copy", "icon icon-sm")}</button></div>
+    <button class="icon-btn" type="button" data-act="copy-text" data-target="username-value" aria-label="Copy">{_icon("copy", "icon icon-sm")}</button></div>
   </div>
   {_secret_block(pw, "view.label.password", "Password", "pw")}
   <div class="field"><label data-i18n="view.label.notes">Notes</label>
@@ -8450,8 +8547,8 @@ def generator_page():
     <div class="faint" id="pw-stats" style="margin-top:var(--sp-3);text-align:center"
          data-i18n="generator.stats.placeholder">Adjust the options to see strength.</div>
     <div class="form-actions" style="justify-content:center">
-      <button class="btn btn-primary" type="button" onclick="SPM_regen()" data-i18n="generator.btn.regen">Regenerate</button>
-      <button class="btn" type="button" onclick="SPM_copyPw()" data-i18n="generator.btn.copy">Copy</button>
+      <button class="btn btn-primary" type="button" data-act="regen" data-i18n="generator.btn.regen">Regenerate</button>
+      <button class="btn" type="button" data-act="copy-pw" data-i18n="generator.btn.copy">Copy</button>
     </div>
   </div></div>
 
@@ -8571,7 +8668,7 @@ def auth_view_page(aid, label, secret, period, algo, created):
     <div class="totp-code" id="code">------</div>
     <div class="totp-ring" id="ring"><i></i></div>
     <div class="faint" id="cd" data-i18n="auth.status.no_code">Waiting for code...</div>
-    <button class="btn btn-primary" type="button" onclick="SPM_copy(document.getElementById('code').textContent)"
+    <button class="btn btn-primary" type="button" data-act="copy-text" data-target="code"
             data-i18n="btn.copy_code">Copy code</button>
   </div>
   <div class="card-body" style="border-top:1px solid var(--border)">
@@ -8657,6 +8754,60 @@ def decrypt_vault(master: str) -> str:
     finally:
         os.close(pw_fd)
 
+def _fsync_path(path):
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+def _fsync_dir(path):
+    # A directory fsync is what makes the rename itself survive a crash. Not
+    # every filesystem permits it, so a refusal must not fail the write.
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+def _archive_vault_generation():
+    """Mirror the CLI's encrypted history so Web Mode edits are recoverable.
+
+    history-list / history-restore used to see nothing at all from Web Mode,
+    which left a single .bak generation as the only undo for the primary client.
+    """
+    try:
+        keep = int(os.environ.get("SPM_HISTORY_RETENTION", "20"))
+        if keep <= 0:
+            keep = 20
+    except ValueError:
+        keep = 20
+    data_dir = os.environ.get("SPM_DATA_DIR") or os.path.join(
+        os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share"), "spm")
+    try:
+        scope = hashlib.sha256(os.path.abspath(VAULT_PATH).encode("utf-8")).hexdigest()[:16]
+        hist = os.path.join(data_dir, "history", scope)
+        os.makedirs(hist, exist_ok=True)
+        os.chmod(hist, 0o700)
+        digest = hashlib.sha256(open(VAULT_PATH, "rb").read()).hexdigest()[:12]
+        stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+        dest = os.path.join(hist, "%s.%d.%s.gpg" % (stamp, os.getpid(), digest))
+        shutil.copy2(VAULT_PATH, dest)
+        os.chmod(dest, 0o600)
+        snaps = sorted(
+            (os.path.join(hist, n) for n in os.listdir(hist) if n.endswith(".gpg")),
+            key=lambda q: os.stat(q).st_mtime, reverse=True)
+        for old_snap in snaps[keep:]:
+            os.remove(old_snap)
+    except Exception:
+        # History is a convenience; never let it block or fail a vault write.
+        pass
+
 def encrypt_vault(master: str, plaintext: str) -> None:
     vault_dir = os.path.dirname(os.path.abspath(VAULT_PATH)) or "."
     vault_name = os.path.basename(VAULT_PATH)
@@ -8684,8 +8835,14 @@ def encrypt_vault(master: str, plaintext: str) -> None:
         if os.path.exists(VAULT_PATH):
             shutil.copy2(VAULT_PATH, VAULT_PATH + ".bak")
             os.chmod(VAULT_PATH + ".bak", 0o600)
+            _archive_vault_generation()
         os.chmod(tmp_path, 0o600)
+        # Rename is atomic but not durable: without flushing the data first a
+        # crash can land the new name over unwritten blocks. Sync the file, then
+        # the directory that records the rename.
+        _fsync_path(tmp_path)
         os.replace(tmp_path, VAULT_PATH)
+        _fsync_dir(vault_dir)
     except subprocess.TimeoutExpired:
         p.kill()
         if os.path.exists(tmp_path):
@@ -9265,9 +9422,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        # script-src carried 'unsafe-inline' until every inline handler was
+        # replaced by a delegated listener. The remaining <script> blocks are
+        # stamped with this response's nonce in _send_html.
+        nonce = getattr(self, "_csp_nonce", "")
+        script_src = "'self' 'nonce-%s'" % nonce if nonce else "'self'"
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "default-src 'self'; script-src " + script_src + "; "
             "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
             "connect-src 'self'; object-src 'none'; base-uri 'none'; "
             "frame-ancestors 'none'; form-action 'self'",
@@ -9275,11 +9437,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         super().end_headers()
 
     _POST_FORM_RE = re.compile(r'(<form\b[^>]*\bmethod="post"[^>]*>)', re.IGNORECASE)
+    _SCRIPT_RE = re.compile(r'<script(?![^>]*\bnonce=)([^>]*)>', re.IGNORECASE)
 
     def _send_html(self, code, body):
         lang = html.escape(self._get_lang())
         if "__LANG__" in body:
             body = body.replace("__LANG__", lang)
+        # A fresh nonce per response, stamped centrally so a page added later
+        # cannot ship a script the CSP will refuse.
+        self._csp_nonce = secrets.token_urlsafe(16)
+        body = self._SCRIPT_RE.sub(
+            lambda m: '<script nonce="%s"%s>' % (self._csp_nonce, m.group(1)), body)
         # Stamp every POST form centrally rather than in each builder, so a
         # form added later cannot silently ship without a token.
         csrf = self._session_csrf()
@@ -10769,7 +10937,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             lines, backups = parse_backup_codes(plaintext)
             idx_to_update = None
             created = ""
+            backups_by_id = {}
             for idx, parts in backups:
+                if len(parts) >= 4:
+                    backups_by_id[parts[1]] = parts[3]
                 if parts[1] == bid:
                     idx_to_update = idx
                     if len(parts) >= 5:
@@ -10788,6 +10959,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 )
                 self._send_html(200, page)
                 return
+            if not codes:
+                # A blank field means "leave them alone", never "erase them".
+                # Recovery codes cannot be regenerated from the vault, so an
+                # unreadable stored value must stop rather than be replaced.
+                stored = backups_by_id.get(bid, "")
+                try:
+                    codes = base64.b64decode(stored.encode("ascii"), validate=True).decode("utf-8", errors="strict")
+                except Exception:
+                    self.send_error(500, "Stored backup codes cannot be decoded; vault was not changed")
+                    return
             encoded = base64.b64encode(codes.encode("utf-8")).decode("ascii")
             lines[idx_to_update] = "\t".join([
                 "BACKUP_CODE",

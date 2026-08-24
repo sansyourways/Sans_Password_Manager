@@ -410,5 +410,77 @@ curl -fsS -D "$TEST_ROOT/import.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
 	-F "file=@$TEST_ROOT/import.csv;type=text/csv" "http://127.0.0.1:$WEB_PORT/import"
 grep -qi '^Location: /?msg=import-ok' "$TEST_ROOT/import.headers"
 
+# --- 2.10.12 integrity regressions -------------------------------------------
+
+# A blank backup-codes field means preserve, never erase. Recovery codes cannot
+# be regenerated from the vault, so this had a worse payload than the
+# passphrase bug above and shipped without the same guard.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/backup-edit.html" \
+	"http://127.0.0.1:$WEB_PORT/backup-codes-edit?id=1"
+csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' "$TEST_ROOT/backup-edit.html" | head -n1)"
+curl -fsS -D "$TEST_ROOT/backup-edit.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
+	-X POST --data-urlencode "csrf=$csrf" --data-urlencode 'label=Renamed codes' \
+	--data-urlencode 'codes=' "http://127.0.0.1:$WEB_PORT/backup-codes-edit?id=1"
+grep -q '302 Found' "$TEST_ROOT/backup-edit.headers"
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
+	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" > "$TEST_ROOT/backup-after"
+awk -F '\t' '$1=="BACKUP_CODE"{print $4}' "$TEST_ROOT/backup-after" | head -n1 | base64 -d \
+	| grep -q . || { printf 'blank backup-code edit erased the stored codes\n' >&2; exit 1; }
+
+# Inline handlers are gone and every script carries this response's nonce, so
+# the CSP no longer needs 'unsafe-inline'.
+curl -fsS -D "$TEST_ROOT/csp.headers" -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/csp.html" \
+	"http://127.0.0.1:$WEB_PORT/"
+grep -i 'content-security-policy' "$TEST_ROOT/csp.headers" | grep -q "script-src 'self' 'nonce-"
+if grep -i 'content-security-policy' "$TEST_ROOT/csp.headers" | grep -q "script-src[^;]*unsafe-inline"; then
+	printf "CSP still allows inline script\n" >&2; exit 1
+fi
+if grep -Eq 'onclick=|onsubmit=' "$TEST_ROOT/csp.html"; then
+	printf 'inline event handler found in generated markup\n' >&2; exit 1
+fi
+csp_nonce="$(sed -n "s/.*script-src 'self' 'nonce-\([A-Za-z0-9_-]*\)'.*/\1/p" "$TEST_ROOT/csp.headers" | head -n1)"
+[ -n "$csp_nonce" ]
+grep -q "<script nonce=\"$csp_nonce\"" "$TEST_ROOT/csp.html"
+
+# Web Mode writes must land in the encrypted history the CLI exposes, not only
+# in the single .bak generation.
+find "$XDG_DATA_HOME/spm/history" -name '*.gpg' 2>/dev/null | grep -q . \
+	|| { printf 'web mode write produced no history snapshot\n' >&2; exit 1; }
+
+# Import must refuse a non-UTF-8 source instead of dropping the bytes it cannot
+# decode, and must leave the vault untouched when it refuses.
+printf 'type,label,username,secret,notes\n' > "$TEST_ROOT/latin1.csv"
+printf 'password,Caf\xe9,jos\xe9,dummy-pw-Gr\xf6\xdfe,notes\n' >> "$TEST_ROOT/latin1.csv"
+cp "$PASSWORD_VAULT" "$TEST_ROOT/vault-before-import.gpg"
+if printf '%s\n' "$AUDIT_PASSWORD" | cmd_import csv "$TEST_ROOT/latin1.csv" >"$TEST_ROOT/import-latin1.log" 2>&1; then
+	printf 'import accepted a non-UTF-8 file\n' >&2; exit 1
+fi
+grep -q 'not valid UTF-8' "$TEST_ROOT/import-latin1.log"
+cmp -s "$PASSWORD_VAULT" "$TEST_ROOT/vault-before-import.gpg" \
+	|| { printf 'refused import still modified the vault\n' >&2; exit 1; }
+
+# Unrecognised record types must be reported, not silently discarded.
+printf 'type,label,username,secret,notes\npassword,Kept,alice,dummy-1,ok\nlogin,Dropped,bob,dummy-2,x\n' \
+	> "$TEST_ROOT/mixed.csv"
+printf '%s\n' "$AUDIT_PASSWORD" | cmd_import csv "$TEST_ROOT/mixed.csv" >"$TEST_ROOT/import-mixed.log" 2>&1
+grep -q 'Skipped 1 record' "$TEST_ROOT/import-mixed.log"
+grep -q 'login' "$TEST_ROOT/import-mixed.log"
+
+# Every character str.splitlines() breaks on has to be collapsed, or the record
+# splits when it is read back and the entry disappears.
+python3 - "$web_script" <<'PYCHK'
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r'_VAULT_BREAKS = "([^"]*)"', src)
+assert m, "_VAULT_BREAKS missing from the generated web server"
+breaks = m.group(1).encode().decode("unicode_escape")
+missing = [c for c in "\t\r\n\v\f\x1c\x1d\x1e\x85\u2028\u2029" if c not in breaks]
+assert not missing, "unhandled line-break characters: %r" % missing
+PYCHK
+
+# The manual updater compared "v2.10.12" with "2.10.12" and so never reported
+# that the running version was current.
+grep -cF 's/.*"tag_name": *"v?([^"]+)".*/\1/' "$ROOT_DIR/spm.sh" | grep -qx 2
+
 printf 'SPM regression suite passed (%s formats plus web and advanced features).\n' \
 	"$(printf '%s\n' "$formats" | awk '{ print NF }')"

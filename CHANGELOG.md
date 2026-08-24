@@ -5,6 +5,53 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.10.12] - 2026-08-24
+
+### Security
+- Vault fields now collapse every character `str.splitlines()` treats as a line
+  break, not just tab, carriage return and newline. A label containing U+2028 or
+  a vertical tab used to split its record in two on read, so the entry vanished
+  from the vault and the next write made the loss permanent.
+- Imports fail closed on a source file that is not valid UTF-8, naming the byte
+  and line and suggesting an `iconv` conversion, instead of dropping every
+  character it could not decode. A cp1252 export previously imported as success
+  with characters missing from the stored secrets.
+- The temporary-file registry is created with `mktemp` rather than at a
+  guessable `$$`-derived path. Because cleanup feeds every line of that file to
+  `shred`, a local user who pre-created it could choose which files SPM
+  destroyed.
+- The self-updater no longer falls back to a predictable temporary directory
+  when `mktemp -d` fails; it aborts, because `mkdir -p` succeeds on a directory
+  somebody else already owns.
+- Web Mode no longer needs `'unsafe-inline'` in its script policy. Inline
+  handlers were replaced by one delegated listener and every remaining script
+  block carries a per-response nonce.
+
+### Fixed
+- Editing backup codes with the field left blank preserves the stored codes.
+  An unreadable stored value now stops without modifying the vault, matching the
+  passphrase behaviour added in 2.10.11. Recovery codes cannot be regenerated
+  from the vault, so the previous silent erase was unrecoverable.
+- Web Mode writes record an encrypted history snapshot, so `history-list` and
+  `history-restore` cover changes made from the browser rather than only the
+  CLI.
+- Vault writes flush the staged ciphertext and its directory before and after
+  the rename, so a crash cannot leave the vault pointing at unwritten blocks.
+- Imports report how many records were stored and name any record types that
+  were not recognised, instead of silently discarding them and reporting
+  success.
+- `spm update` recognises that the running version is current. It compared the
+  release tag `v2.10.12` against the version string `2.10.12` and so always
+  offered to reinstall.
+- `EDITOR` values containing arguments, such as `code --wait`, work when editing
+  the raw vault.
+
+### Tests
+- Added regressions for blank backup-code edits, the CSP nonce and the absence
+  of inline handlers, Web Mode history snapshots, non-UTF-8 import refusal,
+  unrecognised-type reporting, and the line-break character set.
+- `git diff --check` now runs in CI.
+
 ## [2.10.11] - 2026-08-24
 
 ### Security
