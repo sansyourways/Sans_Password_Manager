@@ -5,6 +5,28 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.10.13] - 2026-08-24
+
+### Added
+- `spm doctor` now scans for records that contain a character
+  `str.splitlines()` treats as a line break. Such a record was written as one
+  line but is read back as two, so neither half has enough fields and the entry
+  disappears from Web Mode while still listing correctly in the CLI. 2.10.12
+  stopped new ones being created; this finds any that already exist.
+
+  The scan is strictly read-only. It reports the record type, id, label and the
+  offending character by Unicode name, never prints the secret field, renders
+  any break character in a label as a visible blank rather than the raw
+  character, and leaves the vault byte-identical. Leftover fragments from a
+  record that has already been split are counted separately. Repair is manual:
+  re-save the named entry from the CLI so the field passes through the 2.10.12
+  sanitiser.
+
+### Tests
+- Added a regression asserting the scan finds a seeded U+2028 record, names the
+  character, ignores clean records, never emits a secret value, and does not
+  modify the vault.
+
 ## [2.10.12] - 2026-08-24
 
 ### Security
