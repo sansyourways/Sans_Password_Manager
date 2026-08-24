@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **2.10.13**
+Current release: **2.10.14**
 
 ---
 
@@ -148,8 +148,10 @@ vault or real credential appears in these images.
 - CLI and web import/export across CSV, JSON, TSV, NDJSON, Markdown, HTML,
   YAML, XML, SQL, INI, PSV, RST, TOML, Org, SCSV, JSONC, and related variants
 - Vault-wide security score for weak, reused, old, incomplete, or malformed
-  records
-- Encrypted history, verified manual/automatic backups, and confirmed rollback
+  records, with a Web Mode page listing the entries behind each finding
+- Cross-type search and `#hashtag` tags across every record type
+- Encrypted history, verified manual/automatic backups, and confirmed rollback,
+  restorable from the interactive menu or Web Mode
 - Digest-verified encrypted attachments with a 1 MiB limit
 - Named vault profiles and conflict-aware filesystem synchronization
 - Recipient-encrypted emergency kits with authenticated contents
@@ -226,7 +228,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 2.10.13
+bash install.sh --version 2.10.14
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -238,7 +240,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 2.10.13 at /home/you/.local/bin/spm
+Installed SPM 2.10.14 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -336,6 +338,7 @@ Includes:
 - Secure notes  
 - Recovery  
 - Doctor diagnostics  
+- Vault history (pick an encrypted snapshot by number and restore it)  
 
 ---
 
@@ -834,7 +837,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **2.10.13**
+Version: **2.10.14**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down

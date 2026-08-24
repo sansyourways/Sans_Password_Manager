@@ -5,6 +5,68 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.10.14] - 2026-08-25
+
+### Added
+- **Security page in Web Mode** (`/security`). The overview already computed a
+  security score and rendered it as a tile, but the tile linked to `/` and
+  there was no detail page anywhere, so the number could not be acted on. The
+  page now lists the offending entry IDs per category — weak, reused, due for
+  rotation, missing details, malformed authenticators — each linking to the
+  entry. IDs and labels only; secret fields are never rendered.
+- **History in Web Mode** (`/history`). Lists the encrypted snapshots SPM
+  archives before every change, with a Restore button. Restoring verifies the
+  snapshot opens with the current master password *before* touching the live
+  vault, archives the current vault first, and writes through the same
+  fsync-then-rename path as any other vault write.
+- **`spm history` interactive menu** (main menu item 23). Snapshots are chosen
+  by number instead of typing a generated filename; the confirmation before
+  overwriting a vault is unchanged.
+- **Global search** (`/search?q=`) across passwords, notes, passphrases, backup
+  codes and authenticators. The existing in-page filter is unchanged; pressing
+  Enter escalates to the cross-type search. Search covers labels, names,
+  usernames and IDs — never secret fields, so a query cannot be used to confirm
+  a guessed password.
+- **Tags**, as a `#hashtag` convention inside fields that already exist: a
+  password's service name and notes, and the title or label of every other
+  record type. No schema change, no migration, and export/import are
+  unaffected. Tag chips above the password table drive the existing filter.
+  Secret fields and base64 bodies are never scanned, so a tag can never be a
+  secret.
+- **Rotation badges.** Entries older than `SPM_ROTATION_DAYS` (default 365) are
+  marked in the password list and counted on the overview.
+
+### Fixed
+- `ATTACHMENT` and `PASSKEY` rows were listed as passwords in Web Mode, with
+  their base64 payload sitting in the password column, and were counted in the
+  security score. Web Mode identified a password row by listing every *other*
+  row type by prefix — a denylist that had fallen behind the record types SPM
+  gained since. A password row is now identified the way the CLI identifies
+  one: field 1 is a number.
+- The CLI's `spm security-dashboard` and Web Mode's score were two independent
+  copies of the same weighting and had drifted: the CLI penalised malformed
+  authenticators and Web Mode did not, so the same vault scored differently
+  depending on where you looked. There is now one implementation, and the
+  regression suite asserts the two agree.
+- `spm doctor` printed its duplicate-ID verdict with the empty `[ ]` marker
+  used by in-progress steps, so a passing check read as unfinished. It now
+  reports `[✔]` when clean and `[!]` when duplicates are found.
+
+### Tests
+- Score parity between the CLI dashboard and Web Mode, against a vault seeded
+  with a malformed authenticator so the term that drifted is actually
+  exercised.
+- Global search returns cross-type matches and returns nothing for a query that
+  is a stored password.
+- The security page never echoes a secret.
+- `history-restore` rejects a plain traversal, a percent-encoded traversal and
+  any name that is not a generated snapshot, and refuses a snapshot sealed with
+  a different master password — leaving the vault unmodified in every case.
+- A full restore round-trip returns the vault to its earlier bytes, and the
+  history list is ordered newest-first.
+- Tag parsing ignores `C#` and URL fragments.
+- Every new UI string exists in all three shipped languages.
+
 ## [2.10.13] - 2026-08-24
 
 ### Added

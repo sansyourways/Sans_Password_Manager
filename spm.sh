@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.10.13"
+VERSION="2.10.14"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -3619,12 +3619,22 @@ cmd_doctor() {
 	empty_pw="${rest%%|*}"
 	status_dup="${rest##*|}"
 
+	# The marker has to be chosen after the result is known: this is a verdict
+	# line, not a progress line, so it must not keep the empty "[ ]" that the
+	# in-progress steps use.
+	local dup_mark
+	if [ "$status_dup" = "dup" ]; then
+		dup_mark="[!]"
+	else
+		dup_mark="[✔]"
+	fi
+
 	if [ "$SPM_LANG" = "id" ]; then
 		printf "[✔] Jumlah entry password : %s\n" "$pw_total"
-		printf "[ ] Duplikasi ID          : "
+		printf "%s Duplikasi ID          : " "$dup_mark"
 	else
 		printf "[✔] Password entries count: %s\n" "$pw_total"
-		printf "[ ] Duplicate IDs         : "
+		printf "%s Duplicate IDs         : " "$dup_mark"
 	fi
 
 	if [ "$status_dup" = "dup" ]; then
@@ -6267,6 +6277,37 @@ I18N_SCRIPT = """
 (function() {
   const DICT = {
     "en": {
+      "nav.security": "Security",
+      "nav.history": "History",
+      "security.sub": "What is pulling your vault score down.",
+      "security.scope": "Only password entries are scored. IDs are shown; secrets never are.",
+      "security.none": "Nothing to fix here.",
+      "security.weak": "Weak passwords",
+      "security.weak_d": "Shorter than 12 characters, or using fewer than three character classes.",
+      "security.reused": "Reused passwords",
+      "security.reused_d": "Each row below is one group of entries sharing a password.",
+      "security.aging": "Due for rotation",
+      "security.aging_d": "Older than the rotation threshold:",
+      "security.incomplete": "Missing details",
+      "security.incomplete_d": "No service name or no username.",
+      "security.malformed": "Malformed authenticators",
+      "security.malformed_d": "Missing a secret, or an algorithm SPM cannot generate codes for.",
+      "page.history.desc": "Encrypted vault snapshots kept before each change.",
+      "history.when": "When",
+      "history.size": "Size",
+      "history.name": "Snapshot",
+      "history.newest": "newest",
+      "btn.restore": "Restore",
+      "confirm.restore_snapshot": "Restore this snapshot? The current vault is archived first.",
+      "empty.history.t": "No snapshots yet",
+      "empty.history.d": "SPM archives the vault before each change.",
+      "search.title": "Search",
+      "search.desc": "Look across every record type.",
+      "search.kind": "Type",
+      "empty.search.t": "Nothing found",
+      "empty.search.d": "No label, name or username matches that text.",
+      "badge.aging": "rotate",
+      "tags.all": "All",
       "header.title": "Sans Password Manager",
       "header.subtitle": "Liquid-glass web interface · GPG encrypted",
       "header.check_update": "Check update",
@@ -6456,6 +6497,37 @@ I18N_SCRIPT = """
       "page.backups.desc": "One-time recovery codes for your accounts.",
     },
     "id": {
+      "nav.security": "Keamanan",
+      "nav.history": "Riwayat",
+      "security.sub": "Hal yang menurunkan skor brankas Anda.",
+      "security.scope": "Hanya entry password yang dinilai. ID ditampilkan; rahasia tidak pernah.",
+      "security.none": "Tidak ada yang perlu diperbaiki.",
+      "security.weak": "Password lemah",
+      "security.weak_d": "Kurang dari 12 karakter, atau kurang dari tiga jenis karakter.",
+      "security.reused": "Password dipakai ulang",
+      "security.reused_d": "Tiap baris di bawah adalah satu grup entry dengan password sama.",
+      "security.aging": "Saatnya diganti",
+      "security.aging_d": "Lebih tua dari ambang rotasi:",
+      "security.incomplete": "Detail belum lengkap",
+      "security.incomplete_d": "Tidak ada nama layanan atau username.",
+      "security.malformed": "Authenticator rusak",
+      "security.malformed_d": "Secret hilang, atau algoritma tidak didukung SPM.",
+      "page.history.desc": "Snapshot brankas terenkripsi sebelum tiap perubahan.",
+      "history.when": "Waktu",
+      "history.size": "Ukuran",
+      "history.name": "Snapshot",
+      "history.newest": "terbaru",
+      "btn.restore": "Pulihkan",
+      "confirm.restore_snapshot": "Pulihkan snapshot ini? Brankas saat ini diarsipkan dulu.",
+      "empty.history.t": "Belum ada snapshot",
+      "empty.history.d": "SPM mengarsipkan brankas sebelum tiap perubahan.",
+      "search.title": "Cari",
+      "search.desc": "Cari di semua jenis record.",
+      "search.kind": "Jenis",
+      "empty.search.t": "Tidak ditemukan",
+      "empty.search.d": "Tidak ada label, nama, atau username yang cocok.",
+      "badge.aging": "ganti",
+      "tags.all": "Semua",
       "header.title": "Sans Password Manager",
       "header.subtitle": "Antarmuka web liquid-glass · terenkripsi GPG",
       "header.check_update": "Periksa pembaruan",
@@ -6645,6 +6717,37 @@ I18N_SCRIPT = """
       "page.backups.desc": "Kode pemulihan sekali pakai untuk akun Anda.",
     },
     "ja": {
+      "nav.security": "セキュリティ",
+      "nav.history": "履歴",
+      "security.sub": "ボールトのスコアを下げている項目。",
+      "security.scope": "評価対象はパスワードのみ。IDのみ表示し、シークレットは表示しません。",
+      "security.none": "修正すべき項目はありません。",
+      "security.weak": "弱いパスワード",
+      "security.weak_d": "12文字未満、または文字種が3種類未満。",
+      "security.reused": "使い回しパスワード",
+      "security.reused_d": "以下の各行は同じパスワードを共有するグループです。",
+      "security.aging": "更新が必要",
+      "security.aging_d": "ローテーション期限を超過:",
+      "security.incomplete": "情報が不足",
+      "security.incomplete_d": "サービス名またはユーザー名がありません。",
+      "security.malformed": "不正な認証アプリ",
+      "security.malformed_d": "シークレットが無いか、SPMが対応しないアルゴリズムです。",
+      "page.history.desc": "変更前に保存される暗号化スナップショット。",
+      "history.when": "日時",
+      "history.size": "サイズ",
+      "history.name": "スナップショット",
+      "history.newest": "最新",
+      "btn.restore": "復元",
+      "confirm.restore_snapshot": "このスナップショットを復元しますか？現在のボールトは先に保存されます。",
+      "empty.history.t": "スナップショットなし",
+      "empty.history.d": "SPMは変更前にボールトを保存します。",
+      "search.title": "検索",
+      "search.desc": "すべての種類のレコードを検索します。",
+      "search.kind": "種類",
+      "empty.search.t": "見つかりません",
+      "empty.search.d": "一致するラベル・名前・ユーザー名がありません。",
+      "badge.aging": "更新",
+      "tags.all": "すべて",
       "header.title": "Sans Password Manager",
       "header.subtitle": "リキッドガラス風Webインターフェース · GPG暗号化",
       "header.check_update": "アップデートを確認",
@@ -6920,6 +7023,18 @@ I18N_SCRIPT = """
     else if (act === "copy-text") { if (node && window.SPM_copy) SPM_copy(node.textContent); }
     else if (act === "regen") { if (window.SPM_regen) SPM_regen(); }
     else if (act === "copy-pw") { if (window.SPM_copyPw) SPM_copyPw(); }
+    else if (act === "tag") {
+      // A tag chip drives the search box that already filters this table,
+      // rather than adding a second filtering path that could disagree with it.
+      var box = document.getElementById("q");
+      if (box) {
+        box.value = el.getAttribute("data-tag") || "";
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      document.querySelectorAll("[data-act='tag']").forEach(function (c) {
+        c.classList.toggle("chip-on", c === el);
+      });
+    }
     else return;
     ev.preventDefault();
   });
@@ -7632,6 +7747,19 @@ body::before { content:""; position:fixed; inset:0; pointer-events:none; opacity
   padding-top: env(safe-area-inset-top);
 }
 body { padding-bottom: env(safe-area-inset-bottom); }
+
+/* Tag chips, rotation badges and the security score.
+   Declared last on purpose: the console block above restyles every .chip to
+   the warn colour, so these variants have to come after it to win. */
+.tagbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--sp-3); }
+.chip-btn { cursor: pointer; font-family: inherit; }
+.chip-btn:hover { border-color: var(--accent); }
+.chip-on { background: var(--accent); color: var(--bg); border-color: transparent; }
+.chip-warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+tr[data-row] .chip { margin-left: 6px; vertical-align: middle; }
+.score-ok { color: var(--ok); }
+.score-warn { color: var(--warn); }
+.score-bad { color: var(--danger); }
 </style>
 """
 
@@ -7809,6 +7937,7 @@ ICON_SPRITE = """
   <symbol id="i-lock" viewBox="0 0 24 24"><path d="M4.5 11h15v9.5h-15zM8 11V7.5a4 4 0 018 0V11"/></symbol>
   <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 4H4v16h6M14 7l5 5-5 5M8 12h11"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2.5l8 3v6.5c0 5-3.5 8-8 9.5C7.5 20 4 17 4 12V5.5zM8.5 12l2.5 2.5 4.5-5"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M12 7v5l3.5 2M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4.5V10h5.5"/></symbol>
   <symbol id="i-empty" viewBox="0 0 24 24"><path d="M3.5 5.5h17v13h-17zM3.5 12h17M12 5.5v13"/></symbol>
 </svg>
 """
@@ -7883,6 +8012,8 @@ NAV_SECTIONS = [
         ("backup-codes",   "/backup-codes",   "backup", "nav.backup_codes",   "Backup Codes",   "backups"),
     ]),
     ("nav.group.tools", [
+        ("security",  "/security",  "shield", "nav.security",  "Security",        None),
+        ("history",   "/history",   "history", "nav.history",   "History",         None),
         ("generator", "/generator", "generator", "nav.generator", "Generator",       None),
         ("transfer",  "/transfer",  "transfer", "nav.transfer",  "Export / Import", None),
     ]),
@@ -7931,12 +8062,15 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
     counts = counts or {}
     search_html = ""
     if searchable:
+        # A GET form, so typing still filters the current table instantly and
+        # Enter escalates to the cross-type search. No JS is required for the
+        # escalation, which keeps it working if a script is ever blocked.
         search_html = (
-            '<div class="search">'
+            '<form class="search" method="get" action="/search" role="search">'
             f'<span class="search-ico" aria-hidden="true">{_icon("search", "icon icon-sm")}</span>'
-            '<input id="q" type="search" autocomplete="off" spellcheck="false" '
+            '<input id="q" name="q" type="search" autocomplete="off" spellcheck="false" '
             'data-i18n-placeholder="search.placeholder" placeholder="Search this vault...">'
-            '<kbd>/</kbd></div>'
+            '<kbd>/</kbd></form>'
         )
     else:
         search_html = '<div class="search" aria-hidden="true"></div>'
@@ -8050,18 +8184,45 @@ def build_rows_html(entries):
                       "empty.passwords.d", "Entries you add will appear here.",
                       '<a class="btn btn-primary btn-sm" href="/add" data-i18n="btn.add_entry">+ Add Entry</a>', 4)
     rows = []
+    now = time.time()
+    limit = rotation_days()
     for _, parts in entries:
         eid, name, user = _esc(parts[0]), _esc(parts[1]), _esc(parts[2])
-        key = f"{name} {user} {eid}".lower()
+        tags = entry_tags(parts)
+        # Tags join the filter key so the existing instant filter matches them
+        # without a second mechanism.
+        key = " ".join([f"{name} {user} {eid}".lower()] + ["#" + t for t in tags])
+        # Display only -- the clickable chips live in the tag bar above the
+        # table, which is the single control that drives filtering.
+        chips = "".join(f'<span class="chip">#{_esc(t)}</span>' for t in tags)
+        age = _entry_age_days(parts[5] if len(parts) > 5 else "", now)
+        aging = ('<span class="chip chip-warn" data-i18n="badge.aging">rotate</span>'
+                 if age is not None and age > limit else "")
         rows.append(
             f'<tr data-row="{key}">'
             f'<td class="num">{eid}</td>'
-            f'<td class="strong">{name}</td>'
+            f'<td class="strong">{name} {aging}{chips}</td>'
             f'<td class="muted">{user or "&mdash;"}</td>'
             f'<td class="actions">{_actions(f"/view?id={eid}", f"/edit?id={eid}", "/delete", eid, "confirm.delete_entry", "Delete this entry?")}</td>'
             f'</tr>'
         )
     return "".join(rows)
+
+
+def build_tag_filter_html(entries):
+    """Tag chips above the password table; filtering reuses the search box."""
+    tags = []
+    for _, parts in entries:
+        for tag in entry_tags(parts):
+            if tag not in tags:
+                tags.append(tag)
+    if not tags:
+        return ""
+    chips = "".join(
+        f'<button class="chip chip-btn" type="button" data-act="tag" data-tag="#{_esc(t)}">#{_esc(t)}</button>'
+        for t in sorted(tags))
+    return (f'<div class="tagbar"><button class="chip chip-btn" type="button" data-act="tag" data-tag="" '
+            f'data-i18n="tags.all">All</button>{chips}</div>')
 
 
 def build_notes_rows_html(notes):
@@ -8177,12 +8338,130 @@ def list_page(title_key, title, desc_key, desc, add_href, add_key, add_label, he
 </div>"""
 
 
+def _id_links(ids, key, label, hint_key, hint, suffix=""):
+    """One security finding rendered as links into the offending entries.
+
+    `suffix` carries values that must survive translation -- data-i18n replaces
+    an element's whole text, so an interpolated number has to sit outside the
+    translated node or switching language would silently drop it.
+    """
+    if not ids:
+        return (f'<div class="field"><label data-i18n="{key}">{label}</label>'
+                f'<div class="hint" data-i18n="security.none">Nothing to fix here.</div></div>')
+    links = " ".join(
+        f'<a class="btn btn-ghost btn-sm" href="/view?id={_esc(rid)}">{_esc(rid)}</a>'
+        for rid in ids)
+    tail = f' <span class="hint" style="display:inline">{_esc(suffix)}</span>' if suffix else ""
+    return (f'<div class="field"><label data-i18n="{key}">{label}</label>'
+            f'<div class="hint"><span data-i18n="{hint_key}">{hint}</span>{tail}</div>'
+            f'<div class="actions" style="justify-content:flex-start;flex-wrap:wrap;gap:6px">{links}</div></div>')
+
+
+def security_page(audit):
+    """The findings behind the overview's security score.
+
+    Only IDs are rendered. The CLI dashboard states that secrets and
+    fingerprints are never printed; this page holds the same line, so it stays
+    safe to open on a phone in public.
+    """
+    score = audit["score"]
+    tone = "ok" if score >= 80 else ("warn" if score >= 50 else "bad")
+    reused_html = "".join(
+        f'<div class="actions" style="justify-content:flex-start;flex-wrap:wrap;gap:6px">'
+        + " ".join(f'<a class="btn btn-ghost btn-sm" href="/view?id={_esc(rid)}">{_esc(rid)}</a>' for rid in group)
+        + '</div>'
+        for group in audit["reused"])
+    if not reused_html:
+        reused_html = ('<div class="hint" data-i18n="security.none">Nothing to fix here.</div>')
+    days = audit["rotation_days"]
+    return f"""
+<div class="page-head">
+  <div>
+    <h1 class="page-title" data-i18n="nav.security">Security</h1>
+    <div class="page-sub" data-i18n="security.sub">What is pulling your vault score down.</div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-body">
+    <div class="stat" style="pointer-events:none">
+      <span class="stat-ico" aria-hidden="true">{_icon("shield")}</span>
+      <span><span class="stat-n score-{tone}">{score}</span>
+      <span class="stat-l" data-i18n="overview.security_score">Security score</span></span>
+    </div>
+    <div class="hint" data-i18n="security.scope">Only password entries are scored. IDs are shown; secrets never are.</div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-body">
+    {_id_links(audit["weak"], "security.weak", "Weak passwords",
+               "security.weak_d", "Shorter than 12 characters, or using fewer than three character classes.")}
+    <div class="field"><label data-i18n="security.reused">Reused passwords</label>
+      <div class="hint" data-i18n="security.reused_d">Each row below is one group of entries sharing a password.</div>
+      {reused_html}
+    </div>
+    {_id_links(audit["old"], "security.aging", "Due for rotation",
+               "security.aging_d", "Older than the rotation threshold:", f"{days} days")}
+    {_id_links(audit["incomplete"], "security.incomplete", "Missing details",
+               "security.incomplete_d", "No service name or no username.")}
+    {_id_links(audit["malformed"], "security.malformed", "Malformed authenticators",
+               "security.malformed_d", "Missing a secret, or an algorithm SPM cannot generate codes for.")}
+  </div>
+</div>"""
+
+
+def _fmt_size(n):
+    return f"{n / 1024.0:.1f} KB" if n >= 1024 else f"{n} B"
+
+
+def build_history_rows_html(snapshots):
+    if not snapshots:
+        return _empty("history", "empty.history.t", "No snapshots yet",
+                      "empty.history.d", "SPM archives the vault before each change.", "", 4)
+    rows = []
+    for pos, (name, stamp, size) in enumerate(snapshots):
+        try:
+            when = time.strftime("%Y-%m-%d %H:%M:%S", time.strptime(stamp, "%Y%m%dT%H%M%S"))
+        except ValueError:
+            when = stamp
+        newest = ' <span class="hint" data-i18n="history.newest">newest</span>' if pos == 0 else ""
+        rows.append(
+            f'<tr data-row="{_esc(when.lower())}">'
+            f'<td class="strong">{_esc(when)} UTC{newest}</td>'
+            f'<td class="muted">{_fmt_size(size)}</td>'
+            f'<td class="muted">{_esc(name)}</td>'
+            f'<td class="actions">'
+            f'<form class="inline" method="post" action="/history-restore" '
+            f'data-confirm-key="confirm.restore_snapshot" '
+            f'data-confirm-text="Restore this snapshot? The current vault is archived first.">'
+            f'<input type="hidden" name="name" value="{_esc(name)}">'
+            f'<button class="btn btn-ghost btn-sm" type="submit" data-i18n="btn.restore">Restore</button>'
+            f'</form></td>'
+            f'</tr>')
+    return "".join(rows)
+
+
+def build_search_rows_html(results):
+    if not results:
+        return _empty("search", "empty.search.t", "Nothing found",
+                      "empty.search.d", "No label, name or username matches that text.", "", 3)
+    rows = []
+    for kind_key, kind, rid, label, href in results:
+        rows.append(
+            f'<tr data-row="">'
+            f'<td class="muted" data-i18n="{kind_key}">{_esc(kind)}</td>'
+            f'<td class="num">{_esc(rid)}</td>'
+            f'<td class="strong">{_esc(label) or "&mdash;"}</td>'
+            f'<td class="actions"><a class="btn btn-ghost btn-sm" href="{href}" data-i18n="btn.view">View</a></td>'
+            f'</tr>')
+    return "".join(rows)
+
+
 # --------------------------------------------------------------------------
 # Overview
 # --------------------------------------------------------------------------
 def overview_page(counts, recent):
     tiles = [
-        ("shield", counts.get("security_score", 100), "overview.security_score", "Security score", "/"),
+        ("shield", counts.get("security_score", 100), "overview.security_score", "Security score", "/security"),
         ("key", counts.get("passwords", 0), "nav.passwords", "Passwords", "/passwords"),
         ("note", counts.get("notes", 0), "nav.notes", "Secure Notes", "/notes"),
         ("phrase", counts.get("passphrases", 0), "nav.passphrases", "Passphrases", "/passphrases"),
@@ -9433,16 +9712,23 @@ def parse_multipart(body_bytes: bytes, content_type: str):
 	return out
 
 def parse_entries(plaintext: str):
-    """Password entries."""
+    """Password entries.
+
+    A password row is identified the way the CLI identifies one: field 1 is a
+    number. Listing every other row type by prefix was a denylist, and it had
+    already fallen behind -- ATTACHMENT and PASSKEY rows are both six fields or
+    longer, so they were being listed as passwords with their base64 payload
+    sitting in the password column, and counted in the security score. Anything
+    SPM adds later is excluded by default now instead of by remembering to add
+    it here.
+    """
     lines = plaintext.splitlines()
     entries = []
     for idx, line in enumerate(lines):
-        if not line or line.startswith("#") or line.startswith("META_") or line.startswith("NOTE\t"):
-            continue
-        if line.startswith("PASSPHRASE\t") or line.startswith("BACKUP_CODE\t") or line.startswith("AUTH\t"):
+        if not line or line.startswith("#") or line.startswith("META_"):
             continue
         parts = line.split("\t")
-        if len(parts) >= 6:
+        if len(parts) >= 6 and parts[0].isdigit():
             entries.append((idx, parts))
     return lines, entries
 
@@ -9493,6 +9779,182 @@ def parse_authenticators(plaintext: str):
         if len(parts) >= 6:
             items.append((idx, parts))
     return lines, items
+
+
+def rotation_days():
+    """Age after which a password is flagged for rotation."""
+    try:
+        value = int(os.environ.get("SPM_ROTATION_DAYS", "365"))
+    except ValueError:
+        return 365
+    return value if value > 0 else 365
+
+
+def _entry_age_days(created, now):
+    """Age of a record in days, or None when the timestamp is unreadable."""
+    try:
+        stamp = time.mktime(time.strptime(created.replace("Z", ""), "%Y-%m-%dT%H:%M:%S"))
+    except Exception:
+        return None
+    return (now - stamp) / 86400.0
+
+
+def compute_security(entries, plaintext):
+    """Score the vault and name the offending IDs.
+
+    The CLI's `spm security-dashboard` and this function have to agree: two
+    copies of the same weighting drifted apart once already (the CLI penalised
+    malformed authenticators, the web did not, so the same vault scored
+    differently depending on where you looked). This is now the single
+    implementation for Web Mode, and the regression suite asserts parity with
+    the CLI.
+
+    Secrets are read to compare and measure them; only IDs are ever returned.
+    """
+    now = time.time()
+    limit = rotation_days()
+    seen = {}
+    weak, old, incomplete, malformed = [], [], [], []
+    for _, item in entries:
+        rid = item[0]
+        secret = item[3] if len(item) > 3 else ""
+        seen.setdefault(secret, []).append(rid)
+        classes = sum(bool(re.search(pattern, secret))
+                      for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]"))
+        if len(secret) < 12 or classes < 3:
+            weak.append(rid)
+        if not item[1] or not item[2]:
+            incomplete.append(rid)
+        age = _entry_age_days(item[5] if len(item) > 5 else "", now)
+        if age is not None and age > limit:
+            old.append(rid)
+    for line in plaintext.split("\n"):
+        if not line.startswith("AUTH\t"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 7 or parts[6] not in ("sha1", "sha256", "sha512") or not parts[3]:
+            malformed.append(parts[1] if len(parts) > 1 else "?")
+    reused = [ids for secret, ids in seen.items() if secret and len(ids) > 1]
+    reused_flat = [rid for ids in reused for rid in ids]
+    penalty = min(100, len(weak) * 12 + len(reused_flat) * 10
+                  + len(old) * 4 + len(incomplete) * 3 + len(malformed) * 8)
+    return {
+        "score": max(0, 100 - penalty),
+        "weak": weak,
+        "reused": reused,
+        "reused_flat": reused_flat,
+        "old": old,
+        "incomplete": incomplete,
+        "malformed": malformed,
+        "rotation_days": limit,
+    }
+
+
+# A tag is a #word in a plaintext field. The lookbehind keeps "C#" and the
+# fragment in "http://host/page#anchor" from becoming tags.
+_TAG_RE = re.compile(r"(?<!\S)#([A-Za-z0-9][\w-]{0,31})")
+
+
+def extract_tags(*fields):
+    """Tags parsed from plaintext fields only -- never from a secret.
+
+    SPM has no tag column. Rather than migrate every record, tags are a
+    convention inside fields the user already edits: a password's service name
+    and notes, and the title/label of every other record type. Secret fields
+    and base64 bodies are never scanned, so a tag can never be a secret.
+    """
+    found = []
+    for text in fields:
+        for tag in _TAG_RE.findall(text or ""):
+            tag = tag.lower()
+            if tag not in found:
+                found.append(tag)
+    return found
+
+
+def entry_tags(parts):
+    """Tags for a password row: service name (field 2) and notes (field 5)."""
+    name = parts[1] if len(parts) > 1 else ""
+    notes = parts[4] if len(parts) > 4 else ""
+    return extract_tags(name, notes)
+
+
+def search_vault(plaintext, term):
+    """Search every record type by label, name, username and id.
+
+    Secret fields are deliberately not searched. If a query could match a
+    password, the result count would answer "is this string in the vault?" for
+    anyone who reached an unlocked session -- a confirmation oracle. The
+    searchable fields here are exactly the ones already exposed in the list
+    tables, so this page reveals nothing a list page does not.
+    """
+    needle = (term or "").strip().lower()
+    if not needle:
+        return []
+    out = []
+    _, entries = parse_entries(plaintext)
+    for _, p in entries:
+        if needle in " ".join((p[0], p[1], p[2])).lower():
+            out.append(("nav.passwords", "Password", p[0], p[1], f"/view?id={urllib.parse.quote(p[0])}"))
+    for kind_key, kind, parser, href in (
+            ("nav.notes", "Note", parse_notes, "/notes-view?id="),
+            ("nav.passphrases", "Passphrase", parse_passphrases, "/passphrase-view?id="),
+            ("nav.backup_codes", "Backup codes", parse_backup_codes, "/backup-codes-view?id="),
+            ("nav.authenticators", "Authenticator", parse_authenticators, "/authenticator-view?id=")):
+        _, items = parser(plaintext)
+        for _, p in items:
+            rid = p[1] if len(p) > 1 else ""
+            label = p[2] if len(p) > 2 else ""
+            if needle in (rid + " " + label).lower():
+                out.append((kind_key, kind, rid, label, href + urllib.parse.quote(rid)))
+    return out
+
+
+def _history_dir():
+    """Where the CLI keeps encrypted vault generations.
+
+    Must stay identical to _archive_vault_generation() below and to the CLI's
+    history_dir(); a mismatch would silently show an empty history rather than
+    fail, so both derivations live here.
+    """
+    data_dir = os.environ.get("SPM_DATA_DIR") or os.path.join(
+        os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share"), "spm")
+    scope = hashlib.sha256(os.path.abspath(VAULT_PATH).encode("utf-8")).hexdigest()[:16]
+    return os.path.join(data_dir, "history", scope)
+
+
+# Snapshot names are generated, so they can be matched exactly rather than
+# screened for traversal: an allowlist cannot be talked past with "..%2f".
+_SNAPSHOT_RE = re.compile(r"^[0-9]{8}T[0-9]{6}\.[0-9]+\.[0-9a-f]{6,64}\.gpg$")
+
+
+def list_history_snapshots():
+    """Newest-first list of (name, taken_utc, size) for the current vault.
+
+    Ordered and dated by the timestamp inside the filename, not by mtime.
+    Snapshots are made with shutil.copy2, which copies the *source* file's
+    mtime, so an mtime sort returns the age of the vault each snapshot came
+    from rather than the order they were taken -- which put an older snapshot
+    at the top of the list. The name is generated as UTC %Y%m%dT%H%M%S, so a
+    lexical sort on it is chronological.
+    """
+    hist = _history_dir()
+    out = []
+    try:
+        names = os.listdir(hist)
+    except OSError:
+        return out
+    for name in names:
+        if not _SNAPSHOT_RE.match(name):
+            continue
+        try:
+            size = os.stat(os.path.join(hist, name)).st_size
+        except OSError:
+            continue
+        out.append((name, name.split(".", 1)[0], size))
+    out.sort(key=lambda row: row[0], reverse=True)
+    return out
+
 
 class SPMServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
@@ -9596,6 +10058,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if proto == "https":
             attrs += "; Secure"
         return attrs
+
+    def _expire_session(self):
+        """Drop a session whose master password no longer opens the vault."""
+        self.send_response(302)
+        self.send_header("Set-Cookie", f"spm_session=deleted; Max-Age=0; {self._session_cookie_attrs()}")
+        self.send_header("Location", "/login")
+        self.end_headers()
+        return
+
+    def _counts(self, plaintext):
+        """Sidebar badge counts, so a new page does not have to rebuild them."""
+        _, entries = parse_entries(plaintext)
+        _, notes = parse_notes(plaintext)
+        _, passphrases = parse_passphrases(plaintext)
+        _, backups = parse_backup_codes(plaintext)
+        _, auths = parse_authenticators(plaintext)
+        return {
+            "passwords": len(entries), "notes": len(notes),
+            "passphrases": len(passphrases), "backups": len(backups),
+            "authenticators": len(auths),
+        }
 
     def _add_cors(self):
         origin = self.headers.get("Origin", "")
@@ -9864,21 +10347,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "passphrases": len(passphrases), "backups": len(backups),
                 "authenticators": len(auths),
             }
-            secrets = {}
-            weak = old = incomplete = 0
-            now = time.time()
-            for _, item in entries:
-                secret = item[3] if len(item) > 3 else ""
-                secrets[secret] = secrets.get(secret, 0) + 1
-                classes = sum(bool(re.search(pattern, secret)) for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]"))
-                weak += int(len(secret) < 12 or classes < 3)
-                incomplete += int(not item[1] or not item[2])
-                try:
-                    old += int(now - time.mktime(time.strptime(item[5].replace("Z", ""), "%Y-%m-%dT%H:%M:%S")) > 365 * 86400)
-                except Exception:
-                    pass
-            reused = sum(n for value, n in secrets.items() if value and n > 1)
-            counts["security_score"] = max(0, 100 - min(100, weak * 12 + reused * 10 + old * 4 + incomplete * 3))
+            audit = compute_security(entries, plaintext)
+            counts["security_score"] = audit["score"]
+            counts["aging"] = len(audit["old"])
             counts["attachments"] = sum(1 for line in plaintext.splitlines() if line.startswith("ATTACHMENT\t"))
             counts["passkeys"] = sum(1 for line in plaintext.splitlines() if line.startswith("PASSKEY\t"))
             recent = list(reversed(entries))[:5]
@@ -9890,6 +10361,54 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if path == "/transfer":
             self._send_html(200, transfer_page())
+            return
+
+        if path == "/security":
+            try:
+                plaintext = decrypt_vault(master)
+            except Exception:
+                return self._expire_session()
+            _, entries = parse_entries(plaintext)
+            audit = compute_security(entries, plaintext)
+            self._send_html(200, render_shell(
+                security_page(audit), "security", VERSION, VAULT_PATH,
+                title="Security", counts=self._counts(plaintext)))
+            return
+
+        if path == "/history":
+            hist_flash = ""
+            if (urllib.parse.parse_qs(parsed.query).get("flash") or [""])[0] == "restored":
+                hist_flash = "<div class='flash'>Snapshot restored. The previous vault was archived.</div>"
+            snapshots = list_history_snapshots()
+            content = list_page(
+                "nav.history", "History", "page.history.desc",
+                "Encrypted vault snapshots kept before each change.", "", "", "",
+                [("history.when", "When", ""), ("history.size", "Size", ""),
+                 ("history.name", "Snapshot", ""), ("table.actions", "Actions", "act")],
+                build_history_rows_html(snapshots))
+            self._send_html(200, render_shell(
+                content, "history", VERSION, VAULT_PATH,
+                title="History", flash=hist_flash, searchable=True))
+            return
+
+        if path == "/search":
+            term = (urllib.parse.parse_qs(parsed.query).get("q") or [""])[0].strip()
+            try:
+                plaintext = decrypt_vault(master)
+            except Exception:
+                return self._expire_session()
+            results = search_vault(plaintext, term) if term else []
+            content = list_page(
+                "search.title", "Search", "search.desc",
+                f"Matches for “{html.escape(term)}” across every record type." if term
+                else "Type in the search box to look across every record type.",
+                "", "", "",
+                [("search.kind", "Type", ""), ("table.id", "ID", "num"),
+                 ("table.label", "Label", ""), ("table.actions", "Actions", "act")],
+                build_search_rows_html(results))
+            self._send_html(200, render_shell(
+                content, "", VERSION, VAULT_PATH, title="Search",
+                counts=self._counts(plaintext), searchable=True))
             return
 
         if path in ("/passwords", "/notes", "/passphrases", "/authenticators", "/backup-codes"):
@@ -9945,6 +10464,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                   build_backup_rows_html(backups), "backup-codes"),
             }[path]
             content = list_page(spec[0], spec[1], spec[2], spec[3], spec[4], spec[5], spec[6], spec[7], spec[8])
+            if path == "/passwords":
+                content = build_tag_filter_html(entries) + content
             self._send_html(200, render_shell(content, spec[9], VERSION, VAULT_PATH,
                                               title=spec[1], counts=counts, searchable=True))
             return
@@ -10524,6 +11045,55 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             self.send_response(302)
             self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/history-restore":
+            name = (data.get("name") or [""])[0]
+            # Match the generated snapshot name exactly. A traversal denylist
+            # would have to anticipate every encoding of "..", an allowlist
+            # does not.
+            if not _SNAPSHOT_RE.match(name):
+                self.send_error(400, "Invalid snapshot name")
+                return
+            source = os.path.join(_history_dir(), name)
+            if not os.path.isfile(source):
+                self.send_error(404, "Snapshot not found")
+                return
+            # Prove the snapshot opens with THIS master password before
+            # touching the live vault: restoring a snapshot written under an
+            # older password would lock the user out of their own vault with
+            # no way back.
+            pw_fd = _passphrase_fd(master)
+            try:
+                subprocess.check_output(
+                    ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
+                     "--passphrase-fd", str(pw_fd), "-d", source],
+                    stderr=subprocess.DEVNULL, timeout=15, pass_fds=(pw_fd,))
+            except Exception:
+                self.send_error(409, "Snapshot does not open with the current master password; vault unchanged")
+                return
+            finally:
+                os.close(pw_fd)
+            vault_dir = os.path.dirname(os.path.abspath(VAULT_PATH)) or "."
+            # Archive first: restoring is itself an edit, and undoing a restore
+            # has to be possible too.
+            _archive_vault_generation()
+            tmp_fd, tmp_path = tempfile.mkstemp(prefix=os.path.basename(VAULT_PATH) + ".restore.", dir=vault_dir)
+            os.close(tmp_fd)
+            try:
+                shutil.copy2(source, tmp_path)
+                os.chmod(tmp_path, 0o600)
+                _fsync_path(tmp_path)
+                os.replace(tmp_path, VAULT_PATH)
+                _fsync_dir(vault_dir)
+            except Exception:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                self.send_error(500, "Restore failed; vault unchanged")
+                return
+            self.send_response(302)
+            self.send_header("Location", "/history?flash=restored")
             self.end_headers()
             return
 
@@ -11534,6 +12104,75 @@ interactive_menu_authenticators() {
 }
 
 
+interactive_menu_history() {
+	local dir names count choice snapshot
+	while true; do
+		clear
+		print_banner
+		dir="$(history_dir)"
+		# Newest first. Snapshot names begin with a UTC %Y%m%dT%H%M%S stamp, so
+		# a reverse sort on the name is chronological -- unlike mtime, which
+		# these files inherit from the vault they were copied from.
+		names=""
+		if [ -d "$dir" ]; then
+			names="$(find "$dir" -maxdepth 1 -type f -name '*.gpg' -print 2>/dev/null \
+				| while IFS= read -r snapshot; do basename "$snapshot"; done | sort -r)"
+		fi
+		count=0
+		if [ "$SPM_LANG" = "id" ]; then
+			printf ">> RIWAYAT VAULT (SNAPSHOT TERENKRIPSI)\n\n"
+		else
+			printf ">> VAULT HISTORY (ENCRYPTED SNAPSHOTS)\n\n"
+		fi
+		if [ -z "$names" ]; then
+			if [ "$SPM_LANG" = "id" ]; then
+				printf "  (belum ada snapshot)\n\n"
+			else
+				printf "  (no snapshots yet)\n\n"
+			fi
+		else
+			while IFS= read -r snapshot; do
+				[ -n "$snapshot" ] || continue
+				count=$((count + 1))
+				printf "  %2d) %s  %s\n" "$count" \
+					"$(printf '%s' "$snapshot" | cut -d. -f1)" \
+					"$(du -h "$dir/$snapshot" 2>/dev/null | cut -f1)"
+			done <<-EOF
+			$names
+			EOF
+			printf "\n"
+		fi
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "   0) Kembali\n\n"
+			printf "Pilih nomor snapshot untuk dipulihkan: "
+		else
+			printf "   0) Back\n\n"
+			printf "Choose a snapshot number to restore: "
+		fi
+		read -r choice || true
+		case "$choice" in
+			0|"") break ;;
+		esac
+		if ! printf '%s' "$choice" | grep -Eq '^[0-9]+$' \
+			|| [ "$choice" -lt 1 ] || [ "$choice" -gt "$count" ]; then
+			if [ "$SPM_LANG" = "id" ]; then
+				printf "Pilihan tidak valid.\n"
+			else
+				printf "Invalid choice.\n"
+			fi
+			pause_menu
+			continue
+		fi
+		# The name is never typed: the picker resolves it. The confirmation
+		# inside cmd_history_restore stays, because this overwrites a live
+		# vault.
+		snapshot="$(printf '%s\n' "$names" | sed -n "${choice}p")"
+		clear
+		cmd_history_restore "$snapshot" || true
+		pause_menu
+	done
+}
+
 interactive_menu_autoupdate() {
 	local mode choice
 	while true; do
@@ -11629,6 +12268,7 @@ interactive_menu() {
 			printf " 20) Mode web\n"
 			printf " 21) Restore vault dari bundle portable/save\n"
 			printf " 22) Pengaturan update otomatis [%s]\n" "$(autoupdate_mode)"
+			printf " 23) Riwayat vault (snapshot)\n"
 			printf "  0) Keluar\n\n"
 			printf "Pilih menu: "
 		else
@@ -11662,6 +12302,7 @@ interactive_menu() {
 			printf " 20) Web mode\n"
 			printf " 21) Restore vault from bundle\n"
 			printf " 22) Auto-update settings [%s]\n" "$(autoupdate_mode)"
+			printf " 23) Vault history (snapshots)\n"
 			printf "  0) Exit\n\n"
 			printf "Choose an option: "
 		fi
@@ -11800,6 +12441,7 @@ interactive_menu() {
 				;;
 			21) clear; cmd_restore || true; pause_menu ;;
 			22) interactive_menu_autoupdate ;;
+			23) interactive_menu_history ;;
 			0)
 				if [ "$SPM_LANG" = "id" ]; then
 					printf "Keluar...\n"

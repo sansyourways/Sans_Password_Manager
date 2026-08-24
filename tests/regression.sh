@@ -515,5 +515,227 @@ doctor_scan_broken_records "$PLAIN" > "$TEST_ROOT/scan-clean.out"
 awk -F '\t' '$1=="SUMMARY" && $2==0 && $3==0 { found=1 } END { exit found?0:1 }' \
 	"$TEST_ROOT/scan-clean.out"
 
+# ---- 2.10.14: security page, history, global search, tags, rotation --------
+
+# The CLI dashboard and Web Mode must score the same vault identically. They
+# were two independent copies of the same weighting and had already drifted:
+# the CLI penalised malformed authenticators and the web did not.
+# Seed one malformed authenticator so the comparison actually exercises the
+# term that had drifted. Without a row in that category both formulas agree
+# trivially and the assertion proves nothing.
+malformed_tmp="$(make_tmp)"
+decrypt_vault_to_file "$malformed_tmp"
+printf 'AUTH\t9\tBrokenAlgo\t\t30\t2025-01-01T00:00:00Z\tmd5\n' >> "$malformed_tmp"
+encrypt_file_to_vault "$malformed_tmp"
+secure_wipe "$malformed_tmp"
+cmd_security_dashboard | grep -q 'Malformed protected records: authenticator:9'
+
+cli_score="$(cmd_security_dashboard | sed -n 's#^Score: \([0-9]*\)/100$#\1#p')"
+[ -n "$cli_score" ]
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/security.html" \
+	"http://127.0.0.1:$WEB_PORT/security"
+web_score="$(sed -n 's/.*<span class="stat-n score-[a-z]*">\([0-9]*\)<\/span>.*/\1/p' \
+	"$TEST_ROOT/security.html" | head -1)"
+[ "$cli_score" = "$web_score" ] || {
+	printf 'security score differs: CLI %s, web %s\n' "$cli_score" "$web_score" >&2
+	exit 1
+}
+
+# The security page names IDs. It must never echo a secret: this page is meant
+# to be safe to open on a phone in public.
+if grep -qF 'DemoSecret42' "$TEST_ROOT/security.html"; then
+	printf 'security page leaked a password\n' >&2; exit 1
+fi
+
+# Global search covers every record type by label, and must NOT search secret
+# fields -- a query that could match a password turns the result count into a
+# confirmation oracle.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/search-hit.html" \
+	"http://127.0.0.1:$WEB_PORT/search?q=Memo"
+grep -q '/notes-view?id=1' "$TEST_ROOT/search-hit.html"
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/search-secret.html" \
+	"http://127.0.0.1:$WEB_PORT/search?q=DemoSecret42"
+if grep -q 'btn-sm" href="/view?id=' "$TEST_ROOT/search-secret.html"; then
+	printf 'search matched a secret field\n' >&2; exit 1
+fi
+
+# History lists the snapshots the CLI writes, and rejects anything that is not
+# a generated snapshot name. The allowlist is checked with both a plain and a
+# percent-encoded traversal.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/history.html" \
+	"http://127.0.0.1:$WEB_PORT/history"
+grep -q 'action="/history-restore"' "$TEST_ROOT/history.html"
+hist_csrf="$(grep -o 'name="csrf" value="[^"]*"' "$TEST_ROOT/history.html" \
+	| head -1 | sed 's/.*value="//; s/"$//')"
+[ -n "$hist_csrf" ]
+vault_before="$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)"
+for bad_name in '../../../../etc/passwd' '..%2f..%2fvault.gpg' 'not-a-snapshot.gpg'; do
+	code="$(curl -sS -o /dev/null -w '%{http_code}' -b "$TEST_ROOT/cookies" \
+		-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
+		--data-urlencode "csrf=$hist_csrf" --data-urlencode "name=$bad_name" \
+		"http://127.0.0.1:$WEB_PORT/history-restore")"
+	[ "$code" = "400" ] || {
+		printf 'history-restore accepted %s (HTTP %s)\n' "$bad_name" "$code" >&2
+		exit 1
+	}
+done
+[ "$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)" = "$vault_before" ] || {
+	printf 'a rejected restore still modified the vault\n' >&2; exit 1
+}
+
+# Restoring a snapshot sealed with a different master password would lock the
+# user out of their own vault, so it must be refused before anything is
+# written.
+hist_dir="$XDG_DATA_HOME/spm/history/$(printf '%s' "$PASSWORD_VAULT" \
+	| python3 -c 'import hashlib,os,sys; print(hashlib.sha256(os.path.abspath(sys.stdin.read().strip()).encode()).hexdigest()[:16])')"
+mkdir -p "$hist_dir"
+printf 'META_X\tx\t-\t-\t-\t-\n' > "$TEST_ROOT/foreign-plain"
+printf 'A-Completely-Different-Master' | gpg --batch --yes --pinentry-mode loopback \
+	--passphrase-fd 0 --symmetric --cipher-algo AES256 \
+	-o "$hist_dir/20200101T000000.9999.abcdef123456.gpg" "$TEST_ROOT/foreign-plain"
+code="$(curl -sS -o /dev/null -w '%{http_code}' -b "$TEST_ROOT/cookies" \
+	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$hist_csrf" \
+	--data-urlencode 'name=20200101T000000.9999.abcdef123456.gpg' \
+	"http://127.0.0.1:$WEB_PORT/history-restore")"
+[ "$code" = "409" ] || {
+	printf 'restore of a foreign-password snapshot returned %s, expected 409\n' "$code" >&2
+	exit 1
+}
+[ "$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)" = "$vault_before" ] || {
+	printf 'a refused restore still modified the vault\n' >&2; exit 1
+}
+# Remove the decoy so it cannot be picked as "newest" by the round-trip below.
+rm -f "$hist_dir/20200101T000000.9999.abcdef123456.gpg"
+
+# A real restore round-trip must return the vault to its earlier bytes. The
+# snapshot is located by content, not by position: the sourced CLI library and
+# the web server both archive into this directory during the run, so "newest"
+# is not a stable way to name the one we want.
+curl -fsS -b "$TEST_ROOT/cookies" -o /dev/null -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$hist_csrf" --data-urlencode 'name=Roundtrip' \
+	--data-urlencode 'user=rt' --data-urlencode 'password=Rt9!qqqqqqqqqq' \
+	--data-urlencode 'notes=' "http://127.0.0.1:$WEB_PORT/add"
+[ "$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)" != "$vault_before" ]
+snap=""
+for candidate in "$hist_dir"/*.gpg; do
+	if [ "$(sha256sum "$candidate" | cut -d' ' -f1)" = "$vault_before" ]; then
+		snap="$(basename "$candidate")"
+		break
+	fi
+done
+[ -n "$snap" ] || { printf 'the web write did not archive the previous vault\n' >&2; exit 1; }
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/history2.html" \
+	"http://127.0.0.1:$WEB_PORT/history"
+hist_csrf2="$(grep -o 'name="csrf" value="[^"]*"' "$TEST_ROOT/history2.html" \
+	| head -1 | sed 's/.*value="//; s/"$//')"
+grep -qF "value=\"$snap\"" "$TEST_ROOT/history2.html"
+curl -fsS -b "$TEST_ROOT/cookies" -o /dev/null -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$hist_csrf2" --data-urlencode "name=$snap" \
+	"http://127.0.0.1:$WEB_PORT/history-restore"
+[ "$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)" = "$vault_before" ] || {
+	printf 'history restore did not return the vault to its earlier bytes\n' >&2
+	exit 1
+}
+
+# Snapshots are listed newest-first. They are copied with copy2, which
+# preserves the source mtime, so ordering has to come from the generated name
+# rather than the filesystem or an older snapshot sorts to the top.
+python3 - "$TEST_ROOT/history2.html" <<'PYORDER'
+import re, sys
+html = open(sys.argv[1], encoding="utf-8").read()
+names = re.findall(r'name="name" value="([^"]+)"', html)
+assert names, "history page listed no snapshots"
+assert names == sorted(names, reverse=True), "snapshots are not newest-first: %r" % names
+PYORDER
+
+# Tags are a convention inside existing plaintext fields. "C#" and a URL
+# fragment must not become tags, or every note with a link would sprout one.
+python3 - "$web_script" <<'PYTAG'
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r'_TAG_RE = re\.compile\(r"([^"]+)"\)', src)
+assert m, "_TAG_RE missing from the generated web server"
+rx = re.compile(m.group(1))
+assert rx.findall("work #dev #ops-2") == ["dev", "ops-2"], "tag parsing broke"
+assert rx.findall("write C# daily") == [], "C# became a tag"
+assert rx.findall("see http://host/page#anchor") == [], "a URL fragment became a tag"
+PYTAG
+
+# The rotation badge must be driven by the configured threshold, not a constant.
+grep -q 'SPM_ROTATION_DAYS' "$web_script"
+grep -q 'data-i18n="badge.aging"' "$web_script"
+
+# Every new UI string must exist in all three shipped languages, or switching
+# language blanks the element.
+python3 - "$web_script" <<'PYI18N'
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+need = ["nav.security", "nav.history", "security.weak", "security.reused",
+        "security.aging", "security.incomplete", "security.malformed",
+        "history.when", "btn.restore", "confirm.restore_snapshot",
+        "search.kind", "badge.aging", "tags.all"]
+for lang in ('"en"', '"id"', '"ja"'):
+    start = src.index(lang + ": {")
+    end = src.index("\n    }", start)
+    block = src[start:end]
+    missing = [k for k in need if '"%s":' % k not in block]
+    assert not missing, "%s is missing %r" % (lang, missing)
+PYI18N
+
+# The history picker must resolve a snapshot by number: the point of the menu
+# is that a generated filename never has to be typed.
+grep -q '23) interactive_menu_history ;;' "$ROOT_DIR/spm.sh"
+# Two distinct writes, so the two newest snapshots differ in content. With only
+# one write the snapshot below it can hold identical bytes, and an off-by-one
+# in the picker would restore the right content by accident.
+menu_v0="$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)"
+menu_tmp="$(make_tmp)"
+decrypt_vault_to_file "$menu_tmp"
+printf '77\tMenuProbeA\tprobe\tMp9!wwwwwwwwww\tnotes\t2026-01-01T00:00:00Z\n' >> "$menu_tmp"
+encrypt_file_to_vault "$menu_tmp"
+secure_wipe "$menu_tmp"
+menu_v1="$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)"
+sleep 1
+menu_tmp="$(make_tmp)"
+decrypt_vault_to_file "$menu_tmp"
+printf '78\tMenuProbeB\tprobe\tMp8!wwwwwwwwww\tnotes\t2026-01-01T00:00:00Z\n' >> "$menu_tmp"
+encrypt_file_to_vault "$menu_tmp"
+secure_wipe "$menu_tmp"
+[ "$menu_v0" != "$menu_v1" ]
+[ "$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)" != "$menu_v1" ]
+# Snapshot 1 is the newest: the vault as it stood after probe A. Choosing it
+# must bring back exactly that state -- an off-by-one would land on menu_v0.
+printf '1\nyes\n\n0\n' | interactive_menu_history >/dev/null 2>&1 || true
+menu_now="$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)"
+[ "$menu_now" = "$menu_v1" ] || {
+	printf 'history picker restored the wrong snapshot (got %s, wanted %s)\n' \
+		"$menu_now" "$menu_v1" >&2
+	exit 1
+}
+# `if`, not `&& { exit 1; }`: the expected case is grep finding nothing, and
+# under errexit that form would abort the suite exactly when it should pass.
+if cmd_list | grep -q 'MenuProbeB'; then
+	printf 'restored vault still contains the newer probe entry\n' >&2
+	exit 1
+fi
+cmd_list | grep -q 'MenuProbeA'
+
+# doctor's duplicate-ID line is a verdict, not a progress step, so it must not
+# keep the empty "[ ]" marker that the in-progress lines use.
+cmd_doctor 2>/dev/null > "$TEST_ROOT/doctor.out"
+# `if !`, never `grep -q ... && { exit 1; }`: under errexit the latter aborts
+# the whole suite the moment grep simply finds nothing.
+if grep -q '^\[ \] Duplicate IDs' "$TEST_ROOT/doctor.out"; then
+	printf 'doctor duplicate-ID line still uses the progress marker\n' >&2
+	exit 1
+fi
+if ! grep -qE '^\[(✔|!)\] Duplicate IDs' "$TEST_ROOT/doctor.out"; then
+	printf 'doctor duplicate-ID line lost its verdict marker\n' >&2
+	exit 1
+fi
+
 printf 'SPM regression suite passed (%s formats plus web and advanced features).\n' \
 	"$(printf '%s\n' "$formats" | awk '{ print NF }')"
