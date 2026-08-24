@@ -47,3 +47,9 @@ scripts/
 spm.sh.*.bk
 test-*.csv
 test.md
+
+# Local agent state and machine-local backups. These are large, private, and
+# have no business in a release; the ignore rules did not previously stop an
+# accidental `git add`.
+.nexus/
+SansBACKUP_DEC_25/
