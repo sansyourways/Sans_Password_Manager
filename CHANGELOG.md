@@ -5,6 +5,33 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.11.2] - 2026-08-25
+
+### Changed
+- **The Biometric Unlock page is built with `list_page` like every other
+  listing page.** It shipped in 2.11.0 as a bespoke card with an unstyled
+  table, so it rendered with lower-case headers and columns sized to content
+  while the rest of the app uses a `$`-prefixed page title, a description line
+  and uppercase table headers. It now reuses the shared builder, including the
+  standard empty state, and reuses the existing `table.id` / `table.label` /
+  `table.actions` / `btn.delete` keys instead of minting near-duplicates.
+
+### Fixed
+- **The locked screen was English-only.** It carried no `data-i18n` attributes
+  and loaded neither the language bootstrap nor the i18n script, so an Indonesian
+  or Japanese user hit a hard English page at the moment they were locked out.
+  It now translates, carries the same language picker as the login page, and the
+  status messages both unlock scripts write are routed through `SPM_I18N` the
+  way the lock bar's countdown already was.
+
+### Docs
+- The README product tour showed nothing newer than 2.10.5. It now covers
+  biometric unlock and the locked screen, plus the security, history and
+  cross-type search pages that shipped in 2.10.14 and had never been pictured.
+  Captured from a disposable vault of synthetic records; the captures were
+  checked for any password, TOTP secret, note body or master password before
+  being committed.
+
 ## [2.11.1] - 2026-08-25
 
 ### Fixed
