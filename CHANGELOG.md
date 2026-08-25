@@ -5,6 +5,82 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.11.0] - 2026-08-25
+
+### Added
+- **Biometric unlock for Web Mode.** Register a device from the new Biometric
+  Unlock page and the idle auto-lock resumes with Face ID or Touch ID instead
+  of a retyped master password. This exists because 2.10.14 repaired the
+  30-second lock: once it genuinely fires, the master password gets typed on a
+  phone keyboard dozens of times a day, and the predictable response is to
+  raise the timeout until the control stops meaning anything.
+
+  Suspension is **server-side state**, not a browser redirect. A suspended
+  session keeps the vault open in memory but is refused everywhere except the
+  unlock endpoints, so disabling JavaScript or navigating straight to
+  `/passwords` walks past nothing. `_get_cookie_session` reports a suspended
+  session as no session at all, which means routes written before this feature
+  — and any added after it — fail closed without opting in.
+
+  The ceremony verifies, refusing on the first failure: ceremony type, a
+  single-use server-issued challenge, exact origin match, relying-party id
+  hash, user presence **and user verification** (a bare tap is refused), a
+  registered credential id, and an ES256 signature over
+  `authenticatorData || sha256(clientDataJSON)`. Failed unlocks share the
+  existing login lockout budget, because an assertion that reaches the server
+  having failed is attack-shaped — a real Face ID mismatch never leaves the
+  phone.
+
+  No new dependency: signatures are verified with `openssl`, already required
+  by the recovery-key flow, and registration reads the credential key from the
+  browser's `getPublicKey()` so the server needs no CBOR decoder.
+- `SPM_WEB_RP_ID` names the WebAuthn relying party. SPM's own domain setup
+  supplies it automatically. It is never inferred from the `Host` header — a
+  header rewrite would otherwise move the relying party — and with no value
+  configured the feature and its endpoints do not exist at all.
+- `SPM_WEB_SUSPEND_MAX` (default 28800, eight hours) bounds how long a locked
+  session stays resumable. This is the real cost of the feature: it is how long
+  the master password stays in server memory after the screen locks. It does
+  not slide, and `SESSION_MAX_AGE` still caps the total — an unlock never
+  resets `created`, so biometric resumes cannot chain into an unbounded
+  session.
+- `spm webauthn-list` and `spm webauthn-delete <id>` manage unlock credentials
+  from the CLI. Registration is browser-only by nature, so there is no matching
+  add command.
+
+### Fixed
+- The in-app session description advertised only the browser's 30-second lock
+  in all three languages, having gone stale when 2.10.14 added the server-side
+  idle expiry. It now states both, and the 12-hour cap.
+
+### Security
+- Unlock credentials are stored as a new `WEBAUTHN` row type rather than reusing
+  `PASSKEY`. A `PASSKEY` row is metadata about a passkey held elsewhere; these
+  open this vault, and listing them in `spm passkey-list` would be misleading.
+  The 2.10.12 allowlist fix in `parse_entries` means the new type is invisible
+  to password parsing and the security score without any change there.
+- Signature counters are held per process rather than written back to the vault.
+  Persisting one would mean a full read-modify-write of the encrypted vault on
+  every unlock, and Apple's platform authenticator reports 0 forever regardless.
+  Cloned-authenticator detection is correspondingly weaker within a process
+  restart; hardware-backed platform authenticators do not meaningfully provide
+  it anyway.
+
+### Tests
+- The regression suite performs real WebAuthn ceremonies: a throwaway P-256 key
+  stands in for a platform authenticator, and `authenticatorData` /
+  `clientDataJSON` are built and signed with `openssl`, so the verification
+  path is exercised rather than mocked.
+- Assertions cover a suspended session being unable to reach vault content, a
+  valid assertion resuming it, and refusal of a foreign relying party, a bare
+  presence tap, a foreign origin, tampered `authenticatorData`, a forged
+  challenge, and a replayed one. Each was inverted against a mutated build and
+  confirmed to fail for the right reason before being accepted.
+- CSRF on the JSON ceremonies is tested with the `Origin` header omitted and as
+  `null` — the iOS home-screen case. `_write_authorized` accepts a matching
+  `Origin` without consulting the token, so a test that sends a good `Origin`
+  could never fail.
+
 ## [2.10.14] - 2026-08-25
 
 ### Added

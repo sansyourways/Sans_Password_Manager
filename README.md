@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **2.10.14**
+Current release: **2.11.0**
 
 ---
 
@@ -228,7 +228,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 2.10.14
+bash install.sh --version 2.11.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -240,7 +240,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 2.10.14 at /home/you/.local/bin/spm
+Installed SPM 2.11.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -837,7 +837,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **2.10.14**
+Version: **2.11.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
@@ -851,6 +851,21 @@ session after 12 hours, regardless of what the browser does. Every `<script>`
 is served with `data-cfasync="false"` beside its CSP nonce so a CDN cannot
 rewrite it out of existence; if you front Web Mode with Cloudflare, disable
 Rocket Loader for the hostname as well.
+
+Set a relying-party id (`SPM_WEB_RP_ID`, or let SPM's own domain setup supply
+it) and Web Mode offers **biometric unlock**: register a device from the
+Biometric Unlock page and the idle lock resumes with Face ID or Touch ID
+instead of a retyped master password. Suspension is enforced by the server, not
+the browser — a locked session is refused everywhere except the unlock
+endpoints, so disabling JavaScript walks past nothing. The master password is
+still required for the first sign-in, once the 12-hour session cap is reached,
+and whenever a locked session goes unresumed for longer than
+`SPM_WEB_SUSPEND_MAX` (default 8 hours), which is how long the master password
+stays in server memory after the screen locks. Registration needs a browser
+that can export the credential key (`getPublicKey()`, Safari 16+), assertions
+are verified with `openssl` against ES256, and user verification is required —
+a bare presence tap is refused. No relying-party id means the feature and its
+endpoints do not exist at all. Failed unlocks share the login lockout budget.
 Authenticated web mutations also require an exact same-origin request and are serialized across threads/processes to prevent CSRF and lost vault writes. Decrypted web responses use `Cache-Control: no-store`.
 All listed import formats are round-trip compatible with their matching CLI and web exports.
 Vault writes are staged and atomically installed. CLI and web processes share an advisory vault lock when `flock` is available; avoid concurrent access on systems without it. `save` verifies the archived vault before removing the local copy.

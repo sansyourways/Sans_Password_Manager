@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.10.14"
+VERSION="2.11.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -4656,6 +4656,17 @@ cmd_passkey_list() {
 	local tmp; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"; awk -F '\t' '$1=="PASSKEY"{printf "%s\t%s\t%s\t%s\n",$2,$3,$4,$7}' "$tmp"; secure_wipe "$tmp"
 }
 
+# Web Mode biometric unlock credentials. A separate row type from PASSKEY on
+# purpose: a PASSKEY row describes a passkey held somewhere else, while these
+# open this vault. The public key column is deliberately not printed -- it is
+# long, it is never useful to read by eye, and the list is for deciding what to
+# revoke. Registration is browser-only, so there is no matching add command.
+cmd_webauthn_list() {
+	local tmp; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	awk -F '\t' '$1=="WEBAUTHN"{printf "%s\t%s\t%s\t%s\n",$2,$6,$5,$7}' "$tmp"
+	secure_wipe "$tmp"
+}
+
 sync_paths() {
 	local target="$1" channel="$2" target_id
 	printf '%s' "$channel" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' || die "Invalid sync channel."
@@ -4840,6 +4851,7 @@ Fitur lokal 2.10:
   ./spm.sh attachment-list|attachment-extract|attachment-delete
   ./spm.sh passkey-add <rp> <akun> <credential-id> [catatan]
   ./spm.sh passkey-list|passkey-delete
+  ./spm.sh webauthn-list|webauthn-delete <id>
   ./spm.sh sync status|push|pull <direktori> [channel]
   ./spm.sh emergency-create <id> <public.pem> <YYYY-MM-DD> [arsip]
   ./spm.sh emergency-open <arsip> <private.pem> [output.json]
@@ -4949,6 +4961,7 @@ Local-first 2.10 capabilities:
   ./spm.sh attachment-list|attachment-extract|attachment-delete
   ./spm.sh passkey-add <rp> <account> <credential-id> [notes]
   ./spm.sh passkey-list|passkey-delete
+  ./spm.sh webauthn-list|webauthn-delete <id>
   ./spm.sh sync status|push|pull <directory> [channel]
   ./spm.sh emergency-create <id> <public.pem> <YYYY-MM-DD> [archive]
   ./spm.sh emergency-open <archive> <private.pem> [output.json]
@@ -4992,6 +5005,13 @@ Web Mode:
       • Secure notes section (view / add / edit / delete)
   - Web session auto-locks after ~30 seconds of inactivity in the browser;
     the server also expires an idle session after 5 minutes on its own.
+  - Register a device on the Biometric Unlock page and the idle lock resumes
+    with Face ID or Touch ID instead of a retyped master password. Suspension
+    is enforced by the server, not the browser; the master password is still
+    required for the first sign-in and once the session hits its 12-hour cap.
+    Needs a relying-party id (SPM_WEB_RP_ID, or SPM's own domain setup).
+    Tune how long a locked session stays resumable with SPM_WEB_SUSPEND_MAX
+    (seconds, default 28800).
 
 Clipboard & Password Coaching:
   - When copying a password, clipboard is auto-cleared after a short delay:
@@ -6019,9 +6039,18 @@ start_web_mode() {
 	# Behind nginx the vault is reached at its public HTTPS name, not at the
 	# loopback address it happens to listen on.
 	local display_url="http://${display_host}:${bind_port}/"
+	local webauthn_rp_id=""
 	if [ -n "${SPM_DOMAIN_READY:-}" ]; then
 		display_url="https://${SPM_DOMAIN_READY}/"
+		# A WebAuthn credential is bound to the relying-party id in force when
+		# it was registered, and the server refuses to guess one from the Host
+		# header. The public name the domain flow already established is the
+		# only trustworthy source for it.
+		webauthn_rp_id="$SPM_DOMAIN_READY"
 	fi
+	# An explicit override wins, so a deployment fronted by something other
+	# than SPM's own domain flow can still name its relying party.
+	webauthn_rp_id="${SPM_WEB_RP_ID:-$webauthn_rp_id}"
 
 	# Try to configure firewall automatically if binding to non-local
 	configure_firewall_for_web "$bind_addr" "$bind_port"
@@ -6078,6 +6107,7 @@ start_web_mode() {
 		SPM_WEB_PORT="$bind_port" \
 		SPM_VERSION="$VERSION" \
 		SPM_WEB_ALLOW_INSECURE_REMOTE="$allow_insecure_remote" \
+		SPM_WEB_RP_ID="$webauthn_rp_id" \
 		pm2 start "$spm_web_script" \
 			--name "spm-web" \
 			--interpreter python3 >"$pm2_output" 2>&1 || {
@@ -6158,6 +6188,7 @@ PY
 	SPM_WEB_PORT="$bind_port" \
 	SPM_VERSION="$VERSION" \
 	SPM_WEB_ALLOW_INSECURE_REMOTE="$allow_insecure_remote" \
+	SPM_WEB_RP_ID="$webauthn_rp_id" \
 	python3 "$spm_web_script"
 
 	echo
@@ -6227,6 +6258,36 @@ if not _is_loopback_bind(BIND_ADDR) and os.environ.get("SPM_WEB_ALLOW_INSECURE_R
 if not VAULT_PATH or not os.path.isfile(VAULT_PATH):
     raise SystemExit(f"Vault file not found: {VAULT_PATH!r}")
 
+# WebAuthn relying-party id for biometric unlock. Deliberately NOT derived from
+# the Host header: a header rewrite would otherwise move the relying party, and
+# every credential is bound to whatever value was in force at registration. No
+# id configured means the whole unlock feature stays off rather than guessing.
+def _webauthn_config():
+    rp = (os.environ.get("SPM_WEB_RP_ID") or "").strip().lower()
+    if not rp:
+        # No default is inferred, not even on loopback. The obvious guess there
+        # is the bind address, but "127.0.0.1" is not a valid relying-party id
+        # -- browsers require a domain -- so guessing would enable a feature
+        # whose ceremony can only ever fail. Local development sets
+        # SPM_WEB_RP_ID=localhost and browses to http://localhost:PORT.
+        return "", ""
+    # A relying-party id is a bare domain: no scheme, no port, no path.
+    if not re.match(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$", rp):
+        return "", ""
+    if _is_loopback_bind(BIND_ADDR):
+        # Loopback is a secure context per the WebAuthn spec, so unlock works
+        # in local development and in the regression suite without TLS.
+        origin = "http://%s:%d" % (rp, PORT)
+    else:
+        origin = "https://%s" % rp
+    return rp, origin
+
+WEBAUTHN_RP_ID, WEBAUTHN_ORIGIN = _webauthn_config()
+WEBAUTHN_ENABLED = bool(WEBAUTHN_RP_ID)
+# How long a server-issued ceremony challenge stays usable. Long enough for a
+# Face ID prompt the user has to notice, short enough to be worthless later.
+WEBAUTHN_CHALLENGE_TTL = 120
+
 LATEST_CACHE = {"value": "", "ts": 0}
 
 SUPPORTED_WEB_LANGS = {"en", "id", "ja"}
@@ -6280,6 +6341,7 @@ I18N_SCRIPT = """
     "en": {
       "nav.security": "Security",
       "nav.history": "History",
+      "nav.unlock": "Biometric Unlock",
       "security.sub": "What is pulling your vault score down.",
       "security.scope": "Only password entries are scored. IDs are shown; secrets never are.",
       "security.none": "Nothing to fix here.",
@@ -6359,7 +6421,7 @@ I18N_SCRIPT = """
       "section.backups_desc": "Store recovery codes (view shows full codes).",
       "btn.add_backups": "+ Add Backup Codes",
       "section.session": "Web Session",
-      "section.session_desc": "Protected by your master password. The interface auto-locks after 30 seconds of inactivity and logs you out.",
+      "section.session_desc": "Protected by your master password. The interface auto-locks after 30 seconds of inactivity; the server expires an idle session after 5 minutes and any session after 12 hours.",
       "form.vault": "Vault:",
       "form.back_list": "\u2190 Back to list",
       "form.save": "Save",
@@ -6500,6 +6562,7 @@ I18N_SCRIPT = """
     "id": {
       "nav.security": "Keamanan",
       "nav.history": "Riwayat",
+      "nav.unlock": "Buka Biometrik",
       "security.sub": "Hal yang menurunkan skor brankas Anda.",
       "security.scope": "Hanya entry password yang dinilai. ID ditampilkan; rahasia tidak pernah.",
       "security.none": "Tidak ada yang perlu diperbaiki.",
@@ -6579,7 +6642,7 @@ I18N_SCRIPT = """
       "section.backups_desc": "Simpan kode pemulihan (tampilan memperlihatkan penuh).",
       "btn.add_backups": "+ Tambah Kode Cadangan",
       "section.session": "Sesi Web",
-      "section.session_desc": "Dilindungi kata sandi master. Terkunci otomatis setelah 30 detik tidak aktif.",
+      "section.session_desc": "Dilindungi kata sandi master. Terkunci otomatis setelah 30 detik tidak aktif; server menutup sesi menganggur setelah 5 menit dan sesi apa pun setelah 12 jam.",
       "form.vault": "Brankas:",
       "form.back_list": "\u2190 Kembali ke daftar",
       "form.save": "Simpan",
@@ -6720,6 +6783,7 @@ I18N_SCRIPT = """
     "ja": {
       "nav.security": "セキュリティ",
       "nav.history": "履歴",
+      "nav.unlock": "生体認証ロック解除",
       "security.sub": "ボールトのスコアを下げている項目。",
       "security.scope": "評価対象はパスワードのみ。IDのみ表示し、シークレットは表示しません。",
       "security.none": "修正すべき項目はありません。",
@@ -6799,7 +6863,7 @@ I18N_SCRIPT = """
       "section.backups_desc": "復旧コードを保存（表示時は全文表示）。",
       "btn.add_backups": "+ コード追加",
       "section.session": "Webセッション",
-      "section.session_desc": "マスターパスワードで保護。30秒間操作がないと自動ロックされます。",
+      "section.session_desc": "マスターパスワードで保護。30秒間操作がないと自動ロックされ、サーバーも5分でアイドルセッションを、12時間で全セッションを失効させます。",
       "form.vault": "ボールト:",
       "form.back_list": "\u2190 一覧に戻る",
       "form.save": "保存",
@@ -7884,8 +7948,30 @@ LOCKBAR_SCRIPT = """
     if (!paused && !locking && left <= 0) {
       locking = true;
       clearInterval(ticker);
-      window.location.replace("/logout");
+      lock();
     }
+  }
+  /* Suspending is a server-side state change, not a redirect. The 2.10.14 bug
+     is the reason: a CDN rewrote these scripts out of existence and the lock
+     silently stopped existing. If suspension lived in this file, anyone
+     holding the phone could disable JavaScript and walk straight past it.
+     This function only asks; the server is what enforces. Any failure falls
+     through to a full logout, which is the safe direction. */
+  function lock() {
+    var cfg = window.SPM_UNLOCK;
+    if (!cfg || !cfg.available || !window.PublicKeyCredential) {
+      window.location.replace("/logout");
+      return;
+    }
+    fetch("/unlock/suspend", {
+      method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({csrf: cfg.csrf})
+    }).then(function (r) {
+      window.location.replace(r.ok ? "/unlock" : "/logout");
+    }).catch(function () {
+      window.location.replace("/logout");
+    });
   }
   window.SPM_AutoLock = {
     pause: function () { paused = true; render(); },
@@ -7907,7 +7993,7 @@ LOCKBAR_SCRIPT = """
     clearInterval(ticker);
     if (Date.now() >= deadline) {
       locking = true;
-      window.location.replace("/logout");
+      lock();
       return;
     }
     ticker = setInterval(render, 1000);
@@ -8019,6 +8105,13 @@ NAV_SECTIONS = [
         ("transfer",  "/transfer",  "transfer", "nav.transfer",  "Export / Import", None),
     ]),
 ]
+
+if WEBAUTHN_ENABLED:
+    # Only offered when a relying-party id is configured. Without one the
+    # endpoints 404, and a nav entry pointing at a 404 is worse than no entry.
+    NAV_SECTIONS[1][1].append(
+        ("unlock-settings", "/unlock/settings", "shield", "nav.unlock",
+         "Biometric Unlock", None))
 
 
 def _nav_html(active, counts):
@@ -8139,6 +8232,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
 {LANG_BOOTSTRAP}
 {I18N_SCRIPT}
 {SHELL_SCRIPT}
+{UNLOCK_BOOTSTRAP}
 {LOCKBAR_SCRIPT}
 </body>
 </html>"""
@@ -8776,6 +8870,256 @@ def login_page(version, message=""):
 {SHELL_SCRIPT}
 </body>
 </html>"""
+
+
+# Stamped by _send_html the way __LANG__ is, so the lockbar on every page
+# learns whether biometric unlock is usable without each page handler having to
+# decrypt the vault to find out.
+UNLOCK_BOOTSTRAP = """
+<script>window.SPM_UNLOCK = __SPM_UNLOCK__;</script>
+"""
+
+UNLOCK_SCRIPT = """
+<script>
+(function () {
+  var btn = document.getElementById("unlock-btn");
+  var status = document.getElementById("unlock-status");
+  if (!btn || !status) return;
+  var CSRF = btn.getAttribute("data-csrf") || "";
+  function b64urlToBytes(value) {
+    var pad = value.replace(/-/g, "+").replace(/_/g, "/");
+    while (pad.length % 4) pad += "=";
+    var raw = atob(pad), out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+  function bytesToB64url(buf) {
+    var bytes = new Uint8Array(buf), s = "";
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+  }
+  function post(url, body) {
+    return fetch(url, {
+      method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(Object.assign({csrf: CSRF}, body || {}))
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) throw new Error(j.error || "unlock failed");
+        return j;
+      });
+    });
+  }
+  function fail(message) {
+    status.textContent = message;
+    btn.disabled = false;
+  }
+  btn.addEventListener("click", function () {
+    if (!window.PublicKeyCredential) { fail("This browser has no biometric support."); return; }
+    btn.disabled = true;
+    status.textContent = "Waiting for biometric confirmation...";
+    post("/unlock/challenge").then(function (c) {
+      return navigator.credentials.get({publicKey: {
+        challenge: b64urlToBytes(c.challenge),
+        rpId: c.rp_id,
+        userVerification: "required",
+        timeout: 60000,
+        allowCredentials: (c.allow || []).map(function (id) {
+          return {type: "public-key", id: b64urlToBytes(id)};
+        })
+      }});
+    }).then(function (cred) {
+      if (!cred) throw new Error("no credential");
+      return post("/unlock/verify", {
+        credential_id: cred.id,
+        client_data: bytesToB64url(cred.response.clientDataJSON),
+        auth_data: bytesToB64url(cred.response.authenticatorData),
+        signature: bytesToB64url(cred.response.signature)
+      });
+    }).then(function () {
+      window.location.replace("/");
+    }).catch(function (err) {
+      fail((err && err.message) ? err.message : "Unlock failed.");
+    });
+  });
+})();
+</script>
+"""
+
+UNLOCK_REGISTER_SCRIPT = """
+<script>
+(function () {
+  var btn = document.getElementById("register-btn");
+  var status = document.getElementById("register-status");
+  if (!btn || !status) return;
+  var CSRF = btn.getAttribute("data-csrf") || "";
+  function b64urlToBytes(value) {
+    var pad = value.replace(/-/g, "+").replace(/_/g, "/");
+    while (pad.length % 4) pad += "=";
+    var raw = atob(pad), out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+  function bytesToB64url(buf) {
+    var bytes = new Uint8Array(buf), s = "";
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+  }
+  function post(url, body) {
+    return fetch(url, {
+      method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(Object.assign({csrf: CSRF}, body || {}))
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) throw new Error(j.error || "registration failed");
+        return j;
+      });
+    });
+  }
+  btn.addEventListener("click", function () {
+    if (!window.PublicKeyCredential) { status.textContent = "This browser has no biometric support."; return; }
+    btn.disabled = true;
+    status.textContent = "Waiting for the authenticator...";
+    var label = (document.getElementById("register-label") || {}).value || "";
+    post("/unlock/register/challenge").then(function (c) {
+      return navigator.credentials.create({publicKey: {
+        challenge: b64urlToBytes(c.challenge),
+        rp: {id: c.rp_id, name: "Sans Password Manager"},
+        user: {
+          id: b64urlToBytes(c.user_id),
+          name: c.user_name || "vault",
+          displayName: c.user_name || "vault"
+        },
+        /* ES256 only: it is what every platform authenticator supports, and it
+           keeps server-side verification to one openssl code path. */
+        pubKeyCredParams: [{type: "public-key", alg: -7}],
+        authenticatorSelection: {
+          authenticatorAttachment: "platform",
+          residentKey: "discouraged",
+          userVerification: "required"
+        },
+        attestation: "none",
+        timeout: 60000
+      }});
+    }).then(function (cred) {
+      if (!cred) throw new Error("no credential");
+      /* getPublicKey() hands back SPKI DER directly, which is what lets this
+         server skip a CBOR decoder for the attestation object entirely. */
+      var spki = cred.response.getPublicKey ? cred.response.getPublicKey() : null;
+      if (!spki) throw new Error("this browser cannot export the credential key");
+      return post("/unlock/register/verify", {
+        credential_id: cred.id,
+        client_data: bytesToB64url(cred.response.clientDataJSON),
+        auth_data: bytesToB64url(cred.response.getAuthenticatorData()),
+        public_key: bytesToB64url(spki),
+        label: label
+      });
+    }).then(function () {
+      window.location.replace("/unlock/settings?msg=registered");
+    }).catch(function (err) {
+      status.textContent = (err && err.message) ? err.message : "Registration failed.";
+      btn.disabled = false;
+    });
+  });
+})();
+</script>
+"""
+
+
+def unlock_page(version, csrf):
+    """The locked screen.
+
+    Renders no vault content at all -- a button, a status line and a way out.
+    It must also be usable with no JavaScript, so the master-password route is
+    a plain link rather than something the script has to enable.
+    """
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Locked · SPM</title>
+{HEAD_ICONS}
+{DESIGN_CSS}
+</head>
+<body class="theme-dark">
+{ICON_SPRITE}
+<div class="login-wrap">
+  <main class="login-card" id="main-content">
+    <div class="login-brand">
+      <div class="brand-mark" aria-hidden="true">{_icon("brand")}</div>
+      <h1>Vault locked</h1>
+      <p>Confirm with your device to continue where you left off.</p>
+    </div>
+    <div class="card"><div class="card-body">
+      <button class="btn btn-primary btn-block" type="button" id="unlock-btn"
+              data-csrf="{html.escape(csrf)}">Unlock with biometrics</button>
+      <div class="faint" id="unlock-status" role="status" aria-live="polite"
+           style="margin-top:var(--sp-3);min-height:1.2em"></div>
+    </div>
+    <div class="card-foot">
+      <a href="/logout">Use master password instead</a>
+    </div></div>
+    <div style="text-align:center;margin-top:var(--sp-4)">
+      <div class="faint">v{html.escape(version)}</div>
+    </div>
+  </main>
+</div>
+{UNLOCK_SCRIPT}
+</body>
+</html>"""
+
+
+def unlock_settings_page(creds, csrf, flash=""):
+    """Manage registered unlock credentials."""
+    if creds:
+        rows = []
+        for _, cred in creds:
+            rows.append(
+                # method="post" in double quotes on purpose: _POST_FORM_RE
+                # stamps the CSRF token by matching that exact spelling, and a
+                # single-quoted form silently receives no token. Same-origin
+                # desktop requests would still pass on the Origin check alone,
+                # so the breakage would only ever show up on iOS, where a
+                # home-screen web app sends Origin: null and the token is the
+                # only thing left.
+                '<tr><td>%s</td><td>%s</td><td class="faint">%s</td>'
+                '<td><form method="post" action="/unlock/delete" '
+                "onsubmit=\"return confirm('Remove this unlock credential?')\">"
+                '<input type="hidden" name="id" value="%s">'
+                '<button class="btn btn-danger btn-sm" type="submit">Remove</button>'
+                "</form></td></tr>"
+                % (_esc(cred[1]), _esc(cred[5]), _esc(cred[6]), _esc(cred[1]))
+            )
+        table = (
+            "<div class='table-wrap'><table class='table'><thead><tr>"
+            "<th>ID</th><th>Label</th><th>Registered</th><th></th>"
+            "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>"
+        )
+    else:
+        table = ("<p class='faint'>No unlock credential registered. The vault "
+                 "always falls back to your master password.</p>")
+    return f"""
+<section class="card"><div class="card-head"><h2>Biometric unlock</h2></div>
+<div class="card-body">
+{flash}
+<p class="faint">Registering this device lets the idle lock resume without
+retyping your master password. The master password is still required for the
+first sign-in and once the session reaches its maximum age.</p>
+{table}
+<div class="field" style="margin-top:var(--sp-4)">
+  <label for="register-label">Label for this device</label>
+  <input class="input" id="register-label" maxlength="64" placeholder="iPhone">
+</div>
+<button class="btn btn-primary" type="button" id="register-btn"
+        data-csrf="{html.escape(csrf)}">Register this device</button>
+<div class="faint" id="register-status" role="status" aria-live="polite"
+     style="margin-top:var(--sp-3);min-height:1.2em"></div>
+</div></section>
+{UNLOCK_REGISTER_SCRIPT}
+"""
 
 
 GENERATOR_SCRIPT = """
@@ -9782,6 +10126,142 @@ def parse_authenticators(plaintext: str):
     return lines, items
 
 
+def parse_webauthn(plaintext: str):
+    """Unlock credentials stored as WEBAUTHN rows.
+
+    Deliberately a separate row type from PASSKEY. A PASSKEY row is metadata
+    about a passkey held somewhere else -- `spm passkey-add` says as much when
+    it prints "private key remains in the platform authenticator". These are
+    credentials to this vault, and listing SPM's own unlock keys in
+    `spm passkey-list` would be actively misleading.
+
+    Layout: WEBAUTHN, id, credential_id (b64url), public key (SPKI, b64),
+    rp_id, label, created.
+    """
+    lines = plaintext.splitlines()
+    items = []
+    for idx, line in enumerate(lines):
+        if not line.startswith("WEBAUTHN\t"):
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 7:
+            items.append((idx, parts))
+    return lines, items
+
+
+def _b64url_decode(value):
+    """Decode base64url without padding, rejecting anything else."""
+    if not isinstance(value, str):
+        raise ValueError("not a string")
+    stripped = value.strip()
+    if not stripped or not re.match(r"^[A-Za-z0-9_-]+=*$", stripped):
+        raise ValueError("not base64url")
+    padding = "=" * (-len(stripped.rstrip("=")) % 4)
+    return base64.urlsafe_b64decode(stripped.rstrip("=") + padding)
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _spki_to_pem(spki_der: bytes) -> str:
+    body = base64.b64encode(spki_der).decode("ascii")
+    lines = [body[i:i + 64] for i in range(0, len(body), 64)]
+    return "-----BEGIN PUBLIC KEY-----\n" + "\n".join(lines) + "\n-----END PUBLIC KEY-----\n"
+
+
+def verify_es256(spki_der: bytes, signature: bytes, signed: bytes) -> bool:
+    """Verify an ES256 signature against an SPKI public key.
+
+    Python's standard library has no asymmetric verify, and this server has no
+    third-party dependencies. openssl is already a hard requirement of SPM (it
+    backs the recovery-key flow), so verification shells out the same way vault
+    access already shells out to gpg.
+
+    Only public data touches the filesystem here: an SPKI public key, a
+    signature and the signed bytes. No secret is written.
+    """
+    if not spki_der or not signature or not signed:
+        return False
+    tmpdir = tempfile.mkdtemp(prefix="spm-webauthn-")
+    try:
+        pem_path = os.path.join(tmpdir, "key.pem")
+        sig_path = os.path.join(tmpdir, "sig.der")
+        msg_path = os.path.join(tmpdir, "msg.bin")
+        with open(pem_path, "w", encoding="ascii") as handle:
+            handle.write(_spki_to_pem(spki_der))
+        with open(sig_path, "wb") as handle:
+            handle.write(signature)
+        with open(msg_path, "wb") as handle:
+            handle.write(signed)
+        result = subprocess.run(
+            ["openssl", "dgst", "-sha256", "-verify", pem_path,
+             "-signature", sig_path, msg_path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        return result.returncode == 0
+    except (OSError, ValueError):
+        return False
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def parse_authenticator_data(auth_data: bytes):
+    """Split the fixed header of an authenticatorData blob.
+
+    Only the header is needed: the RP id hash, the flag byte and the signature
+    counter. Attested credential data and extensions sit past byte 37 and are
+    not parsed, which is what keeps this server free of a CBOR decoder.
+    """
+    if len(auth_data) < 37:
+        raise ValueError("authenticatorData too short")
+    rp_id_hash = auth_data[0:32]
+    flags = auth_data[32]
+    sign_count = int.from_bytes(auth_data[33:37], "big")
+    return rp_id_hash, flags, sign_count
+
+
+def check_authenticator_data(auth_data: bytes):
+    """Common authenticatorData checks for both ceremonies.
+
+    User verification is required, not merely user presence. Without the UV
+    check a bare tap on the authenticator satisfies the ceremony and Face ID
+    becomes decoration on top of an unlock anyone holding the phone can do.
+    """
+    rp_id_hash, flags, sign_count = parse_authenticator_data(auth_data)
+    if not hmac.compare_digest(rp_id_hash, hashlib.sha256(WEBAUTHN_RP_ID.encode("utf-8")).digest()):
+        return None, "relying party mismatch"
+    if not flags & 0x01:
+        return None, "user presence flag not set"
+    if not flags & 0x04:
+        return None, "user verification flag not set"
+    return sign_count, ""
+
+
+def check_client_data(raw_json: bytes, expected_type: str, expected_challenge: bytes):
+    """Validate clientDataJSON for either ceremony."""
+    try:
+        data = jsonlib.loads(raw_json.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return "malformed clientDataJSON"
+    if not isinstance(data, dict):
+        return "malformed clientDataJSON"
+    if data.get("type") != expected_type:
+        return "wrong ceremony type"
+    try:
+        supplied = _b64url_decode(data.get("challenge") or "")
+    except ValueError:
+        return "malformed challenge"
+    if not hmac.compare_digest(supplied, expected_challenge):
+        return "challenge mismatch"
+    # The Origin *header* is "null" inside an iOS home-screen web app, which is
+    # why _write_authorized has a branch for it. The origin recorded in
+    # clientDataJSON is the real one even there, so it can be compared exactly.
+    if data.get("origin") != WEBAUTHN_ORIGIN:
+        return "origin mismatch"
+    return ""
+
+
 def rotation_days():
     """Age after which a password is flagged for rotation."""
     try:
@@ -9961,8 +10441,9 @@ class SPMServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.sessions = {}  # token -> {"master": str, "created": float, "last_seen": float}
+        self.sessions = {}  # token -> {"master", "created", "last_seen", "state", ...}
         self.login_failures = {}  # client ip -> {"count": int, "until": float}
+        self.webauthn_counters = {}  # credential id -> highest signature counter seen
         self.auth_lock = threading.RLock()
         # Every mutation is a decrypt -> modify -> encrypt transaction. Without
         # one lock around that whole sequence, concurrent requests calculate the
@@ -9984,6 +10465,22 @@ SESSION_TTL = 300
 # this a session (and the plaintext master password it holds) could live for
 # as long as the browser kept poking it.
 SESSION_MAX_AGE = 12 * 3600
+# A suspended session still holds the plaintext master password in memory so a
+# biometric can resume it without a retyped password. That memory residency is
+# the entire cost of the feature, so it is bounded separately and does not
+# slide: once this much time has passed since the screen locked, the session is
+# swept and the master password is required again. SESSION_MAX_AGE still caps
+# the total -- an unlock never resets "created".
+def _suspend_max_age():
+    try:
+        value = int(os.environ.get("SPM_WEB_SUSPEND_MAX", "28800"))
+    except ValueError:
+        return 28800
+    # Zero or negative would mean "resumable forever" if used as a comparison
+    # bound; treat anything nonsensical as the default rather than as no limit.
+    return value if 0 < value <= SESSION_MAX_AGE else 28800
+
+SUSPEND_MAX_AGE = _suspend_max_age()
 # Web mode can bind beyond loopback, so an unauthenticated master-password
 # guess has to cost something. Lock a client out briefly once it burns through
 # this many attempts.
@@ -10028,6 +10525,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         lang = html.escape(self._get_lang())
         if "__LANG__" in body:
             body = body.replace("__LANG__", lang)
+        if "__SPM_UNLOCK__" in body:
+            _, session = self._session_record()
+            available = bool(
+                WEBAUTHN_ENABLED and session is not None
+                and session.get("has_cred")
+            )
+            body = body.replace("__SPM_UNLOCK__", jsonlib.dumps({
+                "available": available,
+                "csrf": (session or {}).get("csrf", ""),
+            }))
         # A fresh nonce per response, stamped centrally so a page added later
         # cannot ship a script the CSP will refuse.
         #
@@ -10127,8 +10634,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # back, so an abandoned session kept its master password in memory for
         # the life of the process. Sweep the whole table instead.
         for tok, sess in list(self.server.sessions.items()):
-            if (now - sess.get("last_seen", 0) > SESSION_TTL
-                    or now - sess.get("created", 0) > SESSION_MAX_AGE):
+            if now - sess.get("created", 0) > SESSION_MAX_AGE:
+                self.server.sessions.pop(tok, None)
+                continue
+            if sess.get("state") == "suspended":
+                # A suspended session is idle by definition, so the idle TTL
+                # would kill it within minutes and there would be nothing left
+                # to resume. Its own bound applies instead, and unlike
+                # last_seen it does not slide -- the clock starts when the
+                # screen locks and runs regardless of what the browser does.
+                if now - sess.get("suspended_at", 0) > SUSPEND_MAX_AGE:
+                    self.server.sessions.pop(tok, None)
+                continue
+            if now - sess.get("last_seen", 0) > SESSION_TTL:
                 self.server.sessions.pop(tok, None)
 
     def _login_client(self):
@@ -10183,6 +10701,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.server.login_failures.pop(self._login_client(), None)
 
     def _get_cookie_session(self):
+        """The master password for an ACTIVE session, else None.
+
+        A suspended session returns None here on purpose. Every authenticated
+        route already treats None as "not signed in", so suspension fails
+        closed for routes written before this feature existed and for any route
+        added after it -- no per-route opt-in to forget. The unlock endpoints
+        reach past this with _session_record().
+        """
         now = time.time()
         self._sweep_sessions(now)
         token = self._parse_cookies().get("spm_session")
@@ -10191,8 +10717,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         session = self.server.sessions.get(token)
         if not session:
             return None
+        if session.get("state") == "suspended":
+            return None
         session["last_seen"] = now
         return session.get("master", "")
+
+    def _session_record(self):
+        """The raw session record whatever its state, plus its token."""
+        now = time.time()
+        self._sweep_sessions(now)
+        token = self._parse_cookies().get("spm_session")
+        if not token:
+            return "", None
+        return token, self.server.sessions.get(token)
+
+    def _suspended_session(self):
+        """The session record only when it is suspended."""
+        token, session = self._session_record()
+        if session and session.get("state") == "suspended":
+            return token, session
+        return "", None
 
     def _session_csrf(self):
         token = self._parse_cookies().get("spm_session")
@@ -10216,20 +10760,318 @@ class Handler(http.server.BaseHTTPRequestHandler):
         cookies = self._parse_cookies()
         return sanitize_lang(cookies.get("spm_lang"))
 
+    def _deny_unauthenticated(self):
+        """Answer a request that has no active session.
+
+        A suspended session is a different situation from no session at all:
+        the vault is still open in memory and a biometric can resume it, so
+        send the visitor to the unlock page instead of asking for a password
+        they do not need to retype yet.
+        """
+        _, suspended = self._suspended_session()
+        if suspended is not None and WEBAUTHN_ENABLED:
+            self.send_response(302)
+            self.send_header("Location", "/unlock")
+            self.end_headers()
+            return
+        page = login_page(VERSION)
+        self._send_html(200, page)
+
     def _require_login(self):
         master = self._get_cookie_session()
         if not master:
-            page = login_page(VERSION)
-            self._send_html(200, page)
+            self._deny_unauthenticated()
             return None
         return master
+
+    def _send_json(self, code, payload):
+        body = jsonlib.dumps(payload).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_json_authorized(self):
+        """Read a JSON ceremony body after checking CSRF and origin.
+
+        Returns None when the response has already been sent.
+        """
+        raw = self._read_body(limit=64 * 1024)
+        if raw is None:
+            return None
+        if not self._write_authorized(raw, {}):
+            self._send_json(403, {"error": "rejected"})
+            return None
+        try:
+            payload = jsonlib.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            self._send_json(400, {"error": "malformed request"})
+            return None
+        if not isinstance(payload, dict):
+            self._send_json(400, {"error": "malformed request"})
+            return None
+        return payload
+
+    def _issue_challenge(self, session, kind):
+        challenge = secrets.token_bytes(32)
+        session["challenge"] = challenge
+        session["challenge_at"] = time.time()
+        session["challenge_kind"] = kind
+        return challenge
+
+    def _take_challenge(self, session, kind):
+        """Consume the stored challenge, whatever the caller then does with it.
+
+        Reading it clears it unconditionally. A challenge that survived a failed
+        verification could be replayed against a second guess, so failure has to
+        burn it just as success does.
+        """
+        challenge = session.get("challenge") or b""
+        issued_at = session.get("challenge_at", 0)
+        stored_kind = session.get("challenge_kind", "")
+        session["challenge"] = b""
+        session["challenge_at"] = 0
+        session["challenge_kind"] = ""
+        if not challenge or stored_kind != kind:
+            return b""
+        if time.time() - issued_at > WEBAUTHN_CHALLENGE_TTL:
+            return b""
+        return challenge
+
+    def _handle_unlock_post(self, path):
+        """WebAuthn ceremonies. Returns False when the path is not one of them.
+
+        These live above the normal session gate because two of them act on a
+        suspended session, which _get_cookie_session deliberately reports as no
+        session at all.
+        """
+        if not WEBAUTHN_ENABLED:
+            return False
+        if path not in ("/unlock/suspend", "/unlock/challenge", "/unlock/verify",
+                        "/unlock/register/challenge", "/unlock/register/verify"):
+            return False
+
+        if path in ("/unlock/challenge", "/unlock/verify"):
+            token, session = self._suspended_session()
+        else:
+            token, session = self._session_record()
+            if session is not None and session.get("state") != "active":
+                session = None
+        if session is None:
+            self._send_json(403, {"error": "no session"})
+            return True
+
+        payload = self._read_json_authorized()
+        if payload is None:
+            return True
+
+        if path == "/unlock/suspend":
+            session["state"] = "suspended"
+            session["suspended_at"] = time.time()
+            # Nothing may carry over from the active session into the locked
+            # one: a challenge issued before the lock must not be spendable
+            # after it.
+            self._take_challenge(session, "")
+            self.log_message("session suspended, awaiting biometric unlock")
+            self._send_json(200, {"ok": True})
+            return True
+
+        if path == "/unlock/register/challenge":
+            challenge = self._issue_challenge(session, "create")
+            self._send_json(200, {
+                "challenge": _b64url_encode(challenge),
+                "rp_id": WEBAUTHN_RP_ID,
+                "user_id": _b64url_encode(hashlib.sha256(
+                    os.path.abspath(VAULT_PATH).encode("utf-8")).digest()[:16]),
+                "user_name": os.path.basename(VAULT_PATH),
+            })
+            return True
+
+        if path == "/unlock/register/verify":
+            self._webauthn_register(session, payload)
+            return True
+
+        if path == "/unlock/challenge":
+            try:
+                plaintext = decrypt_vault(session.get("master", ""))
+            except Exception:
+                self._send_json(403, {"error": "vault unavailable"})
+                return True
+            _, creds = parse_webauthn(plaintext)
+            allowed = [parts[2] for _, parts in creds if parts[4] == WEBAUTHN_RP_ID]
+            if not allowed:
+                self._send_json(400, {"error": "no credential registered"})
+                return True
+            challenge = self._issue_challenge(session, "get")
+            self._send_json(200, {
+                "challenge": _b64url_encode(challenge),
+                "rp_id": WEBAUTHN_RP_ID,
+                "allow": allowed,
+            })
+            return True
+
+        if path == "/unlock/verify":
+            self._webauthn_unlock(token, session, payload)
+            return True
+
+        return False
+
+    def _webauthn_register(self, session, payload):
+        """Finish a registration ceremony and store the credential."""
+        expected = self._take_challenge(session, "create")
+        if not expected:
+            self._send_json(400, {"error": "challenge expired"})
+            return
+        try:
+            client_data = _b64url_decode(payload.get("client_data") or "")
+            auth_data = _b64url_decode(payload.get("auth_data") or "")
+            spki = _b64url_decode(payload.get("public_key") or "")
+            cred_id = (payload.get("credential_id") or "").strip()
+            _b64url_decode(cred_id)
+        except ValueError:
+            self._send_json(400, {"error": "malformed credential"})
+            return
+        if not spki:
+            # getPublicKey() returned null: the browser could not export the
+            # key. Reaching it would mean decoding the CBOR attestation object,
+            # and a CBOR decoder is exactly the dependency this server does not
+            # have. Fail with something the user can act on instead.
+            self._send_json(400, {"error": "this browser cannot export the credential key"})
+            return
+        problem = check_client_data(client_data, "webauthn.create", expected)
+        if problem:
+            self._send_json(400, {"error": problem})
+            return
+        _, problem = check_authenticator_data(auth_data)
+        if problem:
+            self._send_json(400, {"error": problem})
+            return
+
+        label = (payload.get("label") or "").strip() or "Biometric unlock"
+        label = re.sub(r"[\t\r\n]", " ", label)[:64]
+        master = session.get("master", "")
+        try:
+            plaintext = decrypt_vault(master)
+        except Exception:
+            self._send_json(403, {"error": "vault unavailable"})
+            return
+        lines, creds = parse_webauthn(plaintext)
+        if any(parts[2] == cred_id for _, parts in creds):
+            self._send_json(400, {"error": "credential already registered"})
+            return
+        next_id = 1
+        for _, parts in creds:
+            try:
+                next_id = max(next_id, int(parts[1]) + 1)
+            except (TypeError, ValueError):
+                continue
+        row = "\t".join([
+            "WEBAUTHN", str(next_id), cred_id,
+            base64.b64encode(spki).decode("ascii"),
+            WEBAUTHN_RP_ID, label,
+            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        ])
+        lines.append(row)
+        try:
+            encrypt_vault(master, "\n".join(lines) + "\n")
+        except Exception:
+            self._send_json(500, {"error": "could not save credential"})
+            return
+        session["has_cred"] = True
+        self.log_message("registered unlock credential %s", next_id)
+        self._send_json(200, {"ok": True})
+
+    def _webauthn_unlock(self, token, session, payload):
+        """Verify an assertion and resume a suspended session."""
+        locked_for = self._login_lockout_remaining()
+        if locked_for > 0:
+            self._send_json(429, {"error": "too many attempts", "retry_after": locked_for})
+            return
+        expected = self._take_challenge(session, "get")
+        if not expected:
+            self._send_json(400, {"error": "challenge expired"})
+            return
+        try:
+            client_data = _b64url_decode(payload.get("client_data") or "")
+            auth_data = _b64url_decode(payload.get("auth_data") or "")
+            signature = _b64url_decode(payload.get("signature") or "")
+            cred_id = (payload.get("credential_id") or "").strip()
+            _b64url_decode(cred_id)
+        except ValueError:
+            self._record_login_failure()
+            self._send_json(400, {"error": "malformed assertion"})
+            return
+
+        problem = check_client_data(client_data, "webauthn.get", expected)
+        if problem:
+            self._record_login_failure()
+            self._send_json(403, {"error": problem})
+            return
+        sign_count, problem = check_authenticator_data(auth_data)
+        if problem:
+            self._record_login_failure()
+            self._send_json(403, {"error": problem})
+            return
+
+        try:
+            plaintext = decrypt_vault(session.get("master", ""))
+        except Exception:
+            self._send_json(403, {"error": "vault unavailable"})
+            return
+        _, creds = parse_webauthn(plaintext)
+        match = None
+        for _, parts in creds:
+            if hmac.compare_digest(parts[2], cred_id) and parts[4] == WEBAUTHN_RP_ID:
+                match = parts
+                break
+        if match is None:
+            self._record_login_failure()
+            self._send_json(403, {"error": "unknown credential"})
+            return
+        try:
+            spki = base64.b64decode(match[3].encode("ascii"), validate=True)
+        except Exception:
+            self._send_json(403, {"error": "unreadable credential"})
+            return
+
+        signed = auth_data + hashlib.sha256(client_data).digest()
+        if not verify_es256(spki, signature, signed):
+            self._record_login_failure()
+            self._send_json(403, {"error": "signature rejected"})
+            return
+
+        # Signature counters are held per process rather than written back to
+        # the vault: persisting one would mean a full read-modify-write of the
+        # encrypted vault on every unlock, and Apple's platform authenticator
+        # reports 0 forever anyway. Compare only when both sides are non-zero.
+        counters = self.server.webauthn_counters
+        previous = counters.get(cred_id, 0)
+        if sign_count and previous and sign_count <= previous:
+            self._record_login_failure()
+            self.log_message("signature counter regression on credential %s", match[1])
+            self._send_json(403, {"error": "signature counter regression"})
+            return
+        if sign_count:
+            counters[cred_id] = sign_count
+
+        self._clear_login_failures()
+        session["state"] = "active"
+        session["suspended_at"] = 0
+        session["last_seen"] = time.time()
+        # "created" is deliberately untouched: SESSION_MAX_AGE still caps the
+        # session, so biometric unlocks cannot chain into an unbounded life.
+        session["csrf"] = secrets.token_hex(32)
+        self.log_message("session resumed by credential %s", match[1])
+        self._send_json(200, {"ok": True})
 
     def _body_csrf(self, raw_body_bytes, data):
         token = (data.get("csrf") or [""])[0].strip()
         if token:
             return token
-        # The import form is multipart, so its fields are not in parse_qs.
         ctype = self.headers.get("Content-Type", "") or ""
+        # The import form is multipart, so its fields are not in parse_qs.
         if "multipart/form-data" in ctype.lower():
             try:
                 fields = parse_multipart(raw_body_bytes, ctype)
@@ -10238,6 +11080,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raw = fields.get("csrf")
             if isinstance(raw, bytes):
                 return raw.decode("utf-8", errors="ignore").strip()
+            return ""
+        # The WebAuthn ceremonies post JSON from fetch(), so their token is in
+        # neither parse_qs output nor a multipart part. Read it from the object
+        # itself. Only a string counts: a JSON body can carry a list or a dict
+        # where a token is expected, and str() on either would produce
+        # something that compares as a token-shaped value.
+        if "application/json" in ctype.lower():
+            try:
+                payload = jsonlib.loads(raw_body_bytes.decode("utf-8"))
+            except (AttributeError, UnicodeDecodeError, ValueError):
+                return ""
+            if not isinstance(payload, dict):
+                return ""
+            raw = payload.get("csrf")
+            return raw.strip() if isinstance(raw, str) else ""
         return ""
 
     def _write_authorized(self, raw_body_bytes, data):
@@ -10334,6 +11191,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                              MANIFEST_JSON.encode("utf-8"))
             return
 
+        # Above the login gate because a suspended session has no active
+        # session by design, and this is the page that fixes that. It renders
+        # no vault content -- only a button and a way out.
+        if path == "/unlock":
+            if not WEBAUTHN_ENABLED:
+                self.send_error(404, "Not found")
+                return
+            _, suspended = self._suspended_session()
+            if suspended is None:
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+            self._send_html(200, unlock_page(VERSION, self._session_csrf()))
+            return
+
         master = self._require_login()
         if master is None:
             return
@@ -10393,6 +11266,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_html(200, render_shell(
                 security_page(audit), "security", VERSION, VAULT_PATH,
                 title="Security", counts=self._counts(plaintext)))
+            return
+
+        if path == "/unlock/settings":
+            if not WEBAUTHN_ENABLED:
+                self.send_error(404, "Not found")
+                return
+            try:
+                plaintext = decrypt_vault(master)
+            except Exception:
+                return self._expire_session()
+            _, creds = parse_webauthn(plaintext)
+            params = urllib.parse.parse_qs(parsed.query)
+            flash = ""
+            if (params.get("msg") or [""])[0] == "registered":
+                flash = "<div class='flash'>Unlock credential registered.</div>"
+            elif (params.get("msg") or [""])[0] == "deleted":
+                flash = "<div class='flash'>Unlock credential removed.</div>"
+            self._send_html(200, render_shell(
+                unlock_settings_page(creds, self._session_csrf(), flash),
+                "unlock-settings", VERSION, VAULT_PATH,
+                title="Biometric Unlock", counts=self._counts(plaintext)))
             return
 
         if path == "/history":
@@ -10897,12 +11791,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             try:
-                decrypt_vault(password)
+                opened = decrypt_vault(password)
             except subprocess.CalledProcessError:
                 self._record_login_failure()
                 page = login_page(VERSION, "<div class='msg'>Invalid master password.</div>")
                 self._send_html(200, page)
                 return
+
+            # Counted once here rather than on every page render: the answer
+            # only changes when a credential is registered or removed, and both
+            # of those already hold the plaintext vault open.
+            _, opened_creds = parse_webauthn(opened)
+            has_cred = any(parts[4] == WEBAUTHN_RP_ID for _, parts in opened_creds)
 
             self._clear_login_failures()
             token = secrets.token_hex(32)
@@ -10911,6 +11811,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "csrf": secrets.token_hex(32),
                 "created": time.time(),
                 "last_seen": time.time(),
+                "state": "active",
+                "suspended_at": 0,
+                "challenge": b"",
+                "challenge_at": 0,
+                "challenge_kind": "",
+                "has_cred": has_cred,
             }
             self.send_response(302)
             self.send_header("Set-Cookie", f"spm_session={token}; {self._session_cookie_attrs()}")
@@ -10918,10 +11824,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
 
+        if path.startswith("/unlock/"):
+            handled = self._handle_unlock_post(path)
+            if handled:
+                return
+
         master = self._get_cookie_session()
         if not master:
-            page = login_page(VERSION)
-            self._send_html(200, page)
+            self._deny_unauthenticated()
             return
 
         raw_body_bytes = self._read_body()
@@ -11065,6 +11975,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             self.send_response(302)
             self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/unlock/delete":
+            if not WEBAUTHN_ENABLED:
+                self.send_error(404, "Not found")
+                return
+            target = (data.get("id") or [""])[0].strip()
+            if not target.isdigit():
+                self.send_error(400, "Invalid credential id")
+                return
+            try:
+                plaintext = decrypt_vault(master)
+            except Exception:
+                return self._expire_session()
+            lines, creds = parse_webauthn(plaintext)
+            drop = {idx for idx, parts in creds if parts[1] == target}
+            if not drop:
+                self.send_error(404, "Credential not found")
+                return
+            kept = [line for idx, line in enumerate(lines) if idx not in drop]
+            encrypt_vault(master, "\n".join(kept) + "\n")
+            _, remaining = parse_webauthn("\n".join(kept))
+            _, current = self._session_record()
+            if current is not None:
+                current["has_cred"] = any(parts[4] == WEBAUTHN_RP_ID for _, parts in remaining)
+            self.send_response(302)
+            self.send_header("Location", "/unlock/settings?msg=deleted")
             self.end_headers()
             return
 
@@ -12549,6 +13487,8 @@ main() {
 		passkey-add)     cmd_passkey_add "$@" ;;
 		passkey-list)    cmd_passkey_list "$@" ;;
 		passkey-delete)  cmd_tag_delete PASSKEY "${1:-}" 'Passkey metadata' ;;
+		webauthn-list)   cmd_webauthn_list ;;
+		webauthn-delete) cmd_tag_delete WEBAUTHN "${1:-}" 'Unlock credential' ;;
 		sync)            cmd_sync "$@" ;;
 		emergency-create) cmd_emergency_create "$@" ;;
 		emergency-open)  cmd_emergency_open "$@" ;;
