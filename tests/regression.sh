@@ -987,6 +987,49 @@ assert len(creds) == 1 and creds[0][1][5] == "iPhone", creds
 # Suspension must be bounded, and an unusable value must fall back rather than
 # be taken literally as "resumable forever".
 assert ns["_suspend_max_age"]() > 0
+
+# The expected origin follows the RELYING PARTY, never the bind address. SPM's
+# documented deployment binds loopback behind a TLS reverse proxy, so a bind of
+# 127.0.0.1 says nothing about what the browser connected to. Deriving the
+# scheme from the bind yielded http://<public name>:<port> in exactly that
+# shape and every assertion failed on an origin mismatch -- while this suite,
+# which only ever ran localhost-on-loopback, saw both paths agree and passed.
+cfg = ns["_webauthn_config"]
+import os as _os
+def origin_for(rp, bind, port, override=None):
+    ns["BIND_ADDR"], ns["PORT"] = bind, port
+    keep = _os.environ.get("SPM_WEB_RP_ID"), _os.environ.get("SPM_WEB_ORIGIN")
+    _os.environ["SPM_WEB_RP_ID"] = rp
+    if override is None:
+        _os.environ.pop("SPM_WEB_ORIGIN", None)
+    else:
+        _os.environ["SPM_WEB_ORIGIN"] = override
+    try:
+        return cfg()
+    finally:
+        for k, v in zip(("SPM_WEB_RP_ID", "SPM_WEB_ORIGIN"), keep):
+            if v is None:
+                _os.environ.pop(k, None)
+            else:
+                _os.environ[k] = v
+
+# The production shape: loopback bind, public name, TLS terminated upstream.
+assert origin_for("spm.example.test", "127.0.0.1", 8777) == \
+    ("spm.example.test", "https://spm.example.test"), origin_for("spm.example.test", "127.0.0.1", 8777)
+# Local development still works over plain HTTP, because localhost is the one
+# host a browser treats as a secure context without TLS.
+assert origin_for("localhost", "127.0.0.1", 18000) == \
+    ("localhost", "http://localhost:18000")
+# A non-loopback bind with a public name is https too.
+assert origin_for("spm.example.test", "0.0.0.0", 8777)[1] == "https://spm.example.test"
+# Explicit override, for a proxy on a non-default port.
+assert origin_for("spm.example.test", "127.0.0.1", 8777,
+                  "https://spm.example.test:8443")[1] == "https://spm.example.test:8443"
+# A malformed override disables the feature rather than being trusted.
+assert origin_for("spm.example.test", "127.0.0.1", 8777, "javascript:alert(1)") == ("", "")
+# No relying party at all means the feature does not exist.
+assert origin_for("", "127.0.0.1", 8777) == ("", "")
+assert origin_for("not a domain", "127.0.0.1", 8777) == ("", "")
 PYWEBROW
 
 # Unlock credentials are a distinct row type from PASSKEY on purpose, so
