@@ -708,7 +708,12 @@ need = ["nav.security", "nav.history", "nav.unlock", "security.weak",
         "security.reused",
         "security.aging", "security.incomplete", "security.malformed",
         "history.when", "btn.restore", "confirm.restore_snapshot",
-        "search.kind", "badge.aging", "tags.all"]
+        "search.kind", "badge.aging", "tags.all",
+        "page.unlock.desc", "unlock.registered", "unlock.empty",
+        "unlock.empty_sub", "unlock.field.label", "unlock.register",
+        "unlock.note", "unlock.title", "unlock.sub", "unlock.btn",
+        "unlock.fallback", "unlock.waiting", "unlock.failed",
+        "unlock.nosupport", "register.waiting", "register.failed"]
 for lang in ('"en"', '"id"', '"ja"'):
     start = src.index(lang + ": {")
     end = src.index("\n    }", start)

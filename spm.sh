@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.11.1"
+VERSION="2.11.2"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -6358,6 +6358,22 @@ I18N_SCRIPT = """
       "nav.security": "Security",
       "nav.history": "History",
       "nav.unlock": "Biometric Unlock",
+      "page.unlock.desc": "Resume the idle lock with this device instead of your master password.",
+      "unlock.registered": "Registered",
+      "unlock.empty": "No device registered yet",
+      "unlock.empty_sub": "Register one below, or keep using your master password",
+      "unlock.field.label": "Label for this device",
+      "unlock.register": "Register this device",
+      "unlock.note": "The master password is still required for the first sign-in, once the session reaches its maximum age, and whenever a locked session goes unresumed for too long.",
+      "unlock.title": "Vault locked",
+      "unlock.sub": "Confirm with your device to continue where you left off.",
+      "unlock.btn": "Unlock with biometrics",
+      "unlock.fallback": "Use master password instead",
+      "unlock.waiting": "Waiting for biometric confirmation...",
+      "unlock.failed": "Unlock failed.",
+      "unlock.nosupport": "This browser has no biometric support.",
+      "register.waiting": "Waiting for the authenticator...",
+      "register.failed": "Registration failed.",
       "security.sub": "What is pulling your vault score down.",
       "security.scope": "Only password entries are scored. IDs are shown; secrets never are.",
       "security.none": "Nothing to fix here.",
@@ -6579,6 +6595,22 @@ I18N_SCRIPT = """
       "nav.security": "Keamanan",
       "nav.history": "Riwayat",
       "nav.unlock": "Buka Biometrik",
+      "page.unlock.desc": "Lanjutkan sesi terkunci dengan perangkat ini, bukan kata sandi master.",
+      "unlock.registered": "Terdaftar",
+      "unlock.empty": "Belum ada perangkat terdaftar",
+      "unlock.empty_sub": "Daftarkan di bawah, atau tetap pakai kata sandi master",
+      "unlock.field.label": "Label untuk perangkat ini",
+      "unlock.register": "Daftarkan perangkat ini",
+      "unlock.note": "Kata sandi master tetap diperlukan untuk masuk pertama kali, saat sesi mencapai usia maksimum, dan bila sesi terkunci terlalu lama tidak dilanjutkan.",
+      "unlock.title": "Brankas terkunci",
+      "unlock.sub": "Konfirmasi dengan perangkat Anda untuk melanjutkan.",
+      "unlock.btn": "Buka dengan biometrik",
+      "unlock.fallback": "Pakai kata sandi master saja",
+      "unlock.waiting": "Menunggu konfirmasi biometrik...",
+      "unlock.failed": "Gagal membuka.",
+      "unlock.nosupport": "Peramban ini tidak mendukung biometrik.",
+      "register.waiting": "Menunggu autentikator...",
+      "register.failed": "Pendaftaran gagal.",
       "security.sub": "Hal yang menurunkan skor brankas Anda.",
       "security.scope": "Hanya entry password yang dinilai. ID ditampilkan; rahasia tidak pernah.",
       "security.none": "Tidak ada yang perlu diperbaiki.",
@@ -6800,6 +6832,22 @@ I18N_SCRIPT = """
       "nav.security": "セキュリティ",
       "nav.history": "履歴",
       "nav.unlock": "生体認証ロック解除",
+      "page.unlock.desc": "マスターパスワードの代わりに、この端末でロックを解除します。",
+      "unlock.registered": "登録日時",
+      "unlock.empty": "登録済みの端末はありません",
+      "unlock.empty_sub": "下から登録するか、マスターパスワードを使い続けてください",
+      "unlock.field.label": "この端末のラベル",
+      "unlock.register": "この端末を登録",
+      "unlock.note": "初回サインイン時、セッションが最大有効期間に達したとき、およびロックされたセッションが長時間再開されなかった場合は、引き続きマスターパスワードが必要です。",
+      "unlock.title": "保管庫はロック中",
+      "unlock.sub": "端末で確認して、続きから再開します。",
+      "unlock.btn": "生体認証で解除",
+      "unlock.fallback": "マスターパスワードを使う",
+      "unlock.waiting": "生体認証の確認を待っています...",
+      "unlock.failed": "ロック解除に失敗しました。",
+      "unlock.nosupport": "このブラウザは生体認証に対応していません。",
+      "register.waiting": "認証器を待っています...",
+      "register.failed": "登録に失敗しました。",
       "security.sub": "ボールトのスコアを下げている項目。",
       "security.scope": "評価対象はパスワードのみ。IDのみ表示し、シークレットは表示しません。",
       "security.none": "修正すべき項目はありません。",
@@ -8902,6 +8950,9 @@ UNLOCK_SCRIPT = """
   var status = document.getElementById("unlock-status");
   if (!btn || !status) return;
   var CSRF = btn.getAttribute("data-csrf") || "";
+  function t(key, fallback) {
+    return (window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t(key, fallback) : fallback;
+  }
   function b64urlToBytes(value) {
     var pad = value.replace(/-/g, "+").replace(/_/g, "/");
     while (pad.length % 4) pad += "=";
@@ -8931,9 +8982,9 @@ UNLOCK_SCRIPT = """
     btn.disabled = false;
   }
   btn.addEventListener("click", function () {
-    if (!window.PublicKeyCredential) { fail("This browser has no biometric support."); return; }
+    if (!window.PublicKeyCredential) { fail(t("unlock.nosupport", "This browser has no biometric support.")); return; }
     btn.disabled = true;
-    status.textContent = "Waiting for biometric confirmation...";
+    status.textContent = t("unlock.waiting", "Waiting for biometric confirmation...");
     post("/unlock/challenge").then(function (c) {
       return navigator.credentials.get({publicKey: {
         challenge: b64urlToBytes(c.challenge),
@@ -8955,7 +9006,7 @@ UNLOCK_SCRIPT = """
     }).then(function () {
       window.location.replace("/");
     }).catch(function (err) {
-      fail((err && err.message) ? err.message : "Unlock failed.");
+      fail((err && err.message) ? err.message : t("unlock.failed", "Unlock failed."));
     });
   });
 })();
@@ -8969,6 +9020,9 @@ UNLOCK_REGISTER_SCRIPT = """
   var status = document.getElementById("register-status");
   if (!btn || !status) return;
   var CSRF = btn.getAttribute("data-csrf") || "";
+  function t(key, fallback) {
+    return (window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t(key, fallback) : fallback;
+  }
   function b64urlToBytes(value) {
     var pad = value.replace(/-/g, "+").replace(/_/g, "/");
     while (pad.length % 4) pad += "=";
@@ -8994,9 +9048,9 @@ UNLOCK_REGISTER_SCRIPT = """
     });
   }
   btn.addEventListener("click", function () {
-    if (!window.PublicKeyCredential) { status.textContent = "This browser has no biometric support."; return; }
+    if (!window.PublicKeyCredential) { status.textContent = t("unlock.nosupport", "This browser has no biometric support."); return; }
     btn.disabled = true;
-    status.textContent = "Waiting for the authenticator...";
+    status.textContent = t("register.waiting", "Waiting for the authenticator...");
     var label = (document.getElementById("register-label") || {}).value || "";
     post("/unlock/register/challenge").then(function (c) {
       return navigator.credentials.create({publicKey: {
@@ -9034,7 +9088,7 @@ UNLOCK_REGISTER_SCRIPT = """
     }).then(function () {
       window.location.replace("/unlock/settings?msg=registered");
     }).catch(function (err) {
-      status.textContent = (err && err.message) ? err.message : "Registration failed.";
+      status.textContent = (err && err.message) ? err.message : t("register.failed", "Registration failed.");
       btn.disabled = false;
     });
   });
@@ -9066,74 +9120,95 @@ def unlock_page(version, csrf):
   <main class="login-card" id="main-content">
     <div class="login-brand">
       <div class="brand-mark" aria-hidden="true">{_icon("brand")}</div>
-      <h1>Vault locked</h1>
-      <p>Confirm with your device to continue where you left off.</p>
+      <h1 data-i18n="unlock.title">Vault locked</h1>
+      <p data-i18n="unlock.sub">Confirm with your device to continue where you left off.</p>
     </div>
     <div class="card"><div class="card-body">
       <button class="btn btn-primary btn-block" type="button" id="unlock-btn"
-              data-csrf="{html.escape(csrf)}">Unlock with biometrics</button>
+              data-csrf="{html.escape(csrf)}" data-i18n="unlock.btn">Unlock with biometrics</button>
       <div class="faint" id="unlock-status" role="status" aria-live="polite"
            style="margin-top:var(--sp-3);min-height:1.2em"></div>
     </div>
     <div class="card-foot">
-      <a href="/logout">Use master password instead</a>
+      <a href="/logout" data-i18n="unlock.fallback">Use master password instead</a>
     </div></div>
     <div style="text-align:center;margin-top:var(--sp-4)">
-      <div class="faint">v{html.escape(version)}</div>
+      <select class="select" id="lang-picker" aria-label="Language">
+        <option value="en">EN</option><option value="id">ID</option><option value="ja">JP</option>
+      </select>
+      <div class="faint" style="margin-top:var(--sp-2)">v{html.escape(version)}</div>
     </div>
   </main>
 </div>
+{LANG_BOOTSTRAP}
+{I18N_SCRIPT}
+{SHELL_SCRIPT}
 {UNLOCK_SCRIPT}
 </body>
 </html>"""
 
 
 def unlock_settings_page(creds, csrf, flash=""):
-    """Manage registered unlock credentials."""
-    if creds:
-        rows = []
-        for _, cred in creds:
-            rows.append(
-                # method="post" in double quotes on purpose: _POST_FORM_RE
-                # stamps the CSRF token by matching that exact spelling, and a
-                # single-quoted form silently receives no token. Same-origin
-                # desktop requests would still pass on the Origin check alone,
-                # so the breakage would only ever show up on iOS, where a
-                # home-screen web app sends Origin: null and the token is the
-                # only thing left.
-                '<tr><td>%s</td><td>%s</td><td class="faint">%s</td>'
-                '<td><form method="post" action="/unlock/delete" '
-                "onsubmit=\"return confirm('Remove this unlock credential?')\">"
-                '<input type="hidden" name="id" value="%s">'
-                '<button class="btn btn-danger btn-sm" type="submit">Remove</button>'
-                "</form></td></tr>"
-                % (_esc(cred[1]), _esc(cred[5]), _esc(cred[6]), _esc(cred[1]))
-            )
-        table = (
-            "<div class='table-wrap'><table class='table'><thead><tr>"
-            "<th>ID</th><th>Label</th><th>Registered</th><th></th>"
-            "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>"
+    """Manage registered unlock credentials.
+
+    Built with list_page like every other listing page rather than a bespoke
+    card, so the header, table styling and empty state match the rest of the
+    app instead of drifting into a second look.
+    """
+    rows = []
+    for _, cred in creds:
+        rows.append(
+            # method="post" in double quotes on purpose: _POST_FORM_RE stamps
+            # the CSRF token by matching that exact spelling, and a
+            # single-quoted form silently receives no token. Same-origin
+            # desktop requests would still pass on the Origin check alone, so
+            # the breakage would only ever show up on iOS, where a home-screen
+            # web app sends Origin: null and the token is all that is left.
+            '<tr data-row><td class="num">%s</td><td><strong>%s</strong></td>'
+            '<td class="faint">%s</td>'
+            '<td style="text-align:right"><form method="post" '
+            'action="/unlock/delete" style="display:inline" '
+            "onsubmit=\"return confirm('Remove this unlock credential?')\">"
+            '<input type="hidden" name="id" value="%s">'
+            '<button class="btn btn-danger btn-sm" type="submit" '
+            'data-i18n="btn.delete">Delete</button>'
+            "</form></td></tr>"
+            % (_esc(cred[1]), _esc(cred[5]), _esc(cred[6]), _esc(cred[1]))
         )
-    else:
-        table = ("<p class='faint'>No unlock credential registered. The vault "
-                 "always falls back to your master password.</p>")
-    return f"""
-<section class="card"><div class="card-head"><h2>Biometric unlock</h2></div>
-<div class="card-body">
-{flash}
-<p class="faint">Registering this device lets the idle lock resume without
-retyping your master password. The master password is still required for the
-first sign-in and once the session reaches its maximum age.</p>
-{table}
-<div class="field" style="margin-top:var(--sp-4)">
-  <label for="register-label">Label for this device</label>
-  <input class="input" id="register-label" maxlength="64" placeholder="iPhone">
-</div>
-<button class="btn btn-primary" type="button" id="register-btn"
-        data-csrf="{html.escape(csrf)}">Register this device</button>
-<div class="faint" id="register-status" role="status" aria-live="polite"
-     style="margin-top:var(--sp-3);min-height:1.2em"></div>
-</div></section>
+    if not rows:
+        rows.append(
+            '<tr><td colspan="4"><div class="empty">'
+            '<div class="empty-ico">%s</div>'
+            '<div class="empty-t" data-i18n="unlock.empty">'
+            'No device registered yet</div>'
+            '<div class="empty-s" data-i18n="unlock.empty_sub">'
+            'Register one below, or keep using your master password</div>'
+            "</div></td></tr>" % _icon("shield", "icon icon-lg")
+        )
+    page = list_page(
+        "nav.unlock", "Biometric Unlock",
+        "page.unlock.desc",
+        "Resume the idle lock with this device instead of your master password.",
+        "", "", "",
+        [("table.id", "ID", "num"),
+         ("table.label", "Label", ""),
+         ("unlock.registered", "Registered", ""),
+         ("table.actions", "Actions", "act")],
+        "".join(rows))
+    return f"""{flash}{page}
+<div class="card" style="margin-top:var(--sp-4)"><div class="card-body">
+  <div class="field">
+    <label for="register-label" data-i18n="unlock.field.label">Label for this device</label>
+    <input class="input" id="register-label" maxlength="64" placeholder="iPhone">
+  </div>
+  <button class="btn btn-primary" type="button" id="register-btn"
+          data-csrf="{html.escape(csrf)}" data-i18n="unlock.register">Register this device</button>
+  <div class="faint" id="register-status" role="status" aria-live="polite"
+       style="margin-top:var(--sp-3);min-height:1.2em"></div>
+  <p class="faint" style="margin-top:var(--sp-3)" data-i18n="unlock.note">The master
+  password is still required for the first sign-in, once the session reaches its
+  maximum age, and whenever a locked session goes unresumed for too long.</p>
+</div></div>
 {UNLOCK_REGISTER_SCRIPT}
 """
 

@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **2.11.1**
+Current release: **2.11.2**
 
 ---
 
@@ -79,9 +79,10 @@ attacker with root access.
 
 ## Product tour
 
-All screenshots below were captured in Google Chrome from SPM 2.10.5 using a
-disposable vault containing only synthetic documentation data. No personal
-vault or real credential appears in these images.
+All screenshots below were captured in Google Chrome using a disposable vault
+containing only synthetic documentation data. No personal vault or real
+credential appears in these images. Pages introduced in 2.11 were captured from
+2.11.2; the rest are from 2.10.5 and are unchanged since.
 
 ![Animated tour of the SPM web interface using synthetic records](docs/product-demo.gif)
 
@@ -90,6 +91,32 @@ vault or real credential appears in these images.
 | Secure login | Security overview |
 | --- | --- |
 | ![SPM master-password login](docs/screenshots/web-v2.10.5/01-login.png) | ![SPM vault overview and security score](docs/screenshots/web-v2.10.5/02-overview.png) |
+
+### Resume a locked session with Face ID or Touch ID
+
+Registering a device lets the 30-second idle lock resume without retyping your
+master password. Suspension is enforced by the server, so a locked session is
+refused everywhere except the unlock endpoints — the browser cannot be talked
+out of it. The master password is still required for the first sign-in, at the
+12-hour session cap, and once a locked session has gone unresumed for longer
+than `SPM_WEB_SUSPEND_MAX`.
+
+| Registered devices | The locked screen |
+| --- | --- |
+| ![SPM biometric unlock settings listing two registered devices](docs/screenshots/web-v2.11.2/01-biometric-unlock.png) | ![SPM locked screen offering biometric unlock with a master-password fallback](docs/screenshots/web-v2.11.2/02-vault-locked.png) |
+
+### Audit, search and roll back
+
+| Security findings | Vault history |
+| --- | --- |
+| ![SPM security page listing weak, reused and stale entries by ID](docs/screenshots/web-v2.11.2/03-security.png) | ![SPM history page listing encrypted vault snapshots](docs/screenshots/web-v2.11.2/04-history.png) |
+
+**Cross-type search** — one query across passwords, notes, passphrases,
+authenticators and backup codes. Results carry labels and IDs only: matching on
+a secret field would turn the search box into an oracle that confirms a guessed
+password by whether a row appears.
+
+![SPM search results spanning passwords, backup codes and authenticators](docs/screenshots/web-v2.11.2/05-search.png)
 
 ### Work with credentials and protected records
 
@@ -102,7 +129,7 @@ vault or real credential appears in these images.
 | ![SPM password generator](docs/screenshots/web-v2.10.5/22-generator.png) | ![SPM import and export workspace](docs/screenshots/web-v2.10.5/23-transfer.png) |
 
 <details>
-<summary><strong>Complete web interface gallery (23 pages)</strong></summary>
+<summary><strong>Complete web interface gallery (28 pages)</strong></summary>
 
 #### Passwords
 
@@ -228,7 +255,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 2.11.1
+bash install.sh --version 2.11.2
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -240,7 +267,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 2.11.1 at /home/you/.local/bin/spm
+Installed SPM 2.11.2 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -837,7 +864,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **2.11.1**
+Version: **2.11.2**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
