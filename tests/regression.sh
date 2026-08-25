@@ -342,7 +342,8 @@ fi
 PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 -m py_compile \
 	"$web_script" "$ROOT_DIR/browser-extension/native_host.py"
 SPM_VAULT_PATH="$PASSWORD_VAULT" SPM_WEB_BIND=127.0.0.1 \
-	SPM_WEB_PORT="$WEB_PORT" SPM_VERSION="$VERSION" python3 "$web_script" \
+	SPM_WEB_PORT="$WEB_PORT" SPM_VERSION="$VERSION" \
+	SPM_WEB_RP_ID=localhost python3 "$web_script" \
 	>"$TEST_ROOT/web.log" 2>&1 &
 WEB_PID="$!"
 for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -703,7 +704,8 @@ grep -q 'data-i18n="badge.aging"' "$web_script"
 python3 - "$web_script" <<'PYI18N'
 import re, sys
 src = open(sys.argv[1], encoding="utf-8").read()
-need = ["nav.security", "nav.history", "security.weak", "security.reused",
+need = ["nav.security", "nav.history", "nav.unlock", "security.weak",
+        "security.reused",
         "security.aging", "security.incomplete", "security.malformed",
         "history.when", "btn.restore", "confirm.restore_snapshot",
         "search.kind", "badge.aging", "tags.all"]
@@ -714,6 +716,288 @@ for lang in ('"en"', '"id"', '"ja"'):
     missing = [k for k in need if '"%s":' % k not in block]
     assert not missing, "%s is missing %r" % (lang, missing)
 PYI18N
+
+# Biometric unlock. A throwaway P-256 key stands in for a platform
+# authenticator: the ceremony below builds real authenticatorData and
+# clientDataJSON and signs them with openssl, so the server's verification path
+# is exercised for real rather than mocked.
+#
+# The RP id is "localhost" and the origin is http://localhost:PORT, because the
+# server derives the expected origin from the RP id and a browser will not
+# accept an IP address as a relying party.
+printf 'Web regression: biometric unlock ceremonies\n'
+openssl ecparam -name prime256v1 -genkey -noout -out "$TEST_ROOT/authn.key" 2>/dev/null
+openssl ec -in "$TEST_ROOT/authn.key" -pubout -outform DER \
+	-out "$TEST_ROOT/authn.pub.der" 2>/dev/null
+python3 - "$WEB_PORT" "$AUDIT_PASSWORD" "$TEST_ROOT/authn.key" \
+	"$TEST_ROOT/authn.pub.der" <<'PYWEBAUTHN'
+import base64, hashlib, http.cookiejar, json, re, subprocess, sys
+import urllib.error, urllib.parse, urllib.request
+
+port, password, key_path, pub_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+BASE = "http://localhost:%s" % port
+RP_ID = "localhost"
+jar = http.cookiejar.CookieJar()
+opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+def b64u(raw):
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+def post_json(path, payload, origin=BASE):
+    """origin=None omits the header, reproducing an iOS home-screen web app.
+
+    _write_authorized accepts a request whose Origin header matches the host
+    without consulting the token at all, so a CSRF test that sends a good
+    Origin can never fail. Omitting it is both the honest test and the real
+    case: a standalone iOS web app sends Origin: null for its own posts, which
+    that function treats as absent, and the token is then the only defence.
+    """
+    req = urllib.request.Request(BASE + path, data=json.dumps(payload).encode(),
+                                 method="POST")
+    req.add_header("Content-Type", "application/json")
+    if origin is not None:
+        req.add_header("Origin", origin)
+    try:
+        r = opener.open(req, timeout=20)
+        return r.status, json.loads(r.read().decode() or "{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode() or "{}")
+        except ValueError:
+            return e.code, {}
+
+def get(path):
+    try:
+        r = opener.open(urllib.request.Request(BASE + path), timeout=20)
+        return r.status, r.read().decode("utf-8", "replace"), r.geturl()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace"), BASE + path
+
+def bootstrap():
+    _, body, _ = get("/")
+    m = re.search(r"window\.SPM_UNLOCK = (\{.*?\});", body)
+    assert m, "the unlock bootstrap is missing from the app shell"
+    return json.loads(m.group(1)), body
+
+def auth_data(rp_id=RP_ID, flags=0x05, count=0):
+    return (hashlib.sha256(rp_id.encode()).digest()
+            + bytes([flags]) + count.to_bytes(4, "big"))
+
+def client_data(kind, challenge, origin=BASE):
+    return json.dumps({"type": kind, "challenge": challenge, "origin": origin,
+                       "crossOrigin": False}, separators=(",", ":")).encode()
+
+def sign(message):
+    p = subprocess.run(["openssl", "dgst", "-sha256", "-sign", key_path],
+                       input=message, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert p.returncode == 0, p.stderr
+    return p.stdout
+
+req = urllib.request.Request(
+    BASE + "/login",
+    data=urllib.parse.urlencode({"password": password}).encode(), method="POST")
+req.add_header("Content-Type", "application/x-www-form-urlencoded")
+req.add_header("Origin", BASE)
+opener.open(req, timeout=20)
+
+boot, _ = bootstrap()
+assert boot["available"] is False, "unlock advertised before any credential exists"
+csrf = boot["csrf"]
+assert csrf, "no CSRF token reached the client"
+
+# CSRF on the JSON ceremonies, checked here while the session is still active.
+# _body_csrf grew a JSON branch for these and it is the function every
+# authenticated write depends on. It has to be tested against a session that
+# would otherwise be authorised: a suspended session is refused on its state
+# before the token is ever examined, so the same assertions there would pass
+# without proving anything.
+for bad in ({}, {"csrf": ""}, {"csrf": "wrong"}, {"csrf": ["not", "a", "string"]},
+            {"csrf": {"nested": "object"}}):
+    code, res = post_json("/unlock/register/challenge", bad, origin=None)
+    assert code == 403, ("a JSON post with csrf=%r was authorised" % bad, code, res)
+    code, res = post_json("/unlock/register/challenge", bad, origin="null")
+    assert code == 403, ("an opaque-origin post with csrf=%r was authorised" % bad,
+                         code, res)
+# The same request with the right token must still succeed, or the assertions
+# above would pass for a server that simply refuses every JSON post.
+for opaque in (None, "null"):
+    code, res = post_json("/unlock/register/challenge", {"csrf": csrf}, origin=opaque)
+    assert code == 200, ("a correctly signed JSON post was refused", opaque, code, res)
+# A genuinely cross-origin post is refused whatever token it carries.
+code, res = post_json("/unlock/register/challenge", {"csrf": csrf},
+                      origin="https://evil.invalid")
+assert code == 403, ("a cross-origin post was authorised", code, res)
+
+code, ch = post_json("/unlock/register/challenge", {"csrf": csrf})
+assert code == 200 and ch.get("challenge"), ("register challenge", code, ch)
+code, res = post_json("/unlock/register/verify", {
+    "csrf": csrf, "credential_id": b64u(b"regression-cred"),
+    "client_data": b64u(client_data("webauthn.create", ch["challenge"])),
+    "auth_data": b64u(auth_data()),
+    "public_key": b64u(open(pub_path, "rb").read()), "label": "Regression"})
+assert code == 200, ("registration refused", code, res)
+
+boot, body = bootstrap()
+assert boot["available"] is True, "unlock still not advertised after registering"
+assert "/unlock/settings" in body, "no nav entry for the unlock settings page"
+csrf = boot["csrf"]
+
+# Revocation, on a second credential so the first stays available to unlock
+# with. The delete form must be spelled method="post" in double quotes, because
+# that is what _POST_FORM_RE stamps the CSRF token onto. A single-quoted form
+# receives no token and still works on desktop -- the Origin check carries it --
+# so the failure would surface only on iOS, where a home-screen web app sends
+# Origin: null and the token is all that is left.
+code, ch2 = post_json("/unlock/register/challenge", {"csrf": csrf})
+code, res = post_json("/unlock/register/verify", {
+    "csrf": csrf, "credential_id": b64u(b"regression-spare"),
+    "client_data": b64u(client_data("webauthn.create", ch2["challenge"])),
+    "auth_data": b64u(auth_data()),
+    "public_key": b64u(open(pub_path, "rb").read()), "label": "Disposable"})
+assert code == 200, ("second registration refused", code, res)
+
+_, settings, _ = get("/unlock/settings")
+assert "Disposable" in settings, "the settings page did not list the credential"
+m = re.search(r'name="csrf" value="([^"]+)"', settings)
+assert m, "the delete form was not stamped with a CSRF token"
+form_csrf = m.group(1)
+
+def post_form(path, fields, origin=None):
+    req = urllib.request.Request(path if path.startswith("http") else BASE + path,
+                                 data=urllib.parse.urlencode(fields).encode(),
+                                 method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    if origin is not None:
+        req.add_header("Origin", origin)
+    try:
+        return opener.open(req, timeout=20).status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+ids = re.findall(r'name="id" value="(\d+)"', settings)
+assert len(ids) == 2, ("expected two credentials, saw %r" % ids)
+target = ids[-1]
+for bad in ("../etc", "abc", "99999"):
+    code = post_form("/unlock/delete", {"csrf": form_csrf, "id": bad}, origin=None)
+    assert code in (400, 404), ("delete accepted id=%r" % bad, code)
+assert post_form("/unlock/delete", {"id": target}, origin=None) == 403, \
+    "an unstamped delete was accepted"
+assert post_form("/unlock/delete", {"csrf": form_csrf, "id": target},
+                 origin=None) == 200, "a stamped delete with no Origin was refused"
+_, settings, _ = get("/unlock/settings")
+assert "Disposable" not in settings, "the credential survived deletion"
+assert "Regression" in settings, "deletion removed the wrong credential"
+
+boot, _ = bootstrap()
+assert boot["available"] is True, "unlock stopped being offered while a credential remains"
+csrf = boot["csrf"]
+
+assert post_json("/unlock/suspend", {"csrf": csrf})[0] == 200, "suspend refused"
+
+# The property this whole feature rests on. The 2.10.14 bug was a control that
+# lived only in the browser; if suspension were a client-side redirect, a
+# visitor could simply ask for the page.
+code, body, url = get("/passwords")
+assert "DemoSecret42" not in body, "a suspended session served vault secrets"
+assert url.endswith("/unlock") or "Vault locked" in body, \
+    "a suspended session was not sent to the unlock page (%s)" % url
+code, body, _ = get("/unlock")
+assert code == 200 and "unlock-btn" in body, "unlock page did not render"
+assert "DemoSecret42" not in body, "the unlock page carried vault content"
+
+def assertion(csrf, rp_id=RP_ID, flags=0x05, origin=BASE, tamper=False,
+              challenge=None):
+    code, c = post_json("/unlock/challenge", {"csrf": csrf})
+    if code != 200:
+        return code, c
+    used = challenge or c["challenge"]
+    cd = client_data("webauthn.get", used, origin)
+    ad = auth_data(rp_id, flags)
+    sig = sign(ad + hashlib.sha256(cd).digest())
+    if tamper:
+        ad = auth_data(rp_id, flags, 1)
+    return post_json("/unlock/verify", {
+        "csrf": csrf, "credential_id": b64u(b"regression-cred"),
+        "client_data": b64u(cd), "auth_data": b64u(ad), "signature": b64u(sig)})
+
+# The positive path runs first: each refusal below spends the shared
+# login-failure budget, and a valid attempt made after five failures is
+# correctly answered 429 rather than 200.
+code, res = assertion(csrf)
+assert code == 200, ("a valid assertion did not resume the session", code, res)
+code, body, _ = get("/passwords")
+assert "Example" in body, "the resumed session could not reach the vault"
+
+boot, _ = bootstrap()
+csrf = boot["csrf"]
+assert post_json("/unlock/suspend", {"csrf": csrf})[0] == 200
+code, c = post_json("/unlock/challenge", {"csrf": csrf})
+cd = client_data("webauthn.get", c["challenge"])
+ad = auth_data()
+replay = {"csrf": csrf, "credential_id": b64u(b"regression-cred"),
+          "client_data": b64u(cd), "auth_data": b64u(ad),
+          "signature": b64u(sign(ad + hashlib.sha256(cd).digest()))}
+assert post_json("/unlock/verify", dict(replay))[0] == 200, "assertion refused once"
+boot, _ = bootstrap()
+csrf = boot["csrf"]
+post_json("/unlock/suspend", {"csrf": csrf})
+replay["csrf"] = csrf
+code, res = post_json("/unlock/verify", replay)
+assert code in (400, 403), ("a challenge was spendable twice", code, res)
+
+# A refused assertion leaves the session suspended and its CSRF token intact,
+# so these run back to back without re-suspending. Refusing to rotate the token
+# on failure is deliberate: the page has to stay usable for a second try.
+for name, kwargs in (
+        ("a foreign relying party", {"rp_id": "evil.invalid"}),
+        ("a bare user-presence tap", {"flags": 0x01}),
+        ("a foreign origin", {"origin": "https://evil.invalid"}),
+        ("tampered authenticatorData", {"tamper": True}),
+        ("a forged challenge", {"challenge": b64u(b"z" * 32)})):
+    code, res = assertion(csrf, **kwargs)
+    assert code in (400, 403), ("%s was accepted" % name, code, res)
+
+# The failure budget is spent. The next attempt must be throttled, not merely
+# refused: an assertion that reaches the server having failed is attack-shaped,
+# because a real Face ID mismatch never leaves the phone.
+code, res = assertion(csrf, challenge=b64u(b"y" * 32))
+assert code == 429, ("repeated unlock failures are not throttled", code, res)
+
+print("webauthn unlock ceremonies verified")
+PYWEBAUTHN
+
+# A WEBAUTHN row must be invisible to password parsing and to the security
+# score: it is neither a credential the user stores nor one that can be weak.
+python3 - "$web_script" <<'PYWEBROW'
+import sys
+src = open(sys.argv[1], encoding="utf-8").read()
+head = src.split("class Handler")[0]
+head = head.replace('VAULT_PATH = os.environ.get("SPM_VAULT_PATH")', 'VAULT_PATH = "/dev/null"')
+head = head.replace('raise SystemExit(f"Vault file not found: {VAULT_PATH!r}")', "pass")
+ns = {}
+exec(compile(head, "generated", "exec"), ns)
+plain = "\n".join([
+    "1\tExample\tuser@example.invalid\tDemoSecret42\thttps://example.invalid\t2025-01-01T00:00:00Z",
+    "WEBAUTHN\t1\tY3JlZA\tTUlJQg==\tlocalhost\tiPhone\t2026-08-25T00:00:00Z",
+])
+_, entries = ns["parse_entries"](plain)
+assert len(entries) == 1, "a WEBAUTHN row was parsed as a password: %r" % entries
+_, creds = ns["parse_webauthn"](plain)
+assert len(creds) == 1 and creds[0][1][5] == "iPhone", creds
+# Suspension must be bounded, and an unusable value must fall back rather than
+# be taken literally as "resumable forever".
+assert ns["_suspend_max_age"]() > 0
+PYWEBROW
+
+# Unlock credentials are a distinct row type from PASSKEY on purpose, so
+# `spm passkey-list` must not report them.
+cmd_webauthn_list | grep -q 'Regression'
+cmd_passkey_list | grep -qv 'Regression'
+
+# With no relying party configured the endpoints must not exist at all: a nav
+# entry pointing at a 404 is worse than no entry.
+grep -q 'if WEBAUTHN_ENABLED:' "$web_script"
+grep -q 'SPM_WEB_RP_ID' "$ROOT_DIR/spm.sh"
 
 # The history picker must resolve a snapshot by number: the point of the menu
 # is that a generated filename never has to be typed.
