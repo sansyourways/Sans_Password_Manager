@@ -25,6 +25,11 @@ Keep-a-Changelog style format.
   way the lock bar's countdown already was.
 
 ### Docs
+- The locked screen in the product tour is now a real iPhone capture from the
+  Home Screen web app — the release target for Web Mode — replacing the
+  headless desktop render of the same page, and shown in all three languages to
+  demonstrate that the page translates. Captures were cropped, stripped of EXIF
+  and IPTC, and carry no vault content.
 - The README product tour showed nothing newer than 2.10.5. It now covers
   biometric unlock and the locked screen, plus the security, history and
   cross-type search pages that shipped in 2.10.14 and had never been pictured.
