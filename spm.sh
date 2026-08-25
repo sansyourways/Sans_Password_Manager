@@ -4990,7 +4990,8 @@ Web Mode:
   - UI:
       • Password entries table (ID, service, username – passwords are not shown)
       • Secure notes section (view / add / edit / delete)
-  - Web session auto-locks after ~30 seconds of inactivity.
+  - Web session auto-locks after ~30 seconds of inactivity in the browser;
+    the server also expires an idle session after 5 minutes on its own.
 
 Clipboard & Password Coaching:
   - When copying a password, clipboard is auto-cleared after a short delay:
@@ -9970,7 +9971,15 @@ class SPMServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         self.vault_lock_file = open(VAULT_PATH + ".lock", "a+", encoding="utf-8")
         os.chmod(VAULT_PATH + ".lock", 0o600)
 
-SESSION_TTL = 1800
+# Idle timeout enforced by the server. The 30-second auto-lock users actually
+# see is implemented in the browser, which means it is not a control at all
+# against a client whose JavaScript does not run -- and that is not a
+# hypothetical: a CDN rewriting inline scripts disabled it outright once. This
+# is the backstop that holds when the browser lock does not. It cannot match
+# the browser's 30 seconds, because the browser resets on mouse and touch
+# activity that reaches no server; 5 minutes is long enough to read a page and
+# far short of the half hour this used to grant.
+SESSION_TTL = 300
 # Absolute lifetime: the idle TTL above slides on every request, so without
 # this a session (and the plaintext master password it holds) could live for
 # as long as the browser kept poking it.

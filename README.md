@@ -844,6 +844,13 @@ The 30-second idle auto-lock performs a single logout transition and tears down
 its timer when the page is leaving, avoiding repeated navigation or refresh loops.
 Returning to a page through the back/forward cache does not extend the idle
 window: a page whose deadline already passed locks immediately on restore.
+That lock runs in the browser, so it resets on mouse and touch activity that
+reaches no server — and it cannot protect a client whose scripts do not run.
+The server independently expires an idle session after 5 minutes and any
+session after 12 hours, regardless of what the browser does. Every `<script>`
+is served with `data-cfasync="false"` beside its CSP nonce so a CDN cannot
+rewrite it out of existence; if you front Web Mode with Cloudflare, disable
+Rocket Loader for the hostname as well.
 Authenticated web mutations also require an exact same-origin request and are serialized across threads/processes to prevent CSRF and lost vault writes. Decrypted web responses use `Cache-Control: no-store`.
 All listed import formats are round-trip compatible with their matching CLI and web exports.
 Vault writes are staged and atomically installed. CLI and web processes share an advisory vault lock when `flock` is available; avoid concurrent access on systems without it. `save` verifies the archived vault before removing the local copy.

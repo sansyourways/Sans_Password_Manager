@@ -61,6 +61,14 @@ Keep-a-Changelog style format.
   lock lives entirely in the browser. Every `<script>` is now stamped with
   `data-cfasync="false"` next to its nonce, in the same central place, so a
   page added later cannot ship without the opt-out.
+- **The web session's server-side idle expiry was 30 minutes** while SPM
+  advertises a 30-second auto-lock. That lock is implemented in the browser, so
+  the 30 seconds was never a control against a client whose scripts do not run
+  — as the Rocket Loader bug above proved in production. The server now expires
+  an idle session after 5 minutes on its own. It cannot be 30 seconds, because
+  the browser lock resets on mouse and touch activity that reaches no server;
+  5 minutes is long enough to read a page and far short of the half hour this
+  used to grant. The 12-hour absolute lifetime is unchanged.
 
 ### Tests
 - Score parity between the CLI dashboard and Web Mode, against a vault seeded
@@ -75,6 +83,9 @@ Keep-a-Changelog style format.
 - A full restore round-trip returns the vault to its earlier bytes, and the
   history list is ordered newest-first.
 - Tag parsing ignores `C#` and URL fragments.
+- The generated web server's server-side idle expiry is asserted to stay at or
+  below 5 minutes, so the browser lock can never quietly become the only fast
+  one again.
 - Every `<script>` in a served page carries both the response nonce and the
   `data-cfasync="false"` opt-out, asserted by stripping the guarded form and
   requiring that no script tag survives.

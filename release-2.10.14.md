@@ -66,6 +66,16 @@ passkey counts were recomputed on every request and never displayed.
   If you serve Web Mode through Cloudflare, turn Rocket Loader off for the
   hostname as well. The opt-out attribute is the supported mechanism, but a
   password manager has no reason to let a CDN rewrite and re-order its scripts.
+- **The server's own idle expiry was 30 minutes.** The 30-second auto-lock is
+  browser-side, so it was never a control against a client whose scripts do not
+  run — the bug above proved that in production, silently. The server now
+  expires an idle session after 5 minutes by itself. It cannot be 30 seconds,
+  because the browser lock resets on mouse and touch activity that reaches no
+  server; 5 minutes is long enough to read a page and far short of the half
+  hour this used to grant. The 12-hour absolute lifetime is unchanged.
+
+  If you leave a Web Mode tab idle and come back, expect to log in again sooner
+  than before.
 
 ## Upgrading
 

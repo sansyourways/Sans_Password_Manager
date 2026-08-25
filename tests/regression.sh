@@ -327,6 +327,16 @@ grep -q 'self.auth_lock = threading.RLock()' "$web_script"
 grep -q 'X-Real-IP' "$web_script"
 grep -q '_sweep_login_failures_locked' "$web_script"
 grep -q 'Stored passphrase cannot be decoded; vault was not changed' "$web_script"
+# The 30-second auto-lock users see runs in the browser, so it protects nobody
+# whose scripts fail to execute. The server-side idle expiry is the control
+# that still holds in that case, and it silently used to be half an hour.
+web_ttl="$(sed -n 's/^SESSION_TTL = \([0-9]\+\)$/\1/p' "$web_script" | head -n1)"
+[ -n "$web_ttl" ] || { printf 'SESSION_TTL not found in generated web script\n' >&2; exit 1; }
+if [ "$web_ttl" -gt 300 ]; then
+	printf 'server-side idle expiry is %ss; the browser lock cannot be the only fast one\n' \
+		"$web_ttl" >&2
+	exit 1
+fi
 PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 -m py_compile \
 	"$web_script" "$ROOT_DIR/browser-extension/native_host.py"
 SPM_VAULT_PATH="$PASSWORD_VAULT" SPM_WEB_BIND=127.0.0.1 \
