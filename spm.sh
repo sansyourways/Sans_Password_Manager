@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.11.0"
+VERSION="2.11.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -6274,9 +6274,25 @@ def _webauthn_config():
     # A relying-party id is a bare domain: no scheme, no port, no path.
     if not re.match(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$", rp):
         return "", ""
-    if _is_loopback_bind(BIND_ADDR):
-        # Loopback is a secure context per the WebAuthn spec, so unlock works
-        # in local development and in the regression suite without TLS.
+    # An explicit origin wins, for a deployment whose public URL this cannot be
+    # derived from -- a proxy on a non-default port, say.
+    override = (os.environ.get("SPM_WEB_ORIGIN") or "").strip()
+    if override:
+        if not re.match(r"^https?://[A-Za-z0-9.\-\[\]]+(:[0-9]{1,5})?$", override):
+            return "", ""
+        return rp, override.rstrip("/")
+    # The scheme follows the RELYING PARTY, never the bind address. SPM's
+    # documented deployment binds loopback behind a TLS reverse proxy, so the
+    # bind says nothing about what the browser connected to: it is 127.0.0.1
+    # while the origin the browser reports is https://<public name>. Deriving
+    # the scheme from the bind produced http://<public name>:<port> there and
+    # every assertion failed on an origin mismatch.
+    #
+    # localhost is the one host a browser treats as a secure context over plain
+    # HTTP, which is what makes local development and the regression suite work
+    # without TLS. Everything else is https by definition -- WebAuthn will not
+    # run in an insecure context, so no other answer could ever verify.
+    if rp == "localhost":
         origin = "http://%s:%d" % (rp, PORT)
     else:
         origin = "https://%s" % rp

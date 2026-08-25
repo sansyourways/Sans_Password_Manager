@@ -5,6 +5,32 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.11.1] - 2026-08-25
+
+### Fixed
+- **Biometric unlock could never verify behind a TLS reverse proxy**, which is
+  SPM's own documented deployment. The expected origin was derived from the
+  bind address rather than from the relying-party id, so a server bound to
+  `127.0.0.1` behind nginx expected `http://<public name>:<port>` while the
+  browser reported `https://<public name>`, and every assertion was refused
+  with an origin mismatch. The scheme now follows the relying party:
+  `localhost` implies plain HTTP on the bound port — the one host browsers
+  treat as a secure context without TLS — and every other name implies HTTPS,
+  which is the only scheme WebAuthn can run under anyway.
+
+  2.11.0's regression suite ran `localhost` on a loopback bind, where both
+  derivations agree, so it saw nothing. The suite now asserts the production
+  shape directly, and that assertion was confirmed to fail against 2.11.0.
+- `spm.sh` and `tests/regression.sh` lost their executable bits in 2.10.14 and
+  2.11.0 respectively. Editing them through a script that rewrites the file
+  drops the mode; installs were unaffected because `install.sh` uses
+  `install -m 0755`, but `./spm.sh` from a fresh clone would not run.
+
+### Added
+- `SPM_WEB_ORIGIN` overrides the derived origin, for a proxy that publishes a
+  non-default port. A malformed value disables biometric unlock rather than
+  being trusted.
+
 ## [2.11.0] - 2026-08-25
 
 ### Added
