@@ -5,6 +5,31 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.11.3] - 2026-08-25
+
+### Fixed
+- **`install.sh` could not download any release.** It stripped the leading `v`
+  from the version — correctly, because the archive inside is always named
+  `Sans_Password_Manager_v<version>.zip` — and then reused that stripped value
+  as the *tag* in the download URL. Releases from 2.10.11 onward are tagged
+  `v<version>`, so every request 404'd:
+
+      releases/download/2.11.2/...   404
+      releases/download/v2.11.2/...  200
+
+  The default no-argument path was affected identically: `latest` resolves via
+  the API to `tag_name` `v2.11.2`, which was then stripped straight back off.
+  Both documented install commands in the README were broken.
+
+  The installer now asks which tag actually exists, trying `v<version>` then
+  `<version>`, so releases tagged either way resolve — 2.9.6 and earlier are
+  tagged bare. A dry run still describes the plan when the network is
+  unavailable, and a genuine miss now reports both tags it tried instead of a
+  bare curl failure.
+
+  This is almost certainly why 2.10.11 was published twice, under both tag
+  forms.
+
 ## [2.11.2] - 2026-08-25
 
 ### Changed

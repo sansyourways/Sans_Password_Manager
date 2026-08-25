@@ -134,7 +134,42 @@ printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
 }
 
 archive="Sans_Password_Manager_v${VERSION}.zip"
-base_url="https://github.com/$REPO/releases/download/$VERSION"
+
+# The tag and the version are not the same string, and assuming they were made
+# every download 404. Releases through 2.9.6 were tagged bare ("2.9.6");
+# everything from 2.10.11 onward is tagged with a leading "v". The archive
+# inside a release is always Sans_Password_Manager_v<version>.zip, so the "v"
+# has to be stripped for the filename and the version check above -- but the
+# stripped value was then reused as the tag, so "--version 2.11.2" asked for a
+# tag named 2.11.2 that does not exist, and the default "latest" path resolved
+# tag_name to "v2.11.2" only to strip it back off again.
+#
+# Ask which tag actually exists instead of guessing.
+release_tag() {
+	local candidate
+	for candidate in "v$1" "$1"; do
+		if curl -fsSL -o /dev/null --head \
+			"https://github.com/$REPO/releases/download/$candidate/$archive" 2>/dev/null; then
+			printf '%s\n' "$candidate"
+			return 0
+		fi
+	done
+	return 1
+}
+
+RELEASE_TAG="$(release_tag "$VERSION" || true)"
+if [ -z "$RELEASE_TAG" ]; then
+	if [ "$DRY_RUN" -eq 1 ]; then
+		# A dry run must still describe the plan when the network is
+		# unavailable; it downloads nothing either way.
+		RELEASE_TAG="v$VERSION"
+	else
+		printf 'No release asset found for %s (tried tags v%s and %s).\n' \
+			"$VERSION" "$VERSION" "$VERSION" >&2
+		exit 1
+	fi
+fi
+base_url="https://github.com/$REPO/releases/download/$RELEASE_TAG"
 target_dir="${PREFIX%/}/bin"
 target="$target_dir/spm"
 
