@@ -10021,9 +10021,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = body.replace("__LANG__", lang)
         # A fresh nonce per response, stamped centrally so a page added later
         # cannot ship a script the CSP will refuse.
+        #
+        # data-cfasync="false" rides along because a CDN in front of this server
+        # may rewrite inline scripts. Cloudflare's Rocket Loader replaces every
+        # <script> type with a private token so the browser skips it, then
+        # re-injects the code itself -- and the re-injected copy carries no
+        # nonce, so our own CSP refuses it. The result is a page with no
+        # JavaScript at all: the mobile nav never opens and, far worse, the
+        # idle auto-lock never runs, because that lock lives entirely in the
+        # browser. data-cfasync="false" is the documented opt-out and is inert
+        # everywhere else, so it costs nothing to send unconditionally.
         self._csp_nonce = secrets.token_urlsafe(16)
         body = self._SCRIPT_RE.sub(
-            lambda m: '<script nonce="%s"%s>' % (self._csp_nonce, m.group(1)), body)
+            lambda m: '<script nonce="%s" data-cfasync="false"%s>'
+            % (self._csp_nonce, m.group(1)), body)
         # Stamp every POST form centrally rather than in each builder, so a
         # form added later cannot silently ship without a token.
         csrf = self._session_csrf()

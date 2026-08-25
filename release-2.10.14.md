@@ -52,6 +52,20 @@ passkey counts were recomputed on every request and never displayed.
   you looked. One implementation now, with the suite asserting they agree.
 - `spm doctor` printed its duplicate-ID verdict with the empty `[ ]` marker
   used by in-progress steps, so a passing check read as unfinished.
+- **Web Mode ran no JavaScript at all behind a CDN that rewrites inline
+  scripts.** Cloudflare's Rocket Loader replaces the `type` of every inline
+  `<script>` with a private token so the browser skips it, then re-injects the
+  code itself — and the re-injected copy carries no CSP nonce, so SPM's own
+  `script-src 'self' 'nonce-…'` refused it. The visible symptom was a mobile
+  hamburger menu that did nothing. The serious one was silent: the 30-second
+  idle auto-lock never ran, because that lock lives entirely in the browser,
+  leaving only the server's 30-minute idle session timeout. Every `<script>` is
+  now stamped with `data-cfasync="false"` beside its nonce, in the same central
+  place, so a page added later cannot ship without the opt-out.
+
+  If you serve Web Mode through Cloudflare, turn Rocket Loader off for the
+  hostname as well. The opt-out attribute is the supported mechanism, but a
+  password manager has no reason to let a CDN rewrite and re-order its scripts.
 
 ## Upgrading
 

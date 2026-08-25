@@ -442,6 +442,24 @@ csp_nonce="$(sed -n "s/.*script-src 'self' 'nonce-\([A-Za-z0-9_-]*\)'.*/\1/p" "$
 [ -n "$csp_nonce" ]
 grep -q "<script nonce=\"$csp_nonce\"" "$TEST_ROOT/csp.html"
 
+# A CDN in front of this server must not be able to strip the page's scripts.
+# Cloudflare's Rocket Loader rewrites the type of every inline <script> it is
+# not told to skip and re-injects the code itself; the re-injected copy carries
+# no nonce, so this server's own CSP then refuses it. The page ends up with no
+# JavaScript at all -- which silently disables the idle auto-lock, because that
+# lock lives entirely in the browser. Every script needs the opt-out, so strip
+# the guarded form and assert nothing resembling a script tag survives.
+sed "s/<script nonce=\"$csp_nonce\" data-cfasync=\"false\"/<SCRIPTOK/g" \
+	"$TEST_ROOT/csp.html" > "$TEST_ROOT/csp.stripped"
+if grep -q '<script' "$TEST_ROOT/csp.stripped"; then
+	printf 'script tag without the nonce + data-cfasync opt-out\n' >&2
+	exit 1
+fi
+if ! grep -q '<SCRIPTOK' "$TEST_ROOT/csp.stripped"; then
+	printf 'no guarded script tags found in served page\n' >&2
+	exit 1
+fi
+
 # Web Mode writes must land in the encrypted history the CLI exposes, not only
 # in the single .bak generation.
 find "$XDG_DATA_HOME/spm/history" -name '*.gpg' 2>/dev/null | grep -q . \

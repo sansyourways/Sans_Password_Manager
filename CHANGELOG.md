@@ -51,6 +51,16 @@ Keep-a-Changelog style format.
 - `spm doctor` printed its duplicate-ID verdict with the empty `[ ]` marker
   used by in-progress steps, so a passing check read as unfinished. It now
   reports `[✔]` when clean and `[!]` when duplicates are found.
+- **Web Mode had no working JavaScript behind a CDN that rewrites inline
+  scripts.** Cloudflare's Rocket Loader replaces the `type` of every inline
+  `<script>` with a private token so the browser skips it, then re-injects the
+  code itself — and the re-injected copy carries no CSP nonce, so SPM's own
+  `script-src 'self' 'nonce-…'` refused it. Every script on the page was
+  blocked. The visible symptom was a mobile hamburger menu that did nothing;
+  the serious one was that the 30-second idle auto-lock never ran, because that
+  lock lives entirely in the browser. Every `<script>` is now stamped with
+  `data-cfasync="false"` next to its nonce, in the same central place, so a
+  page added later cannot ship without the opt-out.
 
 ### Tests
 - Score parity between the CLI dashboard and Web Mode, against a vault seeded
@@ -65,6 +75,9 @@ Keep-a-Changelog style format.
 - A full restore round-trip returns the vault to its earlier bytes, and the
   history list is ordered newest-first.
 - Tag parsing ignores `C#` and URL fragments.
+- Every `<script>` in a served page carries both the response nonce and the
+  `data-cfasync="false"` opt-out, asserted by stripping the guarded form and
+  requiring that no script tag survives.
 - Every new UI string exists in all three shipped languages.
 
 ## [2.10.13] - 2026-08-24
