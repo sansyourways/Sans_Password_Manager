@@ -82,7 +82,9 @@ attacker with root access.
 All screenshots below were captured in Google Chrome using a disposable vault
 containing only synthetic documentation data. No personal vault or real
 credential appears in these images. Pages introduced in 2.11 were captured from
-2.11.2; the rest are from 2.10.5 and are unchanged since.
+2.11.2; the rest are from 2.10.5 and are unchanged since. The locked-screen
+captures are from a real iPhone running the Home Screen web app, which is the
+release target for Web Mode.
 
 ![Animated tour of the SPM web interface using synthetic records](docs/product-demo.gif)
 
@@ -101,9 +103,17 @@ out of it. The master password is still required for the first sign-in, at the
 12-hour session cap, and once a locked session has gone unresumed for longer
 than `SPM_WEB_SUSPEND_MAX`.
 
-| Registered devices | The locked screen |
+| Registered devices | The locked screen, on the phone |
 | --- | --- |
-| ![SPM biometric unlock settings listing two registered devices](docs/screenshots/web-v2.11.2/01-biometric-unlock.png) | ![SPM locked screen offering biometric unlock with a master-password fallback](docs/screenshots/web-v2.11.2/02-vault-locked.png) |
+| ![SPM biometric unlock settings listing two registered devices](docs/screenshots/web-v2.11.2/01-biometric-unlock.png) | ![SPM locked screen on iOS offering biometric unlock with a master-password fallback](docs/screenshots/ios-v2.11.2/01-vault-locked-en.jpg) |
+
+The locked screen is translated like the rest of the interface, and carries its
+own language picker — it is the one page a user meets *after* being locked out,
+so it cannot assume they can still reach the app's settings to change language.
+
+| English | Indonesian | Japanese |
+| --- | --- | --- |
+| ![SPM locked screen in English](docs/screenshots/ios-v2.11.2/01-vault-locked-en.jpg) | ![SPM locked screen in Indonesian](docs/screenshots/ios-v2.11.2/02-vault-locked-id.jpg) | ![SPM locked screen in Japanese](docs/screenshots/ios-v2.11.2/03-vault-locked-ja.jpg) |
 
 ### Audit, search and roll back
 
