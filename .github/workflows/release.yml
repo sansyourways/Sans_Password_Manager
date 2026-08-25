@@ -37,6 +37,13 @@ jobs:
 
       - name: Verify source and release version
         run: |
+          # The suite is invoked as ./tests/regression.sh below, so a commit
+          # whose executable bit was lost fails this job *after* the tag is
+          # already public -- leaving a tag with no release, which is worse
+          # than not tagging. ci.yml already chmods for exactly this reason;
+          # this job did not, and 2.11.0 is a real commit it would have failed
+          # on. Restore the bits rather than trusting the tree's modes.
+          chmod +x spm.sh install.sh tests/regression.sh tests/dco-check.sh
           bash -n spm.sh install.sh tests/regression.sh tests/dco-check.sh
           shellcheck -x -S warning spm.sh install.sh tests/regression.sh tests/dco-check.sh
           ./tests/regression.sh
