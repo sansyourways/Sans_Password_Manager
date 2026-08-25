@@ -132,6 +132,19 @@ grep -Fqx "export PATH='$TEST_ROOT/second-prefix/bin':\$PATH" "$HOME/.bashrc"
 PATH="$original_path"
 unset -f uname
 
+# The installer must not assume the release tag equals the version string.
+# Releases through 2.9.6 are tagged bare; everything from 2.10.11 on carries a
+# leading "v". Reusing the v-stripped version as the tag made every download
+# 404, including the default "latest" path, because tag_name comes back as
+# "v2.11.2" and was stripped straight back to "2.11.2".
+grep -q 'release_tag()' "$ROOT_DIR/install.sh"
+grep -q 'for candidate in "v\$1" "\$1"' "$ROOT_DIR/install.sh"
+if grep -q 'base_url="https://github.com/\$REPO/releases/download/\$VERSION"' "$ROOT_DIR/install.sh"; then
+	printf 'install.sh still builds the download URL from the version rather than the tag\n' >&2
+	exit 1
+fi
+grep -q 'No release asset found for' "$ROOT_DIR/install.sh"
+
 # Password generation must fail closed instead of falling back to Bash's small,
 # predictable $RANDOM generator.
 if sed -n '/_spm_rand_below()/,/^}/p' "$ROOT_DIR/spm.sh" | grep -q 'RANDOM %'; then
