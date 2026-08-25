@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.11.3"
+VERSION="2.11.4"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -10946,6 +10946,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if path in ("/unlock/challenge", "/unlock/verify"):
             token, session = self._suspended_session()
+        elif path == "/unlock/suspend":
+            # Suspending accepts a session that is already suspended, because
+            # two tabs share one session and both lock bars fire. Refusing the
+            # second told it "no session", and the lock bar treats any refusal
+            # as a reason to log out -- which destroyed the suspended session
+            # the first tab was about to resume.
+            token, session = self._session_record()
+            if session is not None and session.get("state") not in ("active", "suspended"):
+                session = None
         else:
             token, session = self._session_record()
             if session is not None and session.get("state") != "active":
@@ -10959,6 +10968,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return True
 
         if path == "/unlock/suspend":
+            if session.get("state") == "suspended":
+                # Already locked by another tab. Deliberately does not touch
+                # suspended_at: refreshing it every time a tab reports in would
+                # let an idle browser hold the master password in memory past
+                # SUSPEND_MAX_AGE indefinitely.
+                self._send_json(200, {"ok": True, "already_suspended": True})
+                return True
+            # A suspended session can be resumed by nothing except a registered
+            # credential, so suspending without one strands the user on a page
+            # that cannot let them back in -- they can only log out and retype
+            # the master password, which is the exact friction this feature
+            # exists to remove.
+            #
+            # has_cred alone is not enough to decide: it is cached per session
+            # at login, so a session that was already open when the credential
+            # was deleted (or when SPM_WEB_RP_ID changed) still believes one
+            # exists. Ask the vault, which is the only authority.
+            try:
+                plaintext = decrypt_vault(session.get("master", ""))
+            except Exception:
+                self._send_json(403, {"error": "vault unavailable"})
+                return True
+            _, creds = parse_webauthn(plaintext)
+            if not any(parts[4] == WEBAUTHN_RP_ID for _, parts in creds):
+                # Correct the stale flag so later pages stop advertising it,
+                # and refuse. The lock bar falls through to /logout, which is
+                # exactly what it did before this feature existed.
+                session["has_cred"] = False
+                self.log_message("refusing to suspend: no usable unlock credential")
+                self._send_json(409, {"error": "no credential registered"})
+                return True
+            session["has_cred"] = True
             session["state"] = "suspended"
             session["suspended_at"] = time.time()
             # Nothing may carry over from the active session into the locked
