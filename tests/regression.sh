@@ -846,6 +846,15 @@ code, res = post_json("/unlock/register/challenge", {"csrf": csrf},
                       origin="https://evil.invalid")
 assert code == 403, ("a cross-origin post was authorised", code, res)
 
+# Suspending without a registered credential must be refused. A suspended
+# session can be resumed by nothing except a credential, so allowing it strands
+# the user on a page that cannot let them back in -- they can only log out and
+# retype the master password, which is the friction this feature exists to
+# remove. The lock bar treats a refusal as a reason to log out, which is
+# exactly the pre-2.11.0 behaviour.
+code, res = post_json("/unlock/suspend", {"csrf": csrf})
+assert code == 409, ("suspend was allowed with no credential registered", code, res)
+
 code, ch = post_json("/unlock/register/challenge", {"csrf": csrf})
 assert code == 200 and ch.get("challenge"), ("register challenge", code, ch)
 code, res = post_json("/unlock/register/verify", {
@@ -911,6 +920,15 @@ assert boot["available"] is True, "unlock stopped being offered while a credenti
 csrf = boot["csrf"]
 
 assert post_json("/unlock/suspend", {"csrf": csrf})[0] == 200, "suspend refused"
+
+# Two tabs share one session and both lock bars fire. The second must not be
+# told "no session": the lock bar treats any refusal as a reason to log out,
+# which destroyed the suspended session the first tab was about to resume.
+code, res = post_json("/unlock/suspend", {"csrf": csrf})
+assert code == 200 and res.get("already_suspended") is True, \
+    ("suspending an already-suspended session is not idempotent", code, res)
+code, res = post_json("/unlock/challenge", {"csrf": csrf})
+assert code == 200, ("the session stopped being resumable after a second suspend", code, res)
 
 # The property this whole feature rests on. The 2.10.14 bug was a control that
 # lived only in the browser; if suspension were a client-side redirect, a

@@ -10,7 +10,7 @@ body:
     id: version
     attributes:
       label: SPM version
-      placeholder: "2.11.3"
+      placeholder: "2.11.4"
     validations:
       required: true
   - type: dropdown

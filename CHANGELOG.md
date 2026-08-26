@@ -5,6 +5,37 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.11.4] - 2026-08-25
+
+### Fixed
+- **The idle lock could suspend a session that nothing could then resume.**
+  `/unlock/suspend` trusted a per-session flag cached at login rather than
+  checking the vault, so a browser that was already open when the last
+  credential was deleted — or when `SPM_WEB_RP_ID` changed — would lock itself
+  into a page whose only working control was "Use master password instead".
+  The vault was never at risk, but the user was logged out and made to retype
+  the master password, which is the friction biometric unlock exists to remove.
+
+  Suspending now asks the vault, which is the only authority, and refuses when
+  no usable credential exists. The lock bar treats the refusal as a reason to
+  log out — exactly what it did before 2.11.0 — and the stale flag is corrected
+  so later pages stop advertising unlock.
+
+- **A second browser tab could destroy a session the first had just
+  suspended.** Two tabs share one session and both lock bars fire. The second
+  `/unlock/suspend` was answered "no session", and the lock bar treats any
+  refusal as a reason to log out — so the tab that lost the race logged out the
+  session the other tab was about to resume with Face ID.
+
+  Suspending an already-suspended session is now idempotent. It deliberately
+  does not refresh `suspended_at`: doing so on every tab that reported in would
+  let an idle browser hold the master password in memory past
+  `SPM_WEB_SUSPEND_MAX` indefinitely.
+
+### Tests
+- Both paths are asserted, and each assertion was reverted against the 2.11.2
+  behaviour and confirmed to fail for the right reason before being accepted.
+
 ## [2.11.3] - 2026-08-25
 
 ### Fixed
