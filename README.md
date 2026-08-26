@@ -79,20 +79,22 @@ attacker with root access.
 
 ## Product tour
 
-All screenshots below were captured in Google Chrome using a disposable vault
-containing only synthetic documentation data. No personal vault or real
-credential appears in these images. Pages introduced in 2.11 were captured from
-2.11.2; the rest are from 2.10.5 and are unchanged since. The locked-screen
-captures are from a real iPhone running the Home Screen web app, which is the
-release target for Web Mode.
+Every web capture below was taken from the 2.11.4 build in headless Chromium at
+1440x957, against a disposable vault holding only synthetic documentation data.
+No personal vault or real credential appears in these images, and the sidebar
+path is a placeholder. The locked-screen captures are from a real iPhone running
+the Home Screen web app -- the release target for Web Mode -- and were taken at
+2.11.2, which is the last release that changed that screen.
 
-![Animated tour of the SPM web interface using synthetic records](docs/product-demo.gif)
+![Animated tour of Web Mode cycling through the overview, the tagged password
+list, the security findings page, cross-type search, vault history and
+biometric unlock, all using synthetic records](docs/product-demo.gif)
 
 ### Unlock and assess the vault
 
 | Secure login | Security overview |
 | --- | --- |
-| ![SPM master-password login](docs/screenshots/web-v2.10.5/01-login.png) | ![SPM vault overview and security score](docs/screenshots/web-v2.10.5/02-overview.png) |
+| ![SPM master-password login](docs/screenshots/web-v2.11.4/01-login.png) | ![SPM vault overview and security score](docs/screenshots/web-v2.11.4/02-overview.png) |
 
 ### Resume a locked session with Face ID or Touch ID
 
@@ -105,7 +107,7 @@ than `SPM_WEB_SUSPEND_MAX`.
 
 | Registered devices | The locked screen, on the phone |
 | --- | --- |
-| ![SPM biometric unlock settings listing two registered devices](docs/screenshots/web-v2.11.2/01-biometric-unlock.png) | ![SPM locked screen on iOS offering biometric unlock with a master-password fallback](docs/screenshots/ios-v2.11.2/01-vault-locked-en.jpg) |
+| ![SPM biometric unlock settings listing two registered devices](docs/screenshots/web-v2.11.4/06-biometric-unlock.png) | ![SPM locked screen on iOS offering biometric unlock with a master-password fallback](docs/screenshots/ios-v2.11.2/01-vault-locked-en.jpg) |
 
 The locked screen is translated like the rest of the interface, and carries its
 own language picker — it is the one page a user meets *after* being locked out,
@@ -119,57 +121,62 @@ so it cannot assume they can still reach the app's settings to change language.
 
 | Security findings | Vault history |
 | --- | --- |
-| ![SPM security page listing weak, reused and stale entries by ID](docs/screenshots/web-v2.11.2/03-security.png) | ![SPM history page listing encrypted vault snapshots](docs/screenshots/web-v2.11.2/04-history.png) |
+| ![SPM security page listing weak, reused and stale entries by ID](docs/screenshots/web-v2.11.4/03-security.png) | ![SPM history page listing encrypted vault snapshots](docs/screenshots/web-v2.11.4/05-history.png) |
 
 **Cross-type search** — one query across passwords, notes, passphrases,
 authenticators and backup codes. Results carry labels and IDs only: matching on
 a secret field would turn the search box into an oracle that confirms a guessed
 password by whether a row appears.
 
-![SPM search results spanning passwords, backup codes and authenticators](docs/screenshots/web-v2.11.2/05-search.png)
+![SPM search results spanning passwords, backup codes and authenticators](docs/screenshots/web-v2.11.4/04-search.png)
 
 ### Work with credentials and protected records
 
+Password rows carry `#hashtag` tags parsed from their notes, with a filter chip
+row above the table and a `rotate` badge on anything past the rotation
+threshold. Tags are a convention over existing plaintext fields, so they need no
+schema change and survive export and import untouched.
+
 | Password records | Authenticator codes |
 | --- | --- |
-| ![SPM password list](docs/screenshots/web-v2.10.5/03-passwords.png) | ![SPM TOTP authenticator view](docs/screenshots/web-v2.10.5/16-authenticator-view.png) |
+| ![SPM password list](docs/screenshots/web-v2.11.4/07-passwords.png) | ![SPM TOTP authenticator view](docs/screenshots/web-v2.11.4/20-authenticator-view.png) |
 
 | Password generator | Import and export |
 | --- | --- |
-| ![SPM password generator](docs/screenshots/web-v2.10.5/22-generator.png) | ![SPM import and export workspace](docs/screenshots/web-v2.10.5/23-transfer.png) |
+| ![SPM password generator](docs/screenshots/web-v2.11.4/26-generator.png) | ![SPM import and export workspace](docs/screenshots/web-v2.11.4/27-transfer.png) |
 
 <details>
-<summary><strong>Complete web interface gallery (28 pages)</strong></summary>
+<summary><strong>Complete web interface gallery (27 pages)</strong></summary>
 
 #### Passwords
 
 | Add | View | Edit |
 | --- | --- | --- |
-| ![Add password](docs/screenshots/web-v2.10.5/04-password-add.png) | ![View password](docs/screenshots/web-v2.10.5/05-password-view.png) | ![Edit password](docs/screenshots/web-v2.10.5/06-password-edit.png) |
+| ![Add password](docs/screenshots/web-v2.11.4/08-password-add.png) | ![View password](docs/screenshots/web-v2.11.4/09-password-view.png) | ![Edit password](docs/screenshots/web-v2.11.4/10-password-edit.png) |
 
 #### Secure notes
 
 | List | Add | View |
 | --- | --- | --- |
-| ![Secure notes list](docs/screenshots/web-v2.10.5/07-notes.png) | ![Add secure note](docs/screenshots/web-v2.10.5/08-note-add.png) | ![View secure note](docs/screenshots/web-v2.10.5/09-note-view.png) |
+| ![Secure notes list](docs/screenshots/web-v2.11.4/11-notes.png) | ![Add secure note](docs/screenshots/web-v2.11.4/12-note-add.png) | ![View secure note](docs/screenshots/web-v2.11.4/13-note-view.png) |
 
 #### Passphrases
 
 | List | Add | View | Edit |
 | --- | --- | --- | --- |
-| ![Passphrase list](docs/screenshots/web-v2.10.5/10-passphrases.png) | ![Add passphrase](docs/screenshots/web-v2.10.5/11-passphrase-add.png) | ![View passphrase](docs/screenshots/web-v2.10.5/12-passphrase-view.png) | ![Edit passphrase](docs/screenshots/web-v2.10.5/13-passphrase-edit.png) |
+| ![Passphrase list](docs/screenshots/web-v2.11.4/14-passphrases.png) | ![Add passphrase](docs/screenshots/web-v2.11.4/15-passphrase-add.png) | ![View passphrase](docs/screenshots/web-v2.11.4/16-passphrase-view.png) | ![Edit passphrase](docs/screenshots/web-v2.11.4/17-passphrase-edit.png) |
 
 #### Authenticators
 
 | List | Add | View | Edit |
 | --- | --- | --- | --- |
-| ![Authenticator list](docs/screenshots/web-v2.10.5/14-authenticators.png) | ![Add authenticator](docs/screenshots/web-v2.10.5/15-authenticator-add.png) | ![View authenticator](docs/screenshots/web-v2.10.5/16-authenticator-view.png) | ![Edit authenticator](docs/screenshots/web-v2.10.5/17-authenticator-edit.png) |
+| ![Authenticator list](docs/screenshots/web-v2.11.4/18-authenticators.png) | ![Add authenticator](docs/screenshots/web-v2.11.4/19-authenticator-add.png) | ![View authenticator](docs/screenshots/web-v2.11.4/20-authenticator-view.png) | ![Edit authenticator](docs/screenshots/web-v2.11.4/21-authenticator-edit.png) |
 
 #### Backup codes
 
 | List | Add | View | Edit |
 | --- | --- | --- | --- |
-| ![Backup-code list](docs/screenshots/web-v2.10.5/18-backup-codes.png) | ![Add backup codes](docs/screenshots/web-v2.10.5/19-backup-codes-add.png) | ![View backup codes](docs/screenshots/web-v2.10.5/20-backup-codes-view.png) | ![Edit backup codes](docs/screenshots/web-v2.10.5/21-backup-codes-edit.png) |
+| ![Backup-code list](docs/screenshots/web-v2.11.4/22-backup-codes.png) | ![Add backup codes](docs/screenshots/web-v2.11.4/23-backup-codes-add.png) | ![View backup codes](docs/screenshots/web-v2.11.4/24-backup-codes-view.png) | ![Edit backup codes](docs/screenshots/web-v2.11.4/25-backup-codes-edit.png) |
 
 </details>
 
