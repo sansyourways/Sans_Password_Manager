@@ -5,6 +5,67 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.12.0] - 2026-08-26
+
+### Added
+- **Password records carry a URL.** A seventh field on password rows, shown in
+  the CLI (`add`, `get`, `list`) and in the dashboard's add / edit / view
+  pages, and searchable like any other label. It exists so the browser
+  extension can bind a record to a site explicitly instead of guessing.
+
+  The scheme is an allowlist: `http://` and `https://` only, enforced on the
+  form, on import, and again when the value is rendered as a link. This field
+  becomes an `href` and will be handed to the extension as a match target, so
+  a `javascript:` or `data:` value here would be code execution rather than
+  merely a bad link. Empty stays valid -- the field is optional.
+
+- **`spm dashboard`** as an alias for `spm web`. Both `web` and `web-mode`
+  keep working and always will; they live in shell history, scripts and
+  process managers.
+
+### Changed
+- **"Web Mode" is now "the SPM Dashboard"** throughout the interface, the help
+  text, the interactive menu and the documentation. The `SPM_WEB_*`
+  environment variables and the `web` subcommand are deliberately unchanged:
+  renaming those would break every existing deployment for a cosmetic gain.
+- The username field is labelled **"Username / Email"** in the CLI and the
+  dashboard, in all three languages. It always accepted either.
+- The browser bridge binds on the URL field first, and still reads a URL out
+  of the notes. That is how every vault written before 2.12.0 works, and it
+  keeps working with no migration and no rewrite of anyone's notes.
+
+### Fixed
+- `cmd_bridge_get` returned success when a record was **not** bound to the
+  requested hostname. As a command it already exited non-zero, because
+  `errexit` aborted before the cleanup; called as a shell function inside an
+  `if`, it returned the status of the trailing `MASTER_PW=""` assignment. No
+  credential was ever disclosed -- the JSON said `ok:false` and carried no
+  secret -- but a caller trusting `$?` read "bound" from a refusal.
+
+### Compatibility
+- Existing vaults are read unchanged. Every parser already accepted six or
+  more fields, so a row without a URL reads as an empty one, and no vault is
+  rewritten on upgrade.
+- Exports gain a `url` column **after** `extra`, not before it. Placing it
+  before would have made an older headerless export's `period=..;algo=..`
+  land in the URL column on re-import.
+
+### Documentation
+- The showcase is recaptured on the 2.12.0 build: 27 pages plus the animated
+  tour, which now includes a record showing its URL field. Retires
+  `docs/screenshots/web-v2.11.4/`, verified present at tag `v2.11.4` and in
+  that release's published archive before removal.
+
+### Tests
+- The URL field is covered end to end: storage in field 7, rejection of a
+  `javascript:` scheme with the vault left unchanged, the rendered link and
+  its `rel` guard, search matching, `get` on a seven-field row, and bridge
+  binding on both the URL field and a legacy notes-embedded URL.
+- Four mutations were applied and each was confirmed to fail for the right
+  reason: dropping the scheme allowlist, dropping `url` from the `get` read
+  list, dropping it from the search index, and reverting the bridge to
+  notes-only binding.
+
 ## [2.11.4] - 2026-08-25
 
 ### Fixed

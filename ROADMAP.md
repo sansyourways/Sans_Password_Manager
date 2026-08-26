@@ -10,7 +10,7 @@ feature volume. Proposals should begin with an issue and use synthetic data.
   command behavior.
 - Add focused tests around restore failures, interrupted writes, and concurrent
   CLI/Web mutations.
-- Improve accessibility and keyboard-only verification for every Web Mode page.
+- Improve accessibility and keyboard-only verification for every SPM Dashboard page.
 - Keep import/export fixtures synchronized across every documented format.
 
 ## Next — safer integrations

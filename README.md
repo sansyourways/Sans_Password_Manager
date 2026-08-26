@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **2.11.4**
+Current release: **2.12.0**
 
 ---
 
@@ -36,9 +36,9 @@ Current release: **2.11.4**
   - [Staying up to date](#staying-up-to-date)
 - [Usage](#usage)
   - [Interactive Menu](#interactive-menu)
-  - [Web Mode](#web-mode)
-  - [Publish Web Mode on a domain with HTTPS](#publish-web-mode-on-a-domain-with-https)
-  - [Install Web Mode as an iOS app](#install-web-mode-as-an-ios-app)
+  - [SPM Dashboard](#spm-dashboard)
+  - [Publish the SPM Dashboard on a domain with HTTPS](#publish-the-spm-dashboard-on-a-domain-with-https)
+  - [Install the SPM Dashboard as an iOS app](#install-the-spm-dashboard-as-an-ios-app)
   - [CLI Commands](#cli-commands)
   - [Secure Notes](#secure-notes)
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
@@ -79,14 +79,14 @@ attacker with root access.
 
 ## Product tour
 
-Every web capture below was taken from the 2.11.4 build in headless Chromium at
+Every web capture below was taken from the 2.12.0 build in headless Chromium at
 1440x957, against a disposable vault holding only synthetic documentation data.
 No personal vault or real credential appears in these images, and the sidebar
 path is a placeholder. The locked-screen captures are from a real iPhone running
-the Home Screen web app -- the release target for Web Mode -- and were taken at
+the Home Screen web app -- the release target for SPM Dashboard -- and were taken at
 2.11.2, which is the last release that changed that screen.
 
-![Animated tour of Web Mode cycling through the overview, the tagged password
+![Animated tour of SPM Dashboard cycling through the overview, the tagged password
 list, the security findings page, cross-type search, vault history and
 biometric unlock, all using synthetic records](docs/product-demo.gif)
 
@@ -94,7 +94,7 @@ biometric unlock, all using synthetic records](docs/product-demo.gif)
 
 | Secure login | Security overview |
 | --- | --- |
-| ![SPM master-password login](docs/screenshots/web-v2.11.4/01-login.png) | ![SPM vault overview and security score](docs/screenshots/web-v2.11.4/02-overview.png) |
+| ![SPM master-password login](docs/screenshots/web-v2.12.0/01-login.png) | ![SPM vault overview and security score](docs/screenshots/web-v2.12.0/02-overview.png) |
 
 ### Resume a locked session with Face ID or Touch ID
 
@@ -107,7 +107,7 @@ than `SPM_WEB_SUSPEND_MAX`.
 
 | Registered devices | The locked screen, on the phone |
 | --- | --- |
-| ![SPM biometric unlock settings listing two registered devices](docs/screenshots/web-v2.11.4/06-biometric-unlock.png) | ![SPM locked screen on iOS offering biometric unlock with a master-password fallback](docs/screenshots/ios-v2.11.2/01-vault-locked-en.jpg) |
+| ![SPM biometric unlock settings listing two registered devices](docs/screenshots/web-v2.12.0/06-biometric-unlock.png) | ![SPM locked screen on iOS offering biometric unlock with a master-password fallback](docs/screenshots/ios-v2.11.2/01-vault-locked-en.jpg) |
 
 The locked screen is translated like the rest of the interface, and carries its
 own language picker — it is the one page a user meets *after* being locked out,
@@ -121,14 +121,14 @@ so it cannot assume they can still reach the app's settings to change language.
 
 | Security findings | Vault history |
 | --- | --- |
-| ![SPM security page listing weak, reused and stale entries by ID](docs/screenshots/web-v2.11.4/03-security.png) | ![SPM history page listing encrypted vault snapshots](docs/screenshots/web-v2.11.4/05-history.png) |
+| ![SPM security page listing weak, reused and stale entries by ID](docs/screenshots/web-v2.12.0/03-security.png) | ![SPM history page listing encrypted vault snapshots](docs/screenshots/web-v2.12.0/05-history.png) |
 
 **Cross-type search** — one query across passwords, notes, passphrases,
 authenticators and backup codes. Results carry labels and IDs only: matching on
 a secret field would turn the search box into an oracle that confirms a guessed
 password by whether a row appears.
 
-![SPM search results spanning passwords, backup codes and authenticators](docs/screenshots/web-v2.11.4/04-search.png)
+![SPM search results spanning passwords, backup codes and authenticators](docs/screenshots/web-v2.12.0/04-search.png)
 
 ### Work with credentials and protected records
 
@@ -137,13 +137,22 @@ row above the table and a `rotate` badge on anything past the rotation
 threshold. Tags are a convention over existing plaintext fields, so they need no
 schema change and survive export and import untouched.
 
+Each record also has a **URL**, alongside the username / email, password and
+notes. It is what binds a credential to a site: the browser bridge matches the
+hostname from this field first, and the browser extension will use it to offer
+the right entry without guessing from the record's name. Only `http://` and
+`https://` are accepted -- the value is rendered as a link and handed to the
+extension, so the scheme is an allowlist rather than free text. Vaults written
+before 2.12.0 have no URL field and are read unchanged; the bridge still finds
+a URL in the notes the way it always did, so nothing needs migrating.
+
 | Password records | Authenticator codes |
 | --- | --- |
-| ![SPM password list](docs/screenshots/web-v2.11.4/07-passwords.png) | ![SPM TOTP authenticator view](docs/screenshots/web-v2.11.4/20-authenticator-view.png) |
+| ![SPM password list](docs/screenshots/web-v2.12.0/07-passwords.png) | ![SPM TOTP authenticator view](docs/screenshots/web-v2.12.0/20-authenticator-view.png) |
 
 | Password generator | Import and export |
 | --- | --- |
-| ![SPM password generator](docs/screenshots/web-v2.11.4/26-generator.png) | ![SPM import and export workspace](docs/screenshots/web-v2.11.4/27-transfer.png) |
+| ![SPM password generator](docs/screenshots/web-v2.12.0/26-generator.png) | ![SPM import and export workspace](docs/screenshots/web-v2.12.0/27-transfer.png) |
 
 <details>
 <summary><strong>Complete web interface gallery (27 pages)</strong></summary>
@@ -152,31 +161,31 @@ schema change and survive export and import untouched.
 
 | Add | View | Edit |
 | --- | --- | --- |
-| ![Add password](docs/screenshots/web-v2.11.4/08-password-add.png) | ![View password](docs/screenshots/web-v2.11.4/09-password-view.png) | ![Edit password](docs/screenshots/web-v2.11.4/10-password-edit.png) |
+| ![Add password](docs/screenshots/web-v2.12.0/08-password-add.png) | ![View password](docs/screenshots/web-v2.12.0/09-password-view.png) | ![Edit password](docs/screenshots/web-v2.12.0/10-password-edit.png) |
 
 #### Secure notes
 
 | List | Add | View |
 | --- | --- | --- |
-| ![Secure notes list](docs/screenshots/web-v2.11.4/11-notes.png) | ![Add secure note](docs/screenshots/web-v2.11.4/12-note-add.png) | ![View secure note](docs/screenshots/web-v2.11.4/13-note-view.png) |
+| ![Secure notes list](docs/screenshots/web-v2.12.0/11-notes.png) | ![Add secure note](docs/screenshots/web-v2.12.0/12-note-add.png) | ![View secure note](docs/screenshots/web-v2.12.0/13-note-view.png) |
 
 #### Passphrases
 
 | List | Add | View | Edit |
 | --- | --- | --- | --- |
-| ![Passphrase list](docs/screenshots/web-v2.11.4/14-passphrases.png) | ![Add passphrase](docs/screenshots/web-v2.11.4/15-passphrase-add.png) | ![View passphrase](docs/screenshots/web-v2.11.4/16-passphrase-view.png) | ![Edit passphrase](docs/screenshots/web-v2.11.4/17-passphrase-edit.png) |
+| ![Passphrase list](docs/screenshots/web-v2.12.0/14-passphrases.png) | ![Add passphrase](docs/screenshots/web-v2.12.0/15-passphrase-add.png) | ![View passphrase](docs/screenshots/web-v2.12.0/16-passphrase-view.png) | ![Edit passphrase](docs/screenshots/web-v2.12.0/17-passphrase-edit.png) |
 
 #### Authenticators
 
 | List | Add | View | Edit |
 | --- | --- | --- | --- |
-| ![Authenticator list](docs/screenshots/web-v2.11.4/18-authenticators.png) | ![Add authenticator](docs/screenshots/web-v2.11.4/19-authenticator-add.png) | ![View authenticator](docs/screenshots/web-v2.11.4/20-authenticator-view.png) | ![Edit authenticator](docs/screenshots/web-v2.11.4/21-authenticator-edit.png) |
+| ![Authenticator list](docs/screenshots/web-v2.12.0/18-authenticators.png) | ![Add authenticator](docs/screenshots/web-v2.12.0/19-authenticator-add.png) | ![View authenticator](docs/screenshots/web-v2.12.0/20-authenticator-view.png) | ![Edit authenticator](docs/screenshots/web-v2.12.0/21-authenticator-edit.png) |
 
 #### Backup codes
 
 | List | Add | View | Edit |
 | --- | --- | --- | --- |
-| ![Backup-code list](docs/screenshots/web-v2.11.4/22-backup-codes.png) | ![Add backup codes](docs/screenshots/web-v2.11.4/23-backup-codes-add.png) | ![View backup codes](docs/screenshots/web-v2.11.4/24-backup-codes-view.png) | ![Edit backup codes](docs/screenshots/web-v2.11.4/25-backup-codes-edit.png) |
+| ![Backup-code list](docs/screenshots/web-v2.12.0/22-backup-codes.png) | ![Add backup codes](docs/screenshots/web-v2.12.0/23-backup-codes-add.png) | ![View backup codes](docs/screenshots/web-v2.12.0/24-backup-codes-view.png) | ![Edit backup codes](docs/screenshots/web-v2.12.0/25-backup-codes-edit.png) |
 
 </details>
 
@@ -192,10 +201,12 @@ schema change and survive export and import untouched.
 - CLI and web import/export across CSV, JSON, TSV, NDJSON, Markdown, HTML,
   YAML, XML, SQL, INI, PSV, RST, TOML, Org, SCSV, JSONC, and related variants
 - Vault-wide security score for weak, reused, old, incomplete, or malformed
-  records, with a Web Mode page listing the entries behind each finding
+  records, with an SPM Dashboard page listing the entries behind each finding
 - Cross-type search and `#hashtag` tags across every record type
+- A URL on every password record, scheme-restricted to `http(s)`, used to bind
+  a credential to a site for the browser extension
 - Encrypted history, verified manual/automatic backups, and confirmed rollback,
-  restorable from the interactive menu or Web Mode
+  restorable from the interactive menu or SPM Dashboard
 - Digest-verified encrypted attachments with a 1 MiB limit
 - Named vault profiles and conflict-aware filesystem synchronization
 - Recipient-encrypted emergency kits with authenticated contents
@@ -222,7 +233,7 @@ schema change and survive export and import untouched.
 - User protects master password & private key  
 - GnuPG/OpenSSL are trusted binaries
 
-### Web Mode safeguards
+### SPM Dashboard safeguards
 - Login failures are isolated by visitor behind the bundled loopback nginx
   configuration, synchronized across request threads, expired, and memory-bound.
 - Vault mutations are serialized and protected by per-session CSRF tokens.
@@ -272,7 +283,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 2.11.4
+bash install.sh --version 2.12.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -284,7 +295,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 2.11.4 at /home/you/.local/bin/spm
+Installed SPM 2.12.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -386,7 +397,7 @@ Includes:
 
 ---
 
-### Web Mode
+### SPM Dashboard
 
 ```bash
 ./spm.sh web
@@ -420,7 +431,7 @@ shrinking text or forcing page-level horizontal scrolling.
 
 ---
 
-### Publish Web Mode on a domain with HTTPS
+### Publish the SPM Dashboard on a domain with HTTPS
 
 Choosing bind option **4) Domain/subdomain with HTTPS** puts nginx in front of
 the vault: nginx terminates TLS on the public interface, and the vault itself is
@@ -548,14 +559,14 @@ The choice is saved, so the next run offers the same domain again.
 
 ---
 
-### Install Web Mode as an iOS app
+### Install the SPM Dashboard as an iOS app
 
-Web Mode ships an app icon and a web app manifest, so iPhone and iPad can add it
+SPM Dashboard ships an app icon and a web app manifest, so iPhone and iPad can add it
 to the Home Screen and launch it like a native app — full screen, with no Safari
 address bar. Nothing is installed from an app store and nothing leaves your host;
 the icon simply opens the same local server that is already running.
 
-**1. Start Web Mode in background mode — this is not optional.**
+**1. Start SPM Dashboard in background mode — this is not optional.**
 
 ```bash
 ./spm.sh web
@@ -617,7 +628,7 @@ tab. The address shown here is your own host — the example below is redacted.
 - **There is no address bar in the installed app**, so you cannot visually
   confirm the origin the way you can in a tab. Only install from an address you
   trust.
-- **The icon does not start the server.** If Web Mode is not running when you
+- **The icon does not start the server.** If SPM Dashboard is not running when you
   tap the icon, the page simply fails to load. This is why step 1 uses PM2
   background mode rather than the foreground option.
 - **The icon is cached when you add it.** If you upgrade SPM and the artwork
@@ -765,7 +776,7 @@ Validates:
 - **Split records** — entries containing a character that Python's
   `splitlines()` treats as a line break (`U+000B`, `U+000C`, `U+001C`–`U+001E`,
   `U+0085`, `U+2028`, `U+2029`). Such an entry was written as one record but is
-  read back as two, so it vanishes from Web Mode while still listing correctly
+  read back as two, so it vanishes from SPM Dashboard while still listing correctly
   in the CLI — the CLI splits on newline only. Releases before 2.10.12 could
   create these; the scan finds any you already have.
 
@@ -778,7 +789,7 @@ Validates:
   ```
   [!] 1 record(s) contain a line-break character; 0 leftover fragment(s):
         line 3     PASSWORD      id=2     My␣Bank            U+2028 LINE SEPARATOR
-      These entries are invisible in Web Mode. The vault was NOT changed.
+      These entries are invisible in SPM Dashboard. The vault was NOT changed.
   ```
 
 - File permissions on the vault, its `.bak`, the recovery file, and **every
@@ -881,7 +892,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **2.11.4**
+Version: **2.12.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
@@ -893,11 +904,11 @@ reaches no server — and it cannot protect a client whose scripts do not run.
 The server independently expires an idle session after 5 minutes and any
 session after 12 hours, regardless of what the browser does. Every `<script>`
 is served with `data-cfasync="false"` beside its CSP nonce so a CDN cannot
-rewrite it out of existence; if you front Web Mode with Cloudflare, disable
+rewrite it out of existence; if you front the SPM Dashboard with Cloudflare, disable
 Rocket Loader for the hostname as well.
 
 Set a relying-party id (`SPM_WEB_RP_ID`, or let SPM's own domain setup supply
-it) and Web Mode offers **biometric unlock**: register a device from the
+it) and SPM Dashboard offers **biometric unlock**: register a device from the
 Biometric Unlock page and the idle lock resumes with Face ID or Touch ID
 instead of a retyped master password. Suspension is enforced by the server, not
 the browser — a locked session is refused everywhere except the unlock
@@ -952,8 +963,11 @@ keys remain non-exportable in the operating-system or hardware authenticator;
 SPM stores only discovery and recovery metadata.
 
 The unpacked Chrome/Chromium companion is in `browser-extension/`. Autofill
-requires the record label, or an HTTP(S) URL in its notes, to exactly match the
-active page hostname. See its README for native-host registration.
+requires an exact hostname match against the record's URL field, its label, or
+an HTTP(S) URL in its notes -- the notes fallback is what makes vaults written
+before 2.12.0 keep working. Matching is exact: a record bound to
+`example.com` does not autofill on `login.example.com`. See its README for
+native-host registration.
 Uses **semantic versioning**.  
 `./spm.sh update` fetches the latest GitHub ZIP, verifies its published SHA-256 and the extracted script syntax, then installs to `/usr/local/bin/spm` (sudo may be required).
 See `CHANGELOG.md` for details.

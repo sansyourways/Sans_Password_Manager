@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render the Web Mode app icon (apple-touch-icon / PWA) and print it as base64.
+# Render the SPM Dashboard app icon (apple-touch-icon / PWA) and print it as base64.
 #
 # The artwork is the login page brand mark, reproduced from the CSS rather than
 # redrawn by eye:

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sans Password Manager Bridge",
-  "version": "2.11.4",
+  "version": "2.12.0",
   "description": "Explicit, domain-bound autofill through the local SPM native host.",
   "permissions": ["activeTab", "nativeMessaging", "scripting"],
   "action": {"default_popup": "popup.html", "default_title": "SPM Autofill"}
