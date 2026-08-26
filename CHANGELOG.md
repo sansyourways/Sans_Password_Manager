@@ -36,6 +36,20 @@ Keep-a-Changelog style format.
 - Both paths are asserted, and each assertion was reverted against the 2.11.2
   behaviour and confirmed to fail for the right reason before being accepted.
 
+### Documentation
+- **The product showcase is recaptured at 2.11.4.** The animated tour now
+  cycles the overview, the tagged password list, the security findings page,
+  cross-type search, vault history and biometric unlock; the previous one
+  predated all six. The gallery is 27 pages captured in one pass at 1440x957,
+  so the sidebar no longer varies between shots — the older captures were taken
+  before Security, History and Biometric Unlock joined the nav and showed a
+  stale one.
+- Retired `docs/screenshots/web-v2.10.5/` and `docs/screenshots/web-v2.11.2/`,
+  superseded by `web-v2.11.4/`. Both remain at every tag that referenced them
+  and inside the published release archives, so historical READMEs still
+  render. The iPhone locked-screen captures are kept: they are device captures
+  of the last release that changed that screen.
+
 ## [2.11.3] - 2026-08-25
 
 ### Fixed
