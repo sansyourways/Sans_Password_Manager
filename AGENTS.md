@@ -3,7 +3,7 @@
 ## Project Structure & Modules
 - Core logic lives in `spm.sh` (single-file Bash password manager). Keep changes self-contained and portable.
 - Legal and policy docs sit in `docs/` (`SECURITY.md`, `PRIVACY_POLICY.md`, etc.). Update them when behavior or data handling changes.
-- Release artifacts are the versioned `Sans_Password_Manager_v*.zip` bundles and notes like `release-2.3.0.md`; do not overwrite historical bundles.
+- Release artifacts are the versioned `Sans_Password_Manager_v*.zip` bundles and notes like `release-2.3.0.md`. These are **not** committed: `.github/workflows/release.yml` builds the bundle from source at tag time and publishes it to the GitHub Release, which is the single source of truth. Never `git add -f` a bundle or its `.sha256`.
 - `.github/` holds Gemini automation configs; avoid breaking workflow inputs.
 - Ignore and never commit vaults, recovery keys, or save/portable bundles listed in `.gitignore`.
 
@@ -41,7 +41,7 @@
 - PRs should include: purpose, key changes, test notes (`bash -n`, `shellcheck`, manual flows run), and any security considerations (key handling, vault migrations).
 - Keep diffs minimal; avoid reformatting the ASCII banner or existing translations unless intentional.
 - Versioning policy reminder: keep patch bumps (`x.x.n`) for fixes/small tweaks; add new features without bumping when already on current minor. Accumulate ~5+ new features before bumping the minor (`x.n.0`), and bump major only for overhauls/breaking changes. Current version is 2.8.0 and every future change must keep this semantic versioning policy in mind.
-- Release hygiene: every change set must update `CHANGELOG.md` + `README.md` and regenerate the ZIP (`Sans_Password_Manager_v<version>.zip`) before commit; don’t skip the zip rebuild.
+- Release hygiene: every change set must update `CHANGELOG.md` + `README.md`. Do **not** build or commit a release ZIP by hand — the release workflow builds and publishes it from the tag. Building one locally to test is fine; it stays untracked (`.gitignore` covers `*.zip` and `*.zip.sha256`).
 - Web import stability: always verify `/import` handles both multipart uploads and pasted data with clear logging and redirects; test with a real CSV upload in temporary web mode to confirm success feedback.
 
 ## Current Snapshot (v2.8.0)
@@ -49,4 +49,4 @@
 - Web dashboard now includes an EN/ID/JP language selector in the header that persists via cookie; dashboard cards, table headers, and the export/import UI rerender in the selected language without reloading.
 - Web themes introduced 2.7.x; auto-reload removed in 2.7.1. Tables/cards/theme colors refined through 2.7.2–2.7.3. Buttons pastelized in 2.7.4.
 - Web mode has passphrase, backup codes, authenticator cards; version passed via `SPM_VERSION` env. CLI includes passphrase and authenticator commands. Copy buttons in all view pages now emit toast notifications so users always know when clipboard actions succeed/fail on any device. New `restore` command/menu relocates bundle vaults back to `~/.spm_vault.gpg`.
-- Portable and save bundles now package the RSA private key (`spm_recovery_private.pem`) alongside the vault and recovery file; handle archives carefully. Auto-updater (`./spm.sh update`) downloads the latest ZIP and installs to `/usr/local/bin/spm` (may need sudo). Rebuild the release ZIP (`Sans_Password_Manager_v2.8.0.zip`) before publishing.
+- Portable and save bundles now package the RSA private key (`spm_recovery_private.pem`) alongside the vault and recovery file; handle archives carefully. Auto-updater (`./spm.sh update`) downloads the latest ZIP and installs to `/usr/local/bin/spm` (may need sudo). The release workflow builds the published ZIP from the tag; there is no manual rebuild step.

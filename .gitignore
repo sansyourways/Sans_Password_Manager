@@ -26,6 +26,7 @@ spm_portable_*/
 spm_portable_*.zip
 *.tar.gz
 *.zip
+*.zip.sha256
 
 # Temp files
 /tmp/
