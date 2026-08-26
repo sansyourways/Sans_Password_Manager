@@ -33,10 +33,10 @@ occurs only for features or deployment choices initiated by the user:
   at most once every 24 hours. Only the request itself is sent; no vault
   contents, identifiers, or usage data accompany it. Turning it back off
   (`spm auto-update off`) stops the check.
-- Web Mode communicates between the user's browser and the locally operated SPM
+- SPM Dashboard communicates between the user's browser and the locally operated SPM
   web process. It defaults to loopback, but a user may explicitly bind it to a
   non-loopback address or place it behind a reverse proxy.
-- Choosing the domain/HTTPS bind in Web Mode runs `certbot` against Let's
+- Choosing the domain/HTTPS bind in SPM Dashboard runs `certbot` against Let's
   Encrypt on the user's behalf. The domain names being certified, this host's
   IP address, and the contact email if one is supplied are sent to Let's
   Encrypt, and the issued certificate is published in public Certificate
@@ -56,9 +56,9 @@ maintainer-operated cloud sync, or analytics integration.
 
 ## Local web data
 
-Web Mode uses a session cookie for authentication with the user-operated local
+SPM Dashboard uses a session cookie for authentication with the user-operated local
 server. The cookie is not sent to Sansyourways. Decrypted responses are marked
-`Cache-Control: no-store`. Users who expose Web Mode beyond loopback are
+`Cache-Control: no-store`. Users who expose SPM Dashboard beyond loopback are
 responsible for transport security, access controls, and network configuration.
 
 ## Support and project communications

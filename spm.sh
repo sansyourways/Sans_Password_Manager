@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.11.4"
+VERSION="2.12.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -121,6 +121,22 @@ sanitize_field() {
 	printf '%s' "$1" \
 		| tr '\t\r\n\v\f\034\035\036' '        ' \
 		| sed 's/\xc2\x85/ /g; s/\xe2\x80\xa8/ /g; s/\xe2\x80\xa9/ /g'
+}
+
+sanitize_url() {
+	# The URL field is the one vault field that becomes a clickable link in Web
+	# Mode and, later, an auto-fill target for the browser extension. Both make
+	# a non-http(s) scheme dangerous -- "javascript:" in a rendered href, or a
+	# "data:" document the extension would treat as a login origin -- so the
+	# scheme is an allowlist rather than a denylist. An empty value is valid:
+	# the field is optional and always has been.
+	local raw
+	raw="$(sanitize_field "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+	[ -n "$raw" ] || { printf ''; return 0; }
+	if ! printf '%s' "$raw" | grep -Eqi '^https?://[^[:space:]/]+'; then
+		return 1
+	fi
+	printf '%s' "$raw"
 }
 
 validate_bundle_name() {
@@ -976,15 +992,15 @@ print_vault_table() {
 	fi
 
 	if [ "$SPM_LANG" = "id" ]; then
-		printf '%-5s  %-20s  %-20s  %-20s\n' "ID" "Layanan" "Username" "Dibuat"
+		printf '%-5s  %-20s  %-24s  %-20s  %s\n' "ID" "Layanan" "Username / Email" "Dibuat" "URL"
 	else
-		printf '%-5s  %-20s  %-20s  %-20s\n' "ID" "Service" "Username" "Created"
+		printf '%-5s  %-20s  %-24s  %-20s  %s\n' "ID" "Service" "Username / Email" "Created" "URL"
 	fi
-	printf '%.0s-' $(seq 1 70); printf '\n'
+	printf '%.0s-' $(seq 1 96); printf '\n'
 
 	awk -F '\t' '
 		NF >= 6 && $1 ~ /^[0-9]+$/ {
-			printf "%-5s  %-20s  %-20s  %-20s\n", $1, $2, $3, $6
+			printf "%-5s  %-20s  %-24s  %-20s  %s\n", $1, $2, $3, $6, (NF >= 7 ? $7 : "")
 		}
 	' "$file"
 }
@@ -994,8 +1010,9 @@ search_vault() {
 	local pattern="$2"
 
 	awk -F '\t' -v p="$pattern" '
-		$1 ~ /^[0-9]+$/ && (tolower($2) ~ tolower(p) || tolower($3) ~ tolower(p)) {
-			printf "%-5s  %-20s  %-20s  %-20s\n", $1, $2, $3, $6
+		$1 ~ /^[0-9]+$/ && (tolower($2) ~ tolower(p) || tolower($3) ~ tolower(p) \
+			|| (NF >= 7 && tolower($7) ~ tolower(p))) {
+			printf "%-5s  %-20s  %-24s  %-20s  %s\n", $1, $2, $3, $6, (NF >= 7 ? $7 : "")
 		}
 	' "$file"
 }
@@ -1504,9 +1521,9 @@ cmd_add() {
 	[ "$service" ] || die "Service cannot be empty."
 
 	if [ "$SPM_LANG" = "id" ]; then
-		printf 'Username: '
+		printf 'Username / Email: '
 	else
-		printf 'Username: '
+		printf 'Username / Email: '
 	fi
 	IFS= read -r username
 
@@ -1540,16 +1557,33 @@ cmd_add() {
 	fi
 	IFS= read -r notes
 
+	local url clean_url
+	if [ "$SPM_LANG" = "id" ]; then
+		printf 'URL (opsional, https://contoh.com): '
+	else
+		printf 'URL (optional, https://example.com): '
+	fi
+	IFS= read -r url
+	if ! clean_url="$(sanitize_url "$url")"; then
+		secure_wipe "$tmp"
+		if [ "$SPM_LANG" = "id" ]; then
+			die "URL harus diawali http:// atau https://."
+		else
+			die "URL must start with http:// or https://."
+		fi
+	fi
+
 	local id created
 	id="$(next_id_from_vault "$tmp")"
 	created="$(now_iso)"
 
-	printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" \
+	printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" \
 		"$(sanitize_field "$service")" \
 		"$(sanitize_field "$username")" \
 		"$(sanitize_field "$pw")" \
 		"$(sanitize_field "$notes")" \
-		"$created" >>"$tmp"
+		"$created" \
+		"$clean_url" >>"$tmp"
 
 	encrypt_file_to_vault "$tmp"
 	secure_wipe "$tmp"
@@ -1598,7 +1632,7 @@ cmd_get() {
 			fi
 		fi
 
-		IFS=$'\t' read -r id service username password notes created <<EOF
+		IFS=$'\t' read -r id service username password notes created url <<EOF
 $line
 EOF
 
@@ -1609,19 +1643,21 @@ EOF
 		fi
 
 		if [ "$SPM_LANG" = "id" ]; then
-			printf "ID:       %s\n" "$id"
-			printf "Layanan:  %s\n" "$service"
-			printf "Username: %s\n" "$username"
-			printf "Password: %s\n" "$password"
-			printf "Catatan:  %s\n" "$notes"
-			printf "Dibuat:   %s\n" "$created"
+			printf "ID:              %s\n" "$id"
+			printf "Layanan:         %s\n" "$service"
+			printf "Username / Email: %s\n" "$username"
+			printf "Password:        %s\n" "$password"
+			printf "URL:             %s\n" "${url:-}"
+			printf "Catatan:         %s\n" "$notes"
+			printf "Dibuat:          %s\n" "$created"
 		else
-			printf "ID:       %s\n" "$id"
-			printf "Service:  %s\n" "$service"
-			printf "Username: %s\n" "$username"
-			printf "Password: %s\n" "$password"
-			printf "Notes:    %s\n" "$notes"
-			printf "Created:  %s\n" "$created"
+			printf "ID:               %s\n" "$id"
+			printf "Service:          %s\n" "$service"
+			printf "Username / Email: %s\n" "$username"
+			printf "Password:         %s\n" "$password"
+			printf "URL:              %s\n" "${url:-}"
+			printf "Notes:            %s\n" "$notes"
+			printf "Created:          %s\n" "$created"
 		fi
 
 		copy_password_with_autoclear "$password"
@@ -1646,7 +1682,7 @@ cmd_edit() {
 
 	if [ "$SPM_LANG" = "id" ]; then
 		printf "Membuka vault di editor: %s\n" "$EDITOR_CMD"
-		printf "# Format password: id<TAB>service<TAB>username<TAB>password<TAB>notes<TAB>created_at\n" >&2
+		printf "# Format password: id<TAB>service<TAB>username<TAB>password<TAB>notes<TAB>created_at<TAB>url\n" >&2
 		printf "# Format note    : NOTE<TAB>note_id<TAB>title<TAB>base64_note<TAB>created_at<TAB>-\n" >&2
 		printf "# Format passphrase: PASSPHRASE<TAB>id<TAB>label<TAB>base64_passphrase<TAB>created_at<TAB>-\n" >&2
 		printf "# Format backup code: BACKUP_CODE<TAB>id<TAB>label<TAB>base64_codes<TAB>created_at<TAB>-\n" >&2
@@ -1654,7 +1690,7 @@ cmd_edit() {
 		printf "# Baris meta     : META_RECOVERY_PUBKEY...\n" >&2
 	else
 		printf "Opening vault in editor: %s\n" "$EDITOR_CMD"
-		printf "# Password rows: id<TAB>service<TAB>username<TAB>password<TAB>notes<TAB>created_at\n" >&2
+		printf "# Password rows: id<TAB>service<TAB>username<TAB>password<TAB>notes<TAB>created_at<TAB>url\n" >&2
 		printf "# Note rows    : NOTE<TAB>note_id<TAB>title<TAB>base64_note<TAB>created_at<TAB>-\n" >&2
 		printf "# Passphrase rows: PASSPHRASE<TAB>id<TAB>label<TAB>base64_passphrase<TAB>created_at<TAB>-\n" >&2
 		printf "# Backup code rows: BACKUP_CODE<TAB>id<TAB>label<TAB>base64_codes<TAB>created_at<TAB>-\n" >&2
@@ -3499,7 +3535,7 @@ cmd_forgot() {
 
 # Report vault records that contain a character Python's splitlines() treats as
 # a line break. Such a record was written as one line but is read back as two,
-# so neither half has enough fields and the entry disappears from Web Mode.
+# so neither half has enough fields and the entry disappears from the SPM Dashboard.
 # 2.10.12 stopped new ones being created; this finds any that already exist.
 # Strictly read-only: it reports and never edits the vault.
 doctor_scan_broken_records() {
@@ -3723,10 +3759,10 @@ cmd_doctor() {
 				$1=="ORPHAN" { printf "      line %-5s %-13s %s\n", $2, "FRAGMENT", $3 }
 			'
 			if [ "$SPM_LANG" = "id" ]; then
-				printf "    Entry ini tidak terlihat di Web Mode. Vault TIDAK diubah.\n"
+				printf "    Entry ini tidak terlihat di SPM Dashboard. Vault TIDAK diubah.\n"
 				printf "    Perbaiki dengan menyimpan ulang tiap entry lewat CLI (spm edit <id>).\n"
 			else
-				printf "    These entries are invisible in Web Mode. The vault was NOT changed.\n"
+				printf "    These entries are invisible in the SPM Dashboard. The vault was NOT changed.\n"
 				printf "    Repair by re-saving each one from the CLI (spm edit <id>), which\n"
 				printf "    rewrites the field through the 2.10.12 sanitiser.\n"
 			fi
@@ -3943,7 +3979,8 @@ with open(vault_path, "r", encoding="utf-8", errors="ignore") as f:
                 "secret": parts[3] if len(parts) > 3 else "",
                 "notes": parts[4] if len(parts) > 4 else "",
                 "created": parts[5] if len(parts) > 5 else "",
-                "extra": ""
+                "extra": "",
+                "url": parts[6] if len(parts) > 6 else ""
             })
         elif tag == "NOTE":
             rows.append({
@@ -3954,7 +3991,8 @@ with open(vault_path, "r", encoding="utf-8", errors="ignore") as f:
                 "secret": decode_b64(parts[3]) if len(parts) > 3 else "",
                 "notes": "",
                 "created": parts[4] if len(parts) > 4 else "",
-                "extra": ""
+                "extra": "",
+                "url": ""
             })
         elif tag == "PASSPHRASE":
             rows.append({
@@ -3965,7 +4003,8 @@ with open(vault_path, "r", encoding="utf-8", errors="ignore") as f:
                 "secret": decode_b64(parts[3]) if len(parts) > 3 else "",
                 "notes": "",
                 "created": parts[4] if len(parts) > 4 else "",
-                "extra": ""
+                "extra": "",
+                "url": ""
             })
         elif tag == "BACKUP_CODE":
             rows.append({
@@ -3976,7 +4015,8 @@ with open(vault_path, "r", encoding="utf-8", errors="ignore") as f:
                 "secret": decode_b64(parts[3]) if len(parts) > 3 else "",
                 "notes": "",
                 "created": parts[4] if len(parts) > 4 else "",
-                "extra": ""
+                "extra": "",
+                "url": ""
             })
         elif tag == "AUTH":
             rows.append({
@@ -3990,10 +4030,11 @@ with open(vault_path, "r", encoding="utf-8", errors="ignore") as f:
                 "extra": "period=%s;algo=%s" % (
                     parts[4] if len(parts) > 4 else "",
                     parts[6] if len(parts) > 6 else "sha1"
-                )
+                ),
+                "url": ""
             })
 
-fieldnames = ["type","id","label","username","secret","notes","created","extra"]
+fieldnames = ["type","id","label","username","secret","notes","created","extra","url"]
 
 if fmt == "json":
     with open(out_path, "w", encoding="utf-8") as f:
@@ -4187,6 +4228,7 @@ def _vf(value):
         text = text.replace(ch, " ")
     return text
 
+
 def next_id(tag):
     max_id = 0
     for ln in lines:
@@ -4199,6 +4241,16 @@ def next_id(tag):
             max_id = max(max_id, int(parts[1]))
     return max_id + 1
 
+def _vurl(value):
+    # Same allowlist as the CLI's sanitize_url and SPM Dashboard's form validation.
+    # An import is the least trusted way a value enters the vault, so a foreign
+    # CSV carrying "javascript:..." in its url column is dropped rather than
+    # stored -- the field is rendered as a link and will feed the extension.
+    text = _vf(value).strip()
+    if not text:
+        return ""
+    return text if re.match(r"(?i)^https?://[^\s/]+", text) else ""
+
 def add_password(r):
     pid = str(next_id("PASS"))
     lines.append("\t".join([
@@ -4207,7 +4259,8 @@ def add_password(r):
         _vf(r.get("username","")),
         _vf(r.get("secret","")),
         _vf(r.get("notes","")),
-        _vf(r.get("created",""))
+        _vf(r.get("created","")),
+        _vurl(r.get("url",""))
     ]))
 
 def add_note(r):
@@ -4299,6 +4352,7 @@ def parse_rows():
                     "notes": row[5] if len(row)>5 else "",
                     "created": row[6] if len(row)>6 else "",
                     "extra": row[7] if len(row)>7 else "",
+                    "url": row[8] if len(row)>8 else "",
                 })
         else:
             rows = list(reader)
@@ -4346,7 +4400,7 @@ def parse_advanced_rows():
         root=ET.fromstring(content)
         return [{child.tag: (child.text or "") for child in item} for item in root.findall("item")]
     if fmt == "sql":
-        rows=[]; fields=["type","id","label","username","secret","notes","created","extra"]
+        rows=[]; fields=["type","id","label","username","secret","notes","created","extra","url"]
         for values in re.findall(r"INSERT\s+INTO\s+spm_export\s*\([^)]*\)\s*VALUES\s*\((.*?)\)\s*;", content, re.I | re.S):
             parsed=next(csv.reader([values], delimiter=",", quotechar="'", doublequote=True, skipinitialspace=True))
             rows.append(dict(zip(fields, parsed)))
@@ -4406,6 +4460,7 @@ def parse_plain_table():
                     "notes": parts[4] if len(parts)>4 else "",
                     "created": parts[5] if len(parts)>5 else "",
                     "extra": parts[6] if len(parts)>6 else "",
+                    "url": parts[7] if len(parts)>7 else "",
                 })
     return rows
 
@@ -4656,7 +4711,7 @@ cmd_passkey_list() {
 	local tmp; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"; awk -F '\t' '$1=="PASSKEY"{printf "%s\t%s\t%s\t%s\n",$2,$3,$4,$7}' "$tmp"; secure_wipe "$tmp"
 }
 
-# Web Mode biometric unlock credentials. A separate row type from PASSKEY on
+# SPM Dashboard biometric unlock credentials. A separate row type from PASSKEY on
 # purpose: a PASSKEY row describes a passkey held somewhere else, while these
 # open this vault. The public key column is deliberately not printed -- it is
 # long, it is never useful to read by eye, and the list is for deciding what to
@@ -4729,7 +4784,7 @@ import json,sys
 for line in open(sys.argv[1],encoding="utf-8"):
  p=line.rstrip("\n").split("\t")
  if p and p[0]==sys.argv[2] and len(p)>=6:
-  print(json.dumps({"type":"password","label":p[1],"username":p[2],"secret":p[3],"notes":p[4],"created":p[5]},ensure_ascii=False));break
+  print(json.dumps({"type":"password","label":p[1],"username":p[2],"secret":p[3],"notes":p[4],"created":p[5],"url":p[6] if len(p)>6 else ""},ensure_ascii=False));break
 else: raise SystemExit("record not found")
 PY
 	openssl rand -hex 32 > "$key_file"
@@ -4785,17 +4840,24 @@ cmd_bridge_get() {
 	[ -n "$host" ] || die "Browser hostname required."
 	IFS= read -r MASTER_PW || die "Master password required on stdin."
 	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
-	python3 - "$tmp" "$id" "$host" <<'PY'
+	local status=0
+	python3 - "$tmp" "$id" "$host" <<'PY' || status=$?
 import json,re,sys,urllib.parse
 path,rid,requested=sys.argv[1:]; requested=requested.lower().strip(".")
 for line in open(path,encoding="utf-8",errors="replace"):
  p=line.rstrip("\n").split("\t")
  if p and p[0]==rid and len(p)>=6:
   label,user,secret,notes=p[1:5]
+  url=p[6] if len(p)>6 else ""
   candidates={label.lower().strip(".")}
-  for token in re.findall(r"https?://[^\s]+",notes):
+  # The url field is the intended binding source. Notes are still scanned so
+  # that vaults written before 2.12.0 -- where a URL could only live in the
+  # notes -- keep matching exactly as they did, with no rewrite on upgrade.
+  for token in ([url] if url else [])+re.findall(r"https?://[^\s]+",notes):
+   if not re.match(r"(?i)^https?://",token):continue
    try:candidates.add((urllib.parse.urlparse(token).hostname or "").lower().strip("."))
    except ValueError:pass
+  candidates.discard("")
   if requested not in candidates:
    print(json.dumps({"ok":False,"error":"record is not bound to this hostname"}));raise SystemExit(2)
   print(json.dumps({"ok":True,"username":user,"password":secret}));break
@@ -4803,6 +4865,13 @@ else:
  print(json.dumps({"ok":False,"error":"record not found"}));raise SystemExit(1)
 PY
 	secure_wipe "$tmp"; MASTER_PW=""
+	# Report the helper's status rather than the cleanup's. As a command,
+	# `spm bridge-get` already exited non-zero on a refusal because errexit
+	# aborted here; called as a shell function inside an `if`, errexit is
+	# suppressed and the old ending returned the status of MASTER_PW="",
+	# i.e. success, for a record bound to a different hostname. Capturing it
+	# explicitly makes both callers agree and keeps the wipe unconditional.
+	return "$status"
 }
 
 cmd_help() {
@@ -4837,7 +4906,7 @@ Perintah utama (CLI):
   ./spm.sh forgot          → Reset kata sandi utama dengan private key
   ./spm.sh doctor          → Health / integrity check vault
   ./spm.sh generate        → Generator kata sandi (panjang, mode mudah/aman/angka, simbol opsional)
-  ./spm.sh web             → Mode web (pilih sementara / background via pm2)
+  ./spm.sh web|dashboard   → SPM Dashboard (sementara / background via pm2)
   ./spm.sh help            → Tampilkan bantuan ini
 
 Fitur lokal 2.10:
@@ -4947,7 +5016,7 @@ Main commands (CLI):
   ./spm.sh forgot          → Reset master password using the private key
   ./spm.sh doctor          → Vault health / integrity check
   ./spm.sh generate        → Password generator (length, easy/secure/numeric, optional symbols/upper/lower/digits)
-  ./spm.sh web             → Web mode (foreground or pm2 background)
+  ./spm.sh web|dashboard   → SPM Dashboard (foreground or pm2 background)
   ./spm.sh help            → Show this help
 
 Local-first 2.10 capabilities:
@@ -4994,16 +5063,16 @@ Backup Codes:
   ./spm.sh backup-codes-delete <id>
                                   → Delete backup codes
 
-Web Mode:
+SPM Dashboard:
   - Runs a lightweight HTTP server so you can inspect your vault from a browser.
   - Protected by your master password.
   - Modes:
       • temporary (foreground, stop with Ctrl + C)
       • background (managed by pm2; installed automatically when possible)
   - UI:
-      • Password entries table (ID, service, username – passwords are not shown)
+      • Password entries table (ID, service, username / email, URL – passwords are not shown)
       • Secure notes section (view / add / edit / delete)
-  - Web session auto-locks after ~30 seconds of inactivity in the browser;
+  - The dashboard session auto-locks after ~30 seconds of inactivity in the browser;
     the server also expires an idle session after 5 minutes on its own.
   - Register a device on the Biometric Unlock page and the idle lock resumes
     with Face ID or Touch ID instead of a retyped master password. Suspension
@@ -5135,9 +5204,9 @@ ensure_pm2_installed() {
 }
 
 
-# ----- Domain / TLS publishing for Web Mode ----------------------------------
+# ----- Domain / TLS publishing for SPM Dashboard ----------------------------------
 #
-# Web Mode speaks plain HTTP and always will: adding TLS to the embedded Python
+# SPM Dashboard speaks plain HTTP and always will: adding TLS to the embedded Python
 # server would mean shipping certificate handling inside the vault process. The
 # safer arrangement is the conventional one - nginx terminates TLS on the public
 # interface and proxies to SPM on loopback, so the vault itself is never exposed
@@ -5786,13 +5855,13 @@ domain_setup_flow() {
 start_web_mode() {
 	clear
 	echo "==========================================="
-	echo "  SPM Web Mode"
+	echo "  SPM Dashboard"
 	echo "==========================================="
 	echo
 	if [ "$SPM_LANG" = "id" ]; then
 		printf "\n\033[0;31mPERINGATAN: Menjalankan mode web akan mengekspos vault Anda melalui server HTTP. Lanjutkan hanya jika Anda berada di jaringan yang terpercaya.\033[0m\n\n"
 	else
-		printf "\n\033[0;31mWARNING: Running the web mode will expose your vault over an HTTP server. Only proceed if you are on a trusted network.\033[0m\n\n"
+		printf "\n\033[0;31mWARNING: Running the SPM Dashboard will expose your vault over an HTTP server. Only proceed if you are on a trusted network.\033[0m\n\n"
 	fi
 
 	if [ "${SPM_LANG:-en}" = "id" ]; then
@@ -5896,7 +5965,7 @@ start_web_mode() {
 			echo "   Install python3 lalu coba lagi."
 			read -r -p "Tekan Enter untuk kembali ke menu..." _
 		else
-			echo "❌ python3 is required for web mode but not found."
+			echo "❌ python3 is required for the SPM Dashboard but not found."
 			echo "   Install python3 and retry."
 			read -r -p "Press Enter to return to menu..." _
 		fi
@@ -6059,7 +6128,7 @@ start_web_mode() {
 	local spm_web_script
 	spm_web_script="$(write_spm_web_script)" || {
 		if [ "${SPM_LANG:-en}" = "id" ]; then
-			echo "❌ Gagal menulis script web Python."
+			echo "❌ Gagal menulis script Python SPM Dashboard."
 			read -r -p "Tekan Enter untuk kembali ke menu..." _
 		else
 			echo "❌ Failed to write Python web script."
@@ -6111,7 +6180,7 @@ start_web_mode() {
 		pm2 start "$spm_web_script" \
 			--name "spm-web" \
 			--interpreter python3 >"$pm2_output" 2>&1 || {
-				printf "Failed to start SPM web mode with PM2:\n" >&2
+				printf "Failed to start SPM Dashboard with PM2:\n" >&2
 				tail -n 20 "$pm2_output" >&2
 				secure_wipe "$pm2_output"
 				return 1
@@ -6149,14 +6218,14 @@ PY
 			sleep 0.25
 		done
 		if [ "$web_ready" -ne 1 ]; then
-			printf "SPM web mode did not remain online. PM2 output:\n" >&2
+			printf "SPM Dashboard did not remain online. PM2 output:\n" >&2
 			tail -n 20 "$pm2_output" >&2
 			pm2 logs spm-web --nostream --lines 20 >&2 || true
 			secure_wipe "$pm2_output"
 			return 1
 		fi
 		secure_wipe "$pm2_output"
-		printf "SPM web mode is online (PID %s).\n" "$pm2_pid"
+		printf "SPM Dashboard is online (PID %s).\n" "$pm2_pid"
 
 		if [ "${SPM_LANG:-en}" = "id" ]; then
 			read -r -p "Tekan Enter untuk kembali ke menu..." _
@@ -6327,6 +6396,25 @@ def _vf(value):
         text = text.replace(ch, " ")
     return text
 
+
+_URL_RE = re.compile(r"^https?://[^\s/]+", re.IGNORECASE)
+
+
+def _vurl(value):
+    """Sanitise a URL field; None means "present but unusable".
+
+    The scheme is an allowlist, not a denylist. This value is rendered as an
+    href on the entry page and will be handed to the browser extension as a
+    match target, so "javascript:" or "data:" here is code execution and an
+    exfiltration path rather than merely a bad link. Empty is always valid --
+    the field is optional. None is distinct from "" so the form can say why it
+    rejected the input instead of silently blanking it.
+    """
+    text = _vf(value).strip()
+    if not text:
+        return ""
+    return text if _URL_RE.match(text) else None
+
 def fetch_latest_version():
     now = time.time()
     if now - LATEST_CACHE.get("ts", 0) < 300 and LATEST_CACHE.get("value"):
@@ -6459,7 +6547,9 @@ I18N_SCRIPT = """
       "form.save": "Save",
       "link.back": "\u2190 Back",
       "entry.field.service": "Service / Name",
-      "entry.field.username": "Username",
+      "entry.field.username": "Username / Email",
+      "entry.field.url": "URL",
+      "entry.hint.url": "Used to match this entry to a site. http:// or https:// only.",
       "entry.field.password": "Password",
       "entry.field.notes": "Notes",
       "note.field.title": "Title",
@@ -6477,7 +6567,8 @@ I18N_SCRIPT = """
       "auth.option.sha512": "SHA512",
       "view.title": "View Entry",
       "view.label.name": "Name",
-      "view.label.username": "Username",
+      "view.label.username": "Username / Email",
+      "view.label.url": "URL",
       "view.label.password": "Password",
       "view.label.notes": "Notes",
       "view.label.created": "Created at",
@@ -6696,7 +6787,9 @@ I18N_SCRIPT = """
       "form.save": "Simpan",
       "link.back": "\u2190 Kembali",
       "entry.field.service": "Layanan / Nama",
-      "entry.field.username": "Pengguna",
+      "entry.field.username": "Pengguna / Email",
+      "entry.field.url": "URL",
+      "entry.hint.url": "Dipakai untuk mencocokkan entry ini dengan situs. Hanya http:// atau https://.",
       "entry.field.password": "Kata sandi",
       "entry.field.notes": "Catatan",
       "note.field.title": "Judul",
@@ -6714,7 +6807,8 @@ I18N_SCRIPT = """
       "auth.option.sha512": "SHA512",
       "view.title": "Lihat Entri",
       "view.label.name": "Nama",
-      "view.label.username": "Pengguna",
+      "view.label.username": "Pengguna / Email",
+      "view.label.url": "URL",
       "view.label.password": "Kata sandi",
       "view.label.notes": "Catatan",
       "view.label.created": "Dibuat",
@@ -6933,7 +7027,9 @@ I18N_SCRIPT = """
       "form.save": "保存",
       "link.back": "\u2190 戻る",
       "entry.field.service": "サービス / 名称",
-      "entry.field.username": "ユーザー名",
+      "entry.field.username": "ユーザー名 / メール",
+      "entry.field.url": "URL",
+      "entry.hint.url": "このエントリをサイトに紐づけるために使用します。http:// または https:// のみ。",
       "entry.field.password": "パスワード",
       "entry.field.notes": "メモ",
       "note.field.title": "タイトル",
@@ -6951,7 +7047,8 @@ I18N_SCRIPT = """
       "auth.option.sha512": "SHA512",
       "view.title": "エントリ表示",
       "view.label.name": "名前",
-      "view.label.username": "ユーザー名",
+      "view.label.username": "ユーザー名 / メール",
+      "view.label.url": "URL",
       "view.label.password": "パスワード",
       "view.label.notes": "メモ",
       "view.label.created": "作成日時",
@@ -8734,8 +8831,13 @@ def build_entry_form(title, vault_path, action, values=None, message=""):
     v = values or {}
     f = (
         _field("name", "entry.field.service", "Service", v.get("name", ""), required=True) +
-        _field("user", "entry.field.username", "Username", v.get("user", "")) +
+        _field("user", "entry.field.username", "Username / Email", v.get("user", "")) +
         _field("password", "entry.field.password", "Password", v.get("password", "")) +
+        # type="url" only nudges the browser; the server still validates, since
+        # a form post is not obliged to come from this form.
+        _field("url", "entry.field.url", "URL", v.get("url", ""), ftype="url",
+               hint='<span data-i18n="entry.hint.url">Used to match this entry to a site. '
+                    'http:// or https:// only.</span>') +
         _field("notes", "entry.field.notes", "Notes", v.get("notes", ""), rows=4)
     )
     extra = f'<input type="hidden" name="id" value="{html.escape(v.get("id",""))}">' if v.get("id") else ""
@@ -8838,6 +8940,16 @@ def view_entry_page(parts):
     eid, name, user, pw = _esc(parts[0]), _esc(parts[1]), _esc(parts[2]), parts[3] if len(parts) > 3 else ""
     notes = parts[4] if len(parts) > 4 else ""
     created = _esc(parts[5] if len(parts) > 5 else "")
+    # Re-checked at render time rather than trusted from the vault. A row can
+    # reach this page from an editor session or a hand-edited file, neither of
+    # which went through the form validator, and this value becomes an href.
+    raw_url = parts[6] if len(parts) > 6 else ""
+    safe_url = raw_url if _URL_RE.match(raw_url.strip()) else ""
+    if safe_url:
+        url_html = (f'<a href="{_esc(safe_url)}" target="_blank" '
+                    f'rel="noopener noreferrer nofollow">{_esc(safe_url)}</a>')
+    else:
+        url_html = "&mdash;"
     content = f"""
 <div class="page-head">
   <div>
@@ -8850,11 +8962,14 @@ def view_entry_page(parts):
   </div>
 </div>
 <div class="card" style="max-width:680px"><div class="card-body">
-  <div class="field"><label data-i18n="view.label.username">Username</label>
+  <div class="field"><label data-i18n="view.label.username">Username / Email</label>
     <div class="secret"><span class="secret-val" id="username-value">{user or "&mdash;"}</span>
     <button class="icon-btn" type="button" data-act="copy-text" data-target="username-value" aria-label="Copy">{_icon("copy", "icon icon-sm")}</button></div>
   </div>
   {_secret_block(pw, "view.label.password", "Password", "pw")}
+  <div class="field"><label data-i18n="view.label.url">URL</label>
+    <div class="secret"><span class="secret-val">{url_html}</span></div>
+  </div>
   <div class="field"><label data-i18n="view.label.notes">Notes</label>
     <div class="secret"><span class="secret-val" style="white-space:pre-wrap">{_esc(notes) or "&mdash;"}</span></div>
   </div>
@@ -9605,9 +9720,9 @@ def _fsync_dir(path):
         os.close(fd)
 
 def _archive_vault_generation():
-    """Mirror the CLI's encrypted history so Web Mode edits are recoverable.
+    """Mirror the CLI's encrypted history so SPM Dashboard edits are recoverable.
 
-    history-list / history-restore used to see nothing at all from Web Mode,
+    history-list / history-restore used to see nothing at all from the SPM Dashboard,
     which left a single .bak generation as the only undo for the primary client.
     """
     try:
@@ -9717,7 +9832,8 @@ def _export_rows(plaintext: str):
                 "secret": parts[3] if len(parts) > 3 else "",
                 "notes": parts[4] if len(parts) > 4 else "",
                 "created": parts[5] if len(parts) > 5 else "",
-                "extra": ""
+                "extra": "",
+                "url": parts[6] if len(parts) > 6 else ""
             })
         elif tag == "NOTE":
             rows.append({
@@ -9728,7 +9844,8 @@ def _export_rows(plaintext: str):
                 "secret": base64.b64decode(parts[3]).decode("utf-8", errors="replace") if len(parts) > 3 else "",
                 "notes": "",
                 "created": parts[4] if len(parts) > 4 else "",
-                "extra": ""
+                "extra": "",
+                "url": ""
             })
         elif tag == "PASSPHRASE":
             rows.append({
@@ -9739,7 +9856,8 @@ def _export_rows(plaintext: str):
                 "secret": base64.b64decode(parts[3]).decode("utf-8", errors="replace") if len(parts) > 3 else "",
                 "notes": "",
                 "created": parts[4] if len(parts) > 4 else "",
-                "extra": ""
+                "extra": "",
+                "url": ""
             })
         elif tag == "BACKUP_CODE":
             rows.append({
@@ -9750,7 +9868,8 @@ def _export_rows(plaintext: str):
                 "secret": base64.b64decode(parts[3]).decode("utf-8", errors="replace") if len(parts) > 3 else "",
                 "notes": "",
                 "created": parts[4] if len(parts) > 4 else "",
-                "extra": ""
+                "extra": "",
+                "url": ""
             })
         elif tag == "AUTH":
             rows.append({
@@ -9761,14 +9880,15 @@ def _export_rows(plaintext: str):
                 "secret": parts[3] if len(parts) > 3 else "",
                 "notes": "",
                 "created": parts[5] if len(parts) > 5 else "",
-                "extra": f"period={parts[4] if len(parts)>4 else ''};algo={parts[6] if len(parts)>6 else 'sha1'}"
+                "extra": f"period={parts[4] if len(parts)>4 else ''};algo={parts[6] if len(parts)>6 else 'sha1'}",
+                "url": ""
             })
     return rows
 
 def export_content(fmt: str, plaintext: str):
     import csv, json, html as htmlmod, io
     rows = _export_rows(plaintext)
-    fieldnames = ["type","id","label","username","secret","notes","created","extra"]
+    fieldnames = ["type","id","label","username","secret","notes","created","extra","url"]
     fmt = fmt.lower()
     if fmt == "json":
         return json.dumps(rows, ensure_ascii=False, indent=2)
@@ -9923,7 +10043,7 @@ def _parse_import_rows(fmt: str, content: str):
         root=ET.fromstring(content)
         return [{child.tag: (child.text or "") for child in item} for item in root.findall("item")]
     if fmt == "sql":
-        rows=[]; fields=["type","id","label","username","secret","notes","created","extra"]
+        rows=[]; fields=["type","id","label","username","secret","notes","created","extra","url"]
         for values in re.findall(r"INSERT\s+INTO\s+spm_export\s*\([^)]*\)\s*VALUES\s*\((.*?)\)\s*;", content, re.I | re.S):
             parsed=next(csv.reader([values], delimiter=",", quotechar="'", doublequote=True, skipinitialspace=True))
             rows.append(dict(zip(fields, parsed)))
@@ -9950,6 +10070,7 @@ def _parse_import_rows(fmt: str, content: str):
                 "notes": row[5] if len(row)>5 else "",
                 "created": row[6] if len(row)>6 else "",
                 "extra": row[7] if len(row)>7 else "",
+                "url": row[8] if len(row)>8 else "",
             })
         return rows
     reader = csv.DictReader(io.StringIO(content), delimiter=delim)
@@ -9978,6 +10099,16 @@ def _apply_import(fmt: str, content: str, plaintext: str):
 
     stats = {"passwords": 0, "notes": 0, "passphrases": 0, "backups": 0, "authenticators": 0}
 
+    def _vurl(value):
+        # Same allowlist as sanitize_url in the CLI. An import is the least
+        # trusted way a value enters the vault, so a foreign CSV carrying
+        # "javascript:..." in its url column is dropped rather than stored --
+        # the field renders as a link and will feed the browser extension.
+        text = _vf(value).strip()
+        if not text:
+            return ""
+        return text if re.match(r"(?i)^https?://[^\s/]+", text) else ""
+
     def add_password(r):
         pid = str(next_id("PASS", lines))
         lines.append(tab.join([
@@ -9986,7 +10117,8 @@ def _apply_import(fmt: str, content: str, plaintext: str):
             _vf(r.get("username","")),
             _vf(r.get("secret","")),
             _vf(r.get("notes","")),
-            _vf(r.get("created",""))
+            _vf(r.get("created","")),
+            _vurl(r.get("url",""))
         ]))
         stats["passwords"] += 1
 
@@ -10086,6 +10218,7 @@ def _apply_import(fmt: str, content: str, plaintext: str):
                     "notes": parts[4] if len(parts)>4 else "",
                     "created": parts[5] if len(parts)>5 else "",
                     "extra": parts[6] if len(parts)>6 else "",
+                    "url": parts[7] if len(parts)>7 else "",
                 })
         return rows
 
@@ -10378,7 +10511,7 @@ def compute_security(entries, plaintext):
     copies of the same weighting drifted apart once already (the CLI penalised
     malformed authenticators, the web did not, so the same vault scored
     differently depending on where you looked). This is now the single
-    implementation for Web Mode, and the regression suite asserts parity with
+    implementation for the SPM Dashboard, and the regression suite asserts parity with
     the CLI.
 
     Secrets are read to compare and measure them; only IDs are ever returned.
@@ -10452,13 +10585,14 @@ def entry_tags(parts):
 
 
 def search_vault(plaintext, term):
-    """Search every record type by label, name, username and id.
+    """Search every record type by label, name, username, url and id.
 
     Secret fields are deliberately not searched. If a query could match a
     password, the result count would answer "is this string in the vault?" for
-    anyone who reached an unlocked session -- a confirmation oracle. The
-    searchable fields here are exactly the ones already exposed in the list
-    tables, so this page reveals nothing a list page does not.
+    anyone who reached an unlocked session -- a confirmation oracle. The url is
+    safe to index for the same reason the label is: it is not a secret, it is
+    already shown on the entry page, and matching it is how you find the login
+    for a site you are looking at.
     """
     needle = (term or "").strip().lower()
     if not needle:
@@ -10466,7 +10600,8 @@ def search_vault(plaintext, term):
     out = []
     _, entries = parse_entries(plaintext)
     for _, p in entries:
-        if needle in " ".join((p[0], p[1], p[2])).lower():
+        url = p[6] if len(p) > 6 else ""
+        if needle in " ".join((p[0], p[1], p[2], url)).lower():
             out.append(("nav.passwords", "Password", p[0], p[1], f"/view?id={urllib.parse.quote(p[0])}"))
     for kind_key, kind, parser, href in (
             ("nav.notes", "Note", parse_notes, "/notes-view?id="),
@@ -10583,7 +10718,7 @@ MAX_IMPORT_BYTES = 1024 * 1024
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
-        sys.stderr.write("[SPM Web] " + fmt % args + "\n")
+        sys.stderr.write("[SPM Dashboard] " + fmt % args + "\n")
 
     def end_headers(self):
         # Decrypted credentials and one-time codes must never enter browser or
@@ -11555,6 +11690,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "user": found[2],
                 "password": found[3],
                 "notes": found[4],
+                "url": found[6] if len(found) > 6 else "",
             }
             page = build_entry_form(
                 title=f"Edit Entry #{entry_id}",
@@ -11981,14 +12117,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             user = (data.get("user") or [""])[0].strip()
             password = (data.get("password") or [""])[0]
             notes = (data.get("notes") or [""])[0]
+            url_raw = (data.get("url") or [""])[0]
+            url = _vurl(url_raw)
 
-            if not name:
+            if not name or url is None:
                 page = build_entry_form(
                     title="Add Entry",
                     vault_path=VAULT_PATH,
                     action="/add",
-                    values={"name": name, "user": user, "password": password, "notes": notes},
-                    message="<div class='msg'>Name / service is required.</div>",
+                    values={"name": name, "user": user, "password": password,
+                            "notes": notes, "url": url_raw},
+                    message=("<div class='msg'>Name / service is required.</div>"
+                             if not name else
+                             "<div class='msg'>URL must start with http:// or https://.</div>"),
                 )
                 self._send_html(200, page)
                 return
@@ -12010,6 +12151,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _vf(password),
                 _vf(notes),
                 now,
+                url,
             ])
             lines.append(new_line)
             new_plain = "\n".join(lines) + "\n"
@@ -12031,6 +12173,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             user = (data.get("user") or [""])[0].strip()
             password = (data.get("password") or [""])[0]
             notes = (data.get("notes") or [""])[0]
+            url_raw = (data.get("url") or [""])[0]
+            url = _vurl(url_raw)
 
             plaintext = decrypt_vault(master)
             lines, entries = parse_entries(plaintext)
@@ -12048,19 +12192,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Entry not found")
                 return
 
-            if not name:
+            if not name or url is None:
                 values = {
                     "name": name,
                     "user": user,
                     "password": password,
                     "notes": notes,
+                    "url": url_raw,
                 }
                 page = build_entry_form(
                     title=f"Edit Entry #{entry_id}",
                     vault_path=VAULT_PATH,
                     action="/edit?id=" + urllib.parse.quote(entry_id),
                     values=values,
-                    message="<div class='msg'>Name / service is required.</div>",
+                    message=("<div class='msg'>Name / service is required.</div>"
+                             if not name else
+                             "<div class='msg'>URL must start with http:// or https://.</div>"),
                 )
                 self._send_html(200, page)
                 return
@@ -12072,6 +12219,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _vf(password),
                 _vf(notes),
                 old_created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                url,
             ])
             lines[idx_to_update] = new_line
             new_plain = "\n".join(lines) + "\n"
@@ -12786,12 +12934,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def run():
     with SPMServer((BIND_ADDR, PORT), Handler) as httpd:
-        print(f"[SPM Web] Serving on http://{BIND_ADDR}:{PORT}/")
-        print("[SPM Web] Press Ctrl+C to stop.")
+        print(f"[SPM Dashboard] Serving on http://{BIND_ADDR}:{PORT}/")
+        print("[SPM Dashboard] Press Ctrl+C to stop.")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
-            print("\n[SPM Web] Shutting down...")
+            print("\n[SPM Dashboard] Shutting down...")
 
 if __name__ == "__main__":
     run()
@@ -12801,7 +12949,7 @@ PY
 }
 
 get_external_ip() {
-	# Keep web mode offline: never call a public IP-discovery service merely to
+	# Keep the SPM Dashboard offline: never call a public IP-discovery service merely to
 	# print the access URL. Prefer a LAN address already known by the device.
 	local addr=""
 	if command -v hostname >/dev/null 2>&1; then
@@ -13355,7 +13503,7 @@ interactive_menu() {
 			printf " 17) Kode backup\n"
 			printf " 18) Generator password\n"
 			printf " 19) Doctor / Health check\n"
-			printf " 20) Mode web\n"
+			printf " 20) SPM Dashboard\n"
 			printf " 21) Restore vault dari bundle portable/save\n"
 			printf " 22) Pengaturan update otomatis [%s]\n" "$(autoupdate_mode)"
 			printf " 23) Riwayat vault (snapshot)\n"
@@ -13389,7 +13537,7 @@ interactive_menu() {
 			printf " 17) Backup codes\n"
 			printf " 18) Password generator\n"
 			printf " 19) Doctor / Health check\n"
-			printf " 20) Web mode\n"
+			printf " 20) SPM Dashboard\n"
 			printf " 21) Restore vault from bundle\n"
 			printf " 22) Auto-update settings [%s]\n" "$(autoupdate_mode)"
 			printf " 23) Vault history (snapshots)\n"
@@ -13642,7 +13790,10 @@ main() {
 		backup-codes-list) cmd_backup_codes_list "$@" ;;
 		backup-codes-view) cmd_backup_codes_view "$@" ;;
 		backup-codes-delete) cmd_backup_codes_delete "$@" ;;
-		web|web-mode)     start_web_mode "$@" ;;  # ← CLI access for Web Mode
+		# `web` and `web-mode` are kept forever: they are in users' shell
+		# history, scripts and process managers. `dashboard` is the name the
+		# interface now goes by, not a replacement verb.
+		web|web-mode|dashboard) start_web_mode "$@" ;;
 		help|-h|--help)   cmd_help ;;
 		*)
 			printf "Unknown command: %s\n\n" "$cmd" >&2

@@ -10,7 +10,7 @@ WEB_PORT=$((18000 + ($$ % 10000)))
 harness_cleanup() {
 	local status="${1:-0}"
 	if [ "$status" -ne 0 ] && [ -f "$TEST_ROOT/web.log" ]; then
-		printf '\n--- Web Mode regression log ---\n' >&2
+		printf '\n--- SPM Dashboard regression log ---\n' >&2
 		sed -n '1,240p' "$TEST_ROOT/web.log" >&2
 	fi
 	if [ -n "$WEB_PID" ]; then
@@ -46,7 +46,7 @@ sed '$d' "$ROOT_DIR/spm.sh" > "$SPM_LIBRARY"
 # shellcheck source=/dev/null
 source "$SPM_LIBRARY"
 # The application library installs its own cleanup traps. Restore the harness
-# trap so failures retain the generated Web Mode server log before disposal.
+# trap so failures retain the generated SPM Dashboard server log before disposal.
 trap 'status=$?; harness_cleanup "$status"; exit "$status"' EXIT INT TERM
 export MASTER_PW="$AUDIT_PASSWORD"
 export SPM_LANG="en"
@@ -189,7 +189,7 @@ if grep -qE '(sudo )?cp "\$new_spm" "\$target"' "$ROOT_DIR/spm.sh"; then
 fi
 grep -q 'mv -f "$staged" "$target"' "$ROOT_DIR/spm.sh"
 
-# Web Mode domain/TLS binding. These exercise the generators only -- nothing
+# SPM Dashboard domain/TLS binding. These exercise the generators only -- nothing
 # here touches /etc/nginx, runs certbot, or reaches the network.
 domain_is_valid vault.example.com
 domain_is_valid example.co.uk
@@ -412,7 +412,7 @@ grep -q '<use href="#i-key"' "$TEST_ROOT/dashboard.html"
 grep -q '<use href="#i-shield"' "$TEST_ROOT/dashboard.html"
 grep -q '<use href="#i-logout"' "$TEST_ROOT/dashboard.html"
 if grep -Eq '🔑|🗒|📝|⏱|🧯|✨|🗑|👁|📋' "$TEST_ROOT/dashboard.html"; then
-	printf 'legacy emoji icon found in generated Web Mode dashboard\n' >&2
+	printf 'legacy emoji icon found in generated SPM Dashboard dashboard\n' >&2
 	exit 1
 fi
 # A blank secret on edit means preserve the existing passphrase. The prior bug
@@ -435,6 +435,113 @@ curl -fsS -D "$TEST_ROOT/import.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
 	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" -F 'fmt=csv' \
 	-F "file=@$TEST_ROOT/import.csv;type=text/csv" "http://127.0.0.1:$WEB_PORT/import"
 grep -qi '^Location: /?msg=import-ok' "$TEST_ROOT/import.headers"
+
+# --- 2.12.0 URL field --------------------------------------------------------
+
+# Password rows gained a seventh field. Everything below is about the two ways
+# that can go wrong: the value not surviving a round trip, and the value being
+# trusted when it reaches an href or the browser extension.
+
+vault_plain() {
+	printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
+		--passphrase-fd 0 --decrypt "$PASSWORD_VAULT"
+}
+
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/add.html" \
+	"http://127.0.0.1:$WEB_PORT/add"
+grep -q 'name="url"' "$TEST_ROOT/add.html" \
+	|| { printf 'the add form has no url input\n' >&2; exit 1; }
+add_csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' "$TEST_ROOT/add.html" | head -n1)"
+
+curl -fsS -D "$TEST_ROOT/url-add.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
+	-X POST --data-urlencode "csrf=$add_csrf" --data-urlencode 'name=Bound Site' \
+	--data-urlencode 'user=avery@example.invalid' --data-urlencode 'password=UrlBound42!x' \
+	--data-urlencode 'notes=synthetic' --data-urlencode 'url=https://bound.example.invalid/login' \
+	"http://127.0.0.1:$WEB_PORT/add"
+grep -q '302 Found' "$TEST_ROOT/url-add.headers"
+vault_plain > "$TEST_ROOT/url-after"
+bound_id="$(awk -F '\t' '$2=="Bound Site"{print $1}' "$TEST_ROOT/url-after" | head -n1)"
+[ -n "$bound_id" ] || { printf 'the url entry was not stored\n' >&2; exit 1; }
+[ "$(awk -F '\t' -v id="$bound_id" '$1==id{print $7}' "$TEST_ROOT/url-after")" \
+	= 'https://bound.example.invalid/login' ] \
+	|| { printf 'the url did not reach field 7\n' >&2; exit 1; }
+
+# A javascript: url would become an href on the view page and a match target
+# for the extension. The form must refuse it rather than store it.
+before_rows="$(awk -F '\t' '$1 ~ /^[0-9]+$/' "$TEST_ROOT/url-after" | wc -l)"
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/url-bad.html" \
+	-X POST --data-urlencode "csrf=$add_csrf" --data-urlencode 'name=Hostile' \
+	--data-urlencode 'user=x' --data-urlencode 'password=y' \
+	--data-urlencode 'url=javascript:alert(1)' \
+	"http://127.0.0.1:$WEB_PORT/add"
+grep -qi 'http:// or https://' "$TEST_ROOT/url-bad.html" \
+	|| { printf 'a javascript: url was not rejected with a reason\n' >&2; exit 1; }
+vault_plain > "$TEST_ROOT/url-bad-after"
+after_rows="$(awk -F '\t' '$1 ~ /^[0-9]+$/' "$TEST_ROOT/url-bad-after" | wc -l)"
+[ "$before_rows" = "$after_rows" ] \
+	|| { printf 'a rejected url still wrote a row\n' >&2; exit 1; }
+if grep -q 'javascript:' "$TEST_ROOT/url-bad-after"; then
+	printf 'a javascript: scheme reached the vault\n' >&2; exit 1
+fi
+
+# The view page renders it as a link, and never as a javascript: href even if
+# a hand-edited vault smuggles one past the form.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/url-view.html" \
+	"http://127.0.0.1:$WEB_PORT/view?id=$bound_id"
+grep -q 'href="https://bound.example.invalid/login"' "$TEST_ROOT/url-view.html" \
+	|| { printf 'the view page did not render the url as a link\n' >&2; exit 1; }
+grep -q 'rel="noopener noreferrer nofollow"' "$TEST_ROOT/url-view.html" \
+	|| { printf 'the url link is missing its rel guard\n' >&2; exit 1; }
+
+# Search finds an entry by its url -- the whole point of storing one.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/url-search.html" \
+	"http://127.0.0.1:$WEB_PORT/search?q=bound.example.invalid"
+grep -q 'Bound Site' "$TEST_ROOT/url-search.html" \
+	|| { printf 'search does not match on the url field\n' >&2; exit 1; }
+
+# `get` splits a row with a fixed read list, where the last named variable
+# absorbs every remaining field. On a SEVEN-field row a missing `url` in that
+# list silently appends the URL to the timestamp, so the assertion has to run
+# against a row that actually has one -- a six-field row cannot show the bug.
+bound_created="$(awk -F '\t' -v id="$bound_id" '$1==id{print $6}' "$TEST_ROOT/url-after")"
+bound_url="$(awk -F '\t' -v id="$bound_id" '$1==id{print $7}' "$TEST_ROOT/url-after")"
+[ -n "$bound_created" ] && [ -n "$bound_url" ]
+MASTER_PW="$AUDIT_PASSWORD" cmd_get "$bound_id" > "$TEST_ROOT/url-get.txt" 2>/dev/null || true
+grep -qx "Created: *$bound_created" "$TEST_ROOT/url-get.txt" \
+	|| { printf 'the url field bled into the Created value in get\n' >&2
+	     sed -n '1,12p' "$TEST_ROOT/url-get.txt" >&2; exit 1; }
+grep -qx "URL: *$bound_url" "$TEST_ROOT/url-get.txt" \
+	|| { printf 'get did not print the stored URL\n' >&2
+	     sed -n '1,12p' "$TEST_ROOT/url-get.txt" >&2; exit 1; }
+
+# A vault written before 2.12.0 has six fields and must still read cleanly.
+legacy_created="$(awk -F '\t' '$1=="1"{print $6}' "$TEST_ROOT/url-after")"
+[ -n "$legacy_created" ]
+MASTER_PW="$AUDIT_PASSWORD" cmd_get 1 > "$TEST_ROOT/legacy-get.txt" 2>/dev/null || true
+grep -qx "Created: *$legacy_created" "$TEST_ROOT/legacy-get.txt" \
+	|| { printf 'a six-field row corrupted the Created value in get\n' >&2
+	     sed -n '1,12p' "$TEST_ROOT/legacy-get.txt" >&2; exit 1; }
+grep -qx "URL: *" "$TEST_ROOT/legacy-get.txt" \
+	|| { printf 'get does not print an empty URL line for a legacy row\n' >&2; exit 1; }
+
+# The browser bridge binds on the url field, and still honours a URL that only
+# exists in the notes -- that is how every vault written before 2.12.0 works.
+printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_get "$bound_id" bound.example.invalid \
+	> "$TEST_ROOT/bridge-url.json" || true
+grep -q '"ok": *true' "$TEST_ROOT/bridge-url.json" \
+	|| { printf 'the bridge did not bind on the url field\n' >&2
+	     cat "$TEST_ROOT/bridge-url.json" >&2; exit 1; }
+if printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_get "$bound_id" other.example.invalid \
+	> "$TEST_ROOT/bridge-wrong.json" 2>/dev/null; then
+	printf 'the bridge bound a record to a hostname it does not carry\n' >&2; exit 1
+fi
+printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_get 1 example.invalid \
+	> "$TEST_ROOT/bridge-notes.json" || true
+grep -q '"ok": *true' "$TEST_ROOT/bridge-notes.json" \
+	|| { printf 'a pre-2.12.0 notes-embedded URL stopped binding\n' >&2
+	     cat "$TEST_ROOT/bridge-notes.json" >&2; exit 1; }
+
+printf 'Web regression: url field, scheme allowlist and bridge binding\n'
 
 # --- 2.10.12 integrity regressions -------------------------------------------
 
@@ -486,10 +593,10 @@ if ! grep -q '<SCRIPTOK' "$TEST_ROOT/csp.stripped"; then
 	exit 1
 fi
 
-# Web Mode writes must land in the encrypted history the CLI exposes, not only
+# SPM Dashboard writes must land in the encrypted history the CLI exposes, not only
 # in the single .bak generation.
 find "$XDG_DATA_HOME/spm/history" -name '*.gpg' 2>/dev/null | grep -q . \
-	|| { printf 'web mode write produced no history snapshot\n' >&2; exit 1; }
+	|| { printf 'SPM Dashboard write produced no history snapshot\n' >&2; exit 1; }
 
 # Import must refuse a non-UTF-8 source instead of dropping the bytes it cannot
 # decode, and must leave the vault untouched when it refuses.
@@ -561,7 +668,7 @@ awk -F '\t' '$1=="SUMMARY" && $2==0 && $3==0 { found=1 } END { exit found?0:1 }'
 
 # ---- 2.10.14: security page, history, global search, tags, rotation --------
 
-# The CLI dashboard and Web Mode must score the same vault identically. They
+# The CLI dashboard and SPM Dashboard must score the same vault identically. They
 # were two independent copies of the same weighting and had already drifted:
 # the CLI penalised malformed authenticators and the web did not.
 # Seed one malformed authenticator so the comparison actually exercises the

@@ -21,7 +21,7 @@ SPM is designed around the following core principles:
 - **Platform-owned passkeys** — SPM stores passkey metadata, never private passkey key material.
 
 Core vault operations are offline. The optional updater contacts GitHub Releases,
-and web mode serves the local vault UI on the address selected by the user. The
+and SPM Dashboard serves the local vault UI on the address selected by the user. The
 startup release check is off unless the user enables it, and downloaded releases
 are SHA-256 verified and syntax-checked before they replace the installed
 script, which is swapped in by rename so a running instance is never rewritten
@@ -143,12 +143,12 @@ Users are fully responsible for:
 - Managing encryption keys
 - Protecting their device from malware
 - Securing their filesystem permissions
-- Anything reachable from the internet, including a Web Mode instance published
+- Anything reachable from the internet, including an SPM Dashboard instance published
   on a domain
 
 Because SPM does not collect data or hold keys, **the developer cannot restore lost vaults**.
 
-Publishing Web Mode on a domain widens the trust boundary considerably. The
+Publishing SPM Dashboard on a domain widens the trust boundary considerably. The
 vault stays bound to `127.0.0.1` behind nginx, so nginx and TLS are the only
 things standing between the internet and a master-password prompt. Prefer a
 DNS-only record: a CDN or reverse proxy that terminates TLS at its own edge can

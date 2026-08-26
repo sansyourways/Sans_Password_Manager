@@ -34,7 +34,7 @@ The following user-initiated activity can involve third-party infrastructure:
   by GitHub;
 - support or security emails are processed by the sender's and recipient's mail
   providers;
-- non-loopback Web Mode and externally synchronized directories use networks or
+- non-loopback SPM Dashboard and externally synchronized directories use networks or
   providers configured by the operator.
 
 Users and organizations must assess any international-transfer requirements
