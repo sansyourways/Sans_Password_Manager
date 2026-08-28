@@ -38,6 +38,27 @@ jobs:
         run: |
           bash -n spm.sh install.sh tests/regression.sh tests/dco-check.sh
           shellcheck -x -S warning spm.sh install.sh tests/regression.sh tests/dco-check.sh
+          # The trusted core is Python living inside the shell script; compile
+          # it on its own so a syntax error there cannot reach a release
+          # disguised as a valid shell heredoc.
+          python3 -m compileall -q tests/core-test.py
+          python3 - <<'EXTRACT'
+          import py_compile, tempfile, os
+          body, capturing = [], False
+          for line in open("spm.sh", encoding="utf-8"):
+              if line.rstrip("\n").endswith("<<'SPMCORE'"):
+                  capturing = True
+                  continue
+              if capturing:
+                  if line.rstrip("\n") == "SPMCORE":
+                      break
+                  body.append(line)
+          assert body, "no SPMCORE block found in spm.sh"
+          path = os.path.join(tempfile.mkdtemp(), "spm_core.py")
+          open(path, "w", encoding="utf-8").writelines(body)
+          py_compile.compile(path, doraise=True)
+          print("trusted core compiles (%d lines)" % len(body))
+          EXTRACT
           # Cheapest gate there is, and it was not being enforced.
           git diff --check "$(git rev-list --max-parents=0 HEAD | tail -n1)"..HEAD
 

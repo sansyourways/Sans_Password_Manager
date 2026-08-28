@@ -758,73 +758,677 @@ re_verify_master_password() {
 
 # ----- GPG encrypt / decrypt wrapper -----------------------------------------
 
-# A format-3 vault is a small text container: a header line, the vault key
-# sealed under the master password, then the vault ciphertext sealed under that
-# key. It stays a single self-contained file, so every path that copies, backs
-# up, syncs or bundles "the vault" keeps working untouched.
-is_vault_container() {
-	head -n 1 "$1" 2>/dev/null | grep -qx 'SPM-VAULT-3'
-}
-
-# Open only the key envelope. Separated out because a write to an existing
-# format-3 vault needs the key without paying to decrypt the whole vault.
-unwrap_vault_key_from() {
-	local src="$1" master="$2" envelope key
-	is_vault_container "$src" || return 1
-	envelope="$(make_tmp)"
-	awk 'NR==2{sub(/^KEY /,""); print; exit}' "$src" | base64 -d >"$envelope" 2>/dev/null || true
-	if [ ! -s "$envelope" ]; then
-		secure_wipe "$envelope"
-		return 1
-	fi
-	if ! key="$(printf '%s' "$master" | gpg --batch --quiet \
-		--pinentry-mode loopback --passphrase-fd 0 \
-		--decrypt "$envelope" 2>/dev/null)" || [ -z "$key" ]; then
-		secure_wipe "$envelope"
-		return 1
-	fi
-	secure_wipe "$envelope"
-	printf '%s' "$key"
-}
-
-# Decrypt any SPM vault file under "$3": the live vault, a .bak, a history
-# snapshot, or a synced copy. Returns non-zero instead of dying, because
-# several callers are only proving that a file opens and own their own message.
+# ----- The trusted core ------------------------------------------------------
+# Everything that decides how a vault is protected -- the container format, key
+# wrapping, version stamping, vault mutation, history archiving and the recovery
+# file -- lives in one reviewable Python module and nowhere else. This half of
+# SPM and the SPM Dashboard both reach it rather than each carrying a copy: the
+# two used to, and a regression test existed purely to prove the copies still
+# agreed, which is a test a shared implementation does not need.
 #
-# $4 optionally names a variable to receive the unwrapped vault key. Only a
-# caller about to rewrite that same file should ask for it -- a key unwrapped
-# from a snapshot must never become the key the live vault is written under.
-decrypt_vault_container() {
-	local src="$1" out_file="$2" master="$3" key_var="${4:-}"
-	local cipher key=""
+# Secrets reach it on stdin, never in argv, because argv is world-readable
+# through `ps` and /proc/<pid>/cmdline.
 
-	if is_vault_container "$src"; then
-		key="$(unwrap_vault_key_from "$src" "$master")" || return 1
-		cipher="$(make_tmp)"
-		sed -n '/^DATA$/,$p' "$src" | sed '1d' | base64 -d >"$cipher" 2>/dev/null || true
-		if [ ! -s "$cipher" ]; then
-			secure_wipe "$cipher"
-			return 1
-		fi
-		if ! printf '%s' "$key" | gpg --batch --quiet \
-			--pinentry-mode loopback --passphrase-fd 0 \
-			--decrypt "$cipher" >"$out_file" 2>/dev/null; then
-			secure_wipe "$cipher"
-			return 1
-		fi
-		secure_wipe "$cipher"
-	else
-		# Formats 1 and 2 encrypted the data under the master password directly.
-		printf '%s' "$master" | gpg --batch --quiet \
-			--decrypt --cipher-algo AES256 \
-			--pinentry-mode loopback --passphrase-fd 0 \
-			"$src" >"$out_file" 2>/dev/null || return 1
-	fi
+SPM_CORE_PATH=""
 
-	if [ -n "$key_var" ]; then
-		printf -v "$key_var" '%s' "$key"
-	fi
-	return 0
+ensure_core_script() {
+	require_cmd python3
+	local base_dir
+	base_dir="${1:-${SPM_CORE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/spm}}"
+	mkdir -p "$base_dir" || die "Cannot create the SPM data directory."
+	# A stable name, because the SPM Dashboard imports this module by path.
+	SPM_CORE_PATH="${base_dir}/spm_core.py"
+	# Written unconditionally and installed atomically. The write is a
+	# millisecond against a vault operation's second, and always writing means
+	# an upgraded spm can never be left running last release's core.
+	local staged
+	staged="$(mktemp "${base_dir}/.spm_core.XXXXXX")" || die "Cannot stage the SPM core."
+	cat >"$staged" <<'SPMCORE'
+"""SPM trusted core: vault format, key handling and vault mutation.
+
+Everything that decides how a vault is protected lives here and nowhere else.
+The CLI reaches it through the command interface at the bottom of this file;
+the SPM Dashboard imports it directly. Before this module both surfaces
+carried their own copy of the container format, the key wrapping, the version
+stamping and the history archiving, and a regression test existed purely to
+prove the two copies still agreed -- which is a test that a shared
+implementation does not need.
+
+Secrets never appear in argv. The command interface reads them from stdin,
+and gpg receives them on a dedicated file descriptor, because argv is
+world-readable through `ps` and /proc/<pid>/cmdline.
+"""
+
+import base64
+import hashlib
+import os
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+
+# ----- format and policy -----------------------------------------------------
+
+# The vault records the format it was written in, so a later change can migrate
+# instead of guessing. A vault with no META_VAULT_VERSION row predates this and
+# is format 1; every write stamps the current version.
+VAULT_FORMAT_VERSION = 3
+
+CONTAINER_MAGIC = b"SPM-VAULT-3"
+
+# Key derivation is pinned rather than inherited: a user's gpg.conf can change
+# all of it underneath the application, and a security parameter that is
+# implicit can be neither reviewed nor migrated. GnuPG 2.2 already defaults to
+# s2k mode 3 at the maximum count, so the measurable change is the digest,
+# whose default is SHA1.
+S2K_ARGS = ["--s2k-mode", "3", "--s2k-digest-algo", "SHA512",
+            "--s2k-count", "65011712"]
+
+HISTORY_RETENTION_DEFAULT = 20
+
+
+class VaultError(Exception):
+    """Anything that should reach a user as a refusal rather than a traceback."""
+
+
+# ----- gpg backend -----------------------------------------------------------
+
+def _passphrase_fd(secret):
+    """A read fd holding `secret`, for gpg's --passphrase-fd.
+
+    A pipe rather than argv: argv is world-readable through `ps` and
+    /proc/<pid>/cmdline, so every local user could read the master password.
+    """
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, secret.encode("utf-8"))
+    finally:
+        os.close(write_fd)
+    return read_fd
+
+
+def gpg_encrypt(secret, payload, timeout=60):
+    fd = _passphrase_fd(secret)
+    try:
+        return subprocess.check_output(
+            ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
+             "--passphrase-fd", str(fd)] + S2K_ARGS +
+            ["--cipher-algo", "AES256", "-c"],
+            input=payload, stderr=subprocess.DEVNULL,
+            timeout=timeout, pass_fds=(fd,))
+    finally:
+        os.close(fd)
+
+
+def gpg_decrypt(secret, payload, timeout=60):
+    fd = _passphrase_fd(secret)
+    try:
+        return subprocess.check_output(
+            ["gpg", "--batch", "--quiet", "--pinentry-mode", "loopback",
+             "--passphrase-fd", str(fd), "-d"],
+            input=payload, stderr=subprocess.DEVNULL,
+            timeout=timeout, pass_fds=(fd,))
+    finally:
+        os.close(fd)
+
+
+# ----- container -------------------------------------------------------------
+# A format-3 vault is one file: a header line, the vault key sealed under the
+# master password, then the vault ciphertext sealed under that key. Keeping it
+# to a single self-contained file is why every path that copies, backs up,
+# syncs or bundles "the vault" needed no change when the format did.
+
+def is_container(raw):
+    return raw.startswith(CONTAINER_MAGIC + b"\n")
+
+
+def build_container(envelope, cipher):
+    return (CONTAINER_MAGIC + b"\nKEY " + base64.b64encode(envelope) +
+            b"\nDATA\n" + base64.b64encode(cipher) + b"\n")
+
+
+def parse_container(raw):
+    """(envelope, cipher), or None when `raw` predates the container format."""
+    if not is_container(raw):
+        return None
+    try:
+        key_line, data = raw.split(b"\nDATA\n", 1)
+        envelope = base64.b64decode(key_line.split(b"\nKEY ", 1)[1])
+        cipher = base64.b64decode(data)
+    except Exception as exc:
+        raise VaultError("vault key container is corrupt") from exc
+    if not envelope or not cipher:
+        raise VaultError("vault key container is incomplete")
+    return envelope, cipher
+
+
+def new_vault_key():
+    return base64.b64encode(os.urandom(32)).decode("ascii")
+
+
+# ----- version stamping ------------------------------------------------------
+
+def stamp_version(plaintext):
+    """Exactly one current META_VAULT_VERSION row, first, on every write."""
+    lines = plaintext.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    rows = [l for l in lines if l.split("\t", 1)[0] != "META_VAULT_VERSION"]
+    head = "META_VAULT_VERSION\t%d\t-\t-\t-\t-" % VAULT_FORMAT_VERSION
+    return "\n".join([head] + rows) + "\n"
+
+
+def format_version(plaintext):
+    for line in plaintext.splitlines():
+        parts = line.split("\t")
+        if parts[0] == "META_VAULT_VERSION" and len(parts) > 1:
+            try:
+                return int(parts[1])
+            except ValueError:
+                return 1
+    return 1
+
+
+# ----- durability ------------------------------------------------------------
+
+# The `read` command returns the vault key on stdout, so an output path that
+# resolves to stdout would interleave plaintext with it and silently lose both.
+# Refusing is better than a corrupted read that looks like it worked.
+_STDOUT_ALIASES = ("-", "/dev/stdout", "/dev/fd/1", "/proc/self/fd/1")
+
+
+def write_plaintext(path, text):
+    """Write decrypted vault material to a file, restricted to its owner."""
+    if path in _STDOUT_ALIASES:
+        raise VaultError("refusing to write vault plaintext to stdout; "
+                         "give a file path")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    try:
+        if stat.S_ISREG(os.stat(path).st_mode):
+            os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def _fsync_path(path):
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _fsync_dir(path):
+    # A directory fsync is what makes a rename survive a crash. Not every
+    # filesystem permits it, so a refusal must not fail the write.
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+# ----- history ---------------------------------------------------------------
+# The CLI and the dashboard must agree on this hash exactly, or the two would
+# write snapshots into different directories and each would see only its own.
+
+def vault_scope_id(vault_path):
+    return hashlib.sha256(
+        os.path.abspath(vault_path).encode("utf-8")).hexdigest()[:16]
+
+
+def data_dir():
+    explicit = os.environ.get("SPM_DATA_DIR")
+    if explicit:
+        return explicit
+    base = os.environ.get("XDG_DATA_HOME") or os.path.join(
+        os.path.expanduser("~"), ".local", "share")
+    return os.path.join(base, "spm")
+
+
+def history_dir(vault_path):
+    return os.path.join(data_dir(), "history", vault_scope_id(vault_path))
+
+
+def _retention():
+    try:
+        keep = int(os.environ.get("SPM_HISTORY_RETENTION", ""))
+    except ValueError:
+        return HISTORY_RETENTION_DEFAULT
+    return keep if keep > 0 else HISTORY_RETENTION_DEFAULT
+
+
+def archive_generation(vault_path):
+    """Snapshot the current ciphertext before it is replaced.
+
+    Failure here must never fail the write it protects: losing an undo point
+    is bad, losing the edit is worse.
+    """
+    if not os.path.exists(vault_path):
+        return
+    try:
+        target = history_dir(vault_path)
+        os.makedirs(target, exist_ok=True)
+        os.chmod(target, 0o700)
+        with open(vault_path, "rb") as handle:
+            digest = hashlib.sha256(handle.read()).hexdigest()[:12]
+        stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+        snapshot = os.path.join(
+            target, "%s.%d.%s.gpg" % (stamp, os.getpid(), digest))
+        shutil.copy2(vault_path, snapshot)
+        os.chmod(snapshot, 0o600)
+        _prune(target, ".gpg", _retention())
+    except Exception:
+        return
+
+
+def _prune(directory, suffix, keep):
+    try:
+        entries = [os.path.join(directory, n) for n in os.listdir(directory)
+                   if n.endswith(suffix)]
+        entries = [p for p in entries if os.path.isfile(p)]
+        entries.sort(key=lambda p: os.stat(p).st_mtime, reverse=True)
+        for stale in entries[keep:]:
+            os.remove(stale)
+    except Exception:
+        return
+
+
+# ----- recovery --------------------------------------------------------------
+
+def recovery_path(vault_path):
+    return vault_path + ".recovery"
+
+
+def recovery_pubkey_pem(plaintext):
+    """The vault's own recovery public key, or an exception saying why not."""
+    for line in plaintext.splitlines():
+        parts = line.split("\t")
+        if parts[0] == "META_RECOVERY_PUBKEY" and len(parts) > 1 and parts[1].strip():
+            try:
+                return base64.b64decode(parts[1].strip())
+            except Exception:
+                raise VaultError("recovery public key is not valid base64")
+    raise VaultError("no META_RECOVERY_PUBKEY row in vault")
+
+
+def stage_recovery(vault_path, plaintext, vault_key):
+    """Seal `vault_key` under the vault's recovery pubkey; return a staged path.
+
+    Staging is the safety property. Decoding the stored key only proves it is
+    base64; the vault must not be touched until openssl has actually accepted
+    it and produced the ciphertext. The caller installs the result once the
+    vault it describes is in place.
+
+    Deliberately the same `openssl rsautl -encrypt -pubin` the rest of the
+    project uses. It is deprecated in OpenSSL 3, but `spm doctor` and
+    `spm forgot` read this file back with `rsautl -decrypt`; switching only the
+    writer would be a padding decision made in one place out of three.
+    """
+    pub_pem = recovery_pubkey_pem(plaintext)
+    target = recovery_path(vault_path)
+    rec_dir = os.path.dirname(os.path.abspath(target)) or "."
+    pub_fd, pub_file = tempfile.mkstemp(prefix="spm.recpub.")
+    staged = ""
+    try:
+        os.write(pub_fd, pub_pem)
+        os.close(pub_fd)
+        pub_fd = -1
+        out_fd, staged = tempfile.mkstemp(
+            prefix="." + os.path.basename(target) + ".stage.", dir=rec_dir)
+        os.close(out_fd)
+        os.chmod(staged, 0o600)
+        proc = subprocess.Popen(
+            ["openssl", "rsautl", "-encrypt", "-pubin",
+             "-inkey", pub_file, "-out", staged],
+            stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        try:
+            proc.communicate(input=vault_key.encode("utf-8"), timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raise VaultError("recovery encryption timed out")
+        if proc.returncode != 0 or not os.path.getsize(staged):
+            raise VaultError("the recovery public key was not usable")
+        _fsync_path(staged)
+        result, staged = staged, ""
+        return result
+    finally:
+        if pub_fd != -1:
+            os.close(pub_fd)
+        if os.path.exists(pub_file):
+            os.remove(pub_file)
+        if staged and os.path.exists(staged):
+            os.remove(staged)
+
+
+def install_recovery(vault_path, staged):
+    target = recovery_path(vault_path)
+    os.replace(staged, target)
+    os.chmod(target, 0o600)
+    _fsync_dir(os.path.dirname(os.path.abspath(target)) or ".")
+
+
+# ----- reading ---------------------------------------------------------------
+
+def unwrap_key(vault_path, master):
+    """The vault key alone, or None when the vault predates the container."""
+    with open(vault_path, "rb") as handle:
+        parts = parse_container(handle.read())
+    if parts is None:
+        return None
+    key = gpg_decrypt(master, parts[0]).decode("utf-8")
+    if not key:
+        raise VaultError("vault key envelope decrypted to nothing")
+    return key
+
+
+def read_vault(vault_path, master):
+    """(plaintext, vault_key) for any vault file, whatever format it is in.
+
+    Not only the live vault: .bak files, history snapshots and synced copies
+    are the same container, and everything that proves one opens before
+    overwriting the live vault has to come through here.
+
+    vault_key is None for formats 1 and 2, which were sealed under the master
+    password directly.
+    """
+    with open(vault_path, "rb") as handle:
+        raw = handle.read()
+    parts = parse_container(raw)
+    if parts is None:
+        return gpg_decrypt(master, raw).decode("utf-8", errors="ignore"), None
+    key = gpg_decrypt(master, parts[0]).decode("utf-8")
+    if not key:
+        raise VaultError("vault key envelope decrypted to nothing")
+    return gpg_decrypt(key, parts[1]).decode("utf-8", errors="ignore"), key
+
+
+# ----- writing ---------------------------------------------------------------
+
+def write_vault(vault_path, master, plaintext, vault_key=None):
+    """Install `plaintext` as a format-3 vault. Returns the vault key used.
+
+    A write reuses the key the vault already has. Minting a fresh one whenever
+    the caller did not supply it would strand every .bak, history snapshot and
+    synced copy that the current recovery file can still open, and the whole
+    point of a separate vault key is that it survives password changes.
+
+    Migration from formats 1 and 2 is ordered so that no instant is
+    unrecoverable. The new recovery file is staged first, before anything is
+    encrypted, so a vault whose recovery pubkey is unusable refuses with
+    nothing changed. The container is then installed BEFORE the recovery file
+    is swapped, with the key envelope sealed under the master password that
+    .recovery still names -- which makes the window between the two harmless,
+    because the recovered secret still opens the vault as a password. The
+    reverse order has no such route.
+    """
+    vault_dir = os.path.dirname(os.path.abspath(vault_path)) or "."
+    vault_name = os.path.basename(vault_path)
+    plaintext = stamp_version(plaintext)
+
+    migrating = False
+    if vault_key is None and os.path.exists(vault_path):
+        vault_key = unwrap_key(vault_path, master)
+    if vault_key is None:
+        vault_key = new_vault_key()
+        migrating = True
+
+    staged_recovery = stage_recovery(vault_path, plaintext, vault_key) if migrating else ""
+
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix="." + vault_name + ".stage.", dir=vault_dir)
+    os.close(tmp_fd)
+    try:
+        os.chmod(tmp_path, 0o600)
+        envelope = gpg_encrypt(master, vault_key.encode("utf-8"))
+        cipher = gpg_encrypt(vault_key, plaintext.encode("utf-8"))
+        with open(tmp_path, "wb") as handle:
+            handle.write(build_container(envelope, cipher))
+
+        if os.path.exists(vault_path):
+            archive_generation(vault_path)
+            shutil.copy2(vault_path, vault_path + ".bak")
+            os.chmod(vault_path + ".bak", 0o600)
+
+        # The rename is atomic but not durable on its own: flush the ciphertext
+        # first so a crash cannot leave the new name over unwritten blocks.
+        _fsync_path(tmp_path)
+        os.replace(tmp_path, vault_path)
+        tmp_path = ""
+        os.chmod(vault_path, 0o600)
+        _fsync_dir(vault_dir)
+
+        if staged_recovery:
+            # Second, deliberately. A failure here leaves .recovery naming the
+            # master password, which still unwraps this container, so it is
+            # reported rather than undoing the user's save.
+            try:
+                install_recovery(vault_path, staged_recovery)
+                staged_recovery = ""
+            except Exception as exc:
+                sys.stderr.write(
+                    "warning: the vault was migrated but its recovery file "
+                    "still holds the master password (%s)\n" % exc)
+        return vault_key
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        if staged_recovery and os.path.exists(staged_recovery):
+            os.remove(staged_recovery)
+
+
+def rewrap(vault_path, old_master, new_master):
+    """Change only the master-password envelope, given the old password."""
+    with open(vault_path, "rb") as handle:
+        parts = parse_container(handle.read())
+    if parts is None:
+        raise VaultError("vault must be migrated before its key can be rewrapped")
+    key = gpg_decrypt(old_master, parts[0]).decode("utf-8")
+    if not key:
+        raise VaultError("vault key envelope decrypted to nothing")
+    return rewrap_with_key(vault_path, key, new_master)
+
+
+def rewrap_with_key(vault_path, vault_key, new_master):
+    """Change only the master-password envelope, given the vault key.
+
+    The vault ciphertext stays byte-identical and the recovery file is not
+    touched at all, because both key off the vault key, which does not change.
+    This is the reason for separating the vault key: a password change stops
+    being a re-encryption of everything the user owns.
+
+    Taking the key rather than the old password lets a caller that has just
+    read the vault skip an entire gpg invocation, which is the dominant cost
+    of any vault operation.
+    """
+    with open(vault_path, "rb") as handle:
+        parts = parse_container(handle.read())
+    if parts is None:
+        raise VaultError("vault must be migrated before its key can be rewrapped")
+    key = vault_key
+    updated = build_container(gpg_encrypt(new_master, key.encode("utf-8")), parts[1])
+
+    vault_dir = os.path.dirname(os.path.abspath(vault_path)) or "."
+    fd, staged = tempfile.mkstemp(
+        prefix="." + os.path.basename(vault_path) + ".rewrap.", dir=vault_dir)
+    try:
+        os.write(fd, updated)
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.chmod(staged, 0o600)
+        archive_generation(vault_path)
+        shutil.copy2(vault_path, vault_path + ".bak")
+        os.chmod(vault_path + ".bak", 0o600)
+        os.replace(staged, vault_path)
+        staged = ""
+        os.chmod(vault_path, 0o600)
+        _fsync_dir(vault_dir)
+    finally:
+        if fd != -1:
+            os.close(fd)
+        if staged and os.path.exists(staged):
+            os.remove(staged)
+    return key
+
+
+def recover(vault_path, secret, out_path):
+    """Open a vault with a secret recovered from the .recovery file.
+
+    What that file holds depends on when it was last written: format 3 stores
+    the vault key, the formats before it stored the master password, and a
+    vault caught mid-migration is described by neither. Try every reading
+    rather than assume -- the master-password route is also what makes the
+    migration window recoverable, because the key envelope of a just-migrated
+    vault is sealed under exactly the password the stale file still names.
+
+    Returns (vault_key, recovery_is_stale). A stale recovery file recovered
+    this vault by luck and will not recover it again once the envelope is
+    rewrapped, so the caller must refresh it.
+    """
+    with open(vault_path, "rb") as handle:
+        raw = handle.read()
+    parts = parse_container(raw)
+
+    if parts is None:
+        # Formats 1 and 2: the recovery file can only hold the password.
+        write_plaintext(out_path, gpg_decrypt(secret, raw).decode("utf-8", errors="ignore"))
+        return None, False
+
+    try:
+        plaintext = gpg_decrypt(secret, parts[1]).decode("utf-8", errors="ignore")
+        key, stale = secret, False
+    except subprocess.CalledProcessError:
+        try:
+            key = gpg_decrypt(secret, parts[0]).decode("utf-8")
+        except subprocess.CalledProcessError:
+            raise VaultError("the recovery file does not open this vault")
+        if not key:
+            raise VaultError("vault key envelope decrypted to nothing")
+        plaintext = gpg_decrypt(key, parts[1]).decode("utf-8", errors="ignore")
+        stale = True
+    write_plaintext(out_path, plaintext)
+    return key, stale
+
+
+# ----- command interface -----------------------------------------------------
+# How the shell half reaches the core. Secrets arrive on stdin, one per line,
+# never in argv. A master password cannot contain a newline: every prompt that
+# collects one reads a single line.
+
+def _secrets(count):
+    data = sys.stdin.buffer.read().decode("utf-8")
+    fields = data.split("\n")
+    if len(fields) < count:
+        raise VaultError("expected %d secret(s) on stdin" % count)
+    return fields[:count]
+
+
+def main(argv):
+    if len(argv) < 2:
+        sys.stderr.write("usage: spm_core.py <command> [args]\n")
+        return 2
+    command = argv[1]
+    try:
+        if command == "read":
+            # read <vault> <out> ; stdin: master ; stdout: vault key (may be empty)
+            vault, out = argv[2], argv[3]
+            (master,) = _secrets(1)
+            plaintext, key = read_vault(vault, master)
+            write_plaintext(out, plaintext)
+            sys.stdout.write(key or "")
+        elif command == "write":
+            # write <vault> <plainfile> ; stdin: master[\nvault key]
+            vault, source = argv[2], argv[3]
+            fields = sys.stdin.buffer.read().decode("utf-8").split("\n")
+            master = fields[0]
+            key = fields[1] if len(fields) > 1 and fields[1] else None
+            with open(source, "r", encoding="utf-8") as handle:
+                plaintext = handle.read()
+            sys.stdout.write(write_vault(vault, master, plaintext, key))
+        elif command == "rewrap":
+            # rewrap <vault> ; stdin: old master\nnew master
+            old, new = _secrets(2)
+            rewrap(argv[2], old, new)
+        elif command == "rewrap-key":
+            # rewrap-key <vault> ; stdin: vault key\nnew master
+            key, new = _secrets(2)
+            if not key:
+                raise VaultError("a vault key is required")
+            rewrap_with_key(argv[2], key, new)
+        elif command == "recover":
+            # recover <vault> <out> ; stdin: recovered secret
+            # stdout: "<vault key>\n<1 if the recovery file is stale else 0>"
+            (secret,) = _secrets(1)
+            key, stale = recover(argv[2], secret, argv[3])
+            sys.stdout.write("%s\n%d\n" % (key or "", 1 if stale else 0))
+        elif command == "unwrap":
+            # unwrap <vault> ; stdin: master ; stdout: vault key
+            (master,) = _secrets(1)
+            sys.stdout.write(unwrap_key(argv[2], master) or "")
+        elif command == "is-container":
+            with open(argv[2], "rb") as handle:
+                return 0 if is_container(handle.read(len(CONTAINER_MAGIC) + 1)) else 1
+        elif command == "format-version":
+            with open(argv[2], "r", encoding="utf-8", errors="ignore") as handle:
+                sys.stdout.write("%d\n" % format_version(handle.read()))
+        elif command == "stamp-version":
+            with open(argv[2], "r", encoding="utf-8") as handle:
+                stamped = stamp_version(handle.read())
+            with open(argv[3], "w", encoding="utf-8") as handle:
+                handle.write(stamped)
+        elif command == "write-recovery":
+            # write-recovery <vault> <plainfile> ; stdin: vault key
+            (key,) = _secrets(1)
+            with open(argv[3], "r", encoding="utf-8") as handle:
+                plaintext = handle.read()
+            install_recovery(argv[2], stage_recovery(argv[2], plaintext, key))
+        elif command == "scope-id":
+            sys.stdout.write(vault_scope_id(argv[2]))
+        elif command == "current-version":
+            sys.stdout.write("%d\n" % VAULT_FORMAT_VERSION)
+        elif command == "history-dir":
+            sys.stdout.write(history_dir(argv[2]) + "\n")
+        elif command == "archive":
+            archive_generation(argv[2])
+        elif command == "self-test":
+            return 0
+        else:
+            sys.stderr.write("unknown command: %s\n" % command)
+            return 2
+    except VaultError as exc:
+        sys.stderr.write("%s\n" % exc)
+        return 1
+    except subprocess.CalledProcessError:
+        sys.stderr.write("gpg refused the supplied secret\n")
+        return 1
+    except (OSError, IndexError) as exc:
+        sys.stderr.write("%s\n" % exc)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+SPMCORE
+	chmod 600 "$staged" 2>/dev/null || true
+	mv -f "$staged" "$SPM_CORE_PATH" || { rm -f "$staged"; die "Cannot install the SPM core."; }
+}
+
+core() {
+	[ -n "${SPM_CORE_PATH:-}" ] && [ -f "$SPM_CORE_PATH" ] || ensure_core_script
+	python3 "$SPM_CORE_PATH" "$@"
+}
+
+is_vault_container() {
+	core is-container "$1" 2>/dev/null
 }
 
 decrypt_vault_to_file() {
@@ -833,7 +1437,7 @@ decrypt_vault_to_file() {
 
 	ensure_master_password_loaded
 
-	if ! decrypt_vault_container "$VAULT_FILE" "$out_file" "$MASTER_PW" VAULT_KEY; then
+	if ! VAULT_KEY="$(printf '%s' "$MASTER_PW" | core read "$VAULT_FILE" "$out_file" 2>/dev/null)"; then
 		secure_wipe "$out_file"
 		MASTER_PW=""
 		VAULT_KEY=""
@@ -845,187 +1449,48 @@ decrypt_vault_to_file() {
 	fi
 }
 
-# ----- Vault format version and key-derivation policy ------------------------
-# The vault records the format it was written in, so a later change can migrate
-# instead of guessing. A vault with no META_VAULT_VERSION row predates this and
-# is format 1; every write stamps the current version, so opening and saving any
-# vault upgrades it in place with no separate migration step.
-VAULT_FORMAT_VERSION=3
-
-# Key derivation is pinned rather than inherited. GnuPG 2.2's own defaults are
-# already s2k mode 3 at the maximum iteration count, so the measurable change
-# here is the digest: the default is SHA1 and this asks for SHA512. The larger
-# point is that the policy stops being whatever the local gpg happens to do --
-# a user's gpg.conf can change all of it underneath us, and an implicit
-# security parameter cannot be reviewed or migrated.
+# Decrypt any SPM vault file -- a .bak, a history snapshot, a synced copy --
+# under "$3". Returns non-zero instead of dying, because its callers are
+# proving that a file opens and own their own error message.
 #
-# Argon2 is deliberately absent. OpenPGP Argon2 needs GnuPG 2.4 or newer and
-# this project's baseline, Debian bookworm, ships 2.2; asking for it there
-# fails the write rather than degrading. Recording the format version is what
-# makes adopting it later a migration instead of a rewrite.
-SPM_S2K_MODE=3
-SPM_S2K_DIGEST=SHA512
-SPM_S2K_COUNT=65011712
-
-stamp_vault_version() {
-	# Drop any existing version rows, then prepend exactly one current row.
-	# Idempotent, and byte-identical to the SPM Dashboard's Python
-	# implementation -- the regression suite asserts that parity directly,
-	# because a disagreement would make the two surfaces rewrite this row back
-	# and forth on every save and dirty the history with no-op generations.
-	local in_file="$1" out_file="$2"
-	printf 'META_VAULT_VERSION\t%s\t-\t-\t-\t-\n' "$VAULT_FORMAT_VERSION" >"$out_file"
-	awk -F '\t' '$1 != "META_VAULT_VERSION"' "$in_file" >>"$out_file"
-}
-
-vault_format_version() {
-	# Version of a decrypted vault: the row's value, or 1 when absent.
-	local plain="$1" v
-	v="$(awk -F '\t' '$1=="META_VAULT_VERSION"{print $2; exit}' "$plain")"
-	case "$v" in
-		''|*[!0-9]*) printf '1\n' ;;
-		*) printf '%s\n' "$v" ;;
-	esac
+# The vault key is deliberately NOT captured here: a key unwrapped from a
+# snapshot must never become the key the live vault is written under.
+decrypt_vault_container() {
+	printf '%s' "$3" | core read "$1" "$2" >/dev/null 2>&1
 }
 
 encrypt_file_to_vault() {
 	local in_file="$1"
-	local vault_dir vault_name tmp_cipher tmp_envelope tmp_container tmp_recovery="" generated_key=0
 	[ "${MASTER_PW:-}" ] || die "MASTER_PW is empty in encrypt_file_to_vault"
 
-	vault_dir="$(dirname "$VAULT_FILE")"
-	vault_name="$(basename "$VAULT_FILE")"
-	tmp_cipher="$(make_tmp)"
-	tmp_envelope="$(make_tmp)"
-
-	# Stamp into a copy rather than editing the caller's file: several callers
-	# read that file again after this returns, and one of them is
-	# write_recovery_file.
-	local tmp_plain
-	tmp_plain="$(make_tmp)"
-	stamp_vault_version "$in_file" "$tmp_plain"
-	# A write must reuse the key the vault already has. Minting a fresh one
-	# here would strand every .bak, history snapshot and synced copy that the
-	# current recovery file can still open -- and the whole point of a separate
-	# vault key is that it is stable across master-password changes.
-	if [ -z "${VAULT_KEY:-}" ] && is_vault_container "$VAULT_FILE"; then
-		VAULT_KEY="$(unwrap_vault_key_from "$VAULT_FILE" "$MASTER_PW")" \
-			|| die "The vault key could not be unwrapped. Wrong master password?"
-	fi
-	if [ -z "${VAULT_KEY:-}" ]; then
-		VAULT_KEY="$(openssl rand -base64 32 | tr -d '\n')" || die "Failed to generate a random vault key."
-		generated_key=1
+	# The key is passed back in so an ordinary write does not pay to unwrap
+	# the envelope it already holds. Passing none makes the core recover it
+	# from the vault; only a vault with no key at all gets a new one.
+	if ! VAULT_KEY="$(printf '%s\n%s' "$MASTER_PW" "${VAULT_KEY:-}" \
+		| core write "$VAULT_FILE" "$in_file")"; then
+		die "Failed to write the vault. The existing vault was not changed; plaintext remains in '$in_file'."
 	fi
 
-	# Migration stages the new recovery file FIRST -- before any ciphertext
-	# exists and before anything is written next to the vault. A vault whose
-	# recovery pubkey is unusable can never be given a working recovery file,
-	# so it must refuse here, with nothing changed and nothing left behind.
-	if [ "$generated_key" -eq 1 ]; then
-		tmp_recovery="$(mktemp "${vault_dir}/.${vault_name}.recovery.XXXXXX")" \
-			|| die "Failed to stage recovery migration."
-		write_recovery_file "$in_file" "$tmp_recovery"
-	fi
-
-	tmp_container="$(mktemp "${vault_dir}/.${vault_name}.tmp.XXXXXX")" || die "Failed to create vault staging file."
-	chmod 600 "$tmp_container" 2>/dev/null || true
-
-	if ! printf '%s' "$VAULT_KEY" | gpg --batch --yes \
-		--s2k-mode "$SPM_S2K_MODE" \
-		--s2k-digest-algo "$SPM_S2K_DIGEST" \
-		--s2k-count "$SPM_S2K_COUNT" \
-		--symmetric --cipher-algo AES256 \
-		--pinentry-mode loopback --passphrase-fd 0 \
-		-o "$tmp_cipher" "$tmp_plain" 2>/dev/null; then
-		secure_wipe "$tmp_plain"; secure_wipe "$tmp_cipher"; secure_wipe "$tmp_container"
-		[ -z "$tmp_recovery" ] || secure_wipe "$tmp_recovery"
-		die "Failed to re-encrypt vault. The existing vault was not changed; plaintext remains in '$in_file'."
-	fi
-	secure_wipe "$tmp_plain"
-	if ! gpg --batch --yes \
-		--s2k-mode "$SPM_S2K_MODE" --s2k-digest-algo "$SPM_S2K_DIGEST" --s2k-count "$SPM_S2K_COUNT" \
-		--symmetric --cipher-algo AES256 --pinentry-mode loopback --passphrase-fd 3 \
-		-o "$tmp_envelope" 3< <(printf '%s' "$MASTER_PW") < <(printf '%s' "$VAULT_KEY") 2>/dev/null; then
-		secure_wipe "$tmp_cipher"; secure_wipe "$tmp_envelope"; secure_wipe "$tmp_container"
-		[ -z "$tmp_recovery" ] || secure_wipe "$tmp_recovery"
-		die "Failed to wrap the vault key."
-	fi
-	{
-		printf 'SPM-VAULT-3\nKEY '
-		base64 <"$tmp_envelope" | tr -d '\n'
-		printf '\nDATA\n'
-		base64 <"$tmp_cipher"
-	} >"$tmp_container"
-	secure_wipe "$tmp_cipher"; secure_wipe "$tmp_envelope"
-
-	if [ -f "$VAULT_FILE" ]; then
-		archive_current_vault
-		cp "$VAULT_FILE" "${VAULT_FILE}.bak" || {
-			secure_wipe "$tmp_container"
-			[ -z "$tmp_recovery" ] || secure_wipe "$tmp_recovery"
-			die "Failed to preserve the previous vault."
-		}
-		chmod 600 "${VAULT_FILE}.bak" 2>/dev/null || true
-	fi
-	# The rename is atomic but not durable on its own: flush the ciphertext first
-	# so a crash cannot leave the new name pointing at unwritten blocks.
-	sync "$tmp_container" 2>/dev/null || sync 2>/dev/null || true
-	mv -f "$tmp_container" "$VAULT_FILE" || {
-		secure_wipe "$tmp_container"
-		[ -z "$tmp_recovery" ] || secure_wipe "$tmp_recovery"
-		die "Failed to install the encrypted vault."
-	}
-	chmod 600 "$VAULT_FILE" 2>/dev/null || true
-	# Migration installs the container BEFORE it swaps the recovery file, and
-	# the envelope is sealed under the master password the recovery file still
-	# holds. That makes the crash window harmless: a vault caught between the
-	# two steps opens from .recovery through the master-password route that
-	# cmd_forgot tries second. The reverse order has no such route, which is
-	# why the pre-vault-key code had to write recovery first.
-	if [ "$generated_key" -eq 1 ]; then
-		if mv -f "$tmp_recovery" "$RECOVERY_FILE"; then
-			chmod 600 "$RECOVERY_FILE" 2>/dev/null || true
-		else
-			# Do not roll the vault back: that would discard the write the user
-			# just made, and the vault is recoverable either way.
-			secure_wipe "$tmp_recovery"
-			printf 'Warning: the vault was written, but its recovery file still holds the master password.\n' >&2
-			printf "Run '%s change-master' or '%s doctor' to refresh it.\n" "$0" "$0" >&2
-		fi
-	fi
-	sync "$vault_dir" 2>/dev/null || sync 2>/dev/null || true
 	if ! ( maybe_auto_backup ); then
 		printf 'Warning: vault write succeeded, but the automatic backup failed.\n' >&2
 	fi
 }
 
 rewrap_vault_key() {
-	# Change only the master-password envelope. The data ciphertext remains
-	# byte-identical, which is the reason for separating the vault key at all.
-	local new_master="$1" vault_dir vault_name tmp_envelope tmp_container
+	local new_master="$1"
 	[ -n "${VAULT_KEY:-}" ] || die "Vault key is not loaded."
-	is_vault_container "$VAULT_FILE" || die "Vault must be migrated before its key can be rewrapped."
-	vault_dir="$(dirname "$VAULT_FILE")"; vault_name="$(basename "$VAULT_FILE")"
-	tmp_envelope="$(make_tmp)"
-	tmp_container="$(mktemp "${vault_dir}/.${vault_name}.rewrap.XXXXXX")" || die "Failed to stage vault-key rewrap."
-	if ! gpg --batch --yes \
-		--s2k-mode "$SPM_S2K_MODE" --s2k-digest-algo "$SPM_S2K_DIGEST" --s2k-count "$SPM_S2K_COUNT" \
-		--symmetric --cipher-algo AES256 --pinentry-mode loopback --passphrase-fd 3 \
-		-o "$tmp_envelope" 3< <(printf '%s' "$new_master") < <(printf '%s' "$VAULT_KEY") 2>/dev/null; then
-		secure_wipe "$tmp_envelope"; secure_wipe "$tmp_container"; die "Failed to rewrap vault key."
-	fi
-	{
-		printf 'SPM-VAULT-3\nKEY '; base64 <"$tmp_envelope" | tr -d '\n'; printf '\n'
-		sed -n '/^DATA$/,$p' "$VAULT_FILE"
-	} >"$tmp_container"
-	secure_wipe "$tmp_envelope"
-	archive_current_vault
-	cp "$VAULT_FILE" "${VAULT_FILE}.bak" || { secure_wipe "$tmp_container"; die "Failed to preserve the previous vault."; }
-	chmod 600 "${VAULT_FILE}.bak" "$tmp_container" 2>/dev/null || true
-	sync "$tmp_container" 2>/dev/null || true
-	mv -f "$tmp_container" "$VAULT_FILE" || { secure_wipe "$tmp_container"; die "Failed to install rewrapped vault."; }
-	sync "$vault_dir" 2>/dev/null || true
+	printf '%s\n%s' "$VAULT_KEY" "$new_master" | core rewrap-key "$VAULT_FILE" \
+		|| die "Failed to rewrap the vault key. The vault was not changed."
 }
+
+stamp_vault_version() {
+	core stamp-version "$1" "$2" || die "Failed to stamp the vault format version."
+}
+
+vault_format_version() {
+	core format-version "$1" 2>/dev/null || printf '1\n'
+}
+
 
 acquire_cli_vault_lock() {
 	command -v flock >/dev/null 2>&1 || {
@@ -1038,30 +1503,23 @@ acquire_cli_vault_lock() {
 	CLI_VAULT_LOCKED=1
 }
 
+# Memoised: the scope id is a pure function of the vault path, and
+# maybe_auto_backup asks for it several times per write.
+SPM_VAULT_SCOPE_ID=""
 vault_scope_id() {
-	printf '%s' "$(canon_path "$VAULT_FILE")" | sha256sum | awk '{print substr($1,1,16)}'
+	if [ -z "$SPM_VAULT_SCOPE_ID" ]; then
+		SPM_VAULT_SCOPE_ID="$(core scope-id "$VAULT_FILE")" \
+			|| die "Cannot determine the vault scope id."
+	fi
+	printf '%s' "$SPM_VAULT_SCOPE_ID"
 }
 
 history_dir() {
-	printf '%s/history/%s\n' "$SPM_DATA_DIR" "$(vault_scope_id)"
+	core history-dir "$VAULT_FILE"
 }
 
 archive_current_vault() {
-	[ -f "$VAULT_FILE" ] || return 0
-	local dir keep stamp snapshot
-	dir="$(history_dir)"
-	keep="${SPM_HISTORY_RETENTION:-20}"
-	printf '%s' "$keep" | grep -Eq '^[1-9][0-9]*$' || keep=20
-	mkdir -p "$dir" || die "Failed to create encrypted history directory."
-	chmod 700 "$dir" 2>/dev/null || true
-	stamp="$(date -u +%Y%m%dT%H%M%S 2>/dev/null || date +%Y%m%dT%H%M%S)"
-	snapshot="$dir/${stamp}.$$.$(sha256sum "$VAULT_FILE" | awk '{print substr($1,1,12)}').gpg"
-	cp "$VAULT_FILE" "$snapshot" || die "Failed to preserve encrypted vault history."
-	chmod 600 "$snapshot" 2>/dev/null || true
-	find "$dir" -maxdepth 1 -type f -name '*.gpg' -print 2>/dev/null \
-		| while IFS= read -r item; do printf '%s\t%s\n' "$(stat -c '%Y' "$item" 2>/dev/null || stat -f '%m' "$item")" "$item"; done \
-		| sort -nr | awk -F '\t' -v keep="$keep" 'NR > keep { print $2 }' \
-		| while IFS= read -r old; do secure_wipe "$old"; done
+	core archive "$VAULT_FILE" || true
 }
 
 auto_backup_config() {
@@ -1256,33 +1714,9 @@ get_recovery_pub_b64_from_vault() {
 
 write_recovery_file() {
 	local vault_plain="$1"
-	local recovery_target="${2:-$RECOVERY_FILE}"
-
-	require_cmd openssl
-	local pub_b64 tmp_pub
-
-	pub_b64="$(get_recovery_pub_b64_from_vault "$vault_plain")"
-	if [ -z "$pub_b64" ]; then
-		die "Recovery public key metadata not found in vault. Cannot update recovery file."
-	fi
-
-	tmp_pub="$(make_tmp)"
-	if ! printf '%s' "$pub_b64" | base64 -d >"$tmp_pub" 2>/dev/null; then
-		secure_wipe "$tmp_pub"
-		die "Failed to decode embedded recovery public key."
-	fi
-
 	[ -n "${VAULT_KEY:-}" ] || die "Vault key is not loaded. Cannot update recovery file."
-	if ! printf '%s' "$VAULT_KEY" | openssl rsautl -encrypt -pubin -inkey "$tmp_pub" -out "$recovery_target" 2>/dev/null; then
-		secure_wipe "$tmp_pub"
-		# openssl creates the output before it fails on the key, and the caller
-		# may be staging next to the vault. Do not leave that behind.
-		[ "$recovery_target" = "$RECOVERY_FILE" ] || secure_wipe "$recovery_target"
-		die "Failed to create/update recovery file '$RECOVERY_FILE'."
-	fi
-
-	secure_wipe "$tmp_pub"
-	chmod 600 "$recovery_target" 2>/dev/null || true
+	printf '%s' "$VAULT_KEY" | core write-recovery "$VAULT_FILE" "$vault_plain" \
+		|| die "Failed to create/update recovery file '$RECOVERY_FILE'."
 }
 
 # ----- Password strength coaching --------------------------------------------
@@ -3752,34 +4186,19 @@ cmd_forgot() {
 	local tmp recovery_stale=0
 	tmp="$(make_tmp)"
 	VAULT_KEY=""
-	if is_vault_container "$VAULT_FILE"; then
-		local cipher
-		cipher="$(make_tmp)"
-		sed -n '/^DATA$/,$p' "$VAULT_FILE" | sed '1d' | base64 -d >"$cipher" 2>/dev/null || true
-		[ -s "$cipher" ] || { secure_wipe "$cipher"; die "Vault ciphertext container is corrupt."; }
-		if printf '%s' "$recovered_secret" | gpg --batch --quiet \
-			--pinentry-mode loopback --passphrase-fd 0 \
-			--decrypt "$cipher" >"$tmp" 2>/dev/null; then
-			# The recovery file held the vault key itself.
-			VAULT_KEY="$recovered_secret"
-		elif decrypt_vault_container "$VAULT_FILE" "$tmp" "$recovered_secret" VAULT_KEY; then
-			# It held the master password of a vault whose migration completed
-			# the container but not the recovery swap. Recovery worked this
-			# time only because the envelope was still sealed under that
-			# password; rewrapping below would strand it, so mark it for repair.
-			MASTER_PW="$recovered_secret"
-			recovery_stale=1
-		else
-			secure_wipe "$cipher"; secure_wipe "$tmp"; VAULT_KEY=""
-			die "The recovery file does not open this vault. Recovery aborted."
-		fi
-		secure_wipe "$cipher"
-	else
+	# The core decides what the recovered secret actually is: format 3 stores
+	# the vault key, the formats before it stored the master password, and a
+	# vault caught mid-migration is described by neither. It reports back
+	# whether the recovery file is stale and therefore needs repairing below.
+	local recover_out
+	recover_out="$(printf '%s' "$recovered_secret" | core recover "$VAULT_FILE" "$tmp")" \
+		|| { secure_wipe "$tmp"; die "The recovery file does not open this vault. Recovery aborted."; }
+	VAULT_KEY="$(printf '%s\n' "$recover_out" | sed -n '1p')"
+	recovery_stale="$(printf '%s\n' "$recover_out" | sed -n '2p')"
+	[ "$recovery_stale" = "1" ] || recovery_stale=0
+	if [ -z "$VAULT_KEY" ]; then
+		# A legacy vault: the recovered secret is its master password.
 		MASTER_PW="$recovered_secret"
-		if ! decrypt_vault_container "$VAULT_FILE" "$tmp" "$MASTER_PW"; then
-			secure_wipe "$tmp"; MASTER_PW=""
-			die "Recovered master password could not decrypt the vault. Recovery aborted."
-		fi
 	fi
 
 	if [ "$SPM_LANG" = "id" ]; then
@@ -4067,7 +4486,9 @@ cmd_doctor() {
 	# thing that rewrites a vault.
 	local fmt
 	fmt="$(vault_format_version "$tmp")"
-	if [ "$fmt" -ge "$VAULT_FORMAT_VERSION" ]; then
+	local current_fmt
+	current_fmt="$(core current-version 2>/dev/null || printf '%s' "$fmt")"
+	if [ "$fmt" -ge "$current_fmt" ]; then
 		if [ "$SPM_LANG" = "id" ]; then
 			printf "[✔] Format vault versi %s (terbaru).\n" "$fmt"
 		else
@@ -4075,11 +4496,11 @@ cmd_doctor() {
 		fi
 	else
 		if [ "$SPM_LANG" = "id" ]; then
-			printf "[!] Format vault versi %s; versi %s tersedia.\n" "$fmt" "$VAULT_FORMAT_VERSION"
+			printf "[!] Format vault versi %s; versi %s tersedia.\n" "$fmt" "$current_fmt"
 			printf "    Perubahan berikutnya akan memutakhirkan vault otomatis.\n"
 			printf "    Kunci diturunkan memakai default GnuPG lama (digest SHA1).\n"
 		else
-			printf "[!] Vault format version %s; version %s is available.\n" "$fmt" "$VAULT_FORMAT_VERSION"
+			printf "[!] Vault format version %s; version %s is available.\n" "$fmt" "$current_fmt"
 			printf "    The next change upgrades this vault in place; no migration step.\n"
 			printf "    Its key was derived with GnuPG's older default digest (SHA1).\n"
 		fi
@@ -6610,6 +7031,11 @@ write_spm_web_script() {
 	local base_dir
 	base_dir="${SPM_WEB_SCRIPT_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/spm}"
 	mkdir -p "$base_dir" || return 1
+
+	# The dashboard imports the trusted core by path from its own directory,
+	# so the core has to be in place before the server is written, let alone
+	# started.
+	ensure_core_script "$base_dir" || return 1
 
 	local script_path="${base_dir}/spm_web_server.py"
 
@@ -10151,356 +10577,85 @@ def auth_view_page(aid, label, secret, period, algo, created):
     return render_shell(content, "authenticators", VERSION, VAULT_PATH, title=label)
 
 
-def _passphrase_fd(master: str) -> int:
-    # Never hand the master password to gpg on the command line: argv is world
-    # readable through `ps` and /proc/<pid>/cmdline, so every local user could
-    # read it. Write it into a pipe instead and let gpg read that fd, mirroring
-    # the --passphrase-fd approach the shell side already uses.
-    read_fd, write_fd = os.pipe()
-    try:
-        os.write(write_fd, master.encode("utf-8"))
-    finally:
-        os.close(write_fd)
-    return read_fd
+# ----- The trusted core ------------------------------------------------------
+# The vault format, key wrapping, vault mutation, history archiving and the
+# recovery file all live in spm_core.py, which the CLI half of SPM uses too.
+# This file used to carry its own copy of every one of them, and the regression
+# suite carried a test whose only job was to prove the two copies still agreed.
+# What remains here is the adapter: the dashboard's call sites keep their names
+# and the core keeps the decisions.
 
-def _gpg_decrypt_bytes(secret: str, payload: bytes, timeout=15) -> bytes:
-    pw_fd = _passphrase_fd(secret)
+def _load_core():
+    import importlib.util
+    bases = [os.environ.get("SPM_CORE_DIR")]
     try:
-        return subprocess.check_output(
-            ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
-             "--passphrase-fd", str(pw_fd), "-d"], input=payload,
-            stderr=subprocess.DEVNULL, timeout=timeout, pass_fds=(pw_fd,))
-    finally:
-        os.close(pw_fd)
+        # Normally the core sits beside this file, installed by the same
+        # function that wrote it. __file__ is absent when something execs this
+        # source rather than importing it, which the test suite does.
+        bases.append(os.path.dirname(os.path.abspath(__file__)))
+    except NameError:
+        pass
+    bases.append(os.path.join(
+        os.environ.get("XDG_DATA_HOME")
+        or os.path.join(os.path.expanduser("~"), ".local", "share"), "spm"))
+    for base in bases:
+        if not base:
+            continue
+        candidate = os.path.join(base, "spm_core.py")
+        if os.path.isfile(candidate):
+            spec = importlib.util.spec_from_file_location("spm_core", candidate)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+    raise RuntimeError("spm_core.py was not found; run `spm web` to install it")
 
-def _container_parts(raw: bytes):
-    if not raw.startswith(b"SPM-VAULT-3\n"):
-        return None
-    try:
-        key_line, data = raw.split(b"\nDATA\n", 1)
-        envelope = base64.b64decode(key_line.split(b"\nKEY ", 1)[1])
-        cipher = base64.b64decode(data)
-    except Exception as exc:
-        raise RuntimeError("invalid vault-key container") from exc
-    return envelope, cipher
 
-def unwrap_vault_key(master: str, path=None):
-    """The vault key alone, or None when `path` predates the container format."""
-    parts = _container_parts(open(path or VAULT_PATH, "rb").read())
-    if parts is None:
-        return None
-    key = _gpg_decrypt_bytes(master, parts[0]).decode("utf-8")
-    if not key:
-        raise RuntimeError("empty vault key")
-    return key
+core = _load_core()
+
+VAULT_FORMAT_VERSION = core.VAULT_FORMAT_VERSION
+RECOVERY_PATH = core.recovery_path(VAULT_PATH)
+_fsync_path = core._fsync_path
+_fsync_dir = core._fsync_dir
+stamp_vault_version = core.stamp_version
+vault_format_version = core.format_version
+recovery_pubkey_pem = core.recovery_pubkey_pem
+
 
 def decrypt_vault_file(path: str, master: str) -> str:
-    """Open any SPM vault file under `master`, whatever format it is in.
+    return core.read_vault(path, master)[0]
 
-    Not only the live vault: history snapshots, .bak files and synced copies
-    are the same container, and every one of them has to be readable by
-    whatever is about to prove it opens before overwriting the live vault.
-    """
-    raw = open(path, "rb").read()
-    parts = _container_parts(raw)
-    if parts is not None:
-        key = _gpg_decrypt_bytes(master, parts[0]).decode("utf-8")
-        return _gpg_decrypt_bytes(key, parts[1]).decode("utf-8", errors="ignore")
-    pw_fd = _passphrase_fd(master)
-    try:
-        return subprocess.check_output(
-            ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
-             "--passphrase-fd", str(pw_fd), "-d", path],
-            stderr=subprocess.DEVNULL,
-            timeout=15,
-            pass_fds=(pw_fd,),
-        ).decode("utf-8", errors="ignore")
-    finally:
-        os.close(pw_fd)
 
 def decrypt_vault(master: str) -> str:
-    return decrypt_vault_file(VAULT_PATH, master)
-
-def _fsync_path(path):
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-def _fsync_dir(path):
-    # A directory fsync is what makes the rename itself survive a crash. Not
-    # every filesystem permits it, so a refusal must not fail the write.
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
-
-def _archive_vault_generation():
-    """Mirror the CLI's encrypted history so SPM Dashboard edits are recoverable.
-
-    history-list / history-restore used to see nothing at all from the SPM Dashboard,
-    which left a single .bak generation as the only undo for the primary client.
-    """
-    try:
-        keep = int(os.environ.get("SPM_HISTORY_RETENTION", "20"))
-        if keep <= 0:
-            keep = 20
-    except ValueError:
-        keep = 20
-    data_dir = os.environ.get("SPM_DATA_DIR") or os.path.join(
-        os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share"), "spm")
-    try:
-        scope = hashlib.sha256(os.path.abspath(VAULT_PATH).encode("utf-8")).hexdigest()[:16]
-        hist = os.path.join(data_dir, "history", scope)
-        os.makedirs(hist, exist_ok=True)
-        os.chmod(hist, 0o700)
-        digest = hashlib.sha256(open(VAULT_PATH, "rb").read()).hexdigest()[:12]
-        stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
-        dest = os.path.join(hist, "%s.%d.%s.gpg" % (stamp, os.getpid(), digest))
-        shutil.copy2(VAULT_PATH, dest)
-        os.chmod(dest, 0o600)
-        snaps = sorted(
-            (os.path.join(hist, n) for n in os.listdir(hist) if n.endswith(".gpg")),
-            key=lambda q: os.stat(q).st_mtime, reverse=True)
-        for old_snap in snaps[keep:]:
-            os.remove(old_snap)
-    except Exception:
-        # History is a convenience; never let it block or fail a vault write.
-        pass
-
-# Must stay in step with the CLI's VAULT_FORMAT_VERSION and s2k settings. The
-# regression suite asserts both halves agree, because a mismatch would have the
-# two surfaces rewrite the version row back and forth on every save.
-VAULT_FORMAT_VERSION = 3
-S2K_ARGS = ["--s2k-mode", "3", "--s2k-digest-algo", "SHA512",
-            "--s2k-count", "65011712"]
+    return core.read_vault(VAULT_PATH, master)[0]
 
 
-def stamp_vault_version(plaintext: str) -> str:
-    """Prepend exactly one current version row, dropping any that were there.
+def unwrap_vault_key(master: str, path=None):
+    return core.unwrap_key(path or VAULT_PATH, master)
 
-    Byte-identical to the CLI's stamp_vault_version. The trailing-newline
-    handling is the part that has to match: splitting on newline leaves one
-    empty trailing field for a file that ends in a newline, which awk does not
-    produce a record for, so it is dropped before filtering rather than after.
-    """
-    lines = plaintext.split("\n")
-    if lines and lines[-1] == "":
-        lines.pop()
-    rows = [l for l in lines if l.split("\t", 1)[0] != "META_VAULT_VERSION"]
-    head = "META_VAULT_VERSION\t%d\t-\t-\t-\t-" % VAULT_FORMAT_VERSION
-    return "\n".join([head] + rows) + "\n"
-
-
-def vault_format_version(plaintext: str) -> int:
-    """Version of a decrypted vault: the row's value, or 1 when absent."""
-    for line in plaintext.split("\n"):
-        parts = line.split("\t")
-        if parts[0] == "META_VAULT_VERSION" and len(parts) > 1:
-            try:
-                return int(parts[1])
-            except ValueError:
-                return 1
-    return 1
-
-
-def _gpg_encrypt_bytes(secret: str, payload: bytes) -> bytes:
-    pw_fd = _passphrase_fd(secret)
-    try:
-        return subprocess.check_output(
-            ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
-             "--passphrase-fd", str(pw_fd)] + S2K_ARGS +
-            ["--cipher-algo", "AES256", "-c"], input=payload,
-            stderr=subprocess.DEVNULL, timeout=30, pass_fds=(pw_fd,))
-    finally:
-        os.close(pw_fd)
 
 def encrypt_vault(master: str, plaintext: str, vault_key=None) -> None:
-    vault_dir = os.path.dirname(os.path.abspath(VAULT_PATH)) or "."
-    vault_name = os.path.basename(VAULT_PATH)
-    tmp_fd, tmp_path = tempfile.mkstemp(prefix=vault_name + ".webtmp.", dir=vault_dir)
-    os.close(tmp_fd)
-    os.chmod(tmp_path, 0o600)
-    plaintext = stamp_vault_version(plaintext)
-    migrating = False
-    if vault_key is None and os.path.exists(VAULT_PATH):
-        vault_key = unwrap_vault_key(master)
-    if vault_key is None:
-        vault_key = base64.b64encode(os.urandom(32)).decode("ascii")
-        migrating = True
-    # Prove the recovery file can actually be written BEFORE the vault is
-    # touched: a migrated vault whose .recovery still names a password is
-    # recoverable, but one whose recovery pubkey is unusable can never be
-    # given a working recovery file at all.
-    staged_recovery = stage_recovery_file(plaintext, vault_key) if migrating else ""
-    try:
-        envelope = _gpg_encrypt_bytes(master, vault_key.encode("utf-8"))
-        cipher = _gpg_encrypt_bytes(vault_key, plaintext.encode("utf-8"))
-        container = (b"SPM-VAULT-3\nKEY " + base64.b64encode(envelope) +
-                     b"\nDATA\n" + base64.b64encode(cipher) + b"\n")
-        with open(tmp_path, "wb") as staged:
-            staged.write(container)
-        # Keep one last-known-good encrypted snapshot, matching CLI writes.
-        # copy2 is inside the transaction lock, so the backup cannot capture a
-        # half-written or unrelated concurrent generation.
-        if os.path.exists(VAULT_PATH):
-            shutil.copy2(VAULT_PATH, VAULT_PATH + ".bak")
-            os.chmod(VAULT_PATH + ".bak", 0o600)
-            _archive_vault_generation()
-        os.chmod(tmp_path, 0o600)
-        # Rename is atomic but not durable: without flushing the data first a
-        # crash can land the new name over unwritten blocks. Sync the file, then
-        # the directory that records the rename.
-        _fsync_path(tmp_path)
-        os.replace(tmp_path, VAULT_PATH)
-        _fsync_dir(vault_dir)
-        if staged_recovery:
-            # Install second. The container is already written and its key
-            # envelope is sealed under the master password .recovery still
-            # names, so a crash here leaves a vault `spm forgot` can open by
-            # trying the recovered secret as a password -- which is why this
-            # reports rather than undoing the user's save.
-            try:
-                install_staged_recovery(staged_recovery)
-                staged_recovery = ""
-            except Exception as exc:
-                sys.stderr.write(
-                    "warning: vault migrated but its recovery file still holds "
-                    "the master password (%s)\n" % exc)
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        if staged_recovery and os.path.exists(staged_recovery):
-            os.remove(staged_recovery)
+    core.write_vault(VAULT_PATH, master, plaintext, vault_key)
+
 
 def rewrap_vault_key(old_master: str, new_master: str) -> None:
-    raw = open(VAULT_PATH, "rb").read()
-    parts = _container_parts(raw)
-    if parts is None:
-        raise RuntimeError("legacy vault must migrate before key rewrap")
-    key = _gpg_decrypt_bytes(old_master, parts[0]).decode("utf-8")
-    envelope = _gpg_encrypt_bytes(new_master, key.encode("utf-8"))
-    updated = (b"SPM-VAULT-3\nKEY " + base64.b64encode(envelope) +
-               b"\nDATA\n" + base64.b64encode(parts[1]) + b"\n")
-    vault_dir = os.path.dirname(os.path.abspath(VAULT_PATH)) or "."
-    fd, staged = tempfile.mkstemp(prefix=os.path.basename(VAULT_PATH) + ".rewrap.", dir=vault_dir)
-    try:
-        os.write(fd, updated); os.fsync(fd); os.close(fd); fd = -1
-        shutil.copy2(VAULT_PATH, VAULT_PATH + ".bak")
-        os.chmod(VAULT_PATH + ".bak", 0o600)
-        # A rewrap is an edit to the vault file like any other, and undoing one
-        # has to be possible too.
-        _archive_vault_generation()
-        os.replace(staged, VAULT_PATH); staged = ""; os.chmod(VAULT_PATH, 0o600)
-        _fsync_dir(vault_dir)
-    finally:
-        if fd != -1: os.close(fd)
-        if staged and os.path.exists(staged): os.remove(staged)
-
-RECOVERY_PATH = VAULT_PATH + ".recovery"
-
-# A master password shorter than this is refused on the way in. The CLI has no
-# floor at all, which is a gap rather than a decision worth copying: this is the
-# one password that protects every other one, and nothing rate-limits an
-# attacker who already holds the vault file.
-MASTER_MIN_LEN = 12
+    core.rewrap(VAULT_PATH, old_master, new_master)
 
 
-def recovery_pubkey_pem(plaintext: str) -> bytes:
-    """The vault's own recovery public key, or an exception saying why not.
-
-    Separate from the write so a caller can prove recovery is writable BEFORE
-    it touches the vault -- a vault whose META_RECOVERY_PUBKEY is missing or
-    corrupt must fail while the old ciphertext is still the live one.
-    """
-    pub_b64 = ""
-    for line in plaintext.splitlines():
-        parts = line.split("\t")
-        if parts[0] == "META_RECOVERY_PUBKEY" and len(parts) > 1:
-            pub_b64 = parts[1].strip()
-            break
-    if not pub_b64:
-        raise RuntimeError("no META_RECOVERY_PUBKEY row in vault")
-    try:
-        return base64.b64decode(pub_b64)
-    except Exception:
-        raise RuntimeError("recovery public key is not valid base64")
+def _archive_vault_generation():
+    core.archive_generation(VAULT_PATH)
 
 
 def rewrite_recovery_file(plaintext: str, vault_key: str) -> None:
-    """Encrypt the stable vault key under the vault's recovery public key.
-
-    Called only when a legacy vault migrates to the container format, and only
-    AFTER the container is installed. The envelope is sealed under the master
-    password that this file still names at that moment, so a crash in between
-    leaves a vault that `spm forgot` can still open by trying the recovered
-    secret as a master password. The reverse order has no such route.
-
-    Deliberately the same `openssl rsautl -encrypt -pubin` invocation the shell
-    side uses. It is deprecated in OpenSSL 3, but `spm doctor` and `spm forgot`
-    both read this file back with `rsautl -decrypt`; switching only the writer
-    to `pkeyutl` would be a padding decision made in one place out of three.
-    """
-    install_staged_recovery(stage_recovery_file(plaintext, vault_key))
+    core.install_recovery(
+        VAULT_PATH, core.stage_recovery(VAULT_PATH, plaintext, vault_key))
 
 
-def stage_recovery_file(plaintext: str, vault_key: str) -> str:
-    """Write the new recovery blob beside RECOVERY_PATH and return its path.
+# A master password shorter than this is refused on the way in. Dashboard
+# policy, not vault format: the CLI has no floor at all, which is a gap rather
+# than a decision worth copying, since this is the one password that protects
+# every other one and nothing rate-limits an attacker who holds the vault file.
+MASTER_MIN_LEN = 12
 
-    Staging is the whole safety property. Base64-decoding the stored key only
-    proves it is base64; the vault must not be touched until openssl has
-    actually accepted it and produced the ciphertext, and that is what this
-    returns. The caller installs it with install_staged_recovery once the vault
-    it describes is in place.
-    """
-    pub_pem = recovery_pubkey_pem(plaintext)
-
-    rec_dir = os.path.dirname(os.path.abspath(RECOVERY_PATH)) or "."
-    pub_fd, pub_path = tempfile.mkstemp(prefix="spm.recpub.")
-    tmp_out = ""
-    try:
-        os.write(pub_fd, pub_pem)
-        os.close(pub_fd)
-        pub_fd = -1
-        out_fd, tmp_out = tempfile.mkstemp(
-            prefix=os.path.basename(RECOVERY_PATH) + ".webtmp.", dir=rec_dir)
-        os.close(out_fd)
-        os.chmod(tmp_out, 0o600)
-        proc = subprocess.Popen(
-            ["openssl", "rsautl", "-encrypt", "-pubin",
-             "-inkey", pub_path, "-out", tmp_out],
-            stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        try:
-            proc.communicate(input=vault_key.encode("utf-8"), timeout=15)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            raise RuntimeError("recovery re-encryption timed out")
-        if proc.returncode != 0:
-            raise RuntimeError("openssl could not write the recovery file")
-        _fsync_path(tmp_out)
-        staged, tmp_out = tmp_out, ""
-        return staged
-    finally:
-        if pub_fd != -1:
-            os.close(pub_fd)
-        if os.path.exists(pub_path):
-            os.remove(pub_path)
-        if tmp_out and os.path.exists(tmp_out):
-            os.remove(tmp_out)
-
-
-def install_staged_recovery(staged: str) -> None:
-    rec_dir = os.path.dirname(os.path.abspath(RECOVERY_PATH)) or "."
-    os.replace(staged, RECOVERY_PATH)
-    os.chmod(RECOVERY_PATH, 0o600)
-    _fsync_dir(rec_dir)
 
 
 def totp_code(secret_b32: str, period: int = 30, algo: str = "sha1") -> str:
