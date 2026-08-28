@@ -7,6 +7,8 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-08-29
+
 ### Fixed
 - **Sourcing `spm.sh` no longer runs it.** The script ended in a bare
   `main "$@"`, so `source spm.sh` -- the ordinary way to reach one of its

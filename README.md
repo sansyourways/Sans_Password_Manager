@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.0.0**
+Current release: **3.0.1**
 
 ---
 
@@ -81,7 +81,7 @@ attacker with root access.
 
 Every web capture below was taken from the 2.13.0 build in headless Chromium at
 1440x900, against a disposable vault holding only synthetic documentation data.
-3.0.0 changed how the vault is encrypted and nothing a user sees, so these
+3.0.x changed how the vault is encrypted and nothing a user sees, so these
 remain the current interface; they are not re-captured for a release that would
 reproduce them pixel for pixel.
 No personal vault or real credential appears in these images, and the sidebar
@@ -304,7 +304,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.0.0
+bash install.sh --version 3.0.1
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -316,7 +316,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.0.0 at /home/you/.local/bin/spm
+Installed SPM 3.0.1 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -917,7 +917,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.0.0**
+Version: **3.0.1**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down

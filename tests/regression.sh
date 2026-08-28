@@ -52,6 +52,10 @@ export SPM_LIBRARY="$ROOT_DIR/spm.sh"
 # shellcheck source=/dev/null
 source "$SPM_LIBRARY"
 
+# The application library installs its own cleanup traps. Restore the harness
+# trap so failures retain the generated SPM Dashboard server log before disposal.
+trap 'status=$?; harness_cleanup "$status"; exit "$status"' EXIT INT TERM
+
 # The harness must not be able to reach a real vault. Everything above
 # redirects HOME, XDG and PASSWORD_VAULT into $TEST_ROOT; assert that it
 # actually took, because the failure mode here is not a failing test but an
@@ -64,9 +68,6 @@ case "$VAULT_FILE" in
 		exit 1
 		;;
 esac
-# The application library installs its own cleanup traps. Restore the harness
-# trap so failures retain the generated SPM Dashboard server log before disposal.
-trap 'status=$?; harness_cleanup "$status"; exit "$status"' EXIT INT TERM
 export MASTER_PW="$AUDIT_PASSWORD"
 export SPM_LANG="en"
 
@@ -1136,13 +1137,9 @@ assert code == 429, ("repeated unlock failures are not throttled", code, res)
 print("webauthn unlock ceremonies verified")
 PYWEBAUTHN
 
-# --- 2.14.0 vault format version and pinned key derivation -------------------
+# --- 3.0.0 vault format version and pinned key derivation --------------------
 printf 'Web regression: vault format version and KDF policy\n'
 
-# The trusted core is tested on its own first: the vault format, key handling
-# and vault mutation are exercised against the module directly, without a
-# shell or a web server in the way. That this file can exist at all is the
-# point of extracting it.
 # Sourcing the script must never execute main. Before the entry-point guard,
 # `source spm.sh` fell straight into the interactive menu, and a menu blocked
 # on `read` keeps whatever it already acquired -- including an exclusive flock
@@ -1158,25 +1155,71 @@ guard_out="$TEST_ROOT/source-guard.out"
 # reach `main "$@"` as a command name, and main would exit on the unknown
 # command instead of reaching the menu -- so the probe would pass even with the
 # guard removed. Verified by removing the guard and watching this block.
-if sleep 5 | SPM_GUARD_PROBE="$ROOT_DIR/spm.sh" timeout 9 bash -c \
-	'source "$SPM_GUARD_PROBE" >/dev/null 2>&1; printf ready' > "$guard_out" 2>/dev/null; then
-	[ "$(cat "$guard_out")" = "ready" ] \
-		|| { printf 'sourcing spm.sh did not complete cleanly\n' >&2; exit 1; }
-else
+guard_rc=0
+sleep 5 | SPM_GUARD_PROBE="$ROOT_DIR/spm.sh" timeout 9 bash -c \
+	'source "$SPM_GUARD_PROBE" >/dev/null 2>&1; printf ready' > "$guard_out" 2>/dev/null \
+	|| guard_rc=$?
+# Only a timeout means the guard is gone. The probe discards stderr, so a
+# source-time failure -- an unbalanced `if`, say -- also lands here with its
+# own status, and blaming that on the entry-point guard would send the next
+# reader looking in the wrong place entirely.
+if [ "$guard_rc" -eq 124 ]; then
 	printf 'sourcing spm.sh executed main and blocked; the entry-point guard is gone\n' >&2
 	exit 1
+elif [ "$guard_rc" -ne 0 ]; then
+	# Ambiguous on purpose rather than confidently wrong. A missing guard does
+	# not always hang: with a fresh HOME, main reaches the consent or language
+	# prompt and exits non-zero instead of blocking. A source-time error in the
+	# script produces the same shape. Both are failures; neither is worth
+	# guessing between in the message.
+	printf 'sourcing spm.sh exited %s instead of returning cleanly.\n' "$guard_rc" >&2
+	printf 'Either the entry-point guard is gone (main ran) or the script fails at source time.\n' >&2
+	exit 1
 fi
+[ "$(cat "$guard_out")" = "ready" ] \
+	|| { printf 'sourcing spm.sh did not complete cleanly\n' >&2; exit 1; }
+
 # It must still run main when executed, or the guard has broken the CLI.
 # Deliberately not `... | grep -q`: under `set -o pipefail` grep exits on the
 # first match, the writer takes SIGPIPE, and the pipeline reports 141 -- which
 # fails the check for a reason that has nothing to do with the guard. This
 # suite has been bitten by that shape before; capture, then match.
 guard_help="$TEST_ROOT/source-guard.help"
-timeout 20 bash "$ROOT_DIR/spm.sh" help > "$guard_help" 2>/dev/null || true
+help_rc=0
+timeout 20 bash "$ROOT_DIR/spm.sh" help > "$guard_help" 2>/dev/null || help_rc=$?
+# The status is asserted too: printing the banner and then failing, or being
+# killed at the timeout after printing, would otherwise pass on the text alone.
+[ "$help_rc" -eq 0 ] \
+	|| { printf 'executing spm.sh help exited %s\n' "$help_rc" >&2; exit 1; }
 grep -q "Sans Password Manager" "$guard_help" \
 	|| { printf 'executing spm.sh no longer runs main\n' >&2; exit 1; }
-printf '  source is inert; execution still dispatches\n'
 
+# Piped to a shell there is no BASH_SOURCE at all, and under `set -o nounset`
+# a bare `${BASH_SOURCE[0]}` aborts with "unbound variable" rather than running
+# -- which would break `curl ... | bash` for a guard that is only trying to
+# tell sourcing apart from execution. The `:-$0` default covers it.
+#
+# A real pipe, not `< file`: a redirect from a file is seekable, and bash reads
+# a block then lseeks back, which is a different code path from the incremental
+# read it does on a non-seekable pipe. `curl | bash` is the latter, so the test
+# has to be too.
+guard_pipe="$TEST_ROOT/source-guard.pipe"
+pipe_rc=0
+cat "$ROOT_DIR/spm.sh" | timeout 20 bash -s help > "$guard_pipe" 2>&1 || pipe_rc=$?
+if grep -q 'unbound variable' "$guard_pipe"; then
+	printf 'piping spm.sh into bash aborts on an unbound BASH_SOURCE\n' >&2
+	exit 1
+fi
+[ "$pipe_rc" -eq 0 ] \
+	|| { printf 'piping spm.sh into bash exited %s\n' "$pipe_rc" >&2; exit 1; }
+grep -q "Sans Password Manager" "$guard_pipe" \
+	|| { printf 'piping spm.sh into bash no longer runs main\n' >&2; exit 1; }
+printf '  source is inert; execution and a real pipe still dispatch\n'
+
+# The trusted core is tested on its own first: the vault format, key handling
+# and vault mutation are exercised against the module directly, without a
+# shell or a web server in the way. That this file can exist at all is the
+# point of extracting it.
 printf 'Core regression: trusted core\n'
 SPM_CORE_DIR="$XDG_DATA_HOME/spm" ensure_core_script "$XDG_DATA_HOME/spm"
 SPM_CORE_PATH="$SPM_CORE_PATH" python3 "$ROOT_DIR/tests/core-test.py" \
@@ -1216,7 +1259,7 @@ stamp_vault_version "$TEST_ROOT/stale-plain" "$TEST_ROOT/stale-out"
 # vault mutation, and this test compared them byte for byte; a shared core
 # makes that comparison vacuous, so what is asserted now is the sharing itself.
 python3 - "$web_script" "$VAULT_FORMAT_VERSION" "$SPM_LIBRARY" <<'PYFMT'
-import ast, os, subprocess, sys, tempfile
+import ast, os, shlex, subprocess, sys, tempfile
 
 web_src = open(sys.argv[1], encoding="utf-8").read()
 tree = ast.parse(web_src)
@@ -1241,7 +1284,8 @@ assert "_load_core()" in web_src, "the dashboard does not load the trusted core"
 # a byte-identical file.
 lib = sys.argv[3]
 core_path = subprocess.check_output(
-    ["bash", "-c", 'source "%s" >/dev/null 2>&1; ensure_core_script; printf %%s "$SPM_CORE_PATH"' % lib],
+    ["bash", "-c", "source %s >/dev/null 2>&1; ensure_core_script; printf %%s \"$SPM_CORE_PATH\""
+     % shlex.quote(lib)],
     text=True)
 assert os.path.isfile(core_path), "the CLI did not install a core at %r" % core_path
 web_core = os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])), "spm_core.py")
@@ -1269,7 +1313,8 @@ d = tempfile.mkdtemp()
 for i, text in enumerate(cases):
     open(d + "/in", "w", encoding="utf-8").write(text)
     subprocess.run(["bash", "-c",
-        'source "%s" >/dev/null 2>&1; stamp_vault_version "%s/in" "%s/out"' % (lib, d, d)],
+        "source %s >/dev/null 2>&1; stamp_vault_version %s/in %s/out"
+        % (shlex.quote(lib), shlex.quote(d), shlex.quote(d))],
         check=True)
     sh = open(d + "/out", encoding="utf-8").read()
     py = spm_core.stamp_version(text)
@@ -1597,7 +1642,7 @@ if ! grep -qE '^\[(✔|!)\] Duplicate IDs' "$TEST_ROOT/doctor.out"; then
 	exit 1
 fi
 
-# --- 2.14.0 wrapped vault key ------------------------------------------------
+# --- 3.0.0 wrapped vault key -------------------------------------------------
 # The point of a separate vault key is that it is STABLE: a master-password
 # change rewraps a small envelope and leaves the vault ciphertext, every .bak,
 # every history snapshot and the recovery file untouched. These assert that
@@ -1621,7 +1666,7 @@ vk_unwrap() {
 }
 vk_new_legacy_vault() {
 	# A format-1 vault: encrypted under the master password directly, exactly
-	# what every vault written before 2.14.0 looks like on disk.
+	# what every vault written before 3.0.0 looks like on disk.
 	local target="$1" password="$2"
 	printf '%s' "$password" | gpg --batch --yes --pinentry-mode loopback \
 		--passphrase-fd 0 --symmetric --cipher-algo AES256 -o "$target" "$PLAIN"
