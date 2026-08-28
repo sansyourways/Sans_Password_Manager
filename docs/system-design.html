@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sans Password Manager — System Design</title>
+<style>
+  :root{
+    --bg:#08111f;
+    --panel:#0e1a2d;
+    --panel2:#101f35;
+    --text:#eaf2ff;
+    --muted:#9fb0ca;
+    --line:rgba(255,255,255,.09);
+    --cyan:#5ee7ff;
+    --blue:#7aa2ff;
+    --green:#74f0b5;
+    --yellow:#ffd166;
+    --red:#ff7b8b;
+    --purple:#b58cff;
+    --shadow: 0 16px 40px rgba(0,0,0,.32);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background:
+      radial-gradient(circle at 15% 0%, rgba(94,231,255,.10), transparent 28%),
+      radial-gradient(circle at 85% 12%, rgba(181,140,255,.10), transparent 30%),
+      linear-gradient(180deg,#07101d 0%, #0a1424 55%, #07101d 100%);
+    color:var(--text);
+  }
+  a{color:inherit;text-decoration:none}
+  .shell{max-width:1400px;margin:auto;padding:24px}
+  .topbar{
+    position:sticky;top:0;z-index:50;
+    backdrop-filter:blur(16px);
+    background:rgba(7,16,29,.72);
+    border-bottom:1px solid var(--line)
+  }
+  .nav{max-width:1400px;margin:auto;padding:14px 24px;display:flex;gap:18px;align-items:center;justify-content:space-between}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.2px}
+  .brand-mark{
+    width:34px;height:34px;border-radius:10px;
+    background:conic-gradient(from 180deg,var(--cyan),var(--purple),var(--green),var(--cyan));
+    box-shadow:0 0 30px rgba(94,231,255,.18);
+    position:relative;
+  }
+  .brand-mark:after{content:"";position:absolute;inset:7px;border-radius:7px;background:#08111f}
+  .navlinks{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:14px}
+  .hero{
+    padding:72px 0 36px;
+    display:grid;grid-template-columns:1.25fr .75fr;gap:32px;align-items:center
+  }
+  .eyebrow{color:var(--cyan);text-transform:uppercase;letter-spacing:.16em;font-size:12px;font-weight:800}
+  h1{font-size:clamp(44px,7vw,88px);line-height:.95;margin:14px 0 18px;letter-spacing:-.045em}
+  h1 span{background:linear-gradient(90deg,var(--cyan),var(--blue),var(--purple));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lead{font-size:19px;line-height:1.65;color:#c7d4e8;max-width:780px}
+  .hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}
+  .btn{
+    border:1px solid var(--line);padding:12px 16px;border-radius:12px;font-weight:700;
+    background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));
+    box-shadow:var(--shadow);cursor:pointer
+  }
+  .btn.primary{border-color:rgba(94,231,255,.28);background:linear-gradient(135deg,rgba(94,231,255,.18),rgba(122,162,255,.14))}
+  .score-orb{
+    aspect-ratio:1;border-radius:50%;display:grid;place-items:center;position:relative;
+    background:
+      radial-gradient(circle, #101f35 58%, transparent 60%),
+      conic-gradient(var(--cyan) 0 29%, var(--blue) 29% 57%, var(--purple) 57% 83%, rgba(255,255,255,.08) 83%);
+    box-shadow:0 0 80px rgba(94,231,255,.14), inset 0 0 30px rgba(255,255,255,.04)
+  }
+  .score-orb .inner{text-align:center}
+  .score-orb strong{font-size:72px;display:block;letter-spacing:-.05em}
+  .score-orb small{color:var(--muted);text-transform:uppercase;letter-spacing:.14em}
+  .grid{display:grid;gap:18px}
+  .metrics{grid-template-columns:repeat(4,1fr);margin:26px 0 56px}
+  .card{
+    background:linear-gradient(180deg,rgba(16,31,53,.92),rgba(10,22,38,.9));
+    border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:var(--shadow)
+  }
+  .metric .value{font-size:34px;font-weight:900}
+  .metric .label{font-size:13px;color:var(--muted);margin-top:4px}
+  section{padding:54px 0}
+  .section-head{display:flex;justify-content:space-between;gap:20px;align-items:end;margin-bottom:22px}
+  .section-head h2{font-size:38px;margin:4px 0 0;letter-spacing:-.03em}
+  .section-head p{max-width:720px;color:var(--muted);line-height:1.6;margin:0}
+  .architecture{
+    position:relative;overflow:hidden;padding:28px;
+    background:
+      linear-gradient(180deg,rgba(255,255,255,.02),transparent),
+      #0a1627;
+  }
+  .lanes{display:grid;grid-template-columns:1fr 1fr 1.2fr 1fr;gap:18px;align-items:stretch}
+  .lane{display:flex;flex-direction:column;gap:14px}
+  .lane-title{font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin-bottom:2px}
+  .node{
+    padding:16px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.025);position:relative
+  }
+  .node strong{display:block;margin-bottom:6px}
+  .node p{margin:0;color:var(--muted);font-size:13px;line-height:1.45}
+  .node.secure{border-color:rgba(116,240,181,.25);box-shadow:inset 0 0 0 1px rgba(116,240,181,.03)}
+  .node.warn{border-color:rgba(255,209,102,.24)}
+  .node.future{border-color:rgba(181,140,255,.25)}
+  .arrow{color:var(--cyan);font-weight:900;text-align:center;font-size:22px;padding:2px}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+  .tab{
+    padding:10px 13px;border-radius:11px;border:1px solid var(--line);background:rgba(255,255,255,.03);
+    color:var(--muted);cursor:pointer;font-weight:700
+  }
+  .tab.active{color:white;border-color:rgba(94,231,255,.32);background:rgba(94,231,255,.08)}
+  .tab-panel{display:none}.tab-panel.active{display:block}
+  .split{grid-template-columns:1fr 1fr}
+  .proscons{grid-template-columns:1fr 1fr}
+  .item{padding:14px 0;border-bottom:1px solid var(--line)}
+  .item:last-child{border-bottom:0}
+  .item b{display:block;margin-bottom:5px}
+  .item span{color:var(--muted);line-height:1.45}
+  .badge{display:inline-flex;align-items:center;gap:7px;padding:6px 9px;border-radius:999px;font-size:12px;font-weight:800;border:1px solid var(--line)}
+  .good{color:var(--green)} .bad{color:var(--red)} .mid{color:var(--yellow)} .new{color:var(--purple)}
+  .roadmap{grid-template-columns:repeat(3,1fr)}
+  .roadcol h3{margin-top:0}
+  .feature{padding:12px 0;border-top:1px solid var(--line)}
+  .feature:first-of-type{border-top:0}
+  .feature small{color:var(--muted)}
+  .priority{display:inline-block;font-size:11px;font-weight:900;margin-left:6px;padding:3px 7px;border-radius:999px;background:rgba(255,255,255,.05)}
+  .score-table{width:100%;border-collapse:collapse}
+  .score-table td,.score-table th{padding:14px 10px;border-bottom:1px solid var(--line);text-align:left}
+  .score-table th{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}
+  .bar{height:8px;background:rgba(255,255,255,.06);border-radius:99px;overflow:hidden}
+  .fill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--cyan),var(--purple))}
+  .callout{
+    padding:22px;border-radius:16px;border:1px solid rgba(94,231,255,.22);
+    background:linear-gradient(135deg,rgba(94,231,255,.07),rgba(181,140,255,.06));
+    font-size:18px;line-height:1.6
+  }
+  .footer{padding:48px 0 70px;color:var(--muted);font-size:13px}
+  @media (max-width:1000px){
+    .hero,.split,.proscons{grid-template-columns:1fr}
+    .metrics{grid-template-columns:repeat(2,1fr)}
+    .lanes{grid-template-columns:1fr 1fr}
+    .roadmap{grid-template-columns:1fr}
+  }
+  @media (max-width:640px){
+    .shell{padding:18px}.nav{padding:12px 18px}.navlinks{display:none}
+    .metrics,.lanes{grid-template-columns:1fr}
+    h1{font-size:50px}
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="nav">
+    <div class="brand"><div class="brand-mark"></div> Sans Password Manager</div>
+    <nav class="navlinks">
+      <a href="#overview">Overview</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#review">Review</a>
+      <a href="#roadmap">Roadmap</a>
+      <a href="#score">Score</a>
+    </nav>
+  </div>
+</header>
+
+<main class="shell">
+  <section class="hero" id="overview">
+    <div>
+      <div class="eyebrow">Secure systems • local first • architecture review</div>
+      <h1>Designing the next <span>Sans Password Manager</span></h1>
+      <p class="lead">
+        A visual system-design concept for evolving a feature-rich Bash password manager into a modular,
+        auditable and hardware-ready security platform—without losing its local-first philosophy.
+      </p>
+      <div class="hero-actions">
+        <a class="btn primary" href="#architecture">Explore architecture</a>
+        <a class="btn" href="#roadmap">View feature roadmap</a>
+      </div>
+    </div>
+    <div class="score-orb">
+      <div class="inner"><strong>8.3</strong><small>Current design score</small></div>
+    </div>
+  </section>
+
+  <div class="grid metrics">
+    <div class="card metric"><div class="value">8.7</div><div class="label">Security thinking</div></div>
+    <div class="card metric"><div class="value">9.2</div><div class="label">Feature depth</div></div>
+    <div class="card metric"><div class="value">6.5</div><div class="label">Architecture</div></div>
+    <div class="card metric"><div class="value">9.3</div><div class="label">Documentation</div></div>
+  </div>
+
+  <section id="architecture">
+    <div class="section-head">
+      <div><div class="eyebrow">Target architecture</div><h2>Smaller trust core, clearer boundaries</h2></div>
+      <p>The core idea: keep secrets and cryptography in a tiny auditable engine, while CLI, web, sync and browser integrations become clients of that engine.</p>
+    </div>
+
+    <div class="card architecture">
+      <div class="lanes">
+        <div class="lane">
+          <div class="lane-title">Experience layer</div>
+          <div class="node"><strong>CLI</strong><p>Human commands, shell completion, JSON mode.</p></div>
+          <div class="node"><strong>Web UI</strong><p>Local dashboard, session controls, accessibility.</p></div>
+          <div class="node"><strong>Browser Extension</strong><p>Explicit domain matching and user-approved autofill.</p></div>
+        </div>
+        <div class="lane">
+          <div class="lane-title">Application services</div>
+          <div class="node"><strong>Record Service</strong><p>Logins, notes, TOTP, custom fields, folders.</p></div>
+          <div class="node"><strong>Import / Export</strong><p>Bitwarden, 1Password, KeePass, browsers.</p></div>
+          <div class="node"><strong>Sync Engine</strong><p>Conflict-safe local-first synchronization.</p></div>
+          <div class="node"><strong>Backup & Recovery</strong><p>Verified backups, recovery shares, restore drills.</p></div>
+        </div>
+        <div class="lane">
+          <div class="lane-title">Trusted core</div>
+          <div class="node secure"><strong>Vault Engine</strong><p>Versioned vault format, atomic writes, locking, migrations.</p></div>
+          <div class="arrow">↓</div>
+          <div class="node secure"><strong>Key Manager</strong><p>Random vault key wrapped by master-password and recovery factors.</p></div>
+          <div class="arrow">↓</div>
+          <div class="node secure"><strong>Crypto Provider</strong><p>Explicit Argon2id policy, AEAD encryption, secure randomness.</p></div>
+          <div class="arrow">↓</div>
+          <div class="node future"><strong>Hardware Security</strong><p>FIDO2 / TPM / Secure Enclave / YubiKey.</p></div>
+        </div>
+        <div class="lane">
+          <div class="lane-title">Storage & integration</div>
+          <div class="node"><strong>Encrypted Vault</strong><p>Local encrypted records and metadata.</p></div>
+          <div class="node"><strong>History Store</strong><p>Encrypted rollback snapshots and audit-safe events.</p></div>
+          <div class="node"><strong>Backup Targets</strong><p>Filesystem, removable media, SFTP, WebDAV.</p></div>
+          <div class="node"><strong>Native Bridge</strong><p>Minimal IPC contract to browser extension.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="review">
+    <div class="section-head">
+      <div><div class="eyebrow">Codebase review</div><h2>What works—and what strains</h2></div>
+      <p>The project already demonstrates strong security judgment. The biggest risk is architectural concentration: too many responsibilities inside one very large application script.</p>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="likes">What I like</button>
+      <button class="tab" data-tab="risks">What I don't like</button>
+      <button class="tab" data-tab="principles">Design principles</button>
+    </div>
+
+    <div class="tab-panel active" id="likes">
+      <div class="grid proscons">
+        <div class="card">
+          <span class="badge good">● Strong</span>
+          <div class="item"><b>Explicit threat model</b><span>Clearly communicates what the system does and does not defend against.</span></div>
+          <div class="item"><b>Atomic vault writes</b><span>Temporary staging, restrictive permissions and safer replacement semantics reduce corruption risk.</span></div>
+          <div class="item"><b>Careful temp-file handling</b><span>Shows real awareness of local attack surfaces.</span></div>
+          <div class="item"><b>Conservative browser bridge</b><span>Host-aware retrieval is better than unrestricted vault enumeration.</span></div>
+        </div>
+        <div class="card">
+          <span class="badge good">● Mature</span>
+          <div class="item"><b>Excellent diagnostics</b><span>Doctor-style checks turn operational safety into a first-class feature.</span></div>
+          <div class="item"><b>Feature completeness</b><span>TOTP, attachments, history, recovery, sync, browser support and web mode are substantial.</span></div>
+          <div class="item"><b>Good documentation</b><span>Security tradeoffs and operational behavior are documented unusually well.</span></div>
+          <div class="item"><b>Local-first philosophy</b><span>Users retain ownership of vaults, backups and recovery material.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="risks">
+      <div class="grid proscons">
+        <div class="card">
+          <span class="badge bad">● Architecture debt</span>
+          <div class="item"><b>Monolithic primary script</b><span>As features grow, security review and regression isolation become harder.</span></div>
+          <div class="item"><b>Bash complexity ceiling</b><span>HTTP, concurrency, parsing and evolving crypto policies are costly to assure in shell.</span></div>
+          <div class="item"><b>Implicit crypto policy</b><span>Security parameters should be versioned and encoded rather than left to environment defaults.</span></div>
+        </div>
+        <div class="card">
+          <span class="badge mid">● Operational risk</span>
+          <div class="item"><b>Recovery design</b><span>Recovery should ideally wrap a vault key, not recreate access by protecting the master password itself.</span></div>
+          <div class="item"><b>Dependency installation</b><span>Automatic package installation broadens privilege and maintenance scope.</span></div>
+          <div class="item"><b>Testing frontier</b><span>Next step is fault injection, fuzzing, concurrency stress and kill-during-write testing.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="principles">
+      <div class="grid split">
+        <div class="card">
+          <h3>Keep the trusted computing base tiny</h3>
+          <p style="color:var(--muted);line-height:1.6">Crypto, key handling and vault mutation should live in the smallest possible component. Every UI and integration talks to it through a narrow contract.</p>
+        </div>
+        <div class="card">
+          <h3>Version every security decision</h3>
+          <p style="color:var(--muted);line-height:1.6">Vault format, KDF parameters, cipher choices, migration rules and recovery metadata should all be explicit and migratable.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="roadmap">
+    <div class="section-head">
+      <div><div class="eyebrow">Feature strategy</div><h2>Build the foundation before the fireworks</h2></div>
+      <p>A staged roadmap that prioritizes security architecture first, then user capability, then ecosystem expansion.</p>
+    </div>
+
+    <div class="grid roadmap">
+      <div class="card roadcol">
+        <span class="badge good">Phase 1 — Foundation</span>
+        <h3>Make the core auditable</h3>
+        <div class="feature"><b>Vault-key architecture</b><span class="priority">P0</span><br><small>Random vault key, separately wrapped by master password and recovery.</small></div>
+        <div class="feature"><b>Argon2id + versioned vault format</b><span class="priority">P0</span><br><small>Explicit KDF policy and migrations.</small></div>
+        <div class="feature"><b>Modular core</b><span class="priority">P0</span><br><small>Split crypto, storage, sync, web and recovery boundaries.</small></div>
+        <div class="feature"><b>doctor --json</b><span class="priority">P1</span><br><small>Machine-readable diagnostics.</small></div>
+        <div class="feature"><b>Fault-injection test suite</b><span class="priority">P1</span><br><small>Disk-full, killed process, corrupted files, concurrent writers.</small></div>
+      </div>
+
+      <div class="card roadcol">
+        <span class="badge new">Phase 2 — User Power</span>
+        <h3>Upgrade daily usability</h3>
+        <div class="feature"><b>Password history</b><br><small>Encrypted rotation history per account.</small></div>
+        <div class="feature"><b>Duplicate & breach dashboard</b><br><small>Privacy-preserving compromise analysis.</small></div>
+        <div class="feature"><b>Folders + custom fields</b><br><small>More flexible record organization.</small></div>
+        <div class="feature"><b>Import preview</b><br><small>Bitwarden, 1Password, KeePass, Chrome, Firefox, Apple.</small></div>
+        <div class="feature"><b>Smart browser autofill</b><br><small>Page-aware suggestions with explicit user confirmation.</small></div>
+      </div>
+
+      <div class="card roadcol">
+        <span class="badge mid">Phase 3 — Trust Expansion</span>
+        <h3>Hardware, recovery and sync</h3>
+        <div class="feature"><b>FIDO2 / security-key unlock</b><br><small>Hardware-backed authentication.</small></div>
+        <div class="feature"><b>TPM / Secure Enclave</b><br><small>Platform-protected key wrapping.</small></div>
+        <div class="feature"><b>Shamir recovery shares</b><br><small>3-of-5 style offline recovery.</small></div>
+        <div class="feature"><b>Pluggable sync providers</b><br><small>SFTP, WebDAV, filesystem, Syncthing-friendly storage.</small></div>
+        <div class="feature"><b>Security-event log</b><br><small>Secret-free record of sensitive operations.</small></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="score">
+    <div class="section-head">
+      <div><div class="eyebrow">Assessment</div><h2>Current scorecard</h2></div>
+      <p>High capability and security awareness, with maintainability now becoming the main constraint on future confidence.</p>
+    </div>
+    <div class="card">
+      <table class="score-table">
+        <thead><tr><th>Area</th><th>Score</th><th>Signal</th></tr></thead>
+        <tbody>
+          <tr><td>Security thinking</td><td>8.7 / 10</td><td><div class="bar"><div class="fill" style="width:87%"></div></div></td></tr>
+          <tr><td>Features</td><td>9.2 / 10</td><td><div class="bar"><div class="fill" style="width:92%"></div></div></td></tr>
+          <tr><td>Reliability</td><td>8.5 / 10</td><td><div class="bar"><div class="fill" style="width:85%"></div></div></td></tr>
+          <tr><td>Architecture</td><td>6.5 / 10</td><td><div class="bar"><div class="fill" style="width:65%"></div></div></td></tr>
+          <tr><td>Testing</td><td>8.0 / 10</td><td><div class="bar"><div class="fill" style="width:80%"></div></div></td></tr>
+          <tr><td>Documentation</td><td>9.3 / 10</td><td><div class="bar"><div class="fill" style="width:93%"></div></div></td></tr>
+          <tr><td>UX</td><td>8.5 / 10</td><td><div class="bar"><div class="fill" style="width:85%"></div></div></td></tr>
+          <tr><td>Maintainability</td><td>6.8 / 10</td><td><div class="bar"><div class="fill" style="width:68%"></div></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="height:18px"></div>
+    <div class="callout">
+      <b>Path to 9+</b><br>
+      Shrink the trusted core, introduce explicit versioned cryptographic policy, and validate the design with adversarial testing plus an independent security review.
+    </div>
+  </section>
+
+  <footer class="footer">
+    Concept system-design website for Sans Password Manager. This page visualizes review findings and a proposed future architecture; it is not a formal security audit.
+  </footer>
+</main>
+
+<script>
+  const tabs = document.querySelectorAll('.tab');
+  const panels = document.querySelectorAll('.tab-panel');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      panels.forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById(tab.dataset.tab).classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>
