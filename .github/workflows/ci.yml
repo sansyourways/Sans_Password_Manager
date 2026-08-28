@@ -24,6 +24,11 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v6
+        with:
+          # The whitespace gate needs a real base commit to diff against. The
+          # default shallow clone fetches one commit, which is what silently
+          # reduced that check to a diff of HEAD against itself.
+          fetch-depth: 0
 
       - name: Install system test dependencies
         run: |
@@ -55,8 +60,28 @@ jobs:
           python3 -m compileall -q src/spm_core.py src/spm_web_server.py \
             tests/core-test.py browser-extension-universal/native_host.py \
             tests/native_host_protocol.py
-          # Cheapest gate there is, and it was not being enforced.
-          git diff --check "$(git rev-list --max-parents=0 HEAD | tail -n1)"..HEAD
+          # Whitespace errors in the lines this change actually adds.
+          #
+          # This used to diff the repo's root commit against HEAD, but the
+          # checkout was shallow: `git rev-list --max-parents=0 HEAD` found no
+          # parentless commit other than HEAD itself, so the gate compared HEAD
+          # to HEAD and passed unconditionally. It never once ran.
+          #
+          # Scope it to the change instead of the whole tree. Older files carry
+          # a backlog of trailing whitespace (markdown hard line breaks, mostly)
+          # that is not any one PR's to clean up, and a gate that fails on
+          # unrelated history is a gate people learn to ignore.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            base="origin/$GITHUB_BASE_REF"
+          else
+            base="HEAD^"
+          fi
+          if git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+            # Three-dot: what this branch added, ignoring what the base moved on to.
+            git diff --check "$base"...HEAD
+          else
+            printf 'No base commit available; skipping the whitespace gate.\n'
+          fi
 
       - name: Disposable-vault regression suite
         run: |
