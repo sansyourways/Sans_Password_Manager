@@ -45,16 +45,19 @@ jobs:
           # on. Restore the bits rather than trusting the tree's modes.
           chmod +x spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh \
             browser-extension-universal/build.sh browser-extension-universal/install-host.sh \
+            browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh \
             browser-extension-universal/native_host.py tests/native_host_protocol.py
           # The tagged spm.sh must be what src/ produces. A tag whose shipped
           # script does not match its own sources is unauditable, and this is
           # the last point at which that can still be caught.
           ./build.sh --check
           bash -n spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh \
-            browser-extension-universal/build.sh browser-extension-universal/install-host.sh
+            browser-extension-universal/build.sh browser-extension-universal/install-host.sh \
+            browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh
           shellcheck -x -S warning spm.sh install.sh build.sh \
             tests/regression.sh tests/dco-check.sh \
-            browser-extension-universal/build.sh browser-extension-universal/install-host.sh
+            browser-extension-universal/build.sh browser-extension-universal/install-host.sh \
+            browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh
           python3 -m compileall -q browser-extension-universal/native_host.py \
             tests/native_host_protocol.py
           ./tests/regression.sh

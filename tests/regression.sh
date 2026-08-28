@@ -598,6 +598,24 @@ grep -q '"ok": *true' "$TEST_ROOT/bridge-list-dispatch.json"
 
 printf 'Web regression: url field, scheme allowlist and bridge binding\n'
 python3 "$ROOT_DIR/tests/native_host_protocol.py"
+setup_home="$TEST_ROOT/extension-setup-home"
+mkdir -p "$setup_home"
+HOME="$setup_home" XDG_DATA_HOME="$setup_home/data" \
+	"$ROOT_DIR/browser-extension-universal/setup.sh" --browser firefox --no-open \
+	> "$TEST_ROOT/extension-setup.txt"
+grep -q 'Finish in Firefox' "$TEST_ROOT/extension-setup.txt"
+case "$(uname -s)" in
+	Darwin)
+		firefox_manifest="$setup_home/Library/Application Support/Mozilla/NativeMessagingHosts/xyz.sansyourways.spm.json"
+		chromium_manifest="$setup_home/Library/Application Support/Google/Chrome/NativeMessagingHosts/xyz.sansyourways.spm.json"
+		;;
+	*)
+		firefox_manifest="$setup_home/.mozilla/native-messaging-hosts/xyz.sansyourways.spm.json"
+		chromium_manifest="$setup_home/.config/google-chrome/NativeMessagingHosts/xyz.sansyourways.spm.json"
+		;;
+esac
+grep -q 'browser-extension@sansyourways.xyz' "$firefox_manifest"
+grep -q 'infdncbkefpjncplegccokcfpiicadlo' "$chromium_manifest"
 
 # --- 2.10.12 integrity regressions -------------------------------------------
 
