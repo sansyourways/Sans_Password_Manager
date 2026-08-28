@@ -2,7 +2,7 @@
 
 Status: **3.1.0 protocol and popup picker shipped; 3.2.0 guided setup and
 stable extension identity shipped**. The origin-isolated in-field picker is
-next, for 3.3.0.
+next, for 3.4.0.
 
 Phases were rebased onto 3.1.0 after 3.0.0 took the major version for the
 vault-format change, and shifted one release again when 3.2.0 went to the
@@ -10,6 +10,10 @@ guided installer. That is the third rebase -- 2.13.0 shipped the dashboard
 master-password change ahead of this work, 3.0.0 shipped the trusted core ahead
 of it again, and 3.2.0 fixed the installation loop that 3.1.0 left behind. The
 sequence is unchanged every time; only the version each phase targets moved.
+
+That has now happened four times, which is enough to say plainly: **the version
+numbers below are the next free minor at the time of writing, not a
+reservation.** The order is the part worth trusting.
 
 This is an implementation plan with target versions, so it lives here rather
 than in [`ROADMAP.md`](../ROADMAP.md), which deliberately communicates direction
@@ -186,14 +190,14 @@ Not a picker phase. It removes the installation friction that 3.1.0 shipped
 with, and it is separated from the in-field work so that the identity change,
 which requires existing users to reload the extension, lands on its own.
 
-### 3.3.0 — in-field dropdown
+### 3.4.0 — in-field dropdown
 
 - Content script, field detection, extension-origin iframe menu
 - Keyboard navigation (arrows, Enter, Escape), focus handling
 - The fill-path rules above, each with a test
 - Firefox for Android verification pass
 
-### 3.4.0 — cheap unlock and scoping
+### 3.5.0 — cheap unlock and scoping
 
 - WebAuthn unlock in the popup, reusing the Dashboard's ceremony
 - Opt-in `*.` subdomain scoping
@@ -210,7 +214,7 @@ CLI-level and needs no browser:
 - native-host `lock` makes a previously working session fail
 - unlock, list, get, and lock work over native-messaging framing
 
-Wildcard scope and HTTPS downgrade refusal belong to the 3.4.0 scoping phase
+Wildcard scope and HTTPS downgrade refusal belong to the 3.5.0 scoping phase
 and receive their regression assertions with that implementation.
 
 **Manual matrix** — the browser UI. Driving an extension under headless Chromium

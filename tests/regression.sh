@@ -376,6 +376,78 @@ if grep -q 'if not self._same_origin_post():' "$web_script"; then
 	exit 1
 fi
 grep -q 'self.auth_lock = threading.RLock()' "$web_script"
+
+# The dashboard ships its three translation dictionaries as one inline
+# <script>. They are written inside a plain Python triple-quoted string, so an
+# escape intended for JavaScript is consumed by Python first: `\"` in the
+# source reaches the browser as a bare quote, ends the JS string early, and
+# takes the whole dictionary down with a SyntaxError. Nothing observable
+# fails -- the page still renders, because every element carries an English
+# fallback in its markup -- so the only symptom is that the language picker
+# silently does nothing. That shipped, in every release that carried the
+# string, and no test noticed. This parses what the browser is actually
+# handed and checks the three languages against each other while it is there.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$web_script" <<'I18NPY'
+import ast
+import json
+import re
+import sys
+
+source = open(sys.argv[1], encoding="utf-8").read()
+
+# The dictionaries live inside a Python string literal, so the file on disk is
+# one escaping level away from what the browser is handed: `\\"` in the source
+# is correct Python for an emitted `\"`. Decoding the literal first is the
+# whole point -- checking the raw source instead would pass the broken version
+# and fail the fixed one.
+literal = re.search(r'I18N_SCRIPT = (""".*?""")', source, re.S)
+if not literal:
+    sys.exit("I18N_SCRIPT literal was not found")
+emitted = ast.literal_eval(literal.group(1))
+
+match = re.search(r"const DICT = (\{.*?\n  \});", emitted, re.S)
+if not match:
+    sys.exit("the dashboard's DICT literal was not found")
+
+# The literal is JavaScript, and it uses trailing commas, which JSON rejects.
+# Dropping a comma only where the next line closes its object keeps this a
+# check on quoting and escaping rather than on punctuation style -- and it
+# cannot touch the inside of a value, because every value line ends `",`.
+lines = match.group(1).split("\n")
+for index in range(len(lines) - 1):
+    if lines[index].rstrip().endswith(",") and lines[index + 1].lstrip()[:1] in "}]":
+        lines[index] = lines[index].rstrip()[:-1]
+try:
+    dictionaries = json.loads("\n".join(lines))
+except ValueError as exc:
+    sys.exit("the dictionary the browser receives is not parseable: %s" % exc)
+
+missing = {"en", "id", "ja"} - set(dictionaries)
+if missing:
+    sys.exit("translation dictionary is missing %s" % ", ".join(sorted(missing)))
+
+english = set(dictionaries["en"])
+for language in ("id", "ja"):
+    absent = english - set(dictionaries[language])
+    extra = set(dictionaries[language]) - english
+    if absent:
+        sys.exit("%s is missing %d key(s), e.g. %s"
+                 % (language, len(absent), sorted(absent)[0]))
+    if extra:
+        sys.exit("%s has %d key(s) English does not, e.g. %s"
+                 % (language, len(extra), sorted(extra)[0]))
+print("  i18n: 3 languages, %d keys each, dictionary parses as delivered" % len(english))
+I18NPY
+
+# The hamburger exists at every width: under 900px it opens the drawer, above
+# it collapses the sidebar to an icon rail. It was display:none until 900px,
+# which left a desktop user pressing a control that was not there.
+grep -q '\.menu-btn { display: inline-grid; }' "$web_script"
+grep -q 'body\.rail' "$web_script"
+if grep -qE 'transition:[^;]*\bwidth\b' "$web_script"; then
+	printf 'a stylesheet transition still animates width; it relayouts every frame\n' >&2
+	exit 1
+fi
 grep -q 'X-Real-IP' "$web_script"
 grep -q '_sweep_login_failures_locked' "$web_script"
 grep -q 'Stored passphrase cannot be decoded; vault was not changed' "$web_script"

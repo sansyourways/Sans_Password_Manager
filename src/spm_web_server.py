@@ -214,6 +214,10 @@ I18N_SCRIPT = """
       "header.subtitle": "Liquid-glass web interface · GPG encrypted",
       "header.check_update": "Check update",
       "header.logout": "Logout",
+      "nav.collapse": "Collapse sidebar",
+      "nav.expand": "Expand sidebar",
+      "nav.open": "Menu",
+      "nav.close": "Close menu",
       "header.vault": "Vault",
       "section.passwords": "Passwords",
       "chip.online": "Online · read / write",
@@ -369,7 +373,7 @@ I18N_SCRIPT = """
       "settings.mismatch": "The two new passwords do not match.",
       "settings.effect": "What this does",
       "settings.effect_vault": "Re-encrypts the whole vault under the new password.",
-      "settings.effect_recovery": "Rewrites the recovery file so \"spm forgot\" keeps working.",
+      "settings.effect_recovery": "Rewrites the recovery file so \\"spm forgot\\" keeps working.",
       "settings.effect_sessions": "Signs out every other browser session.",
       "settings.effect_backup": "Keeps the previous vault as a .bak and a history snapshot.",
       "nav.overview": "Overview",
@@ -469,6 +473,10 @@ I18N_SCRIPT = """
       "header.subtitle": "Antarmuka web liquid-glass · terenkripsi GPG",
       "header.check_update": "Periksa pembaruan",
       "header.logout": "Keluar",
+      "nav.collapse": "Ciutkan bilah sisi",
+      "nav.expand": "Bentangkan bilah sisi",
+      "nav.open": "Menu",
+      "nav.close": "Tutup menu",
       "header.vault": "Brankas",
       "section.passwords": "Kata Sandi",
       "chip.online": "Online · baca / tulis",
@@ -624,7 +632,7 @@ I18N_SCRIPT = """
       "settings.mismatch": "Kedua kata sandi baru tidak sama.",
       "settings.effect": "Yang akan terjadi",
       "settings.effect_vault": "Mengenkripsi ulang seluruh brankas dengan kata sandi baru.",
-      "settings.effect_recovery": "Menulis ulang file pemulihan agar \"spm forgot\" tetap berfungsi.",
+      "settings.effect_recovery": "Menulis ulang file pemulihan agar \\"spm forgot\\" tetap berfungsi.",
       "settings.effect_sessions": "Mengeluarkan semua sesi browser lain.",
       "settings.effect_backup": "Menyimpan brankas lama sebagai .bak dan snapshot riwayat.",
       "nav.overview": "Ringkasan",
@@ -724,6 +732,10 @@ I18N_SCRIPT = """
       "header.subtitle": "リキッドガラス風Webインターフェース · GPG暗号化",
       "header.check_update": "アップデートを確認",
       "header.logout": "ログアウト",
+      "nav.collapse": "サイドバーを折りたたむ",
+      "nav.expand": "サイドバーを展開",
+      "nav.open": "メニュー",
+      "nav.close": "メニューを閉じる",
       "header.vault": "ボールト",
       "section.passwords": "パスワード",
       "chip.online": "オンライン · 読み/書き",
@@ -879,7 +891,7 @@ I18N_SCRIPT = """
       "settings.mismatch": "\u65b0\u3057\u3044\u30d1\u30b9\u30ef\u30fc\u30c9\u304c\u4e00\u81f4\u3057\u307e\u305b\u3093\u3002",
       "settings.effect": "\u5b9f\u884c\u3055\u308c\u308b\u5185\u5bb9",
       "settings.effect_vault": "\u4fdd\u7ba1\u5eab\u5168\u4f53\u3092\u65b0\u3057\u3044\u30d1\u30b9\u30ef\u30fc\u30c9\u3067\u518d\u6697\u53f7\u5316\u3057\u307e\u3059\u3002",
-      "settings.effect_recovery": "\"spm forgot\" \u304c\u5f15\u304d\u7d9a\u304d\u4f7f\u3048\u308b\u3088\u3046\u30ea\u30ab\u30d0\u30ea\u30d5\u30a1\u30a4\u30eb\u3092\u66f8\u304d\u63db\u3048\u307e\u3059\u3002",
+      "settings.effect_recovery": "\\"spm forgot\\" \u304c\u5f15\u304d\u7d9a\u304d\u4f7f\u3048\u308b\u3088\u3046\u30ea\u30ab\u30d0\u30ea\u30d5\u30a1\u30a4\u30eb\u3092\u66f8\u304d\u63db\u3048\u307e\u3059\u3002",
       "settings.effect_sessions": "\u4ed6\u306e\u3059\u3079\u3066\u306e\u30d6\u30e9\u30a6\u30b6\u30bb\u30c3\u30b7\u30e7\u30f3\u3092\u30b5\u30a4\u30f3\u30a2\u30a6\u30c8\u3057\u307e\u3059\u3002",
       "settings.effect_backup": "\u4ee5\u524d\u306e\u4fdd\u7ba1\u5eab\u3092 .bak \u3068\u5c65\u6b74\u30b9\u30ca\u30c3\u30d7\u30b7\u30e7\u30c3\u30c8\u3068\u3057\u3066\u4fdd\u6301\u3057\u307e\u3059\u3002",
       "nav.overview": "\u6982\u8981",
@@ -955,6 +967,13 @@ I18N_SCRIPT = """
       const key = node.getAttribute("data-i18n-placeholder");
       const text = lookup(key, current);
       if (text !== null && text !== undefined) node.setAttribute("placeholder", text);
+    });
+    /* Collapsed to a rail, a nav item's only remaining label is its tooltip.
+       Leaving that untranslated would make the icon-only sidebar English-only. */
+    document.querySelectorAll("[data-i18n-title]").forEach((node) => {
+      const key = node.getAttribute("data-i18n-title");
+      const text = lookup(key, current);
+      if (text !== null && text !== undefined) node.setAttribute("title", text);
     });
     const picker = document.getElementById("lang-picker");
     if (picker) picker.value = current;
@@ -1069,6 +1088,18 @@ DESIGN_CSS = """
   --motion-fast: 140ms;
   --motion-base: 200ms;
   --motion-live: 320ms;
+  /* A07 durations. Exits are faster than entrances on purpose: a departing
+     surface has already been decided about, and equal timings make dismissal
+     feel sticky. --motion-reveal fires once per element, ever; --motion-ambient
+     is reserved for state that is genuinely live. */
+  --motion-slow: 320ms;
+  --motion-reveal: 500ms;
+  --motion-ambient: 8s;
+  --motion-tick: 950ms;
+  --stagger: 40ms;
+  --ease-entrance: cubic-bezier(.2, .7, .3, 1);
+  --ease-exit: cubic-bezier(.4, 0, 1, 1);
+  --rail-w: 68px;
 }
 
 /* ---- Theme: dark (default) ---- */
@@ -1274,7 +1305,10 @@ p  { margin: 0; }
 }
 @supports not (backdrop-filter: blur(4px)) { .topbar { background: var(--bg); } }
 
-.menu-btn { display: none; }
+/* Shown at every width. Under 900px it opens the drawer; above, it collapses
+   the sidebar to an icon rail. It used to be display:none until 900px, which
+   left the desktop button in the markup but invisible and inert. */
+.menu-btn { display: inline-grid; }
 
 .search {
   position: relative; flex: 1; max-width: 460px;
@@ -1496,7 +1530,9 @@ textarea.input { min-height: 120px; resize: vertical; font-family: var(--mono); 
 .lockbar { display: flex; align-items: center; gap: 7px; font-size: var(--fs-xs); color: var(--text-faint); }
 .lockbar.warn { color: var(--warn); font-weight: 600; }
 .lockbar .track { width: 44px; height: 4px; border-radius: var(--r-full); background: var(--surface-3); overflow: hidden; }
-.lockbar .fill { height: 100%; width: 100%; background: var(--ok); transition: width .95s linear, background .3s var(--ease); }
+/* scaleX, not width: width relayouts the track on every one of these frames,
+   and this one repaints once a second for the life of the session (A07 4.6). */
+.lockbar .fill { height: 100%; width: 100%; transform-origin: left center; background: var(--ok); transition: transform var(--motion-tick) linear, background var(--motion-base) var(--ease); }
 .lockbar.warn .fill { background: var(--warn); }
 
 /* TOTP */
@@ -1510,7 +1546,7 @@ textarea.input { min-height: 120px; resize: vertical; font-family: var(--mono); 
   font-variant-numeric: tabular-nums; line-height: 1;
 }
 .totp-ring { --pct: 100; width: 100%; max-width: 240px; height: 5px; border-radius: var(--r-full); background: var(--surface-3); overflow: hidden; }
-.totp-ring i { display: block; height: 100%; width: calc(var(--pct) * 1%); background: var(--accent); transition: width .95s linear; }
+.totp-ring i { display: block; height: 100%; width: 100%; transform-origin: left center; transform: scaleX(calc(var(--pct) / 100)); background: var(--accent); transition: transform var(--motion-tick) linear; }
 
 /* Login */
 .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: var(--sp-5); }
@@ -1529,7 +1565,7 @@ textarea.input { min-height: 120px; resize: vertical; font-family: var(--mono); 
   display: grid; place-items: center;
 }
 .meter { height: 6px; border-radius: var(--r-full); background: var(--surface-3); overflow: hidden; margin-top: var(--sp-3); }
-.meter i { display: block; height: 100%; width: 0; transition: width .3s var(--ease), background .3s var(--ease); }
+.meter i { display: block; height: 100%; width: 100%; transform-origin: left center; transform: scaleX(0); transition: transform var(--motion-base) var(--ease), background var(--motion-base) var(--ease); }
 .switch-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--border); }
 .switch-row:last-child { border-bottom: none; }
 .switch-row span { font-size: var(--fs-md); }
@@ -1754,6 +1790,109 @@ tr[data-row] .chip { margin-left: 6px; vertical-align: middle; }
 .score-ok { color: var(--ok); }
 .score-warn { color: var(--warn); }
 .score-bad { color: var(--danger); }
+
+/* ============================================================
+   Desktop rail, and the motion layer.
+   Declared last for the same reason the chips above are: the console
+   block restyles most of these selectors, so anything that has to win
+   over it comes after it.
+   ============================================================ */
+
+/* ---- Sidebar rail (>= 901px) ----
+   Under 900px the sidebar is an off-canvas drawer and the hamburger opens
+   it. Above that there is nothing to open, so the same control collapses
+   the sidebar to an icon rail instead.
+
+   Labels are clipped, not display:none, so they stay in the accessibility
+   tree -- a screen reader still reads "Passwords", and the tooltip is a
+   convenience for pointer users rather than the only remaining name.
+
+   The collapse is deliberately instant. The sidebar is a grid column, so
+   animating it would animate grid-template-columns and relayout the whole
+   page on every frame, which A07 4.6 forbids outright. */
+@media (min-width: 901px) {
+  body.rail { --sidebar-w: var(--rail-w); }
+  body.rail .sidebar { padding-left: var(--sp-2); padding-right: var(--sp-2); }
+  body.rail .brand { justify-content: center; }
+  body.rail .nav-item { justify-content: center; padding-left: 0; padding-right: 0; }
+  body.rail .vault-chip { justify-content: center; padding-left: 0; padding-right: 0; }
+  body.rail .sidebar-foot .btn { padding-left: 0; padding-right: 0; }
+  body.rail .brand-text,
+  body.rail .nav-text,
+  body.rail .nav-label,
+  body.rail .nav-count,
+  body.rail .vault-chip .path,
+  body.rail .rail-label {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+  /* With the label gone, the left rule and the tinted ground are the only
+     things left saying which page you are on, so both have to stay. */
+  body.rail .nav-item.active .nav-ico { color: var(--accent); }
+}
+
+/* ---- First-sight reveal: the transcript prints ----
+   Blocks arrive in reading order, one stagger step apart, once per load.
+   A07 4.2 forbids entrance animation that re-fires on scroll, so this is
+   bound to load and never to an IntersectionObserver; 4.4 caps the stagger
+   at eight items, past which the group arrives as one.
+
+   The static state is the truth. These rules only ever *add* motion: they
+   sit behind an explicit no-preference query and behind a class that only
+   JS sets. With JS off, motion off, or the query unsupported, every block
+   is already at its final position -- which is the failure A07 4.5 calls
+   the single most common bug in this area. */
+@media (prefers-reduced-motion: no-preference) {
+  body.can-reveal .content > [data-reveal] {
+    opacity: 0;
+    transform: translateY(var(--sp-2));
+    transition: opacity var(--motion-reveal) var(--ease-entrance),
+                transform var(--motion-reveal) var(--ease-entrance);
+    transition-delay: var(--reveal-delay, 0ms);
+  }
+  body.can-reveal .content > [data-reveal][data-seen] { opacity: 1; transform: none; }
+}
+
+/* ---- Live session indicator ----
+   A07 4.2 permits a loop only on something genuinely live. This tracks the
+   idle countdown and stops the moment it is paused, so it reports session
+   state rather than decorating the sidebar. */
+@keyframes sessionpulse {
+  0%, 92%, 100% { opacity: 1; }
+  96%           { opacity: .3; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  body:not(.lock-paused) .vault-chip .dot {
+    animation: sessionpulse var(--motion-ambient) var(--ease) infinite;
+  }
+}
+
+/* ---- Row hover ----
+   The border is always present and always the same width, so hovering a row
+   repaints a colour instead of reflowing the table. */
+table.t tbody tr[data-row] td:first-child {
+  border-left: 2px solid transparent;
+  transition: border-color var(--motion-base) var(--ease);
+}
+table.t tbody tr[data-row]:hover td:first-child { border-left-color: var(--accent); }
+
+/* ---- Entrances are slower than exits ----
+   A07 4.3. A departing surface has already been decided about; matching the
+   two durations is what makes dismissal feel sticky. */
+@media (max-width: 900px) {
+  .sidebar { transition: transform var(--motion-fast) var(--ease-exit); }
+  .scrim { transition: opacity var(--motion-fast) var(--ease-exit); }
+  body.nav-open .sidebar { transition: transform var(--motion-slow) var(--ease-entrance); }
+  body.nav-open .scrim { transition: opacity var(--motion-slow) var(--ease-entrance); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vault-chip .dot { animation: none; }
+  /* Belt and braces: the reveal rules above cannot strand content because
+     they only exist under no-preference, but stating the final state here
+     means a future edit that moves them cannot either. */
+  .content > [data-reveal] { opacity: 1; transform: none; }
+}
 </style>
 """
 
@@ -1800,14 +1939,53 @@ SHELL_SCRIPT = """
     }
   };
 
-  /* ---- mobile nav ----------------------------------------------------- */
+  /* ---- sidebar: a drawer under 900px, an icon rail above ---------------
+     One control, two jobs, because the sidebar has two shapes. Below 900px
+     it is off-canvas and the button opens it; above, it is always on screen
+     and there is nothing to open, so the button collapses it to icons
+     instead. That upper half did not exist -- the button was rendered and
+     then hidden by CSS, so on a desktop it was dead markup. */
+  var DESKTOP = "(min-width: 901px)";
+  function isDesktop() {
+    return !!(window.matchMedia && window.matchMedia(DESKTOP).matches);
+  }
+  function syncTrigger() {
+    var trigger = document.querySelector(".menu-btn");
+    if (!trigger || !document.body) return;
+    var desktop = isDesktop();
+    var expanded = desktop
+      ? !document.body.classList.contains("rail")
+      : document.body.classList.contains("nav-open");
+    /* aria-expanded describes the sidebar either way: on desktop "expanded"
+       means showing labels, on mobile it means on screen. */
+    trigger.setAttribute("aria-expanded", expanded ? "true" : "false");
+    var key, fb;
+    if (desktop) {
+      key = expanded ? "nav.collapse" : "nav.expand";
+      fb = expanded ? "Collapse sidebar" : "Expand sidebar";
+    } else {
+      key = expanded ? "nav.close" : "nav.open";
+      fb = expanded ? "Close menu" : "Menu";
+    }
+    trigger.setAttribute("aria-label", t(key, fb));
+    trigger.setAttribute("title", t(key, fb));
+    trigger.setAttribute("data-i18n-title", key);
+  }
   function setNav(open) {
     document.body.classList.toggle("nav-open", open);
-    var trigger = document.querySelector(".menu-btn");
-    if (trigger) trigger.setAttribute("aria-expanded", open ? "true" : "false");
+    syncTrigger();
+  }
+  function setRail(on) {
+    document.body.classList.toggle("rail", on);
+    /* Storage can throw outright where site data is blocked, and a sidebar
+       that refuses to collapse because a preference could not be saved is a
+       worse failure than one that forgets. */
+    try { localStorage.setItem("spm.rail", on ? "1" : "0"); } catch (e) {}
+    syncTrigger();
   }
   window.SPM_toggleNav = function () {
-    setNav(!document.body.classList.contains("nav-open"));
+    if (isDesktop()) setRail(!document.body.classList.contains("rail"));
+    else setNav(!document.body.classList.contains("nav-open"));
   };
   function wireMobileNav() {
     // Navigation is deliberately wired directly. Delegating through an SVG
@@ -1822,6 +2000,64 @@ SHELL_SCRIPT = """
       e.preventDefault();
       setNav(false);
     });
+    /* Crossing the breakpoint with the drawer open would otherwise leave
+       nav-open set on a layout that has no drawer, and the button's label
+       would still describe the other mode. */
+    if (window.matchMedia) {
+      var mq = window.matchMedia(DESKTOP);
+      var onChange = function () {
+        if (mq.matches) document.body.classList.remove("nav-open");
+        syncTrigger();
+      };
+      if (mq.addEventListener) mq.addEventListener("change", onChange);
+      else if (mq.addListener) mq.addListener(onChange);
+    }
+    syncTrigger();
+  }
+
+  /* ---- first-sight reveal ---------------------------------------------
+     The transcript prints: the page's top-level blocks arrive in reading
+     order, once per load. Bound to load and never to scroll position --
+     A07 4.2 prohibits entrance animation that re-fires as content scrolls
+     into view.
+
+     Everything here only ever adds motion on top of a finished page. The
+     hiding rules live behind a no-preference query *and* behind the
+     can-reveal class set below, so with JS off, motion off, or the query
+     unsupported, the content was never hidden in the first place. */
+  function wireReveal() {
+    var main = document.querySelector(".content");
+    if (!main || !window.matchMedia) return;
+    if (!window.matchMedia("(prefers-reduced-motion: no-preference)").matches) return;
+    var kids = [];
+    for (var i = 0; i < main.children.length; i++) {
+      var el = main.children[i];
+      /* The import overlay is positioned over the card it belongs to and is
+         shown by its own class; giving it an entrance would fight that. */
+      if (el.classList && el.classList.contains("overlay")) continue;
+      kids.push(el);
+    }
+    if (!kids.length) return;
+    /* A07 4.4 caps the stagger at about eight items. Past that the delay on
+       the last item reads as the page being slow rather than as sequence,
+       so the group arrives together instead. */
+    var stagger = kids.length <= 8;
+    kids.forEach(function (el, i) {
+      el.setAttribute("data-reveal", "");
+      if (stagger) el.style.setProperty("--reveal-delay", "calc(var(--stagger) * " + i + ")");
+    });
+    document.body.classList.add("can-reveal");
+    var shown = false;
+    function show() {
+      if (shown) return;
+      shown = true;
+      kids.forEach(function (el) { el.setAttribute("data-seen", ""); });
+    }
+    /* requestAnimationFrame does not fire in a background tab, so a page
+       opened in one would sit at opacity 0 until it was focused. The timer
+       is the guarantee; the frames are just the fast path. */
+    setTimeout(show, 1000);
+    requestAnimationFrame(function () { requestAnimationFrame(show); });
   }
 
   /* ---- instant table filter ------------------------------------------- */
@@ -1863,6 +2099,7 @@ SHELL_SCRIPT = """
   document.addEventListener("DOMContentLoaded", function () {
     wireMobileNav();
     wireSearch();
+    try { wireReveal(); } catch (e) { document.body.classList.remove("can-reveal"); }
   });
 })();
 </script>
@@ -1875,13 +2112,19 @@ LOCKBAR_SCRIPT = """
 (function () {
   var IDLE_MS = 30000, WARN_AT = 10;
   var deadline = Date.now() + IDLE_MS, paused = false, locking = false, ticker;
+  /* The session dot is allowed to pulse only while the session is actually
+     counting down (A07 4.2 permits a loop on live state and nothing else),
+     so the countdown owns the class and the stylesheet reads it. */
+  function syncLive() {
+    if (document.body) document.body.classList.toggle("lock-paused", paused || locking);
+  }
   function reset() { if (!paused && !locking) deadline = Date.now() + IDLE_MS; }
   function render() {
     var left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
     var bar = document.getElementById("lockbar");
     if (bar) {
       var fill = bar.querySelector(".fill");
-      if (fill) fill.style.width = (left / (IDLE_MS / 1000) * 100) + "%";
+      if (fill) fill.style.transform = "scaleX(" + (left / (IDLE_MS / 1000)) + ")";
       bar.classList.toggle("warn", left <= WARN_AT);
       var lbl = bar.querySelector(".lbl");
       if (lbl) {
@@ -1891,6 +2134,7 @@ LOCKBAR_SCRIPT = """
     }
     if (!paused && !locking && left <= 0) {
       locking = true;
+      syncLive();
       clearInterval(ticker);
       lock();
     }
@@ -1918,8 +2162,8 @@ LOCKBAR_SCRIPT = """
     });
   }
   window.SPM_AutoLock = {
-    pause: function () { paused = true; render(); },
-    resume: function () { paused = false; reset(); render(); },
+    pause: function () { paused = true; syncLive(); render(); },
+    resume: function () { paused = false; syncLive(); reset(); render(); },
     restart: reset
   };
   ["click", "keydown", "mousemove", "touchstart", "scroll"].forEach(function (ev) {
@@ -2080,12 +2324,32 @@ def _nav_html(active, counts):
                 if n:
                     badge = f'<span class="nav-count">{n}</span>'
             out.append(
-                f'<a class="{cls}" href="{href}">'
+                f'<a class="{cls}" href="{href}" title="{html.escape(fallback)}" '
+                f'data-i18n-title="{i18n}">'
                 f'<span class="nav-ico" aria-hidden="true">{_icon(ico)}</span>'
-                f'<span data-i18n="{i18n}">{fallback}</span>{badge}</a>'
+                f'<span class="nav-text" data-i18n="{i18n}">{fallback}</span>{badge}</a>'
             )
         out.append("</div>")
     return "".join(out)
+
+
+RAIL_BOOTSTRAP = """
+<script>
+/* Runs inline, immediately after <body> opens, because reading the
+   preference in DOMContentLoaded paints the sidebar expanded and then snaps
+   it to the rail -- which reads as the page glitching rather than as a
+   remembered setting. Any storage failure leaves the sidebar expanded,
+   which is the state that needs no explanation. */
+(function () {
+  try {
+    if (localStorage.getItem("spm.rail") === "1" &&
+        window.matchMedia && window.matchMedia("(min-width: 901px)").matches) {
+      document.body.classList.add("rail");
+    }
+  } catch (e) {}
+})();
+</script>
+"""
 
 
 LANG_BOOTSTRAP = """
@@ -2132,6 +2396,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
 {DESIGN_CSS}
 </head>
 <body class="theme-dark">
+{RAIL_BOOTSTRAP}
 {ICON_SPRITE}
 <a class="skip-link" href="#main-content">Skip to vault content</a>
 <div class="scrim" aria-hidden="true"></div>
@@ -2150,9 +2415,10 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
         <span class="dot" aria-hidden="true"></span>
         <span class="path">{html.escape(vault_path)}</span>
       </div>
-      <a class="btn btn-ghost btn-sm btn-block" href="/logout">
+      <a class="btn btn-ghost btn-sm btn-block" href="/logout"
+         title="Logout" data-i18n-title="header.logout">
         {_icon("logout", "icon icon-sm")}
-        <span data-i18n="header.logout">Logout</span>
+        <span class="rail-label" data-i18n="header.logout">Logout</span>
       </a>
     </div>
   </aside>
@@ -2164,7 +2430,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
       {search_html}
       <div class="topbar-right">
         <div class="lockbar" id="lockbar" title="Idle auto-lock">
-          <span class="lbl">Locks in 30s</span>
+          <span class="lbl" aria-live="off">Locks in 30s</span>
           <span class="track"><span class="fill"></span></span>
         </div>
         <select class="select" id="lang-picker" aria-label="Language">
@@ -3297,7 +3563,7 @@ GENERATOR_SCRIPT = """
     else if (bits >= 60) { key = "generator.strength.moderate";  fb = "Moderate";  pct = 55;  col = "var(--warn)"; }
     else if (bits < 40)  { key = "generator.strength.very_weak"; fb = "Very weak"; pct = 15;  col = "var(--danger)"; }
     var meter = document.getElementById("meter-fill");
-    if (meter) { meter.style.width = pct + "%"; meter.style.background = col; }
+    if (meter) { meter.style.transform = "scaleX(" + (pct / 100) + ")"; meter.style.background = col; }
     var el = document.getElementById("pw-stats");
     if (el) {
       el.textContent = t(key, fb) + " \\u00b7 ~" + bits.toFixed(1) + " " + t("generator.stats.bits", "bits") +
