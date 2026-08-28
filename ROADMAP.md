@@ -25,9 +25,21 @@ co-owners of it. That review is a design concept, not a formal security audit.
 - **Universal browser-extension popup picker — shipped in 3.1.0.** Chrome,
   Chromium, Edge, Brave, Opera, Vivaldi, and Firefox desktop share one source
   tree. The secret-free account-list protocol, memory-only native-host session,
-  exact-host selection, installers, and installation tutorials are delivered.
+  and exact-host selection are delivered.
+
+- **Guided extension setup — shipped in 3.2.0.** 3.1.0's installation was a
+  loop: load the extension unpacked, read the ID the browser generated from the
+  install directory, paste it into a second command, restart. The ID differed
+  per machine, so it could not be documented. A public development key now
+  gives every unpacked copy one stable identity, `extension-id.sh` derives it
+  from the manifest key the way the browser does so the two cannot drift, and
+  `setup.sh` performs the build, registration, and browser hand-off in one
+  command. Existing installs must remove the previously loaded extension, since
+  its ID changes.
+
   The in-field picker and optional WebAuthn unlock remain phased in
-  [`docs/BROWSER-EXTENSION-ROADMAP.md`](docs/BROWSER-EXTENSION-ROADMAP.md).
+  [`docs/BROWSER-EXTENSION-ROADMAP.md`](docs/BROWSER-EXTENSION-ROADMAP.md),
+  retargeted to 3.3.0 and 3.4.0.
 
 ## Next — safer integrations
 
