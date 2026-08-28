@@ -7,6 +7,26 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+### Fixed
+- **Sourcing `spm.sh` no longer runs it.** The script ended in a bare
+  `main "$@"`, so `source spm.sh` -- the ordinary way to reach one of its
+  functions from a test or a helper -- fell straight into the interactive
+  menu. A menu blocked on `read` keeps whatever it has already acquired, and
+  that includes an exclusive `flock` on `${VAULT_FILE}.lock`; for a caller that
+  had not set `PASSWORD_VAULT`, that is the operator's real vault. One was
+  found holding a live vault's lock for fourteen hours, which would have
+  blocked every write for as long as it ran.
+
+  `main` is now called only when the file is executed. The regression suite
+  had been working around this by sourcing a copy with the last line stripped
+  by `sed '$d'` -- correct only for as long as `main "$@"` stayed the final
+  line -- and now sources the script directly.
+
+  The suite also asserts its own isolation after sourcing: `VAULT_FILE` must
+  resolve inside the disposable test root. It always did, but the failure mode
+  is a locked live vault rather than a red test, so it is worth stating rather
+  than assuming.
+
 ## [3.0.0] - 2026-08-29
 
 **A major version because the vault format changed, not because the feature

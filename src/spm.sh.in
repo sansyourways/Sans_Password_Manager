@@ -7269,4 +7269,14 @@ main() {
 	esac
 }
 
-main "$@"
+# Run main only when this file is executed, never when it is sourced.
+#
+# Without this, `source spm.sh` fell straight into the interactive menu, and a
+# menu blocked on `read` holds whatever it had already acquired -- including an
+# exclusive flock on ${VAULT_FILE}.lock, which for a caller that had not set
+# PASSWORD_VAULT is the operator's real vault. A sourced helper that silently
+# locks a live vault until it is killed is not a footgun anyone should have to
+# know about; the guard removes it rather than documenting it.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+	main "$@"
+fi
