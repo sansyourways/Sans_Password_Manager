@@ -7,6 +7,28 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-08-29
+
+### Added
+- **Universal browser-extension popup picker.** One Manifest V3 source tree now
+  supports Chrome, Chromium, Edge, Brave, Opera, Vivaldi, and Firefox desktop.
+  The popup discovers accounts for the active tab's exact hostname and fills
+  only the account explicitly selected by the user.
+- A secret-free `spm bridge-list <host>` native-messaging verb. It returns only
+  record ID, label, username, and URL; password and notes fields never cross
+  the discovery boundary. `bridge-get` independently re-verifies the hostname
+  when the selected credential is retrieved.
+- A persistent native host with memory-only unlock state, explicit lock, a
+  five-minute idle limit, a twelve-hour absolute limit, message size limits,
+  and compatibility for the original one-shot Chromium extension.
+- Linux and macOS native-host registration for the supported browser families,
+  separate Chromium and Firefox manifests, build tooling, protocol regression
+  tests, and complete README installation tutorials.
+
+### Changed
+- The browser-extension roadmap now records 3.1.0 as shipped and keeps the
+  origin-isolated in-field picker and WebAuthn unlock in later phases.
+
 ## [3.0.2] - 2026-08-29
 
 ### Fixed

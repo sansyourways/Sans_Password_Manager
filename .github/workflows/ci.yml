@@ -42,14 +42,17 @@ jobs:
 
       - name: Static checks
         run: |
-          bash -n spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh
+          bash -n spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh \
+            browser-extension-universal/build.sh browser-extension-universal/install-host.sh
           shellcheck -x -S warning spm.sh install.sh build.sh \
-            tests/regression.sh tests/dco-check.sh
+            tests/regression.sh tests/dco-check.sh \
+            browser-extension-universal/build.sh browser-extension-universal/install-host.sh
           # The trusted core and the dashboard are Python that ships inside a
           # shell script. Compile them as themselves, so a syntax error cannot
           # reach a release disguised as a valid shell heredoc.
           python3 -m compileall -q src/spm_core.py src/spm_web_server.py \
-            tests/core-test.py
+            tests/core-test.py browser-extension-universal/native_host.py \
+            tests/native_host_protocol.py
           # Cheapest gate there is, and it was not being enforced.
           git diff --check "$(git rev-list --max-parents=0 HEAD | tail -n1)"..HEAD
 
@@ -64,6 +67,8 @@ jobs:
           test -n "$version"
           grep -q "Current release: \*\*$version\*\*" README.md
           grep -q '"version": "'"$version"'"' browser-extension/manifest.json
+          grep -q '"version": "'"$version"'"' browser-extension-universal/manifest.chromium.json
+          grep -q '"version": "'"$version"'"' browser-extension-universal/manifest.firefox.json
 
   termux:
     name: termux

@@ -27,6 +27,7 @@ spm_portable_*.zip
 *.tar.gz
 *.zip
 *.zip.sha256
+browser-extension-universal/dist/
 
 # Temp files
 /tmp/

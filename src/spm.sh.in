@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.0.2"
+VERSION="3.1.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -4998,6 +4998,37 @@ PY
 	return "$status"
 }
 
+cmd_bridge_list() {
+	local host="${1:-}" tmp
+	[ -n "$host" ] || die "Browser hostname required."
+	IFS= read -r MASTER_PW || die "Master password required on stdin."
+	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	local status=0
+	python3 - "$tmp" "$host" <<'PY' || status=$?
+import json,re,sys,urllib.parse
+path,requested=sys.argv[1:]; requested=requested.lower().strip(".")
+if not requested or any(c.isspace() for c in requested):
+ print(json.dumps({"ok":False,"error":"invalid browser hostname"}));raise SystemExit(2)
+matches=[]
+for line in open(path,encoding="utf-8",errors="replace"):
+ p=line.rstrip("\n").split("\t")
+ if not p or not p[0].isdigit() or len(p)<6:continue
+ rid,label,user,notes=p[0],p[1],p[2],p[4]
+ url=p[6] if len(p)>6 else ""
+ candidates={label.lower().strip(".")}
+ for token in ([url] if url else [])+re.findall(r"https?://[^\s]+",notes):
+  if not re.match(r"(?i)^https?://",token):continue
+  try:candidates.add((urllib.parse.urlparse(token).hostname or "").lower().strip("."))
+  except ValueError:pass
+ candidates.discard("")
+ if requested in candidates:
+  matches.append({"id":rid,"label":label,"username":user,"url":url})
+print(json.dumps({"ok":True,"matches":matches}))
+PY
+	secure_wipe "$tmp"; MASTER_PW=""
+	return "$status"
+}
+
 cmd_help() {
 	print_banner
 
@@ -7171,10 +7202,14 @@ interactive_menu() {
 main() {
 	# Native messaging is a machine-readable protocol: never emit language or
 	# consent prompts before its single JSON response.
-	if [ "${1:-}" = "bridge-get" ]; then
+	if [ "${1:-}" = "bridge-get" ] || [ "${1:-}" = "bridge-list" ]; then
+		local bridge_cmd="$1"
 		shift
 		acquire_cli_vault_lock
-		cmd_bridge_get "$@"
+		case "$bridge_cmd" in
+			bridge-get) cmd_bridge_get "$@" ;;
+			bridge-list) cmd_bridge_list "$@" ;;
+		esac
 		return
 	fi
 	# Help must remain available before dependency installation, language, or

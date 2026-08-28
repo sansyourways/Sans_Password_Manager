@@ -580,8 +580,24 @@ printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_get 1 example.invalid \
 grep -q '"ok": *true' "$TEST_ROOT/bridge-notes.json" \
 	|| { printf 'a pre-2.12.0 notes-embedded URL stopped binding\n' >&2
 	     cat "$TEST_ROOT/bridge-notes.json" >&2; exit 1; }
+printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_list bound.example.invalid \
+	> "$TEST_ROOT/bridge-list.json" || true
+grep -q '"ok": *true' "$TEST_ROOT/bridge-list.json"
+grep -q '"id": *"'"$bound_id"'"' "$TEST_ROOT/bridge-list.json"
+if grep -q "$AUDIT_PASSWORD\|url-secret" "$TEST_ROOT/bridge-list.json"; then
+	printf 'bridge-list exposed secret material\n' >&2; exit 1
+fi
+printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_list no-match.example.invalid \
+	> "$TEST_ROOT/bridge-list-empty.json" || true
+grep -q '"matches": *\[\]' "$TEST_ROOT/bridge-list-empty.json"
+printf '%s\n' "$AUDIT_PASSWORD" | "$ROOT_DIR/spm.sh" bridge-list bound.example.invalid \
+	> "$TEST_ROOT/bridge-list-dispatch.json"
+grep -q '"ok": *true' "$TEST_ROOT/bridge-list-dispatch.json"
+[ "$(wc -l < "$TEST_ROOT/bridge-list-dispatch.json" | tr -d ' ')" = 1 ] \
+	|| { printf 'bridge-list dispatch emitted prompts around its JSON response\n' >&2; exit 1; }
 
 printf 'Web regression: url field, scheme allowlist and bridge binding\n'
+python3 "$ROOT_DIR/tests/native_host_protocol.py"
 
 # --- 2.10.12 integrity regressions -------------------------------------------
 

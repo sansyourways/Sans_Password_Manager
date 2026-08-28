@@ -1,7 +1,7 @@
 # Browser extension roadmap — URL auto-bind and the account picker
 
-Status: **planned**, not started. Written against 2.12.0, which added the URL
-field this work depends on.
+Status: **3.1.0 protocol and popup picker shipped**. The origin-isolated
+in-field picker is next for 3.2.0.
 
 Phases were rebased onto 3.1.0 after 3.0.0 took the major version for the
 vault-format change. That is the second rebase -- 2.13.0 shipped the dashboard
@@ -21,9 +21,10 @@ without typing a record ID or a master password every time.
 
 ## Where we are
 
-`browser-extension/` currently ships a Chromium MV3 extension with a popup that
-asks for a **record ID** and the **master password**, then calls
-`spm bridge-get <id> <host>` through a native-messaging host.
+`browser-extension-universal/` now ships one Chromium-family/Firefox source
+tree. Its popup unlocks a memory-only native-host session, lists accounts for
+the active tab's exact hostname, and fills the account the user chooses. The
+original `browser-extension/` remains for compatibility.
 
 It works, and it is deliberately explicit. It is also not usable as a daily
 autofill tool, for two reasons that decide the rest of this plan.
@@ -71,14 +72,13 @@ which is the release target for that platform.
 
 ## Protocol
 
-Replace the single verb with four. The master password reaches `bridge-unlock`
-on stdin, exactly as `bridge-get` takes it today.
+The shipped boundary keeps both vault operations as CLI verbs and session
+state inside the persistent native host. The master password reaches the CLI
+only on stdin, exactly as `bridge-get` took it previously.
 
 ```
-spm bridge-unlock            master on stdin  -> { ok, token }
-spm bridge-list  <host>      -> { ok, matches: [ {id, label, username, url} ] }
-spm bridge-get   <id> <host> -> { ok, username, password }     (unchanged)
-spm bridge-lock              -> { ok }
+spm bridge-list  <host>      master on stdin -> { ok, matches: [ {id, label, username, url} ] }
+spm bridge-get   <id> <host> master on stdin -> { ok, username, password }
 ```
 
 `bridge-list` **never returns a secret field**. That is the property to assert
@@ -161,9 +161,10 @@ The wildcard is expanded by the bridge, never inferred from a bare hostname.
 
 One release for all of this would be too large to review or bisect.
 
-### 3.1.0 — protocol and popup picker
+### 3.1.0 — protocol and popup picker — **shipped**
 
-- `bridge-unlock` / `bridge-list` / `bridge-lock`; `bridge-get` unchanged
+- Secret-free `bridge-list`; `bridge-get` remains hostname-bound
+- Unlock and lock are native-host messages, so no reusable token or daemon is exposed
 - Session in the native host behind a persistent port
 - Popup lists matching accounts for the current tab and fills the chosen one
 - Firefox build: polyfill, second native-host manifest, install docs
@@ -190,10 +191,12 @@ CLI-level and needs no browser:
 
 - `bridge-list` returns matches for a bound host and an empty list otherwise
 - `bridge-list` output contains **no** secret, under mutation
-- an expired or absent session is refused by `list` and `get`
-- `bridge-lock` makes a previously working token fail
-- wildcard scope matches a subdomain; a bare host does not
-- an `https://` record refuses an `http://` page
+- the native host refuses `list` and `get` without an unlocked session
+- native-host `lock` makes a previously working session fail
+- unlock, list, get, and lock work over native-messaging framing
+
+Wildcard scope and HTTPS downgrade refusal belong to the 3.3.0 scoping phase
+and receive their regression assertions with that implementation.
 
 **Manual matrix** — the browser UI. Driving an extension under headless Chromium
 with `--load-extension` is possible and worth revisiting, but it is its own
@@ -201,9 +204,9 @@ project and should not gate 3.1.0.
 
 ## Packaging
 
-`browser-extension/` is already zipped recursively into the release archive, so
-"ship it in the bundle" needs no packaging change. Local `*.bak` files in that
-directory are gitignored and excluded from the archive.
+Both `browser-extension/` (compatibility) and `browser-extension-universal/`
+are zipped recursively into the release archive. Generated `dist/` builds and
+local `*.bak` files are excluded.
 
 ## Open questions
 
