@@ -39,11 +39,19 @@ spm.*.tmp
 GEMINI.md
 .github/commands/
 .github/workflows/gemini-*.yml
-release-2.3.0.md
-release-2.*.md
+/release-2.*.md
 
-# Local helper docs and temp scripts
+# Local helper docs, internal reports and temp scripts.
+# These are working notes, not repository content: they are kept on the
+# maintainer's disk and deliberately never published. Listing them here is not
+# on its own enough -- a rule added after a file is already tracked does
+# nothing, which is how twenty release notes and AGENTS.md stayed in the tree
+# long after this section claimed to exclude them. Untrack with
+# `git rm --cached`, never `git add -f`.
 AGENTS.md
+CLAUDE.md
+code-review-report-*.html
+*-report.html
 scripts/
 spm.sh.*.bk
 test-*.csv
