@@ -5,6 +5,40 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [2.13.0] - 2026-08-28
+
+### Added
+- **Change the master password from the SPM Dashboard.** A new **Settings**
+  group in the sidebar, with a gear-marked **Master Password** page at
+  `/settings`. It asks for the current password, the new one and a
+  confirmation, then re-encrypts the vault in place -- the same operation
+  `spm change-master` performs, now reachable without dropping to a terminal.
+
+  It writes the recovery file **before** it touches the vault, which is the
+  order `spm change-master` uses and the reason the feature is safe to run: a
+  vault re-encrypted under a new password while its `.recovery` file still
+  holds the old one is the single state `spm forgot` cannot recover from. If
+  the vault carries no usable `META_RECOVERY_PUBKEY`, the change is refused
+  outright and the vault is left byte-identical.
+
+  Changing the password signs out every other browser session immediately --
+  each one holds a password in memory that no longer opens anything -- while
+  the session that made the change continues without a re-login. The previous
+  vault is kept as `.bak` and as a history snapshot, both still under the old
+  password.
+
+### Changed
+- **Biometric Unlock moved from Tools into the new Settings group.** Its URL
+  (`/unlock/settings`) is unchanged, so existing links and bookmarks still
+  work. It sits beside the master password because both answer the same
+  question -- how this vault gets opened -- and having one of them under Tools
+  made the gear a half-answer.
+- A new master password must be at least 12 characters. The CLI has never
+  enforced a floor; this is the one password protecting every other one, and
+  nothing rate-limits an attacker who already holds the vault file. The CLI is
+  deliberately left alone in this release rather than changed underneath
+  existing scripted use.
+
 ## [2.12.0] - 2026-08-26
 
 ### Added

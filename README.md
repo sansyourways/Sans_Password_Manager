@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **2.12.0**
+Current release: **2.13.0**
 
 ---
 
@@ -417,6 +417,10 @@ Includes:
   - Local copy-to-clipboard with inline toast feedback  
   - Language dropdown (EN/ID/JP) that translates the dashboard/import card and remembers your choice via cookie  
   - Detail pages (/view, /edit, authenticator viewer/editor, generator) inherit that language selection so every screen stays localized  
+  - A **Settings** group holding the gear-marked **Master Password** page and
+    **Biometric Unlock**. Changing the master password re-encrypts the vault,
+    rewrites the recovery file first so `spm forgot` keeps working, and signs
+    out every other browser session  
   - Dark-only Console presentation with a command-style vault status overview, visible keyboard focus, and mobile record layouts
   - Restrained motion for causal feedback—toast arrival, mobile navigation,
     import progress, and authenticator-code changes—with a fully static

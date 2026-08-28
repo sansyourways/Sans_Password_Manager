@@ -1109,6 +1109,156 @@ assert code == 429, ("repeated unlock failures are not throttled", code, res)
 print("webauthn unlock ceremonies verified")
 PYWEBAUTHN
 
+# --- 2.13.0 master password change from the SPM Dashboard --------------------
+printf 'Web regression: master password change\n'
+
+# The fixture vault ships a placeholder recovery pubkey ("test"), which is not
+# a key at all. Swap in the real one generated earlier so the SUCCESS path can
+# be proved end to end -- the refusal path is exercised separately below by
+# breaking it again on purpose.
+web_pub_b64="$(base64 < "$TEST_ROOT/public.pem" | tr -d '\n')"
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
+	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" > "$TEST_ROOT/rekey-plain"
+awk -F '\t' -v pub="$web_pub_b64" 'BEGIN{OFS="\t"}
+	$1=="META_RECOVERY_PUBKEY"{$2=pub} {print}' \
+	"$TEST_ROOT/rekey-plain" > "$TEST_ROOT/rekey-plain.new"
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback \
+	--passphrase-fd 0 --symmetric --cipher-algo AES256 \
+	-o "$PASSWORD_VAULT" "$TEST_ROOT/rekey-plain.new"
+
+NEW_MASTER="SPM-Rotated-Only-4242"
+
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/settings.html" \
+	"http://127.0.0.1:$WEB_PORT/settings"
+grep -q '<use href="#i-gear"' "$TEST_ROOT/settings.html"
+grep -q 'action="/settings/master-password"' "$TEST_ROOT/settings.html"
+grep -q 'data-i18n="nav.group.settings"' "$TEST_ROOT/settings.html"
+grep -q 'data-i18n="nav.master_password"' "$TEST_ROOT/settings.html"
+# Biometric Unlock moved into Settings; it must not have been dropped on the way.
+grep -q 'href="/unlock/settings"' "$TEST_ROOT/settings.html"
+# The form is a plain in-flow POST, and _send_html must have stamped its token.
+mp_csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' "$TEST_ROOT/settings.html" | head -n1)"
+[ "${#mp_csrf}" -eq 64 ]
+
+vault_before="$(sha256sum < "$PASSWORD_VAULT")"
+
+# Each refusal must leave the vault byte-identical. A change-master path that
+# half-applies is worse than one that does not run at all.
+mp_reject() {
+	curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/mp-reject.html" \
+		-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
+		--data-urlencode "csrf=$mp_csrf" \
+		--data-urlencode "current=$2" --data-urlencode "new=$3" \
+		--data-urlencode "confirm=$4" \
+		"http://127.0.0.1:$WEB_PORT/settings/master-password"
+	if ! grep -q "$1" "$TEST_ROOT/mp-reject.html"; then
+		printf 'expected refusal %s was not shown\n' "$1" >&2
+		sed -n 's/.*class=.flash error.>\([^<]*\).*/got: \1/p' "$TEST_ROOT/mp-reject.html" >&2
+		exit 1
+	fi
+	if [ "$(sha256sum < "$PASSWORD_VAULT")" != "$vault_before" ]; then
+		printf 'vault was modified by a refused change (%s)\n' "$1" >&2
+		exit 1
+	fi
+}
+
+mp_reject 'Current master password is incorrect' \
+	'not-the-password' "$NEW_MASTER" "$NEW_MASTER"
+mp_reject 'do not match' \
+	"$AUDIT_PASSWORD" "$NEW_MASTER" "${NEW_MASTER}-typo"
+mp_reject 'at least 12 characters' \
+	"$AUDIT_PASSWORD" 'short11chr' 'short11chr'
+mp_reject 'same as the current one' \
+	"$AUDIT_PASSWORD" "$AUDIT_PASSWORD" "$AUDIT_PASSWORD"
+
+# A vault whose recovery pubkey is unusable must fail BEFORE the vault is
+# touched: a rotated vault whose .recovery file still holds the old password
+# is the one state `spm forgot` cannot get out of.
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
+	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" > "$TEST_ROOT/nopub-plain"
+awk -F '\t' 'BEGIN{OFS="\t"} $1=="META_RECOVERY_PUBKEY"{$2="dGVzdA=="} {print}' \
+	"$TEST_ROOT/nopub-plain" > "$TEST_ROOT/nopub-plain.new"
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback \
+	--passphrase-fd 0 --symmetric --cipher-algo AES256 \
+	-o "$PASSWORD_VAULT" "$TEST_ROOT/nopub-plain.new"
+vault_before="$(sha256sum < "$PASSWORD_VAULT")"
+mp_reject 'recovery file could not be updated' \
+	"$AUDIT_PASSWORD" "$NEW_MASTER" "$NEW_MASTER"
+# Put the real key back for the success path.
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback \
+	--passphrase-fd 0 --symmetric --cipher-algo AES256 \
+	-o "$PASSWORD_VAULT" "$TEST_ROOT/rekey-plain.new"
+
+# A second session, to prove the change signs it out rather than leaving it
+# holding a password that no longer opens anything.
+# A throttle key of its own: the biometric section above deliberately burns
+# this host's login-failure budget, and the lockout is per client.
+curl -fsS -c "$TEST_ROOT/cookies2" -o /dev/null \
+	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
+	-H 'X-Real-IP: 203.0.113.7' \
+	--data-urlencode "password=$AUDIT_PASSWORD" "http://127.0.0.1:$WEB_PORT/login"
+code="$(curl -sS -o /dev/null -w '%{http_code}' -b "$TEST_ROOT/cookies2" \
+	"http://127.0.0.1:$WEB_PORT/passwords")"
+[ "$code" = "200" ] || { printf 'second session did not open\n' >&2; exit 1; }
+
+curl -fsS -D "$TEST_ROOT/mp-ok.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
+	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$mp_csrf" \
+	--data-urlencode "current=$AUDIT_PASSWORD" \
+	--data-urlencode "new=$NEW_MASTER" --data-urlencode "confirm=$NEW_MASTER" \
+	"http://127.0.0.1:$WEB_PORT/settings/master-password"
+grep -qi '^Location: /settings?msg=changed' "$TEST_ROOT/mp-ok.headers"
+
+# The vault now opens with the new password and no longer with the old one.
+printf '%s' "$NEW_MASTER" | gpg --batch --quiet --pinentry-mode loopback \
+	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" > "$TEST_ROOT/rotated-plain"
+grep -q 'DemoSecret42' "$TEST_ROOT/rotated-plain"
+if printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
+	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" >/dev/null 2>&1; then
+	printf 'the old master password still opens the vault after a change\n' >&2
+	exit 1
+fi
+
+# The recovery file is the point of the whole ordering: it must now name the
+# NEW password, or `spm forgot` would restore one that opens nothing.
+openssl rsautl -decrypt -inkey "$TEST_ROOT/private.pem" \
+	-in "$PASSWORD_VAULT.recovery" > "$TEST_ROOT/recovered-master" 2>/dev/null
+if [ "$(cat "$TEST_ROOT/recovered-master")" != "$NEW_MASTER" ]; then
+	printf 'recovery file does not hold the new master password\n' >&2
+	exit 1
+fi
+
+# The previous vault is kept, still under the old password.
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
+	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT.bak" >/dev/null
+
+# The acting session survives without a re-login; every other one is gone.
+code="$(curl -sS -o /dev/null -w '%{http_code}' -b "$TEST_ROOT/cookies" \
+	"http://127.0.0.1:$WEB_PORT/settings")"
+[ "$code" = "200" ] || { printf 'the acting session was signed out by its own change\n' >&2; exit 1; }
+curl -sS -b "$TEST_ROOT/cookies2" -o "$TEST_ROOT/stale.html" \
+	"http://127.0.0.1:$WEB_PORT/passwords"
+if ! grep -q 'name="password"' "$TEST_ROOT/stale.html"; then
+	printf 'a session holding the old password was not signed out\n' >&2
+	exit 1
+fi
+
+# Rotate back so the rest of the suite keeps its fixture password, which also
+# exercises the flow a second time from a session that has already used it.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/settings2.html" \
+	"http://127.0.0.1:$WEB_PORT/settings"
+grep -q 'Master password changed' "$TEST_ROOT/settings2.html" || true
+mp_csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' "$TEST_ROOT/settings2.html" | head -n1)"
+curl -fsS -D "$TEST_ROOT/mp-back.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
+	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$mp_csrf" \
+	--data-urlencode "current=$NEW_MASTER" \
+	--data-urlencode "new=$AUDIT_PASSWORD" --data-urlencode "confirm=$AUDIT_PASSWORD" \
+	"http://127.0.0.1:$WEB_PORT/settings/master-password"
+grep -qi '^Location: /settings?msg=changed' "$TEST_ROOT/mp-back.headers"
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
+	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" >/dev/null
+
 # A WEBAUTHN row must be invisible to password parsing and to the security
 # score: it is neither a credential the user stores nor one that can be weak.
 python3 - "$web_script" <<'PYWEBROW'
