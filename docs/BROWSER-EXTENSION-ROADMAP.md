@@ -1,13 +1,15 @@
 # Browser extension roadmap — URL auto-bind and the account picker
 
-Status: **3.1.0 protocol and popup picker shipped**. The origin-isolated
-in-field picker is next for 3.2.0.
+Status: **3.1.0 protocol and popup picker shipped; 3.2.0 guided setup and
+stable extension identity shipped**. The origin-isolated in-field picker is
+next, for 3.3.0.
 
 Phases were rebased onto 3.1.0 after 3.0.0 took the major version for the
-vault-format change. That is the second rebase -- 2.13.0 shipped the dashboard
-master-password change ahead of this work, and 3.0.0 shipped the trusted core
-ahead of it again. The sequence is unchanged both times; only the version each
-phase targets moved.
+vault-format change, and shifted one release again when 3.2.0 went to the
+guided installer. That is the third rebase -- 2.13.0 shipped the dashboard
+master-password change ahead of this work, 3.0.0 shipped the trusted core ahead
+of it again, and 3.2.0 fixed the installation loop that 3.1.0 left behind. The
+sequence is unchanged every time; only the version each phase targets moved.
 
 This is an implementation plan with target versions, so it lives here rather
 than in [`ROADMAP.md`](../ROADMAP.md), which deliberately communicates direction
@@ -171,14 +173,27 @@ One release for all of this would be too large to review or bisect.
 
 Fully testable headlessly: the whole protocol is CLI-level.
 
-### 3.2.0 — in-field dropdown
+### 3.2.0 — guided setup and stable identity — **shipped**
+
+- `setup.sh` detects the browser, builds the right package, registers the
+  native host, and opens the extensions page and prepared folder
+- A public development key gives every unpacked Chromium copy one stable ID,
+  removing the copy-the-generated-ID-and-rerun-the-installer loop
+- `extension-id.sh` derives that ID from the manifest key the way the browser
+  does, so the registration cannot drift from the loaded extension
+
+Not a picker phase. It removes the installation friction that 3.1.0 shipped
+with, and it is separated from the in-field work so that the identity change,
+which requires existing users to reload the extension, lands on its own.
+
+### 3.3.0 — in-field dropdown
 
 - Content script, field detection, extension-origin iframe menu
 - Keyboard navigation (arrows, Enter, Escape), focus handling
 - The fill-path rules above, each with a test
 - Firefox for Android verification pass
 
-### 3.3.0 — cheap unlock and scoping
+### 3.4.0 — cheap unlock and scoping
 
 - WebAuthn unlock in the popup, reusing the Dashboard's ceremony
 - Opt-in `*.` subdomain scoping
@@ -195,7 +210,7 @@ CLI-level and needs no browser:
 - native-host `lock` makes a previously working session fail
 - unlock, list, get, and lock work over native-messaging framing
 
-Wildcard scope and HTTPS downgrade refusal belong to the 3.3.0 scoping phase
+Wildcard scope and HTTPS downgrade refusal belong to the 3.4.0 scoping phase
 and receive their regression assertions with that implementation.
 
 **Manual matrix** — the browser UI. Driving an extension under headless Chromium
