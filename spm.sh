@@ -773,6 +773,49 @@ decrypt_vault_to_file() {
 	fi
 }
 
+# ----- Vault format version and key-derivation policy ------------------------
+# The vault records the format it was written in, so a later change can migrate
+# instead of guessing. A vault with no META_VAULT_VERSION row predates this and
+# is format 1; every write stamps the current version, so opening and saving any
+# vault upgrades it in place with no separate migration step.
+VAULT_FORMAT_VERSION=2
+
+# Key derivation is pinned rather than inherited. GnuPG 2.2's own defaults are
+# already s2k mode 3 at the maximum iteration count, so the measurable change
+# here is the digest: the default is SHA1 and this asks for SHA512. The larger
+# point is that the policy stops being whatever the local gpg happens to do --
+# a user's gpg.conf can change all of it underneath us, and an implicit
+# security parameter cannot be reviewed or migrated.
+#
+# Argon2 is deliberately absent. OpenPGP Argon2 needs GnuPG 2.4 or newer and
+# this project's baseline, Debian bookworm, ships 2.2; asking for it there
+# fails the write rather than degrading. Recording the format version is what
+# makes adopting it later a migration instead of a rewrite.
+SPM_S2K_MODE=3
+SPM_S2K_DIGEST=SHA512
+SPM_S2K_COUNT=65011712
+
+stamp_vault_version() {
+	# Drop any existing version rows, then prepend exactly one current row.
+	# Idempotent, and byte-identical to the SPM Dashboard's Python
+	# implementation -- the regression suite asserts that parity directly,
+	# because a disagreement would make the two surfaces rewrite this row back
+	# and forth on every save and dirty the history with no-op generations.
+	local in_file="$1" out_file="$2"
+	printf 'META_VAULT_VERSION\t%s\t-\t-\t-\t-\n' "$VAULT_FORMAT_VERSION" >"$out_file"
+	awk -F '\t' '$1 != "META_VAULT_VERSION"' "$in_file" >>"$out_file"
+}
+
+vault_format_version() {
+	# Version of a decrypted vault: the row's value, or 1 when absent.
+	local plain="$1" v
+	v="$(awk -F '\t' '$1=="META_VAULT_VERSION"{print $2; exit}' "$plain")"
+	case "$v" in
+		''|*[!0-9]*) printf '1\n' ;;
+		*) printf '%s\n' "$v" ;;
+	esac
+}
+
 encrypt_file_to_vault() {
 	local in_file="$1"
 	local vault_dir vault_name tmp_cipher
@@ -782,13 +825,26 @@ encrypt_file_to_vault() {
 	vault_name="$(basename "$VAULT_FILE")"
 	tmp_cipher="$(mktemp "${vault_dir}/.${vault_name}.tmp.XXXXXX")" || die "Failed to create vault staging file."
 	chmod 600 "$tmp_cipher" 2>/dev/null || true
+
+	# Stamp into a copy rather than editing the caller's file: several callers
+	# read that file again after this returns, and one of them is
+	# write_recovery_file.
+	local tmp_plain
+	tmp_plain="$(make_tmp)"
+	stamp_vault_version "$in_file" "$tmp_plain"
+
 	if ! printf '%s' "$MASTER_PW" | gpg --batch --yes \
+		--s2k-mode "$SPM_S2K_MODE" \
+		--s2k-digest-algo "$SPM_S2K_DIGEST" \
+		--s2k-count "$SPM_S2K_COUNT" \
 		--symmetric --cipher-algo AES256 \
 		--pinentry-mode loopback --passphrase-fd 0 \
-		-o "$tmp_cipher" "$in_file" 2>/dev/null; then
+		-o "$tmp_cipher" "$tmp_plain" 2>/dev/null; then
+		secure_wipe "$tmp_plain"
 		secure_wipe "$tmp_cipher"
 		die "Failed to re-encrypt vault. The existing vault was not changed; plaintext remains in '$in_file'."
 	fi
+	secure_wipe "$tmp_plain"
 
 	if [ -f "$VAULT_FILE" ]; then
 		archive_current_vault
@@ -3772,6 +3828,29 @@ cmd_doctor() {
 			printf "[!] Pemindaian record terpotong gagal dijalankan.\n"
 		else
 			printf "[!] Split-record scan could not be run.\n"
+		fi
+	fi
+
+	# Report the vault format version, and whether the next write upgrades it.
+	# Stated rather than acted on: doctor is a diagnostic and must never be the
+	# thing that rewrites a vault.
+	local fmt
+	fmt="$(vault_format_version "$tmp")"
+	if [ "$fmt" -ge "$VAULT_FORMAT_VERSION" ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "[✔] Format vault versi %s (terbaru).\n" "$fmt"
+		else
+			printf "[✔] Vault format version %s (current).\n" "$fmt"
+		fi
+	else
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "[!] Format vault versi %s; versi %s tersedia.\n" "$fmt" "$VAULT_FORMAT_VERSION"
+			printf "    Perubahan berikutnya akan memutakhirkan vault otomatis.\n"
+			printf "    Kunci diturunkan memakai default GnuPG lama (digest SHA1).\n"
+		else
+			printf "[!] Vault format version %s; version %s is available.\n" "$fmt" "$VAULT_FORMAT_VERSION"
+			printf "    The next change upgrades this vault in place; no migration step.\n"
+			printf "    Its key was derived with GnuPG's older default digest (SHA1).\n"
 		fi
 	fi
 
@@ -9895,16 +9974,53 @@ def _archive_vault_generation():
         # History is a convenience; never let it block or fail a vault write.
         pass
 
+# Must stay in step with the CLI's VAULT_FORMAT_VERSION and s2k settings. The
+# regression suite asserts both halves agree, because a mismatch would have the
+# two surfaces rewrite the version row back and forth on every save.
+VAULT_FORMAT_VERSION = 2
+S2K_ARGS = ["--s2k-mode", "3", "--s2k-digest-algo", "SHA512",
+            "--s2k-count", "65011712"]
+
+
+def stamp_vault_version(plaintext: str) -> str:
+    """Prepend exactly one current version row, dropping any that were there.
+
+    Byte-identical to the CLI's stamp_vault_version. The trailing-newline
+    handling is the part that has to match: splitting on newline leaves one
+    empty trailing field for a file that ends in a newline, which awk does not
+    produce a record for, so it is dropped before filtering rather than after.
+    """
+    lines = plaintext.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    rows = [l for l in lines if l.split("\t", 1)[0] != "META_VAULT_VERSION"]
+    head = "META_VAULT_VERSION\t%d\t-\t-\t-\t-" % VAULT_FORMAT_VERSION
+    return "\n".join([head] + rows) + "\n"
+
+
+def vault_format_version(plaintext: str) -> int:
+    """Version of a decrypted vault: the row's value, or 1 when absent."""
+    for line in plaintext.split("\n"):
+        parts = line.split("\t")
+        if parts[0] == "META_VAULT_VERSION" and len(parts) > 1:
+            try:
+                return int(parts[1])
+            except ValueError:
+                return 1
+    return 1
+
+
 def encrypt_vault(master: str, plaintext: str) -> None:
     vault_dir = os.path.dirname(os.path.abspath(VAULT_PATH)) or "."
     vault_name = os.path.basename(VAULT_PATH)
     tmp_fd, tmp_path = tempfile.mkstemp(prefix=vault_name + ".webtmp.", dir=vault_dir)
     os.close(tmp_fd)
     os.chmod(tmp_path, 0o600)
+    plaintext = stamp_vault_version(plaintext)
     pw_fd = _passphrase_fd(master)
     p = subprocess.Popen(
         ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
-         "--passphrase-fd", str(pw_fd), "--cipher-algo", "AES256",
+         "--passphrase-fd", str(pw_fd)] + S2K_ARGS + ["--cipher-algo", "AES256",
          "-c", "-o", tmp_path],
         stdin=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
