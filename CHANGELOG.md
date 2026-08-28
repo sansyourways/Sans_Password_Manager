@@ -46,6 +46,27 @@ is a planning decision rather than an implementation one.
   that state, and nothing else in the tool could report it.
 
 ### Changed
+- **`spm.sh` is now generated from real source files.** SPM still *ships* as
+  one file -- a password manager you install by copying a single script is one
+  people actually install -- but it is no longer *written* as one. `./build.sh`
+  assembles `spm.sh` from `src/spm_core.py` (the trusted core),
+  `src/spm_web_server.py` (the SPM Dashboard) and `src/spm.sh.in` (the CLI).
+
+  Nothing about the shipped artifact changes: the build is byte-identical to
+  the file it replaces, and CI fails any change where `spm.sh` and `src/`
+  disagree. What changes is that seven thousand lines of Python stop being a
+  shell heredoc. A linter, a type checker, an editor and `git blame` now read
+  the core and the dashboard as what they are, and CI compiles them directly
+  instead of scraping them back out of the script.
+
+  The build refuses to emit a script whose payload contains a line equal to the
+  heredoc terminator -- the one way a valid-looking source file could generate
+  a truncated one that still parses as shell.
+
+  Releases carry `src/` and `build.sh`, so anyone holding a release archive can
+  run `./build.sh --check` and confirm the `spm.sh` they were given is exactly
+  what those sources produce.
+
 - **One trusted core, not two implementations of it.** Every operation that
   touches the vault's bytes -- unwrapping the key, reading, writing, rewrapping,
   stamping the version, staging and installing `.recovery`, archiving a history

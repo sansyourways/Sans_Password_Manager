@@ -43,9 +43,14 @@ jobs:
           # than not tagging. ci.yml already chmods for exactly this reason;
           # this job did not, and 2.11.0 is a real commit it would have failed
           # on. Restore the bits rather than trusting the tree's modes.
-          chmod +x spm.sh install.sh tests/regression.sh tests/dco-check.sh
-          bash -n spm.sh install.sh tests/regression.sh tests/dco-check.sh
-          shellcheck -x -S warning spm.sh install.sh tests/regression.sh tests/dco-check.sh
+          chmod +x spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh
+          # The tagged spm.sh must be what src/ produces. A tag whose shipped
+          # script does not match its own sources is unauditable, and this is
+          # the last point at which that can still be caught.
+          ./build.sh --check
+          bash -n spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh
+          shellcheck -x -S warning spm.sh install.sh build.sh \
+            tests/regression.sh tests/dco-check.sh
           ./tests/regression.sh
           version="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' spm.sh)"
           tag_version="${RELEASE_TAG#v}"
@@ -58,9 +63,12 @@ jobs:
           version="${RELEASE_TAG#v}"
           archive="Sans_Password_Manager_v${version}.zip"
           rm -f -- "$archive" "$archive.sha256"
+          # src/ and build.sh ship with the archive so anyone holding a
+          # release can run `./build.sh --check` and confirm the spm.sh they
+          # were given is exactly what these sources produce.
           zip -9 -r "$archive" \
-            spm.sh install.sh README.md ROADMAP.md CHANGELOG.md CONTRIBUTING.md LICENSE NOTICE DCO \
-            docs browser-extension tests \
+            spm.sh install.sh build.sh README.md ROADMAP.md CHANGELOG.md CONTRIBUTING.md LICENSE NOTICE DCO \
+            src docs browser-extension tests \
             .github/PULL_REQUEST_TEMPLATE.md .github/ISSUE_TEMPLATE \
             -x '*.bak'
           sha256sum "$archive" > "$archive.sha256"
