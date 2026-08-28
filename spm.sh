@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="2.12.0"
+VERSION="2.13.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -6638,6 +6638,21 @@ I18N_SCRIPT = """
       "confirm.delete_authenticator": "Delete this authenticator?",
       "nav.group.vault": "Vault",
       "nav.group.tools": "Tools",
+      "nav.group.settings": "Settings",
+      "nav.master_password": "Master Password",
+      "page.settings.title": "Master Password",
+      "page.settings.desc": "Change the password that encrypts this vault.",
+      "settings.current": "Current master password",
+      "settings.new": "New master password",
+      "settings.confirm": "Confirm new master password",
+      "settings.submit": "Change master password",
+      "settings.hint": "At least 12 characters. There is no way to recover a master password you forget \u2014 only the recovery file and its private key can reset it.",
+      "settings.mismatch": "The two new passwords do not match.",
+      "settings.effect": "What this does",
+      "settings.effect_vault": "Re-encrypts the whole vault under the new password.",
+      "settings.effect_recovery": "Rewrites the recovery file so \"spm forgot\" keeps working.",
+      "settings.effect_sessions": "Signs out every other browser session.",
+      "settings.effect_backup": "Keeps the previous vault as a .bak and a history snapshot.",
       "nav.overview": "Overview",
       "nav.passwords": "Passwords",
       "nav.notes": "Secure Notes",
@@ -6878,6 +6893,21 @@ I18N_SCRIPT = """
       "confirm.delete_authenticator": "Hapus autentikator ini?",
       "nav.group.vault": "Brankas",
       "nav.group.tools": "Alat",
+      "nav.group.settings": "Pengaturan",
+      "nav.master_password": "Kata Sandi Utama",
+      "page.settings.title": "Kata Sandi Utama",
+      "page.settings.desc": "Ubah kata sandi yang mengenkripsi brankas ini.",
+      "settings.current": "Kata sandi utama saat ini",
+      "settings.new": "Kata sandi utama baru",
+      "settings.confirm": "Konfirmasi kata sandi utama baru",
+      "settings.submit": "Ubah kata sandi utama",
+      "settings.hint": "Minimal 12 karakter. Kata sandi utama yang lupa tidak bisa dipulihkan \u2014 hanya file pemulihan dan kunci privatnya yang bisa meresetnya.",
+      "settings.mismatch": "Kedua kata sandi baru tidak sama.",
+      "settings.effect": "Yang akan terjadi",
+      "settings.effect_vault": "Mengenkripsi ulang seluruh brankas dengan kata sandi baru.",
+      "settings.effect_recovery": "Menulis ulang file pemulihan agar \"spm forgot\" tetap berfungsi.",
+      "settings.effect_sessions": "Mengeluarkan semua sesi browser lain.",
+      "settings.effect_backup": "Menyimpan brankas lama sebagai .bak dan snapshot riwayat.",
       "nav.overview": "Ringkasan",
       "nav.passwords": "Kata Sandi",
       "nav.notes": "Catatan Aman",
@@ -7118,6 +7148,21 @@ I18N_SCRIPT = """
       "confirm.delete_authenticator": "この認証情報を削除しますか？",
       "nav.group.vault": "\u4fdd\u7ba1\u5eab",
       "nav.group.tools": "\u30c4\u30fc\u30eb",
+      "nav.group.settings": "\u8a2d\u5b9a",
+      "nav.master_password": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
+      "page.settings.title": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
+      "page.settings.desc": "\u3053\u306e\u4fdd\u7ba1\u5eab\u3092\u6697\u53f7\u5316\u3057\u3066\u3044\u308b\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5909\u66f4\u3057\u307e\u3059\u3002",
+      "settings.current": "\u73fe\u5728\u306e\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
+      "settings.new": "\u65b0\u3057\u3044\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
+      "settings.confirm": "\u65b0\u3057\u3044\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\uff08\u78ba\u8a8d\uff09",
+      "settings.submit": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5909\u66f4",
+      "settings.hint": "12\u6587\u5b57\u4ee5\u4e0a\u3002\u5fd8\u308c\u305f\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5fa9\u5143\u3059\u308b\u65b9\u6cd5\u306f\u3042\u308a\u307e\u305b\u3093\u3002\u30ea\u30ab\u30d0\u30ea\u30d5\u30a1\u30a4\u30eb\u3068\u79d8\u5bc6\u9375\u3060\u3051\u304c\u30ea\u30bb\u30c3\u30c8\u3067\u304d\u307e\u3059\u3002",
+      "settings.mismatch": "\u65b0\u3057\u3044\u30d1\u30b9\u30ef\u30fc\u30c9\u304c\u4e00\u81f4\u3057\u307e\u305b\u3093\u3002",
+      "settings.effect": "\u5b9f\u884c\u3055\u308c\u308b\u5185\u5bb9",
+      "settings.effect_vault": "\u4fdd\u7ba1\u5eab\u5168\u4f53\u3092\u65b0\u3057\u3044\u30d1\u30b9\u30ef\u30fc\u30c9\u3067\u518d\u6697\u53f7\u5316\u3057\u307e\u3059\u3002",
+      "settings.effect_recovery": "\"spm forgot\" \u304c\u5f15\u304d\u7d9a\u304d\u4f7f\u3048\u308b\u3088\u3046\u30ea\u30ab\u30d0\u30ea\u30d5\u30a1\u30a4\u30eb\u3092\u66f8\u304d\u63db\u3048\u307e\u3059\u3002",
+      "settings.effect_sessions": "\u4ed6\u306e\u3059\u3079\u3066\u306e\u30d6\u30e9\u30a6\u30b6\u30bb\u30c3\u30b7\u30e7\u30f3\u3092\u30b5\u30a4\u30f3\u30a2\u30a6\u30c8\u3057\u307e\u3059\u3002",
+      "settings.effect_backup": "\u4ee5\u524d\u306e\u4fdd\u7ba1\u5eab\u3092 .bak \u3068\u5c65\u6b74\u30b9\u30ca\u30c3\u30d7\u30b7\u30e7\u30c3\u30c8\u3068\u3057\u3066\u4fdd\u6301\u3057\u307e\u3059\u3002",
       "nav.overview": "\u6982\u8981",
       "nav.passwords": "\u30d1\u30b9\u30ef\u30fc\u30c9",
       "nav.notes": "\u30bb\u30ad\u30e5\u30a2\u30e1\u30e2",
@@ -8186,6 +8231,7 @@ ICON_SPRITE = """
   <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 4H4v16h6M14 7l5 5-5 5M8 12h11"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2.5l8 3v6.5c0 5-3.5 8-8 9.5C7.5 20 4 17 4 12V5.5zM8.5 12l2.5 2.5 4.5-5"/></symbol>
   <symbol id="i-history" viewBox="0 0 24 24"><path d="M12 7v5l3.5 2M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4.5V10h5.5"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.25"/><path d="M19.9 15a1.7 1.7 0 00.34 1.87l.06.07a2.05 2.05 0 11-2.9 2.9l-.06-.07a1.7 1.7 0 00-1.88-.34 1.7 1.7 0 00-1.03 1.56v.18a2.05 2.05 0 11-4.1 0v-.1a1.7 1.7 0 00-1.11-1.55 1.7 1.7 0 00-1.88.34l-.06.07a2.05 2.05 0 11-2.9-2.9l.06-.07a1.7 1.7 0 00.34-1.88 1.7 1.7 0 00-1.55-1.03H3a2.05 2.05 0 110-4.1h.1A1.7 1.7 0 004.65 8.7a1.7 1.7 0 00-.34-1.88l-.06-.06a2.05 2.05 0 112.9-2.9l.06.06a1.7 1.7 0 001.88.34h.08A1.7 1.7 0 0010.2 2.7v-.18a2.05 2.05 0 114.1 0v.1a1.7 1.7 0 001.03 1.56 1.7 1.7 0 001.88-.34l.06-.06a2.05 2.05 0 112.9 2.9l-.06.06a1.7 1.7 0 00-.34 1.88v.08a1.7 1.7 0 001.56 1.03h.17a2.05 2.05 0 110 4.1h-.1A1.7 1.7 0 0019.9 15z"/></symbol>
   <symbol id="i-empty" viewBox="0 0 24 24"><path d="M3.5 5.5h17v13h-17zM3.5 12h17M12 5.5v13"/></symbol>
 </svg>
 """
@@ -8265,12 +8311,18 @@ NAV_SECTIONS = [
         ("generator", "/generator", "generator", "nav.generator", "Generator",       None),
         ("transfer",  "/transfer",  "transfer", "nav.transfer",  "Export / Import", None),
     ]),
+    ("nav.group.settings", [
+        ("settings", "/settings", "gear", "nav.master_password", "Master Password", None),
+    ]),
 ]
 
 if WEBAUTHN_ENABLED:
     # Only offered when a relying-party id is configured. Without one the
     # endpoints 404, and a nav entry pointing at a 404 is worse than no entry.
-    NAV_SECTIONS[1][1].append(
+    # It sits in Settings next to the master password because both answer the
+    # same question -- how this vault gets opened -- and having one of them
+    # under Tools made the gear a half-answer.
+    NAV_SECTIONS[2][1].append(
         ("unlock-settings", "/unlock/settings", "shield", "nav.unlock",
          "Biometric Unlock", None))
 
@@ -8278,7 +8330,8 @@ if WEBAUTHN_ENABLED:
 def _nav_html(active, counts):
     out = []
     for group_key, items in NAV_SECTIONS:
-        label = {"nav.group.vault": "Vault", "nav.group.tools": "Tools"}[group_key]
+        label = {"nav.group.vault": "Vault", "nav.group.tools": "Tools",
+                 "nav.group.settings": "Settings"}[group_key]
         out.append(f'<div class="nav-label" data-i18n="{group_key}">{label}</div>')
         out.append('<div class="nav">')
         for key, href, ico, i18n, fallback, counter in items:
@@ -9328,6 +9381,96 @@ def unlock_settings_page(creds, csrf, flash=""):
 """
 
 
+def settings_page(flash=""):
+    """Change the master password.
+
+    Built from the same page-head / card / field primitives as every other form
+    page rather than a bespoke layout, so it inherits the focus ring, the
+    dark-only palette and the split accent for free. Nothing on this page is an
+    emitted value, so nothing here is painted with the value role -- the submit
+    is the only accent, and it is a control.
+    """
+    return f"""{flash}
+<div class="page-head">
+  <div>
+    <h1 class="page-title" data-i18n="page.settings.title">Master Password</h1>
+    <div class="page-sub" data-i18n="page.settings.desc">Change the password that
+      encrypts this vault.</div>
+  </div>
+</div>
+<div class="card"><div class="card-body">
+  <form method="post" action="/settings/master-password" autocomplete="off">
+    <div class="field">
+      <label for="mp-current" data-i18n="settings.current">Current master password</label>
+      <input class="input" id="mp-current" name="current" type="password"
+             autocomplete="current-password" required autofocus>
+    </div>
+    <div class="field">
+      <label for="mp-new" data-i18n="settings.new">New master password</label>
+      <input class="input" id="mp-new" name="new" type="password"
+             autocomplete="new-password" minlength="{MASTER_MIN_LEN}" required>
+    </div>
+    <div class="field">
+      <label for="mp-confirm" data-i18n="settings.confirm">Confirm new master password</label>
+      <input class="input" id="mp-confirm" name="confirm" type="password"
+             autocomplete="new-password" minlength="{MASTER_MIN_LEN}" required>
+    </div>
+    <p class="faint" style="margin-bottom:var(--sp-4)" data-i18n="settings.hint">At least
+      {MASTER_MIN_LEN} characters. There is no way to recover a master password you
+      forget &mdash; only the recovery file and its private key can reset it.</p>
+    <div class="faint" id="mp-status" role="status" aria-live="polite"
+         style="margin-bottom:var(--sp-3);min-height:1.2em"></div>
+    <button class="btn btn-primary" type="submit"
+            data-i18n="settings.submit">Change master password</button>
+  </form>
+</div></div>
+<div class="card" style="margin-top:var(--sp-4)">
+  <div class="card-head"><h2 data-i18n="settings.effect">What this does</h2></div>
+  <div class="card-body">
+    <ul style="margin:0;padding-left:var(--sp-5);line-height:1.9">
+      <li data-i18n="settings.effect_vault">Re-encrypts the whole vault under the
+        new password.</li>
+      <li data-i18n="settings.effect_recovery">Rewrites the recovery file so
+        &quot;spm forgot&quot; keeps working.</li>
+      <li data-i18n="settings.effect_sessions">Signs out every other browser
+        session.</li>
+      <li data-i18n="settings.effect_backup">Keeps the previous vault as a .bak
+        and a history snapshot.</li>
+    </ul>
+  </div>
+</div>
+{SETTINGS_SCRIPT}
+"""
+
+
+SETTINGS_SCRIPT = """
+<script>
+(function () {
+  var form = document.querySelector('form[action="/settings/master-password"]');
+  if (!form) return;
+  var pw = document.getElementById("mp-new");
+  var cf = document.getElementById("mp-confirm");
+  var out = document.getElementById("mp-status");
+  if (!pw || !cf || !out) return;
+
+  function t(key, fb) {
+    return (window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t(key, fb) : fb;
+  }
+
+  // Mirror only, never gate: the server re-checks both of these. If this
+  // script is blocked the form still submits and still gets a real answer.
+  function check() {
+    if (!cf.value) { out.textContent = ""; return true; }
+    var same = pw.value === cf.value;
+    out.textContent = same ? "" : t("settings.mismatch", "The two new passwords do not match.");
+    return same;
+  }
+  pw.addEventListener("input", check);
+  cf.addEventListener("input", check);
+})();
+</script>"""
+
+
 GENERATOR_SCRIPT = """
 <script>
 (function () {
@@ -9796,6 +9939,79 @@ def encrypt_vault(master: str, plaintext: str) -> None:
         os.close(pw_fd)
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
+
+RECOVERY_PATH = VAULT_PATH + ".recovery"
+
+# A master password shorter than this is refused on the way in. The CLI has no
+# floor at all, which is a gap rather than a decision worth copying: this is the
+# one password that protects every other one, and nothing rate-limits an
+# attacker who already holds the vault file.
+MASTER_MIN_LEN = 12
+
+
+def rewrite_recovery_file(plaintext: str, master: str) -> None:
+    """Re-encrypt the master password under the vault's own recovery pubkey.
+
+    `spm change-master` calls write_recovery_file BEFORE it re-encrypts the
+    vault, so a vault whose recovery metadata is missing or corrupt fails while
+    the old ciphertext is still the live one. That ordering is the whole safety
+    property and this path keeps it: a rotated vault left with a stale
+    .recovery file would hand `spm forgot` a password that opens nothing, and
+    that file plus its private key is the only way back in.
+
+    Deliberately the same `openssl rsautl -encrypt -pubin` invocation the shell
+    side uses. It is deprecated in OpenSSL 3, but `spm doctor` and `spm forgot`
+    both read this file back with `rsautl -decrypt`; switching only the writer
+    to `pkeyutl` would be a padding decision made in one place out of three.
+    """
+    pub_b64 = ""
+    for line in plaintext.splitlines():
+        parts = line.split("\t")
+        if parts[0] == "META_RECOVERY_PUBKEY" and len(parts) > 1:
+            pub_b64 = parts[1].strip()
+            break
+    if not pub_b64:
+        raise RuntimeError("no META_RECOVERY_PUBKEY row in vault")
+    try:
+        pub_pem = base64.b64decode(pub_b64)
+    except Exception:
+        raise RuntimeError("recovery public key is not valid base64")
+
+    rec_dir = os.path.dirname(os.path.abspath(RECOVERY_PATH)) or "."
+    pub_fd, pub_path = tempfile.mkstemp(prefix="spm.recpub.")
+    tmp_out = ""
+    try:
+        os.write(pub_fd, pub_pem)
+        os.close(pub_fd)
+        pub_fd = -1
+        out_fd, tmp_out = tempfile.mkstemp(
+            prefix=os.path.basename(RECOVERY_PATH) + ".webtmp.", dir=rec_dir)
+        os.close(out_fd)
+        os.chmod(tmp_out, 0o600)
+        proc = subprocess.Popen(
+            ["openssl", "rsautl", "-encrypt", "-pubin",
+             "-inkey", pub_path, "-out", tmp_out],
+            stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        try:
+            proc.communicate(input=master.encode("utf-8"), timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raise RuntimeError("recovery re-encryption timed out")
+        if proc.returncode != 0:
+            raise RuntimeError("openssl could not write the recovery file")
+        _fsync_path(tmp_out)
+        os.replace(tmp_out, RECOVERY_PATH)
+        tmp_out = ""
+        os.chmod(RECOVERY_PATH, 0o600)
+        _fsync_dir(rec_dir)
+    finally:
+        if pub_fd != -1:
+            os.close(pub_fd)
+        if os.path.exists(pub_path):
+            os.remove(pub_path)
+        if tmp_out and os.path.exists(tmp_out):
+            os.remove(tmp_out)
+
 
 def totp_code(secret_b32: str, period: int = 30, algo: str = "sha1") -> str:
     import hashlib, hmac, struct, base64
@@ -11556,6 +11772,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 title="Biometric Unlock", counts=self._counts(plaintext)))
             return
 
+        if path == "/settings":
+            try:
+                plaintext = decrypt_vault(master)
+            except Exception:
+                return self._expire_session()
+            params = urllib.parse.parse_qs(parsed.query)
+            flash = ""
+            if (params.get("msg") or [""])[0] == "changed":
+                flash = ("<div class='flash'>Master password changed. The recovery "
+                         "file was rewritten and every other session was signed "
+                         "out.</div>")
+            self._send_html(200, render_shell(
+                settings_page(flash), "settings", VERSION, VAULT_PATH,
+                title="Master Password", counts=self._counts(plaintext)))
+            return
+
         if path == "/history":
             hist_flash = ""
             if (urllib.parse.parse_qs(parsed.query).get("flash") or [""])[0] == "restored":
@@ -12110,6 +12342,91 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if not self._write_authorized(raw_body_bytes, data):
             self.send_error(403, "Cross-origin write rejected")
+            return
+
+        if path == "/settings/master-password":
+            current = (data.get("current") or [""])[0]
+            new_pw = (data.get("new") or [""])[0]
+            confirm = (data.get("confirm") or [""])[0]
+
+            def _reject(message):
+                self._send_html(200, render_shell(
+                    settings_page("<div class='flash error'>%s</div>" % message),
+                    "settings", VERSION, VAULT_PATH, title="Master Password"))
+
+            # Compared against the copy this session already proved at login
+            # rather than by decrypting again: a typo should not cost a gpg
+            # spawn, and the session holds the authoritative answer anyway.
+            # Encoded first because compare_digest rejects non-ASCII str.
+            if not hmac.compare_digest(current.encode("utf-8"),
+                                       master.encode("utf-8")):
+                self.log_message("master password change refused: wrong current password")
+                _reject("Current master password is incorrect.")
+                return
+            if new_pw != confirm:
+                _reject("The two new passwords do not match.")
+                return
+            if len(new_pw) < MASTER_MIN_LEN:
+                _reject("The new master password must be at least %d characters."
+                        % MASTER_MIN_LEN)
+                return
+            if hmac.compare_digest(new_pw.encode("utf-8"),
+                                   current.encode("utf-8")):
+                _reject("The new master password is the same as the current one.")
+                return
+
+            try:
+                plaintext = decrypt_vault(master)
+            except Exception:
+                return self._expire_session()
+
+            # Recovery file first, the order `spm change-master` uses. A vault
+            # with no usable META_RECOVERY_PUBKEY fails here, while the old
+            # ciphertext is still the live one -- the alternative is a rotated
+            # vault whose .recovery file still holds the password that no
+            # longer opens it, which is the one state with no way back.
+            try:
+                rewrite_recovery_file(plaintext, new_pw)
+            except Exception as exc:
+                self.log_message("master password change aborted before write: %s", exc)
+                _reject("The recovery file could not be updated, so the vault was "
+                        "left unchanged. Run &#39;spm doctor&#39; to check it.")
+                return
+
+            try:
+                encrypt_vault(new_pw, plaintext)
+            except Exception as exc:
+                self.log_message("master password change failed on re-encrypt: %s", exc)
+                # The recovery file now names a password the vault does not
+                # use. Put the old one back rather than leave the two
+                # disagreeing; a failure here is reported as-is because at
+                # that point only `spm doctor` can say which way it landed.
+                try:
+                    rewrite_recovery_file(plaintext, master)
+                except Exception:
+                    self.log_message("could not roll the recovery file back")
+                    _reject("The vault could not be re-encrypted AND the recovery "
+                            "file could not be rolled back. The vault still opens "
+                            "with your current password. Run &#39;spm doctor&#39;.")
+                    return
+                _reject("The vault could not be re-encrypted and was left unchanged.")
+                return
+
+            # Every other session is holding the old password in memory, and
+            # its next decrypt would fail anyway. Drop them now so the sign-out
+            # is immediate rather than whenever they happen to poll.
+            token = self._parse_cookies().get("spm_session")
+            for other in list(self.server.sessions):
+                if other != token:
+                    self.server.sessions.pop(other, None)
+            session = self.server.sessions.get(token)
+            if session is not None:
+                session["master"] = new_pw
+            self.log_message("master password changed; other sessions cleared")
+
+            self.send_response(302)
+            self.send_header("Location", "/settings?msg=changed")
+            self.end_headers()
             return
 
         if path == "/add":
