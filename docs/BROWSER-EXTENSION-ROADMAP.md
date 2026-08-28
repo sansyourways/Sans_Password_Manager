@@ -3,6 +3,10 @@
 Status: **planned**, not started. Written against 2.12.0, which added the URL
 field this work depends on.
 
+Phases were rebased onto 2.14.0 after 2.13.0 shipped the dashboard
+master-password change instead of this work. The sequence is unchanged; only
+the version each phase targets moved.
+
 This is an implementation plan with target versions, so it lives here rather
 than in [`ROADMAP.md`](../ROADMAP.md), which deliberately communicates direction
 without delivery dates.
@@ -155,25 +159,23 @@ The wildcard is expanded by the bridge, never inferred from a bare hostname.
 
 One release for all of this would be too large to review or bisect.
 
-### 2.13.0 — protocol and popup picker
+### 2.14.0 — protocol and popup picker
 
 - `bridge-unlock` / `bridge-list` / `bridge-lock`; `bridge-get` unchanged
 - Session in the native host behind a persistent port
 - Popup lists matching accounts for the current tab and fills the chosen one
 - Firefox build: polyfill, second native-host manifest, install docs
-- Wire `browser-extension/manifest.json` into the CI version-consistency gate —
-  it is bumped by hand today and can silently drift
 
 Fully testable headlessly: the whole protocol is CLI-level.
 
-### 2.14.0 — in-field dropdown
+### 2.15.0 — in-field dropdown
 
 - Content script, field detection, extension-origin iframe menu
 - Keyboard navigation (arrows, Enter, Escape), focus handling
 - The fill-path rules above, each with a test
 - Firefox for Android verification pass
 
-### 2.15.0 — cheap unlock and scoping
+### 2.16.0 — cheap unlock and scoping
 
 - WebAuthn unlock in the popup, reusing the Dashboard's ceremony
 - Opt-in `*.` subdomain scoping
@@ -193,7 +195,7 @@ CLI-level and needs no browser:
 
 **Manual matrix** — the browser UI. Driving an extension under headless Chromium
 with `--load-extension` is possible and worth revisiting, but it is its own
-project and should not gate 2.13.0.
+project and should not gate 2.14.0.
 
 ## Packaging
 
