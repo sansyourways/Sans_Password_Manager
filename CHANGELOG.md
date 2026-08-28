@@ -7,6 +7,38 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-08-29
+
+### Fixed
+- **The dashboard's language picker never worked.** All three translation
+  dictionaries ship as one inline `<script>`, written inside a Python string,
+  so a `\"` intended for JavaScript was consumed by Python first and reached
+  the browser as a bare quote. That ended the JS string early and took the
+  whole dictionary down with a `SyntaxError`. Nothing looked broken, because
+  every element carries an English fallback in its markup, so the only symptom
+  was that switching to Indonesian or Japanese did nothing at all. The
+  regression suite now parses the dictionary exactly as the browser receives
+  it, and checks the three languages against each other.
+- **The sidebar hamburger did nothing on a desktop.** It was rendered at every
+  width but hidden by CSS above 900px, so the control existed and was inert.
+  It now collapses the sidebar to an icon rail, and that choice is remembered.
+- Progress bars — the idle-lock countdown, the TOTP ring and the generator's
+  strength meter — animated `width`, which relayouts on every frame. The
+  countdown did it once a second for the life of a session. They now animate
+  `transform`, which is composited.
+
+### Added
+- A desktop sidebar rail. The hamburger collapses the sidebar to icons and
+  back; the preference survives a reload and is applied before first paint.
+  Labels stay in the accessibility tree rather than being removed, so a screen
+  reader still announces them, and each item carries a translated tooltip.
+- A motion layer for the dashboard, built to the Console (CNS-18) system's
+  rules. Top-level blocks arrive in reading order once per load, the session
+  indicator pulses only while the idle countdown is actually running, and
+  entrances are slower than exits. Every part of it is additive: with
+  JavaScript off, motion disabled, or `prefers-reduced-motion` unreported, the
+  page renders at its final state and nothing is hidden.
+
 ## [3.2.0] - 2026-08-29
 
 ### Added
