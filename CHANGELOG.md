@@ -7,6 +7,18 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.0.2] - 2026-08-29
+
+### Fixed
+- **The hamburger button now opens the navigation drawer in the installed iOS
+  web app.** Navigation no longer depends on a document-level delegated click
+  reaching `Element.closest()` through an SVG `<use>` target, which is not
+  reliable in WebKit/PWA event dispatch. The menu button and backdrop now have
+  direct listeners; the shared delegated handler still uses a guarded Element
+  lookup for controls added dynamically. The button also declares
+  `type="button"` and `aria-controls` so its behavior and controlled drawer are
+  explicit.
+
 ## [3.0.1] - 2026-08-29
 
 ### Fixed

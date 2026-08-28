@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.0.1"
+VERSION="3.0.2"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -8044,13 +8044,17 @@ I18N_SCRIPT = """
 // One delegated listener covers every control, including markup added later.
 (function () {
   document.addEventListener("click", function (ev) {
-    const el = ev.target.closest("[data-act]");
+    // WebKit can report an SVG <use> (and older builds occasionally a text
+    // node) as the tap target. Those targets do not reliably implement
+    // Element.closest(), so walk to an Element before delegating actions.
+    var target = ev.target;
+    if (target && target.nodeType !== 1) target = target.parentElement;
+    const el = target && target.closest ? target.closest("[data-act]") : null;
     if (!el) return;
     const act = el.getAttribute("data-act");
     const id = el.getAttribute("data-target");
     const node = id ? document.getElementById(id) : null;
-    if (act === "nav") { if (window.SPM_toggleNav) SPM_toggleNav(); }
-    else if (act === "reveal") { if (window.SPM_reveal) SPM_reveal(id, el); }
+    if (act === "reveal") { if (window.SPM_reveal) SPM_reveal(id, el); }
     else if (act === "copy-val") { if (node && window.SPM_copy) SPM_copy(node.dataset.val); }
     else if (act === "copy-text") { if (node && window.SPM_copy) SPM_copy(node.textContent); }
     else if (act === "regen") { if (window.SPM_regen) SPM_regen(); }
@@ -8847,6 +8851,20 @@ SHELL_SCRIPT = """
   window.SPM_toggleNav = function () {
     setNav(!document.body.classList.contains("nav-open"));
   };
+  function wireMobileNav() {
+    // Navigation is deliberately wired directly. Delegating through an SVG
+    // event target made the installed iOS web app's hamburger a no-op.
+    var trigger = document.querySelector(".menu-btn");
+    var scrim = document.querySelector(".scrim");
+    if (trigger) trigger.addEventListener("click", function (e) {
+      e.preventDefault();
+      window.SPM_toggleNav();
+    });
+    if (scrim) scrim.addEventListener("click", function (e) {
+      e.preventDefault();
+      setNav(false);
+    });
+  }
 
   /* ---- instant table filter ------------------------------------------- */
   function wireSearch() {
@@ -8885,6 +8903,7 @@ SHELL_SCRIPT = """
   });
 
   document.addEventListener("DOMContentLoaded", function () {
+    wireMobileNav();
     wireSearch();
   });
 })();
@@ -9157,9 +9176,9 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
 <body class="theme-dark">
 {ICON_SPRITE}
 <a class="skip-link" href="#main-content">Skip to vault content</a>
-<div class="scrim" data-act="nav"></div>
+<div class="scrim" aria-hidden="true"></div>
 <div class="app">
-  <aside class="sidebar">
+  <aside class="sidebar" id="mobile-navigation">
     <div class="brand">
       <div class="brand-mark" aria-hidden="true">{_icon("brand")}</div>
       <div class="brand-text">
@@ -9182,7 +9201,8 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
 
   <div class="main">
     <header class="topbar">
-      <button class="icon-btn menu-btn" data-act="nav" aria-label="Menu" aria-expanded="false">{_icon("menu", "icon icon-sm")}</button>
+      <button class="icon-btn menu-btn" type="button" aria-label="Menu"
+        aria-controls="mobile-navigation" aria-expanded="false">{_icon("menu", "icon icon-sm")}</button>
       {search_html}
       <div class="topbar-right">
         <div class="lockbar" id="lockbar" title="Idle auto-lock">
