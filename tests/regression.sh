@@ -346,6 +346,17 @@ grep -q 'APP_ICON_PNG = base64.b64decode' "$web_script"
 # one, which pushed the vault chip and logout button off the bottom.
 grep -q 'height: 100dvh' "$web_script"
 grep -q 'padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom))' "$web_script"
+# The iOS installed app can surface the SVG <use> as the tap target. Mobile
+# navigation must therefore have direct listeners instead of depending on a
+# delegated ev.target.closest() call reaching the surrounding button.
+grep -q 'function wireMobileNav()' "$web_script"
+grep -q 'trigger.addEventListener("click"' "$web_script"
+grep -q 'scrim.addEventListener("click"' "$web_script"
+grep -q 'aria-controls="mobile-navigation"' "$web_script"
+if grep -q 'data-act="nav"' "$web_script"; then
+	printf 'mobile navigation still depends on delegated data-act handling\n' >&2
+	exit 1
+fi
 grep -q 'prefers-reduced-motion:reduce' "$web_script"
 # Safari omits Origin on same-origin form submissions, so an Origin-only check
 # rejected every authenticated write from an iPhone with a 403. Referer cannot
