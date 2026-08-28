@@ -266,9 +266,9 @@
       <div class="grid proscons">
         <div class="card">
           <span class="badge bad">● Architecture debt</span>
-          <div class="item"><b>Monolithic primary script</b><span>As features grow, security review and regression isolation become harder.</span></div>
+          <div class="item"><b>Monolithic primary script</b><span>Addressed: vault cryptography now lives in one reviewable core, and the shipped script is generated from source files rather than written as one.</span></div>
           <div class="item"><b>Bash complexity ceiling</b><span>HTTP, concurrency, parsing and evolving crypto policies are costly to assure in shell.</span></div>
-          <div class="item"><b>Implicit crypto policy</b><span>Security parameters should be versioned and encoded rather than left to environment defaults.</span></div>
+          <div class="item"><b>Implicit crypto policy</b><span>Addressed: the vault records its format version and derivation is pinned, so a local <code>gpg.conf</code> can no longer change a security parameter underneath the application.</span></div>
         </div>
         <div class="card">
           <span class="badge mid">● Operational risk</span>
@@ -303,9 +303,10 @@
       <div class="card roadcol">
         <span class="badge good">Phase 1 — Foundation</span>
         <h3>Make the core auditable</h3>
-        <div class="feature"><b>Vault-key architecture</b><span class="priority">P0</span><br><small>Random vault key, separately wrapped by master password and recovery.</small></div>
-        <div class="feature"><b>Argon2id + versioned vault format</b><span class="priority">P0</span><br><small>Explicit KDF policy and migrations.</small></div>
-        <div class="feature"><b>Modular core</b><span class="priority">P0</span><br><small>Split crypto, storage, sync, web and recovery boundaries.</small></div>
+        <div class="feature"><b>Vault-key architecture</b><span class="priority good">Shipped</span><br><small>Random vault key, separately wrapped by master password and recovery.</small></div>
+        <div class="feature"><b>Versioned vault format + explicit KDF policy</b><span class="priority good">Shipped</span><br><small>Format version recorded in the vault; derivation pinned rather than inherited.</small></div>
+        <div class="feature"><b>Argon2id</b><span class="priority">P0</span><br><small>Blocked while GnuPG encrypts the vault: OpenPGP string-to-key offers no memory-hard function. Arrives with the data-layer replacement.</small></div>
+        <div class="feature"><b>Modular core</b><span class="priority good">Shipped</span><br><small>One trusted core; CLI, Dashboard and browser bridge are clients of it.</small></div>
         <div class="feature"><b>doctor --json</b><span class="priority">P1</span><br><small>Machine-readable diagnostics.</small></div>
         <div class="feature"><b>Fault-injection test suite</b><span class="priority">P1</span><br><small>Disk-full, killed process, corrupted files, concurrent writers.</small></div>
       </div>
