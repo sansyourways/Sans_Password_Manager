@@ -1337,6 +1337,120 @@ printf '  source is inert; execution and a real pipe still dispatch\n'
 # and vault mutation are exercised against the module directly, without a
 # shell or a web server in the way. That this file can exist at all is the
 # point of extracting it.
+printf 'CLI regression: doctor --json\n'
+# doctor --json is the machine-readable half of the same checks. Two things
+# make it useful and both are asserted: stdout carries the document and
+# nothing else, so it pipes into jq without a filter; and the exit status
+# mirrors the verdict, so a script can gate on it without parsing.
+doctor_plain="$TEST_ROOT/doctor-plain"
+doctor_vault="$TEST_ROOT/doctor-vault.gpg"
+printf 'META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n1\tGood\tu@example.invalid\tSecret1\thttps://a.invalid\t2025-01-01T00:00:00Z\nNOTE\t1\tMemo\taGk=\t2025-01-01T00:00:00Z\t-\n' \
+	"$TEST_RECOVERY_B64" > "$doctor_plain"
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback \
+	--passphrase-fd 0 --symmetric --cipher-algo AES256 \
+	-o "$doctor_vault" "$doctor_plain"
+chmod 600 "$doctor_vault"
+
+doctor_json="$TEST_ROOT/doctor.json"
+doctor_rc=0
+( export VAULT_FILE="$doctor_vault" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY=""
+  cmd_doctor_json ) > "$doctor_json" 2>/dev/null || doctor_rc=$?
+
+python3 - "$doctor_json" "$doctor_rc" "$doctor_vault" <<'DOCPY'
+import json
+import sys
+
+path, exit_code, vault = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+raw = open(path, encoding="utf-8").read()
+try:
+    report = json.loads(raw)
+except ValueError as exc:
+    sys.exit("doctor --json did not emit a lone JSON document: %s" % exc)
+
+if report["vault"]["path"] != vault:
+    sys.exit("report names the wrong vault: %s" % report["vault"]["path"])
+
+by_id = {c["id"]: c for c in report["checks"]}
+for required in ("duplicate_ids", "empty_passwords", "split_records",
+                 "vault_format", "recovery_pubkey", "recovery_pairing",
+                 "file_permissions"):
+    if required not in by_id:
+        sys.exit("report is missing the %s check" % required)
+    if by_id[required]["status"] not in ("ok", "warn", "fail"):
+        sys.exit("%s has a status outside ok/warn/fail" % required)
+
+if by_id["duplicate_ids"]["status"] != "ok":
+    sys.exit("a clean vault reported duplicate ids")
+if by_id["split_records"]["status"] != "ok":
+    sys.exit("a clean vault reported split records")
+if report["counts"]["passwords"] != 1 or report["counts"]["notes"] != 1:
+    sys.exit("counts are wrong: %r" % report["counts"])
+
+# The exit status has to follow the verdict, or gating on it is a lie.
+failed = report["summary"]["failed"]
+if failed and exit_code == 0:
+    sys.exit("checks failed but doctor --json exited 0")
+if not failed and exit_code != 0:
+    sys.exit("no check failed but doctor --json exited %d" % exit_code)
+
+# A report is only safe to hand to a log collector if it carries no secret.
+blob = json.dumps(report)
+for secret in ("Secret1", "aGk="):
+    if secret in blob:
+        sys.exit("doctor --json leaked a secret field: %s" % secret)
+print("  doctor --json: %d checks, exit %d, no secret in the document"
+      % (len(report["checks"]), exit_code))
+DOCPY
+
+# A vault with a duplicate id and a split record has to be reported as failed,
+# and the exit status has to follow. Proving the clean case alone would pass
+# for a report that never says "fail".
+doctor_bad_plain="$TEST_ROOT/doctor-bad-plain"
+doctor_bad_vault="$TEST_ROOT/doctor-bad.gpg"
+printf 'META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n7\tOne\tu\tS1\thttps://a.invalid\t2025-01-01T00:00:00Z\n7\tTwo\tu\tS2\thttps://b.invalid\t2025-01-01T00:00:00Z\nBACKUP_CODE\t9\tBro\vken\tY29kZQ==\t2025-01-01T00:00:00Z\t-\n' \
+	"$TEST_RECOVERY_B64" > "$doctor_bad_plain"
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback \
+	--passphrase-fd 0 --symmetric --cipher-algo AES256 \
+	-o "$doctor_bad_vault" "$doctor_bad_plain"
+chmod 600 "$doctor_bad_vault"
+doctor_bad_rc=0
+( export VAULT_FILE="$doctor_bad_vault" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY=""
+  cmd_doctor_json ) > "$TEST_ROOT/doctor-bad.json" 2>/dev/null || doctor_bad_rc=$?
+[ "$doctor_bad_rc" -ne 0 ] || {
+	printf 'doctor --json exited 0 for a vault with a duplicate id and a split record\n' >&2
+	exit 1
+}
+python3 - "$TEST_ROOT/doctor-bad.json" <<'DOCBADPY'
+import json
+import sys
+report = json.load(open(sys.argv[1], encoding="utf-8"))
+by_id = {c["id"]: c for c in report["checks"]}
+if by_id["duplicate_ids"]["status"] != "fail":
+    sys.exit("a duplicated password id was not reported as a failure")
+if by_id["split_records"]["status"] != "fail":
+    sys.exit("a record split by a line break was not reported as a failure")
+if report["summary"]["status"] != "fail":
+    sys.exit("summary status is %r with two failing checks"
+             % report["summary"]["status"])
+print("  doctor --json: a damaged vault is reported failed, and exits non-zero")
+DOCBADPY
+
+# The human doctor and the JSON report must not drift: they now read the same
+# scan out of the core, and this is what proves it stayed that way.
+scan_out="$TEST_ROOT/scan-records.tsv"
+core scan-records "$doctor_bad_plain" > "$scan_out"
+grep -q '^SUMMARY	1	0$' "$scan_out" || {
+	printf 'core scan-records did not report the one broken record\n' >&2
+	cat "$scan_out" >&2; exit 1
+}
+grep -q '^BROKEN	4	BACKUP_CODE	9	' "$scan_out" || {
+	printf 'core scan-records did not describe the broken record\n' >&2
+	cat "$scan_out" >&2; exit 1
+}
+grep -q 'Bro' "$scan_out" && ! grep -q 'Y29kZQ==' "$scan_out" || {
+	printf 'core scan-records printed the secret field\n' >&2; exit 1
+}
+
 printf 'Core regression: trusted core\n'
 SPM_CORE_DIR="$XDG_DATA_HOME/spm" ensure_core_script "$XDG_DATA_HOME/spm"
 SPM_CORE_PATH="$SPM_CORE_PATH" python3 "$ROOT_DIR/tests/core-test.py" \

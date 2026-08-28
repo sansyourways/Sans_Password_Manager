@@ -3613,74 +3613,59 @@ cmd_forgot() {
 # 2.10.12 stopped new ones being created; this finds any that already exist.
 # Strictly read-only: it reports and never edits the vault.
 doctor_scan_broken_records() {
-	local plain="$1"
-	python3 - "$plain" <<'PY'
-import sys, unicodedata
-
-BREAKS = {
-    "\v": "U+000B VERTICAL TAB",
-    "\f": "U+000C FORM FEED",
-    "\x1c": "U+001C FILE SEPARATOR",
-    "\x1d": "U+001D GROUP SEPARATOR",
-    "\x1e": "U+001E RECORD SEPARATOR",
-    "\x85": "U+0085 NEXT LINE",
-    "\u2028": "U+2028 LINE SEPARATOR",
-    "\u2029": "U+2029 PARAGRAPH SEPARATOR",
+	# One implementation, in the core. This used to carry its own copy of the
+	# break table and the record describer, which is exactly the arrangement
+	# the trusted-core split exists to prevent -- the JSON report needs the
+	# same scan, and two copies of it would drift the way the old dashboard
+	# and CLI copies did.
+	core scan-records "$1"
 }
-# Field 3 holds the secret for every record shape SPM writes, so it is never
-# printed. Only type, id and label are shown.
-SECRET_FIELD = 3
-TAGS = {"NOTE": "NOTE", "PASSPHRASE": "PASSPHRASE",
-        "BACKUP_CODE": "BACKUP_CODE", "AUTH": "AUTHENTICATOR"}
+# Which of the recovery states this vault is in, as a single token. The human
+# doctor prints these as sentences further down; the JSON report needs the same
+# determination without the prose, and neither should decide it twice.
+doctor_recovery_state() {
+	[ -f "$RECOVERY_FILE" ] || { printf 'no-recovery-file'; return 0; }
+	[ -f "$RECOVERY_PRIV_DEFAULT" ] || { printf 'no-private-key'; return 0; }
+	local secret
+	if secret="$(openssl rsautl -decrypt -inkey "$RECOVERY_PRIV_DEFAULT" \
+			-in "$RECOVERY_FILE" 2>/dev/null)"; then
+		if is_vault_container "$VAULT_FILE"; then
+			if [ -n "${VAULT_KEY:-}" ] && [ "$secret" = "$VAULT_KEY" ]; then
+				printf 'match-current'
+			else
+				printf 'match-stale'
+			fi
+		else
+			printf 'match-legacy'
+		fi
+	else
+		printf 'mismatch'
+	fi
+	secret=""
+}
 
-def describe(line):
-    parts = line.split("\t")
-    tag = parts[0] if parts else ""
-    if tag in TAGS:
-        return TAGS[tag], (parts[1] if len(parts) > 1 else "?"), (parts[2] if len(parts) > 2 else "")
-    if tag.isdigit():
-        return "PASSWORD", tag, (parts[1] if len(parts) > 1 else "")
-    return tag or "(unknown)", "?", ""
-
-def safe(text, limit=32):
-    out = []
-    for ch in text:
-        if ch in BREAKS or ch == "\t":
-            out.append("\u2423")           # visible blank, never the raw char
-        elif unicodedata.category(ch).startswith("C"):
-            out.append("?")
-        else:
-            out.append(ch)
-    shown = "".join(out)
-    return shown[:limit] + ("..." if len(shown) > limit else "")
-
-# Split on newline only: this is how the record was physically written.
-with open(sys.argv[1], "r", encoding="utf-8", errors="surrogateescape") as fh:
-    lines = fh.read().split("\n")
-
-broken, orphans = [], []
-for number, line in enumerate(lines, start=1):
-    if not line or line.startswith("#"):
-        continue
-    hits = [name for ch, name in BREAKS.items() if ch in line]
-    if hits:
-        kind, rid, label = describe(line)
-        broken.append((number, kind, rid, safe(label), hits))
-        continue
-    if line.startswith("META_"):
-        continue
-    if len(line.split("\t")) < 5:
-        orphans.append((number, safe(line, 48)))
-
-for number, kind, rid, label, hits in broken:
-    print("BROKEN\t%d\t%s\t%s\t%s\t%s" % (number, kind, rid, label, "; ".join(hits)))
-for number, text in orphans:
-    print("ORPHAN\t%d\t%s" % (number, text))
-print("SUMMARY\t%d\t%d" % (len(broken), len(orphans)))
-PY
+# `doctor --json`. Everything a script needs, nothing a human needs: no
+# progress lines, no banner, and stdout carries the document and nothing else
+# so it can be piped straight into jq. Exit status mirrors the report, so a
+# caller can gate on it without parsing.
+cmd_doctor_json() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp state status
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+	state="$(doctor_recovery_state)"
+	status=0
+	# shellcheck disable=SC2046
+	core doctor-report "$tmp" "$VAULT_FILE" "$state" $(sensitive_files) || status=$?
+	secure_wipe "$tmp"
+	return "$status"
 }
 
 cmd_doctor() {
+	if [ "${1:-}" = "--json" ]; then
+		cmd_doctor_json
+		return $?
+	fi
 	if [ "$SPM_LANG" = "id" ]; then
 		printf ">>> HEALTH / DOCTOR CHECK <<<\n\n"
 	else
@@ -5060,6 +5045,7 @@ Perintah utama (CLI):
                            → Aktifkan cek rilis harian saat mulai
   ./spm.sh forgot          → Reset kata sandi utama dengan private key
   ./spm.sh doctor          → Health / integrity check vault
+  ./spm.sh doctor --json   → the same checks as JSON, for scripts
   ./spm.sh generate        → Generator kata sandi (panjang, mode mudah/aman/angka, simbol opsional)
   ./spm.sh web|dashboard   → SPM Dashboard (sementara / background via pm2)
   ./spm.sh help            → Tampilkan bantuan ini
@@ -5170,6 +5156,7 @@ Main commands (CLI):
   ./spm.sh update          → Check & auto-install latest GitHub release
   ./spm.sh forgot          → Reset master password using the private key
   ./spm.sh doctor          → Vault health / integrity check
+  ./spm.sh doctor --json   → the same checks as JSON, for scripts
   ./spm.sh generate        → Password generator (length, easy/secure/numeric, optional symbols/upper/lower/digits)
   ./spm.sh web|dashboard   → SPM Dashboard (foreground or pm2 background)
   ./spm.sh help            → Show this help

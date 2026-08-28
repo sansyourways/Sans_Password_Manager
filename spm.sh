@@ -801,6 +801,7 @@ world-readable through `ps` and /proc/<pid>/cmdline.
 
 import base64
 import hashlib
+import json
 import os
 import shutil
 import stat
@@ -808,6 +809,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 
 # ----- format and policy -----------------------------------------------------
 
@@ -1323,6 +1325,206 @@ def recover(vault_path, secret, out_path):
 # never in argv. A master password cannot contain a newline: every prompt that
 # collects one reads a single line.
 
+# ----- diagnostics -----------------------------------------------------------
+
+# Characters that splitlines() honours but a TAB-delimited, line-based record
+# format does not survive. A value carrying one of these was written as a
+# single record and reads back as two, so the tail becomes an orphan fragment
+# that no surface displays. See the 2.10.12 sanitiser, which stops new ones.
+RECORD_BREAKS = {
+    "\v": "U+000B VERTICAL TAB",
+    "\f": "U+000C FORM FEED",
+    "\x1c": "U+001C FILE SEPARATOR",
+    "\x1d": "U+001D GROUP SEPARATOR",
+    "\x1e": "U+001E RECORD SEPARATOR",
+    "\x85": "U+0085 NEXT LINE",
+    "\u2028": "U+2028 LINE SEPARATOR",
+    "\u2029": "U+2029 PARAGRAPH SEPARATOR",
+}
+
+# Field 3 holds the secret in every record shape SPM writes, so nothing here
+# ever reads it. Only type, id and label are reported.
+_RECORD_TAGS = {"NOTE": "NOTE", "PASSPHRASE": "PASSPHRASE",
+                "BACKUP_CODE": "BACKUP_CODE", "AUTH": "AUTHENTICATOR"}
+
+
+def _describe_record(line):
+    parts = line.split("\t")
+    tag = parts[0] if parts else ""
+    if tag in _RECORD_TAGS:
+        return (_RECORD_TAGS[tag],
+                parts[1] if len(parts) > 1 else "?",
+                parts[2] if len(parts) > 2 else "")
+    if tag.isdigit():
+        return "PASSWORD", tag, (parts[1] if len(parts) > 1 else "")
+    return tag or "(unknown)", "?", ""
+
+
+def _safe_text(text, limit=32):
+    """A label rendered for a terminal: no raw control characters, ever."""
+    out = []
+    for ch in text:
+        if ch in RECORD_BREAKS or ch == "\t":
+            out.append("\u2423")
+        elif unicodedata.category(ch).startswith("C"):
+            out.append("?")
+        else:
+            out.append(ch)
+    shown = "".join(out)
+    return shown[:limit] + ("..." if len(shown) > limit else "")
+
+
+def scan_broken_records(plaintext):
+    """(broken, orphans) for records split by an embedded line break.
+
+    Split on "\n" only, because that is how the record was physically written.
+    """
+    broken, orphans = [], []
+    for number, line in enumerate(plaintext.split("\n"), start=1):
+        if not line or line.startswith("#"):
+            continue
+        hits = [name for ch, name in RECORD_BREAKS.items() if ch in line]
+        if hits:
+            kind, rid, label = _describe_record(line)
+            broken.append((number, kind, rid, _safe_text(label), hits))
+            continue
+        if line.startswith("META_"):
+            continue
+        if len(line.split("\t")) < 5:
+            orphans.append((number, _safe_text(line, 48)))
+    return broken, orphans
+
+
+def vault_counts(plaintext):
+    """Record counts, duplicate password ids and empty password fields."""
+    counts = {"passwords": 0, "notes": 0, "passphrases": 0,
+              "backup_codes": 0, "authenticators": 0}
+    by_tag = {"NOTE": "notes", "PASSPHRASE": "passphrases",
+              "BACKUP_CODE": "backup_codes", "AUTH": "authenticators"}
+    seen, duplicates, empty = {}, [], 0
+    for line in plaintext.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        tag = parts[0]
+        if tag in by_tag:
+            counts[by_tag[tag]] += 1
+        elif tag.isdigit():
+            counts["passwords"] += 1
+            seen[tag] = seen.get(tag, 0) + 1
+            if len(parts) > 3 and not parts[3]:
+                empty += 1
+    duplicates = sorted((rid for rid, n in seen.items() if n > 1), key=int)
+    return counts, duplicates, empty
+
+
+def _check(identifier, status, summary, **extra):
+    entry = {"id": identifier, "status": status, "summary": summary}
+    entry.update(extra)
+    return entry
+
+
+def doctor_report(plaintext, vault_path, recovery_status="unchecked",
+                  sensitive_files=()):
+    """A machine-readable health report. Never contains a secret.
+
+    Structured as a list of checks with stable ids rather than a bag of
+    booleans, so a caller can act on one without parsing prose, and so a check
+    added later does not change the shape of the ones already there.
+    """
+    checks = []
+    counts, duplicates, empty = vault_counts(plaintext)
+
+    if duplicates:
+        checks.append(_check("duplicate_ids", "fail",
+                             "%d password id(s) appear more than once" % len(duplicates),
+                             ids=duplicates))
+    else:
+        checks.append(_check("duplicate_ids", "ok", "no duplicate password ids"))
+
+    if empty:
+        checks.append(_check("empty_passwords", "warn",
+                             "%d entr(y/ies) have an empty password field" % empty,
+                             count=empty))
+    else:
+        checks.append(_check("empty_passwords", "ok", "no empty password fields"))
+
+    broken, orphans = scan_broken_records(plaintext)
+    if broken or orphans:
+        checks.append(_check(
+            "split_records", "fail",
+            "%d record(s) contain a line-break character; %d orphan fragment(s)"
+            % (len(broken), len(orphans)),
+            broken=[{"line": n, "kind": k, "id": i, "label": l, "characters": h}
+                    for n, k, i, l, h in broken],
+            orphans=[{"line": n, "text": t} for n, t in orphans]))
+    else:
+        checks.append(_check("split_records", "ok",
+                             "no records split by a line-break character"))
+
+    found = format_version(plaintext)
+    if found >= VAULT_FORMAT_VERSION:
+        checks.append(_check("vault_format", "ok",
+                             "format version %d is current" % found,
+                             found=found, current=VAULT_FORMAT_VERSION))
+    else:
+        checks.append(_check(
+            "vault_format", "warn",
+            "format version %d; %d is available and the next write upgrades in place"
+            % (found, VAULT_FORMAT_VERSION),
+            found=found, current=VAULT_FORMAT_VERSION))
+
+    try:
+        recovery_pubkey_pem(plaintext)
+        checks.append(_check("recovery_pubkey", "ok",
+                             "recovery public key present and decodable"))
+    except VaultError as exc:
+        checks.append(_check("recovery_pubkey", "fail", str(exc)))
+
+    pairing = {
+        "match-current": ("ok", "recovery file holds this vault's current key"),
+        "match-legacy": ("ok", "recovery file decrypts; this format predates vault keys"),
+        "match-stale": ("fail", "recovery file does not hold this vault's key; "
+                                "run change-master to refresh it"),
+        "mismatch": ("fail", "private key does not match the recovery file"),
+        "no-private-key": ("fail", "no default private key found"),
+        "no-recovery-file": ("fail", "no recovery file found"),
+        "unchecked": ("warn", "recovery pairing was not checked"),
+    }
+    status, summary = pairing.get(recovery_status,
+                                  ("warn", "unrecognised recovery state"))
+    checks.append(_check("recovery_pairing", status, summary, state=recovery_status))
+
+    exposed = []
+    for path in sensitive_files:
+        try:
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+        except OSError:
+            continue
+        if mode & (stat.S_IRWXG | stat.S_IRWXO):
+            exposed.append({"path": path, "mode": "%03o" % mode})
+    if exposed:
+        checks.append(_check("file_permissions", "fail",
+                             "%d sensitive file(s) readable by other users" % len(exposed),
+                             files=exposed))
+    else:
+        checks.append(_check("file_permissions", "ok",
+                             "sensitive files are not group- or world-accessible"))
+
+    failed = sum(1 for c in checks if c["status"] == "fail")
+    warned = sum(1 for c in checks if c["status"] == "warn")
+    return {
+        "schema": 1,
+        "vault": {"path": vault_path,
+                  "format_version": found,
+                  "current_format_version": VAULT_FORMAT_VERSION},
+        "counts": counts,
+        "checks": checks,
+        "summary": {"failed": failed, "warned": warned,
+                    "status": "fail" if failed else ("warn" if warned else "ok")},
+    }
+
+
 def _secrets(count):
     data = sys.stdin.buffer.read().decode("utf-8")
     fields = data.split("\n")
@@ -1398,6 +1600,25 @@ def main(argv):
             sys.stdout.write(history_dir(argv[2]) + "\n")
         elif command == "archive":
             archive_generation(argv[2])
+        elif command == "scan-records":
+            # scan-records <plainfile> ; stdout: the TSV the CLI's doctor renders
+            with open(argv[2], "r", encoding="utf-8", errors="surrogateescape") as handle:
+                broken, orphans = scan_broken_records(handle.read())
+            for number, kind, rid, label, hits in broken:
+                sys.stdout.write("BROKEN\t%d\t%s\t%s\t%s\t%s\n"
+                                 % (number, kind, rid, label, "; ".join(hits)))
+            for number, text in orphans:
+                sys.stdout.write("ORPHAN\t%d\t%s\n" % (number, text))
+            sys.stdout.write("SUMMARY\t%d\t%d\n" % (len(broken), len(orphans)))
+        elif command == "doctor-report":
+            # doctor-report <plainfile> <vault> <recovery state> [sensitive file ...]
+            # stdout: JSON. Exit 1 when any check failed, so a script can gate
+            # on the status without parsing the document.
+            with open(argv[2], "r", encoding="utf-8", errors="surrogateescape") as handle:
+                plaintext = handle.read()
+            report = doctor_report(plaintext, argv[3], argv[4], argv[5:])
+            sys.stdout.write(json.dumps(report, indent=2) + "\n")
+            return 1 if report["summary"]["failed"] else 0
         elif command == "self-test":
             return 0
         else:
@@ -4245,74 +4466,59 @@ cmd_forgot() {
 # 2.10.12 stopped new ones being created; this finds any that already exist.
 # Strictly read-only: it reports and never edits the vault.
 doctor_scan_broken_records() {
-	local plain="$1"
-	python3 - "$plain" <<'PY'
-import sys, unicodedata
-
-BREAKS = {
-    "\v": "U+000B VERTICAL TAB",
-    "\f": "U+000C FORM FEED",
-    "\x1c": "U+001C FILE SEPARATOR",
-    "\x1d": "U+001D GROUP SEPARATOR",
-    "\x1e": "U+001E RECORD SEPARATOR",
-    "\x85": "U+0085 NEXT LINE",
-    "\u2028": "U+2028 LINE SEPARATOR",
-    "\u2029": "U+2029 PARAGRAPH SEPARATOR",
+	# One implementation, in the core. This used to carry its own copy of the
+	# break table and the record describer, which is exactly the arrangement
+	# the trusted-core split exists to prevent -- the JSON report needs the
+	# same scan, and two copies of it would drift the way the old dashboard
+	# and CLI copies did.
+	core scan-records "$1"
 }
-# Field 3 holds the secret for every record shape SPM writes, so it is never
-# printed. Only type, id and label are shown.
-SECRET_FIELD = 3
-TAGS = {"NOTE": "NOTE", "PASSPHRASE": "PASSPHRASE",
-        "BACKUP_CODE": "BACKUP_CODE", "AUTH": "AUTHENTICATOR"}
+# Which of the recovery states this vault is in, as a single token. The human
+# doctor prints these as sentences further down; the JSON report needs the same
+# determination without the prose, and neither should decide it twice.
+doctor_recovery_state() {
+	[ -f "$RECOVERY_FILE" ] || { printf 'no-recovery-file'; return 0; }
+	[ -f "$RECOVERY_PRIV_DEFAULT" ] || { printf 'no-private-key'; return 0; }
+	local secret
+	if secret="$(openssl rsautl -decrypt -inkey "$RECOVERY_PRIV_DEFAULT" \
+			-in "$RECOVERY_FILE" 2>/dev/null)"; then
+		if is_vault_container "$VAULT_FILE"; then
+			if [ -n "${VAULT_KEY:-}" ] && [ "$secret" = "$VAULT_KEY" ]; then
+				printf 'match-current'
+			else
+				printf 'match-stale'
+			fi
+		else
+			printf 'match-legacy'
+		fi
+	else
+		printf 'mismatch'
+	fi
+	secret=""
+}
 
-def describe(line):
-    parts = line.split("\t")
-    tag = parts[0] if parts else ""
-    if tag in TAGS:
-        return TAGS[tag], (parts[1] if len(parts) > 1 else "?"), (parts[2] if len(parts) > 2 else "")
-    if tag.isdigit():
-        return "PASSWORD", tag, (parts[1] if len(parts) > 1 else "")
-    return tag or "(unknown)", "?", ""
-
-def safe(text, limit=32):
-    out = []
-    for ch in text:
-        if ch in BREAKS or ch == "\t":
-            out.append("\u2423")           # visible blank, never the raw char
-        elif unicodedata.category(ch).startswith("C"):
-            out.append("?")
-        else:
-            out.append(ch)
-    shown = "".join(out)
-    return shown[:limit] + ("..." if len(shown) > limit else "")
-
-# Split on newline only: this is how the record was physically written.
-with open(sys.argv[1], "r", encoding="utf-8", errors="surrogateescape") as fh:
-    lines = fh.read().split("\n")
-
-broken, orphans = [], []
-for number, line in enumerate(lines, start=1):
-    if not line or line.startswith("#"):
-        continue
-    hits = [name for ch, name in BREAKS.items() if ch in line]
-    if hits:
-        kind, rid, label = describe(line)
-        broken.append((number, kind, rid, safe(label), hits))
-        continue
-    if line.startswith("META_"):
-        continue
-    if len(line.split("\t")) < 5:
-        orphans.append((number, safe(line, 48)))
-
-for number, kind, rid, label, hits in broken:
-    print("BROKEN\t%d\t%s\t%s\t%s\t%s" % (number, kind, rid, label, "; ".join(hits)))
-for number, text in orphans:
-    print("ORPHAN\t%d\t%s" % (number, text))
-print("SUMMARY\t%d\t%d" % (len(broken), len(orphans)))
-PY
+# `doctor --json`. Everything a script needs, nothing a human needs: no
+# progress lines, no banner, and stdout carries the document and nothing else
+# so it can be piped straight into jq. Exit status mirrors the report, so a
+# caller can gate on it without parsing.
+cmd_doctor_json() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp state status
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+	state="$(doctor_recovery_state)"
+	status=0
+	# shellcheck disable=SC2046
+	core doctor-report "$tmp" "$VAULT_FILE" "$state" $(sensitive_files) || status=$?
+	secure_wipe "$tmp"
+	return "$status"
 }
 
 cmd_doctor() {
+	if [ "${1:-}" = "--json" ]; then
+		cmd_doctor_json
+		return $?
+	fi
 	if [ "$SPM_LANG" = "id" ]; then
 		printf ">>> HEALTH / DOCTOR CHECK <<<\n\n"
 	else
@@ -5692,6 +5898,7 @@ Perintah utama (CLI):
                            → Aktifkan cek rilis harian saat mulai
   ./spm.sh forgot          → Reset kata sandi utama dengan private key
   ./spm.sh doctor          → Health / integrity check vault
+  ./spm.sh doctor --json   → the same checks as JSON, for scripts
   ./spm.sh generate        → Generator kata sandi (panjang, mode mudah/aman/angka, simbol opsional)
   ./spm.sh web|dashboard   → SPM Dashboard (sementara / background via pm2)
   ./spm.sh help            → Tampilkan bantuan ini
@@ -5802,6 +6009,7 @@ Main commands (CLI):
   ./spm.sh update          → Check & auto-install latest GitHub release
   ./spm.sh forgot          → Reset master password using the private key
   ./spm.sh doctor          → Vault health / integrity check
+  ./spm.sh doctor --json   → the same checks as JSON, for scripts
   ./spm.sh generate        → Password generator (length, easy/secure/numeric, optional symbols/upper/lower/digits)
   ./spm.sh web|dashboard   → SPM Dashboard (foreground or pm2 background)
   ./spm.sh help            → Show this help
