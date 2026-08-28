@@ -52,11 +52,14 @@ the vault-key change needed the format version to migrate through, and both
 needed the core extracted before the crypto backend could be touched at all.
 What remains is listed below in the order that dependency imposes.
 
-### Foundation — make the core auditable — **delivered**
+### Foundation — make the core auditable — **shipped in 3.0.0**
 
-All three items are implemented and on `main`; they are described in
-`CHANGELOG.md` and await a version number. One clause of the second item is
-carried forward, and is stated as such below rather than quietly dropped.
+All three items are implemented and released. 3.0.0 is a major version because
+the vault format changed and a vault it writes cannot be opened by 2.13.0 or
+earlier — not because the feature list is long; it carries this section and
+nothing else, so that backing out a format migration would not also back out
+unrelated work. One clause of the second item is carried forward, and is stated
+as such below rather than quietly dropped.
 
 - **Version the vault format and state the KDF policy explicitly.** *(#36)*
   Vaults carry a `META_VAULT_VERSION` row written on every write, and a vault
@@ -68,13 +71,24 @@ carried forward, and is stated as such below rather than quietly dropped.
   at the maximum count, so the concrete change is the digest, which defaults to
   **SHA1**.
 
-  **Argon2id was not adopted, and cannot be while GnuPG encrypts the vault.**
-  OpenPGP string-to-key is hash-iteration by construction; `gpg --symmetric`
-  exposes only `--s2k-mode`, `--s2k-digest-algo`, `--s2k-cipher-algo` and
-  `--s2k-count`, over a hash list with no memory-hard function in it. GnuPG
-  uses Argon2id to protect its own private keys from 2.4 onward, never for
-  symmetric messages. A memory-hard KDF therefore arrives with the data-layer
-  replacement below, not before it.
+  **Argon2id was not adopted, and is not reachable on any platform SPM
+  supports.** Two separate walls, and the second was found only after the
+  first was blamed for everything. GnuPG cannot express it: OpenPGP
+  string-to-key is hash-iteration by construction, `gpg --symmetric` offers
+  only `--s2k-mode`, `--s2k-digest-algo`, `--s2k-cipher-algo` and
+  `--s2k-count`, and GnuPG's own Argon2id support covers its private keys from
+  2.4 onward, never symmetric messages. But replacing gpg does not deliver it
+  either — Argon2 arrived in **OpenSSL 3.2**, and the platforms SPM targets are
+  behind it: OpenSSL 3.0 on current Debian and Ubuntu, LibreSSL with no
+  `openssl kdf` at all on macOS. Python's `hashlib` offers scrypt and PBKDF2
+  and no Argon2. Every remaining route is a third-party dependency, which is
+  the portability rule SPM is built on.
+
+  So the honest statement is that the clause names a primitive the ecosystem
+  does not yet hand us on the terms this project accepts. The reachable
+  memory-hard KDF is **scrypt**, and it arrives with the data-layer
+  replacement below. Argon2id follows it when a platform floor makes it
+  testable rather than merely writable.
 
 - **Wrap a vault key rather than the master password.** *(#37)* Format 3 seals
   the vault under a random 256-bit vault key and seals only that key under the
@@ -99,20 +113,32 @@ carried forward, and is stated as such below rather than quietly dropped.
 
 ### Foundation — the work this unblocks
 
-- **Replace the gpg data layer.** Now the single-file change it was not before.
-  Benchmarking is unambiguous: one `gpg --symmetric` call costs ~600 ms and the
-  figure is flat from 100 bytes to 2 MB — unaffected by iteration count, by
-  `--no-symkey-cache`, and by killing `gpg-agent` (which made it worse). It is
-  fixed overhead inside gpg's symmetric path, not startup, not payload, not the
-  KDF. So gpg accounts for essentially all of the time SPM spends on a vault
-  operation, and `openssl aes-256-ctr` with an HMAC-SHA256 tag costs ~29 ms
-  against it.
+- **Replace the gpg data layer.** Now the single-file change it was not
+  before, and the one that brings a memory-hard KDF with it. Measured on a
+  format-3 vault: a read costs **452 ms**, of which 280 ms is the key unwrap
+  and 172 ms the data layer — two gpg invocations, and gpg's symmetric path
+  carries a fixed cost that payload size barely moves. Against that,
+  `openssl aes-256-ctr` with an HMAC-SHA256 tag costs **~30 ms**, and
+  `hashlib.scrypt` costs **69 ms at n=2^14** (16 MiB) or **183 ms at n=2^15**
+  (32 MiB).
 
-  This is the same change that makes Argon2id-class key derivation reachable:
-  `hashlib.scrypt` is memory-hard, in the Python standard library, implemented
-  in C, and costs 53 ms at n=32768. One replacement closes the open KDF clause
-  and the performance gap together. It must keep reading existing format-3
-  vaults, which is what the version row exists for.
+  The gain is therefore about **2× on a cold read and ~15× once a derived key
+  is held**, because the KDF runs on the key envelope only — the data layer is
+  keyed by a random 256-bit value that needs no stretching, which is precisely
+  what format 3 established and gpg squanders by stretching both layers.
+
+  Three constraints the implementation does not get to choose. Keys must reach
+  openssl on a file descriptor: `openssl enc -K` places the key in `argv`, and
+  while OpenSSL 3 scrubs it moments after startup there is a race, and
+  LibreSSL is not known to scrub at all. Authentication must be explicit and
+  encrypt-then-MAC, since `openssl enc` has no AEAD mode that carries a tag.
+  And `hashlib.scrypt` must be given an explicit `maxmem`, or it refuses
+  anything past its default with `memory limit exceeded`.
+
+  The vault must record the KDF it used, by name and parameters. That is what
+  turns Argon2id from another format change into a value the reader already
+  knows how to dispatch on. It must also keep reading format-3 vaults, which is
+  what the version row exists for.
 - **Cache the dashboard session key.** Two gpg invocations per request become
   one. Roughly half the latency, for a change confined to the core's callers.
 
