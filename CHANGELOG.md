@@ -7,6 +7,8 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-08-29
+
 ### Added
 - A guided `browser-extension-universal/setup.sh` flow now detects an installed
   browser, builds the matching Chromium or Firefox package, registers the
@@ -31,6 +33,11 @@ Keep-a-Changelog style format.
   installed and its native-host registration no longer matches. Re-running
   `install-host.sh` also rewrites any Chromium manifest that had been
   registered against a previous ID.
+
+### Fixed
+- The CI whitespace gate diffed `HEAD` against itself under a shallow
+  checkout and had never actually run. It now fetches full history and
+  checks the lines a change adds.
 
 ## [3.1.0] - 2026-08-29
 
