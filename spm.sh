@@ -20,6 +20,7 @@ REPO_API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/l
 
 # Global master password (in-memory only, per process)
 MASTER_PW=""
+VAULT_KEY=""
 # Registry of temp files holding decrypted vault material.
 # A file (not an array) because make_tmp is called via $(...) subshells,
 # whose variable writes would be discarded. Wiped by cleanup() on any exit.
@@ -281,6 +282,10 @@ cleanup() {
 		MASTER_PW="$(printf '%*s' "${#MASTER_PW}" '' | tr ' ' 'X')"
 	fi
 	unset MASTER_PW 2>/dev/null || true
+	if [ -n "${VAULT_KEY:-}" ]; then
+		VAULT_KEY="$(printf '%*s' "${#VAULT_KEY}" '' | tr ' ' 'X')"
+	fi
+	unset VAULT_KEY 2>/dev/null || true
 
 	# Never leave decrypted vault material behind, even on error or interrupt.
 	if [ -n "${SPM_TMP_REGISTRY:-}" ] && [ -f "$SPM_TMP_REGISTRY" ]; then
@@ -753,18 +758,85 @@ re_verify_master_password() {
 
 # ----- GPG encrypt / decrypt wrapper -----------------------------------------
 
+# A format-3 vault is a small text container: a header line, the vault key
+# sealed under the master password, then the vault ciphertext sealed under that
+# key. It stays a single self-contained file, so every path that copies, backs
+# up, syncs or bundles "the vault" keeps working untouched.
+is_vault_container() {
+	head -n 1 "$1" 2>/dev/null | grep -qx 'SPM-VAULT-3'
+}
+
+# Open only the key envelope. Separated out because a write to an existing
+# format-3 vault needs the key without paying to decrypt the whole vault.
+unwrap_vault_key_from() {
+	local src="$1" master="$2" envelope key
+	is_vault_container "$src" || return 1
+	envelope="$(make_tmp)"
+	awk 'NR==2{sub(/^KEY /,""); print; exit}' "$src" | base64 -d >"$envelope" 2>/dev/null || true
+	if [ ! -s "$envelope" ]; then
+		secure_wipe "$envelope"
+		return 1
+	fi
+	if ! key="$(printf '%s' "$master" | gpg --batch --quiet \
+		--pinentry-mode loopback --passphrase-fd 0 \
+		--decrypt "$envelope" 2>/dev/null)" || [ -z "$key" ]; then
+		secure_wipe "$envelope"
+		return 1
+	fi
+	secure_wipe "$envelope"
+	printf '%s' "$key"
+}
+
+# Decrypt any SPM vault file under "$3": the live vault, a .bak, a history
+# snapshot, or a synced copy. Returns non-zero instead of dying, because
+# several callers are only proving that a file opens and own their own message.
+#
+# $4 optionally names a variable to receive the unwrapped vault key. Only a
+# caller about to rewrite that same file should ask for it -- a key unwrapped
+# from a snapshot must never become the key the live vault is written under.
+decrypt_vault_container() {
+	local src="$1" out_file="$2" master="$3" key_var="${4:-}"
+	local cipher key=""
+
+	if is_vault_container "$src"; then
+		key="$(unwrap_vault_key_from "$src" "$master")" || return 1
+		cipher="$(make_tmp)"
+		sed -n '/^DATA$/,$p' "$src" | sed '1d' | base64 -d >"$cipher" 2>/dev/null || true
+		if [ ! -s "$cipher" ]; then
+			secure_wipe "$cipher"
+			return 1
+		fi
+		if ! printf '%s' "$key" | gpg --batch --quiet \
+			--pinentry-mode loopback --passphrase-fd 0 \
+			--decrypt "$cipher" >"$out_file" 2>/dev/null; then
+			secure_wipe "$cipher"
+			return 1
+		fi
+		secure_wipe "$cipher"
+	else
+		# Formats 1 and 2 encrypted the data under the master password directly.
+		printf '%s' "$master" | gpg --batch --quiet \
+			--decrypt --cipher-algo AES256 \
+			--pinentry-mode loopback --passphrase-fd 0 \
+			"$src" >"$out_file" 2>/dev/null || return 1
+	fi
+
+	if [ -n "$key_var" ]; then
+		printf -v "$key_var" '%s' "$key"
+	fi
+	return 0
+}
+
 decrypt_vault_to_file() {
 	local out_file="$1"
 	[ -f "$VAULT_FILE" ] || die "Vault does not exist. Run '$0 init' first."
 
 	ensure_master_password_loaded
 
-	if ! printf '%s' "$MASTER_PW" | gpg --batch --quiet \
-		--decrypt --cipher-algo AES256 \
-		--pinentry-mode loopback --passphrase-fd 0 \
-		"$VAULT_FILE" >"$out_file" 2>/dev/null; then
+	if ! decrypt_vault_container "$VAULT_FILE" "$out_file" "$MASTER_PW" VAULT_KEY; then
 		secure_wipe "$out_file"
 		MASTER_PW=""
+		VAULT_KEY=""
 		if [ "$SPM_LANG" = "id" ]; then
 			die "Gagal mendekripsi vault. Kata sandi utama salah?"
 		else
@@ -778,7 +850,7 @@ decrypt_vault_to_file() {
 # instead of guessing. A vault with no META_VAULT_VERSION row predates this and
 # is format 1; every write stamps the current version, so opening and saving any
 # vault upgrades it in place with no separate migration step.
-VAULT_FORMAT_VERSION=2
+VAULT_FORMAT_VERSION=3
 
 # Key derivation is pinned rather than inherited. GnuPG 2.2's own defaults are
 # already s2k mode 3 at the maximum iteration count, so the measurable change
@@ -818,13 +890,13 @@ vault_format_version() {
 
 encrypt_file_to_vault() {
 	local in_file="$1"
-	local vault_dir vault_name tmp_cipher
+	local vault_dir vault_name tmp_cipher tmp_envelope tmp_container tmp_recovery="" generated_key=0
 	[ "${MASTER_PW:-}" ] || die "MASTER_PW is empty in encrypt_file_to_vault"
 
 	vault_dir="$(dirname "$VAULT_FILE")"
 	vault_name="$(basename "$VAULT_FILE")"
-	tmp_cipher="$(mktemp "${vault_dir}/.${vault_name}.tmp.XXXXXX")" || die "Failed to create vault staging file."
-	chmod 600 "$tmp_cipher" 2>/dev/null || true
+	tmp_cipher="$(make_tmp)"
+	tmp_envelope="$(make_tmp)"
 
 	# Stamp into a copy rather than editing the caller's file: several callers
 	# read that file again after this returns, and one of them is
@@ -832,34 +904,127 @@ encrypt_file_to_vault() {
 	local tmp_plain
 	tmp_plain="$(make_tmp)"
 	stamp_vault_version "$in_file" "$tmp_plain"
+	# A write must reuse the key the vault already has. Minting a fresh one
+	# here would strand every .bak, history snapshot and synced copy that the
+	# current recovery file can still open -- and the whole point of a separate
+	# vault key is that it is stable across master-password changes.
+	if [ -z "${VAULT_KEY:-}" ] && is_vault_container "$VAULT_FILE"; then
+		VAULT_KEY="$(unwrap_vault_key_from "$VAULT_FILE" "$MASTER_PW")" \
+			|| die "The vault key could not be unwrapped. Wrong master password?"
+	fi
+	if [ -z "${VAULT_KEY:-}" ]; then
+		VAULT_KEY="$(openssl rand -base64 32 | tr -d '\n')" || die "Failed to generate a random vault key."
+		generated_key=1
+	fi
 
-	if ! printf '%s' "$MASTER_PW" | gpg --batch --yes \
+	# Migration stages the new recovery file FIRST -- before any ciphertext
+	# exists and before anything is written next to the vault. A vault whose
+	# recovery pubkey is unusable can never be given a working recovery file,
+	# so it must refuse here, with nothing changed and nothing left behind.
+	if [ "$generated_key" -eq 1 ]; then
+		tmp_recovery="$(mktemp "${vault_dir}/.${vault_name}.recovery.XXXXXX")" \
+			|| die "Failed to stage recovery migration."
+		write_recovery_file "$in_file" "$tmp_recovery"
+	fi
+
+	tmp_container="$(mktemp "${vault_dir}/.${vault_name}.tmp.XXXXXX")" || die "Failed to create vault staging file."
+	chmod 600 "$tmp_container" 2>/dev/null || true
+
+	if ! printf '%s' "$VAULT_KEY" | gpg --batch --yes \
 		--s2k-mode "$SPM_S2K_MODE" \
 		--s2k-digest-algo "$SPM_S2K_DIGEST" \
 		--s2k-count "$SPM_S2K_COUNT" \
 		--symmetric --cipher-algo AES256 \
 		--pinentry-mode loopback --passphrase-fd 0 \
 		-o "$tmp_cipher" "$tmp_plain" 2>/dev/null; then
-		secure_wipe "$tmp_plain"
-		secure_wipe "$tmp_cipher"
+		secure_wipe "$tmp_plain"; secure_wipe "$tmp_cipher"; secure_wipe "$tmp_container"
+		[ -z "$tmp_recovery" ] || secure_wipe "$tmp_recovery"
 		die "Failed to re-encrypt vault. The existing vault was not changed; plaintext remains in '$in_file'."
 	fi
 	secure_wipe "$tmp_plain"
+	if ! gpg --batch --yes \
+		--s2k-mode "$SPM_S2K_MODE" --s2k-digest-algo "$SPM_S2K_DIGEST" --s2k-count "$SPM_S2K_COUNT" \
+		--symmetric --cipher-algo AES256 --pinentry-mode loopback --passphrase-fd 3 \
+		-o "$tmp_envelope" 3< <(printf '%s' "$MASTER_PW") < <(printf '%s' "$VAULT_KEY") 2>/dev/null; then
+		secure_wipe "$tmp_cipher"; secure_wipe "$tmp_envelope"; secure_wipe "$tmp_container"
+		[ -z "$tmp_recovery" ] || secure_wipe "$tmp_recovery"
+		die "Failed to wrap the vault key."
+	fi
+	{
+		printf 'SPM-VAULT-3\nKEY '
+		base64 <"$tmp_envelope" | tr -d '\n'
+		printf '\nDATA\n'
+		base64 <"$tmp_cipher"
+	} >"$tmp_container"
+	secure_wipe "$tmp_cipher"; secure_wipe "$tmp_envelope"
 
 	if [ -f "$VAULT_FILE" ]; then
 		archive_current_vault
-		cp "$VAULT_FILE" "${VAULT_FILE}.bak" || { secure_wipe "$tmp_cipher"; die "Failed to preserve the previous vault."; }
+		cp "$VAULT_FILE" "${VAULT_FILE}.bak" || {
+			secure_wipe "$tmp_container"
+			[ -z "$tmp_recovery" ] || secure_wipe "$tmp_recovery"
+			die "Failed to preserve the previous vault."
+		}
 		chmod 600 "${VAULT_FILE}.bak" 2>/dev/null || true
 	fi
 	# The rename is atomic but not durable on its own: flush the ciphertext first
 	# so a crash cannot leave the new name pointing at unwritten blocks.
-	sync "$tmp_cipher" 2>/dev/null || sync 2>/dev/null || true
-	mv -f "$tmp_cipher" "$VAULT_FILE" || { secure_wipe "$tmp_cipher"; die "Failed to install the encrypted vault."; }
+	sync "$tmp_container" 2>/dev/null || sync 2>/dev/null || true
+	mv -f "$tmp_container" "$VAULT_FILE" || {
+		secure_wipe "$tmp_container"
+		[ -z "$tmp_recovery" ] || secure_wipe "$tmp_recovery"
+		die "Failed to install the encrypted vault."
+	}
 	chmod 600 "$VAULT_FILE" 2>/dev/null || true
+	# Migration installs the container BEFORE it swaps the recovery file, and
+	# the envelope is sealed under the master password the recovery file still
+	# holds. That makes the crash window harmless: a vault caught between the
+	# two steps opens from .recovery through the master-password route that
+	# cmd_forgot tries second. The reverse order has no such route, which is
+	# why the pre-vault-key code had to write recovery first.
+	if [ "$generated_key" -eq 1 ]; then
+		if mv -f "$tmp_recovery" "$RECOVERY_FILE"; then
+			chmod 600 "$RECOVERY_FILE" 2>/dev/null || true
+		else
+			# Do not roll the vault back: that would discard the write the user
+			# just made, and the vault is recoverable either way.
+			secure_wipe "$tmp_recovery"
+			printf 'Warning: the vault was written, but its recovery file still holds the master password.\n' >&2
+			printf "Run '%s change-master' or '%s doctor' to refresh it.\n" "$0" "$0" >&2
+		fi
+	fi
 	sync "$vault_dir" 2>/dev/null || sync 2>/dev/null || true
 	if ! ( maybe_auto_backup ); then
 		printf 'Warning: vault write succeeded, but the automatic backup failed.\n' >&2
 	fi
+}
+
+rewrap_vault_key() {
+	# Change only the master-password envelope. The data ciphertext remains
+	# byte-identical, which is the reason for separating the vault key at all.
+	local new_master="$1" vault_dir vault_name tmp_envelope tmp_container
+	[ -n "${VAULT_KEY:-}" ] || die "Vault key is not loaded."
+	is_vault_container "$VAULT_FILE" || die "Vault must be migrated before its key can be rewrapped."
+	vault_dir="$(dirname "$VAULT_FILE")"; vault_name="$(basename "$VAULT_FILE")"
+	tmp_envelope="$(make_tmp)"
+	tmp_container="$(mktemp "${vault_dir}/.${vault_name}.rewrap.XXXXXX")" || die "Failed to stage vault-key rewrap."
+	if ! gpg --batch --yes \
+		--s2k-mode "$SPM_S2K_MODE" --s2k-digest-algo "$SPM_S2K_DIGEST" --s2k-count "$SPM_S2K_COUNT" \
+		--symmetric --cipher-algo AES256 --pinentry-mode loopback --passphrase-fd 3 \
+		-o "$tmp_envelope" 3< <(printf '%s' "$new_master") < <(printf '%s' "$VAULT_KEY") 2>/dev/null; then
+		secure_wipe "$tmp_envelope"; secure_wipe "$tmp_container"; die "Failed to rewrap vault key."
+	fi
+	{
+		printf 'SPM-VAULT-3\nKEY '; base64 <"$tmp_envelope" | tr -d '\n'; printf '\n'
+		sed -n '/^DATA$/,$p' "$VAULT_FILE"
+	} >"$tmp_container"
+	secure_wipe "$tmp_envelope"
+	archive_current_vault
+	cp "$VAULT_FILE" "${VAULT_FILE}.bak" || { secure_wipe "$tmp_container"; die "Failed to preserve the previous vault."; }
+	chmod 600 "${VAULT_FILE}.bak" "$tmp_container" 2>/dev/null || true
+	sync "$tmp_container" 2>/dev/null || true
+	mv -f "$tmp_container" "$VAULT_FILE" || { secure_wipe "$tmp_container"; die "Failed to install rewrapped vault."; }
+	sync "$vault_dir" 2>/dev/null || true
 }
 
 acquire_cli_vault_lock() {
@@ -1091,6 +1256,7 @@ get_recovery_pub_b64_from_vault() {
 
 write_recovery_file() {
 	local vault_plain="$1"
+	local recovery_target="${2:-$RECOVERY_FILE}"
 
 	require_cmd openssl
 	local pub_b64 tmp_pub
@@ -1106,13 +1272,17 @@ write_recovery_file() {
 		die "Failed to decode embedded recovery public key."
 	fi
 
-	if ! printf '%s' "$MASTER_PW" | openssl rsautl -encrypt -pubin -inkey "$tmp_pub" -out "$RECOVERY_FILE" 2>/dev/null; then
+	[ -n "${VAULT_KEY:-}" ] || die "Vault key is not loaded. Cannot update recovery file."
+	if ! printf '%s' "$VAULT_KEY" | openssl rsautl -encrypt -pubin -inkey "$tmp_pub" -out "$recovery_target" 2>/dev/null; then
 		secure_wipe "$tmp_pub"
+		# openssl creates the output before it fails on the key, and the caller
+		# may be staging next to the vault. Do not leave that behind.
+		[ "$recovery_target" = "$RECOVERY_FILE" ] || secure_wipe "$recovery_target"
 		die "Failed to create/update recovery file '$RECOVERY_FILE'."
 	fi
 
 	secure_wipe "$tmp_pub"
-	chmod 600 "$RECOVERY_FILE" 2>/dev/null || true
+	chmod 600 "$recovery_target" 2>/dev/null || true
 }
 
 # ----- Password strength coaching --------------------------------------------
@@ -1515,7 +1685,8 @@ generate_recovery_keypair_and_meta() {
 
 	printf 'META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n' "$pub_b64" >"$vault_plain"
 
-	if ! printf '%s' "$MASTER_PW" | openssl rsautl -encrypt -pubin -inkey "$tmp_pub" -out "$RECOVERY_FILE" 2>/dev/null; then
+	VAULT_KEY="$(openssl rand -base64 32 | tr -d '\n')" || die "Failed to generate a random vault key."
+	if ! printf '%s' "$VAULT_KEY" | openssl rsautl -encrypt -pubin -inkey "$tmp_pub" -out "$RECOVERY_FILE" 2>/dev/null; then
 		secure_wipe "$tmp_pub"
 		die "Failed to create recovery file '$RECOVERY_FILE'."
 	fi
@@ -1785,6 +1956,17 @@ cmd_change_master() {
 	fi
 	decrypt_vault_to_file "$tmp"
 
+	# A legacy vault is migrated FIRST, while MASTER_PW is still the old
+	# password -- so the key envelope and the recovery file agree at every
+	# instant. Doing it after the prompt would seal the envelope under the new
+	# password while .recovery still named the old one, and neither would open
+	# the vault if the process died in between.
+	local migrated=0
+	if [ -z "${VAULT_KEY:-}" ]; then
+		encrypt_file_to_vault "$tmp"
+		migrated=1
+	fi
+
 	if [ "$SPM_LANG" = "id" ]; then
 		printf "Masukkan kata sandi utama BARU.\n"
 	else
@@ -1792,17 +1974,27 @@ cmd_change_master() {
 	fi
 	prompt_master_password
 
-	write_recovery_file "$tmp"
-
-	encrypt_file_to_vault "$tmp"
+	# Only the small envelope is rewritten. The vault ciphertext and the
+	# recovery file both key off the vault key, which does not change.
+	rewrap_vault_key "$MASTER_PW"
 	secure_wipe "$tmp"
 
 	if [ "$SPM_LANG" = "id" ]; then
 		printf "Kata sandi utama berhasil diubah.\n"
-		printf "File pemulihan diperbarui di: %s\n" "$RECOVERY_FILE"
+		if [ "$migrated" -eq 1 ]; then
+			printf "Vault dimigrasikan ke format kunci terbungkus.\n"
+			printf "File pemulihan diperbarui di: %s\n" "$RECOVERY_FILE"
+		else
+			printf "Kunci vault dibungkus ulang; data vault dan file pemulihan tidak berubah.\n"
+		fi
 	else
 		printf "Master password changed successfully.\n"
-		printf "Recovery file updated at: %s\n" "$RECOVERY_FILE"
+		if [ "$migrated" -eq 1 ]; then
+			printf "The vault was migrated to the wrapped-key format.\n"
+			printf "Recovery file updated at: %s\n" "$RECOVERY_FILE"
+		else
+			printf "Vault key rewrapped; the vault data and recovery file are unchanged.\n"
+		fi
 	fi
 }
 
@@ -3547,22 +3739,47 @@ cmd_forgot() {
 
 	[ -f "$pk_path" ] || die "Private key file '$pk_path' not found."
 
-	local old_master
-	if ! old_master="$(openssl rsautl -decrypt -inkey "$pk_path" -in "$RECOVERY_FILE" 2>/dev/null)"; then
+	local recovered_secret
+	if ! recovered_secret="$(openssl rsautl -decrypt -inkey "$pk_path" -in "$RECOVERY_FILE" 2>/dev/null)"; then
 		die "Failed to decrypt recovery file with the provided private key."
 	fi
 
-	MASTER_PW="$old_master"
-
-	local tmp
+	# What the recovery file holds depends on when it was last written:
+	# format 3 stores the vault key, the formats before it stored the master
+	# password, and a vault caught mid-migration is described by neither. Try
+	# every reading rather than assume -- the master-password route is also
+	# what makes the migration crash window recoverable.
+	local tmp recovery_stale=0
 	tmp="$(make_tmp)"
-	if ! printf '%s' "$MASTER_PW" | gpg --batch --quiet \
-		--decrypt --cipher-algo AES256 \
-		--pinentry-mode loopback --passphrase-fd 0 \
-		"$VAULT_FILE" >"$tmp" 2>/dev/null; then
-		secure_wipe "$tmp"
-		MASTER_PW=""
-		die "Recovered master password could not decrypt the vault. Recovery aborted."
+	VAULT_KEY=""
+	if is_vault_container "$VAULT_FILE"; then
+		local cipher
+		cipher="$(make_tmp)"
+		sed -n '/^DATA$/,$p' "$VAULT_FILE" | sed '1d' | base64 -d >"$cipher" 2>/dev/null || true
+		[ -s "$cipher" ] || { secure_wipe "$cipher"; die "Vault ciphertext container is corrupt."; }
+		if printf '%s' "$recovered_secret" | gpg --batch --quiet \
+			--pinentry-mode loopback --passphrase-fd 0 \
+			--decrypt "$cipher" >"$tmp" 2>/dev/null; then
+			# The recovery file held the vault key itself.
+			VAULT_KEY="$recovered_secret"
+		elif decrypt_vault_container "$VAULT_FILE" "$tmp" "$recovered_secret" VAULT_KEY; then
+			# It held the master password of a vault whose migration completed
+			# the container but not the recovery swap. Recovery worked this
+			# time only because the envelope was still sealed under that
+			# password; rewrapping below would strand it, so mark it for repair.
+			MASTER_PW="$recovered_secret"
+			recovery_stale=1
+		else
+			secure_wipe "$cipher"; secure_wipe "$tmp"; VAULT_KEY=""
+			die "The recovery file does not open this vault. Recovery aborted."
+		fi
+		secure_wipe "$cipher"
+	else
+		MASTER_PW="$recovered_secret"
+		if ! decrypt_vault_container "$VAULT_FILE" "$tmp" "$MASTER_PW"; then
+			secure_wipe "$tmp"; MASTER_PW=""
+			die "Recovered master password could not decrypt the vault. Recovery aborted."
+		fi
 	fi
 
 	if [ "$SPM_LANG" = "id" ]; then
@@ -3573,18 +3790,32 @@ cmd_forgot() {
 		printf "Now set a NEW master password for this vault.\n\n"
 	fi
 
+	# Same two-step as change-master: migrate a legacy vault under the password
+	# the recovery file already names, then rewrap to the new one.
+	if [ -z "${VAULT_KEY:-}" ]; then
+		encrypt_file_to_vault "$tmp"
+		recovery_stale=0
+	fi
 	prompt_master_password
-	write_recovery_file "$tmp"
-	encrypt_file_to_vault "$tmp"
+	rewrap_vault_key "$MASTER_PW"
+	# Finish the migration this vault was caught in the middle of. Without
+	# this the vault would open under the new password while its recovery file
+	# still named the old one -- recoverable once, by luck, and never again.
+	if [ "$recovery_stale" -eq 1 ]; then
+		write_recovery_file "$tmp"
+	fi
 	secure_wipe "$tmp"
 
 	if [ "$SPM_LANG" = "id" ]; then
 		printf "\nKata sandi utama berhasil DI-RESET.\n"
-		printf "File pemulihan diperbarui di: %s\n" "$RECOVERY_FILE"
+		printf "File pemulihan tetap berlaku: %s\n" "$RECOVERY_FILE"
 		printf "Simpan baik-baik private key dan file recovery.\n"
 	else
 		printf "\nMaster password has been RESET.\n"
-		printf "Recovery file updated at: %s\n" "$RECOVERY_FILE"
+		# The recovery file wraps the vault key, which a password reset does
+		# not change. Saying it was "updated" would invite the user to re-copy
+		# a file that is byte-identical to the one they already keep offline.
+		printf "Recovery file remains valid at: %s\n" "$RECOVERY_FILE"
 		printf "Keep your private key and this recovery file safe.\n"
 	fi
 }
@@ -3904,12 +4135,34 @@ cmd_doctor() {
 			else
 				printf "[ ] Testing PRIVATE KEY + recovery file pair...\n"
 			fi
-			if openssl rsautl -decrypt -inkey "$RECOVERY_PRIV_DEFAULT" -in "$RECOVERY_FILE" >/dev/null 2>&1; then
+			local recovered_secret=""
+			if recovered_secret="$(openssl rsautl -decrypt -inkey "$RECOVERY_PRIV_DEFAULT" -in "$RECOVERY_FILE" 2>/dev/null)"; then
 				if [ "$SPM_LANG" = "id" ]; then
 					printf "[✔] Private key dan file recovery cocok.\n"
 				else
 					printf "[✔] Private key and recovery file match.\n"
 				fi
+				# Holding a decryptable recovery file is not the same as
+				# holding a USEFUL one. Since 2.14.0 it must contain the vault
+				# key; one still holding a master password recovers a vault
+				# only until the next password change, and nothing else in the
+				# tool can tell the user which of the two they have.
+				if is_vault_container "$VAULT_FILE"; then
+					if [ -n "${VAULT_KEY:-}" ] && [ "$recovered_secret" = "$VAULT_KEY" ]; then
+						if [ "$SPM_LANG" = "id" ]; then
+							printf "[✔] File recovery berisi kunci vault saat ini.\n"
+						else
+							printf "[✔] Recovery file holds the current vault key.\n"
+						fi
+					else
+						if [ "$SPM_LANG" = "id" ]; then
+							printf "[✖] File recovery tidak berisi kunci vault ini; jalankan '%s change-master' untuk memperbaruinya.\n" "$0"
+						else
+							printf "[✖] Recovery file does not hold this vault's key; run '%s change-master' to refresh it.\n" "$0"
+						fi
+					fi
+				fi
+				recovered_secret=""
 			else
 				if [ "$SPM_LANG" = "id" ]; then
 					printf "[✖] Private key tidak cocok dengan file recovery.\n"
@@ -4664,7 +4917,10 @@ cmd_history_restore() {
 	printf "Restore encrypted snapshot %s? (yes/NO): " "$name"; read -r answer || answer=no
 	case "$answer" in yes|y|YES|Y) ;; *) return 1 ;; esac
 	ensure_master_password_loaded; verify_tmp="$(make_tmp)"
-	printf '%s' "$MASTER_PW" | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 --decrypt "$source" > "$verify_tmp" 2>/dev/null || { secure_wipe "$verify_tmp"; die "History snapshot failed authentication or uses a different master password."; }
+	# No key variable: a snapshot carries its own vault key, and letting that
+	# key escape into the next write would seal the live vault under it.
+	decrypt_vault_container "$source" "$verify_tmp" "$MASTER_PW" \
+		|| { secure_wipe "$verify_tmp"; die "History snapshot failed authentication or uses a different master password."; }
 	secure_wipe "$verify_tmp"
 	staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm_history_restore.XXXXXX")"
 	cp "$source" "$staged" || { rm -f "$staged"; die "Failed to stage history snapshot."; }
@@ -4838,7 +5094,7 @@ cmd_sync() {
 			if [ -n "$local_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then die "Initial sync conflict: local differs; set SPM_SYNC_FORCE_INITIAL=1 only after verification."; fi
 			if [ -n "$local_sha" ] && [ -n "$base_sha" ] && [ "$local_sha" != "$base_sha" ] && [ "$remote_sha" != "$base_sha" ]; then die "Sync conflict: local and remote both changed."; fi
 			tmp="$(make_tmp)"; ensure_master_password_loaded
-			printf '%s' "$MASTER_PW" | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 --decrypt "$SYNC_REMOTE" > "$tmp" 2>/dev/null || { secure_wipe "$tmp"; die "Remote vault cannot be decrypted with this master password."; }
+			decrypt_vault_container "$SYNC_REMOTE" "$tmp" "$MASTER_PW" || { secure_wipe "$tmp"; die "Remote vault cannot be decrypted with this master password."; }
 			secure_wipe "$tmp"; archive_current_vault; staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm-sync.XXXXXX")"; cp "$SYNC_REMOTE" "$staged" || { rm -f "$staged"; die "Cannot stage sync pull."; }; chmod 600 "$staged"
 			[ "$(sha256sum "$staged" | awk '{print $1}')" = "$remote_sha" ] || { secure_wipe "$staged"; die "Staged sync pull failed verification."; }
 			mv -f "$staged" "$VAULT_FILE"; write_sync_state "$remote_sha"; printf 'Encrypted vault pulled.\n' ;;
@@ -9907,18 +10163,63 @@ def _passphrase_fd(master: str) -> int:
         os.close(write_fd)
     return read_fd
 
-def decrypt_vault(master: str) -> str:
+def _gpg_decrypt_bytes(secret: str, payload: bytes, timeout=15) -> bytes:
+    pw_fd = _passphrase_fd(secret)
+    try:
+        return subprocess.check_output(
+            ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
+             "--passphrase-fd", str(pw_fd), "-d"], input=payload,
+            stderr=subprocess.DEVNULL, timeout=timeout, pass_fds=(pw_fd,))
+    finally:
+        os.close(pw_fd)
+
+def _container_parts(raw: bytes):
+    if not raw.startswith(b"SPM-VAULT-3\n"):
+        return None
+    try:
+        key_line, data = raw.split(b"\nDATA\n", 1)
+        envelope = base64.b64decode(key_line.split(b"\nKEY ", 1)[1])
+        cipher = base64.b64decode(data)
+    except Exception as exc:
+        raise RuntimeError("invalid vault-key container") from exc
+    return envelope, cipher
+
+def unwrap_vault_key(master: str, path=None):
+    """The vault key alone, or None when `path` predates the container format."""
+    parts = _container_parts(open(path or VAULT_PATH, "rb").read())
+    if parts is None:
+        return None
+    key = _gpg_decrypt_bytes(master, parts[0]).decode("utf-8")
+    if not key:
+        raise RuntimeError("empty vault key")
+    return key
+
+def decrypt_vault_file(path: str, master: str) -> str:
+    """Open any SPM vault file under `master`, whatever format it is in.
+
+    Not only the live vault: history snapshots, .bak files and synced copies
+    are the same container, and every one of them has to be readable by
+    whatever is about to prove it opens before overwriting the live vault.
+    """
+    raw = open(path, "rb").read()
+    parts = _container_parts(raw)
+    if parts is not None:
+        key = _gpg_decrypt_bytes(master, parts[0]).decode("utf-8")
+        return _gpg_decrypt_bytes(key, parts[1]).decode("utf-8", errors="ignore")
     pw_fd = _passphrase_fd(master)
     try:
         return subprocess.check_output(
             ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
-             "--passphrase-fd", str(pw_fd), "-d", VAULT_PATH],
+             "--passphrase-fd", str(pw_fd), "-d", path],
             stderr=subprocess.DEVNULL,
             timeout=15,
             pass_fds=(pw_fd,),
         ).decode("utf-8", errors="ignore")
     finally:
         os.close(pw_fd)
+
+def decrypt_vault(master: str) -> str:
+    return decrypt_vault_file(VAULT_PATH, master)
 
 def _fsync_path(path):
     fd = os.open(path, os.O_RDONLY)
@@ -9977,7 +10278,7 @@ def _archive_vault_generation():
 # Must stay in step with the CLI's VAULT_FORMAT_VERSION and s2k settings. The
 # regression suite asserts both halves agree, because a mismatch would have the
 # two surfaces rewrite the version row back and forth on every save.
-VAULT_FORMAT_VERSION = 2
+VAULT_FORMAT_VERSION = 3
 S2K_ARGS = ["--s2k-mode", "3", "--s2k-digest-algo", "SHA512",
             "--s2k-count", "65011712"]
 
@@ -10010,28 +10311,42 @@ def vault_format_version(plaintext: str) -> int:
     return 1
 
 
-def encrypt_vault(master: str, plaintext: str) -> None:
+def _gpg_encrypt_bytes(secret: str, payload: bytes) -> bytes:
+    pw_fd = _passphrase_fd(secret)
+    try:
+        return subprocess.check_output(
+            ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
+             "--passphrase-fd", str(pw_fd)] + S2K_ARGS +
+            ["--cipher-algo", "AES256", "-c"], input=payload,
+            stderr=subprocess.DEVNULL, timeout=30, pass_fds=(pw_fd,))
+    finally:
+        os.close(pw_fd)
+
+def encrypt_vault(master: str, plaintext: str, vault_key=None) -> None:
     vault_dir = os.path.dirname(os.path.abspath(VAULT_PATH)) or "."
     vault_name = os.path.basename(VAULT_PATH)
     tmp_fd, tmp_path = tempfile.mkstemp(prefix=vault_name + ".webtmp.", dir=vault_dir)
     os.close(tmp_fd)
     os.chmod(tmp_path, 0o600)
     plaintext = stamp_vault_version(plaintext)
-    pw_fd = _passphrase_fd(master)
-    p = subprocess.Popen(
-        ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
-         "--passphrase-fd", str(pw_fd)] + S2K_ARGS + ["--cipher-algo", "AES256",
-         "-c", "-o", tmp_path],
-        stdin=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        pass_fds=(pw_fd,),
-    )
+    migrating = False
+    if vault_key is None and os.path.exists(VAULT_PATH):
+        vault_key = unwrap_vault_key(master)
+    if vault_key is None:
+        vault_key = base64.b64encode(os.urandom(32)).decode("ascii")
+        migrating = True
+    # Prove the recovery file can actually be written BEFORE the vault is
+    # touched: a migrated vault whose .recovery still names a password is
+    # recoverable, but one whose recovery pubkey is unusable can never be
+    # given a working recovery file at all.
+    staged_recovery = stage_recovery_file(plaintext, vault_key) if migrating else ""
     try:
-        stdout, stderr = p.communicate(input=plaintext.encode("utf-8"), timeout=30)
-        if p.returncode != 0:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            raise RuntimeError("Failed to encrypt vault")
+        envelope = _gpg_encrypt_bytes(master, vault_key.encode("utf-8"))
+        cipher = _gpg_encrypt_bytes(vault_key, plaintext.encode("utf-8"))
+        container = (b"SPM-VAULT-3\nKEY " + base64.b64encode(envelope) +
+                     b"\nDATA\n" + base64.b64encode(cipher) + b"\n")
+        with open(tmp_path, "wb") as staged:
+            staged.write(container)
         # Keep one last-known-good encrypted snapshot, matching CLI writes.
         # copy2 is inside the transaction lock, so the backup cannot capture a
         # half-written or unrelated concurrent generation.
@@ -10046,15 +10361,48 @@ def encrypt_vault(master: str, plaintext: str) -> None:
         _fsync_path(tmp_path)
         os.replace(tmp_path, VAULT_PATH)
         _fsync_dir(vault_dir)
-    except subprocess.TimeoutExpired:
-        p.kill()
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        raise RuntimeError("Vault encryption timed out")
+        if staged_recovery:
+            # Install second. The container is already written and its key
+            # envelope is sealed under the master password .recovery still
+            # names, so a crash here leaves a vault `spm forgot` can open by
+            # trying the recovered secret as a password -- which is why this
+            # reports rather than undoing the user's save.
+            try:
+                install_staged_recovery(staged_recovery)
+                staged_recovery = ""
+            except Exception as exc:
+                sys.stderr.write(
+                    "warning: vault migrated but its recovery file still holds "
+                    "the master password (%s)\n" % exc)
     finally:
-        os.close(pw_fd)
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
+        if staged_recovery and os.path.exists(staged_recovery):
+            os.remove(staged_recovery)
+
+def rewrap_vault_key(old_master: str, new_master: str) -> None:
+    raw = open(VAULT_PATH, "rb").read()
+    parts = _container_parts(raw)
+    if parts is None:
+        raise RuntimeError("legacy vault must migrate before key rewrap")
+    key = _gpg_decrypt_bytes(old_master, parts[0]).decode("utf-8")
+    envelope = _gpg_encrypt_bytes(new_master, key.encode("utf-8"))
+    updated = (b"SPM-VAULT-3\nKEY " + base64.b64encode(envelope) +
+               b"\nDATA\n" + base64.b64encode(parts[1]) + b"\n")
+    vault_dir = os.path.dirname(os.path.abspath(VAULT_PATH)) or "."
+    fd, staged = tempfile.mkstemp(prefix=os.path.basename(VAULT_PATH) + ".rewrap.", dir=vault_dir)
+    try:
+        os.write(fd, updated); os.fsync(fd); os.close(fd); fd = -1
+        shutil.copy2(VAULT_PATH, VAULT_PATH + ".bak")
+        os.chmod(VAULT_PATH + ".bak", 0o600)
+        # A rewrap is an edit to the vault file like any other, and undoing one
+        # has to be possible too.
+        _archive_vault_generation()
+        os.replace(staged, VAULT_PATH); staged = ""; os.chmod(VAULT_PATH, 0o600)
+        _fsync_dir(vault_dir)
+    finally:
+        if fd != -1: os.close(fd)
+        if staged and os.path.exists(staged): os.remove(staged)
 
 RECOVERY_PATH = VAULT_PATH + ".recovery"
 
@@ -10065,20 +10413,12 @@ RECOVERY_PATH = VAULT_PATH + ".recovery"
 MASTER_MIN_LEN = 12
 
 
-def rewrite_recovery_file(plaintext: str, master: str) -> None:
-    """Re-encrypt the master password under the vault's own recovery pubkey.
+def recovery_pubkey_pem(plaintext: str) -> bytes:
+    """The vault's own recovery public key, or an exception saying why not.
 
-    `spm change-master` calls write_recovery_file BEFORE it re-encrypts the
-    vault, so a vault whose recovery metadata is missing or corrupt fails while
-    the old ciphertext is still the live one. That ordering is the whole safety
-    property and this path keeps it: a rotated vault left with a stale
-    .recovery file would hand `spm forgot` a password that opens nothing, and
-    that file plus its private key is the only way back in.
-
-    Deliberately the same `openssl rsautl -encrypt -pubin` invocation the shell
-    side uses. It is deprecated in OpenSSL 3, but `spm doctor` and `spm forgot`
-    both read this file back with `rsautl -decrypt`; switching only the writer
-    to `pkeyutl` would be a padding decision made in one place out of three.
+    Separate from the write so a caller can prove recovery is writable BEFORE
+    it touches the vault -- a vault whose META_RECOVERY_PUBKEY is missing or
+    corrupt must fail while the old ciphertext is still the live one.
     """
     pub_b64 = ""
     for line in plaintext.splitlines():
@@ -10089,9 +10429,38 @@ def rewrite_recovery_file(plaintext: str, master: str) -> None:
     if not pub_b64:
         raise RuntimeError("no META_RECOVERY_PUBKEY row in vault")
     try:
-        pub_pem = base64.b64decode(pub_b64)
+        return base64.b64decode(pub_b64)
     except Exception:
         raise RuntimeError("recovery public key is not valid base64")
+
+
+def rewrite_recovery_file(plaintext: str, vault_key: str) -> None:
+    """Encrypt the stable vault key under the vault's recovery public key.
+
+    Called only when a legacy vault migrates to the container format, and only
+    AFTER the container is installed. The envelope is sealed under the master
+    password that this file still names at that moment, so a crash in between
+    leaves a vault that `spm forgot` can still open by trying the recovered
+    secret as a master password. The reverse order has no such route.
+
+    Deliberately the same `openssl rsautl -encrypt -pubin` invocation the shell
+    side uses. It is deprecated in OpenSSL 3, but `spm doctor` and `spm forgot`
+    both read this file back with `rsautl -decrypt`; switching only the writer
+    to `pkeyutl` would be a padding decision made in one place out of three.
+    """
+    install_staged_recovery(stage_recovery_file(plaintext, vault_key))
+
+
+def stage_recovery_file(plaintext: str, vault_key: str) -> str:
+    """Write the new recovery blob beside RECOVERY_PATH and return its path.
+
+    Staging is the whole safety property. Base64-decoding the stored key only
+    proves it is base64; the vault must not be touched until openssl has
+    actually accepted it and produced the ciphertext, and that is what this
+    returns. The caller installs it with install_staged_recovery once the vault
+    it describes is in place.
+    """
+    pub_pem = recovery_pubkey_pem(plaintext)
 
     rec_dir = os.path.dirname(os.path.abspath(RECOVERY_PATH)) or "."
     pub_fd, pub_path = tempfile.mkstemp(prefix="spm.recpub.")
@@ -10109,17 +10478,15 @@ def rewrite_recovery_file(plaintext: str, master: str) -> None:
              "-inkey", pub_path, "-out", tmp_out],
             stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
-            proc.communicate(input=master.encode("utf-8"), timeout=15)
+            proc.communicate(input=vault_key.encode("utf-8"), timeout=15)
         except subprocess.TimeoutExpired:
             proc.kill()
             raise RuntimeError("recovery re-encryption timed out")
         if proc.returncode != 0:
             raise RuntimeError("openssl could not write the recovery file")
         _fsync_path(tmp_out)
-        os.replace(tmp_out, RECOVERY_PATH)
-        tmp_out = ""
-        os.chmod(RECOVERY_PATH, 0o600)
-        _fsync_dir(rec_dir)
+        staged, tmp_out = tmp_out, ""
+        return staged
     finally:
         if pub_fd != -1:
             os.close(pub_fd)
@@ -10127,6 +10494,13 @@ def rewrite_recovery_file(plaintext: str, master: str) -> None:
             os.remove(pub_path)
         if tmp_out and os.path.exists(tmp_out):
             os.remove(tmp_out)
+
+
+def install_staged_recovery(staged: str) -> None:
+    rec_dir = os.path.dirname(os.path.abspath(RECOVERY_PATH)) or "."
+    os.replace(staged, RECOVERY_PATH)
+    os.chmod(RECOVERY_PATH, 0o600)
+    _fsync_dir(rec_dir)
 
 
 def totp_code(secret_b32: str, period: int = 30, algo: str = "sha1") -> str:
@@ -12496,36 +12870,32 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 return self._expire_session()
 
-            # Recovery file first, the order `spm change-master` uses. A vault
-            # with no usable META_RECOVERY_PUBKEY fails here, while the old
-            # ciphertext is still the live one -- the alternative is a rotated
-            # vault whose .recovery file still holds the password that no
-            # longer opens it, which is the one state with no way back.
+            # Two steps, never one. A legacy vault is migrated to the
+            # container format while `master` is STILL the live password, so
+            # its key envelope and its recovery file agree at every instant;
+            # only then is the envelope rewrapped to the new password. Sealing
+            # the envelope under new_pw during the migration would leave a
+            # window where .recovery names a password that opens nothing, and
+            # that is the one state `spm forgot` cannot get out of.
             try:
-                rewrite_recovery_file(plaintext, new_pw)
+                if unwrap_vault_key(master) is None:
+                    encrypt_vault(master, plaintext)
             except Exception as exc:
-                self.log_message("master password change aborted before write: %s", exc)
-                _reject("The recovery file could not be updated, so the vault was "
-                        "left unchanged. Run &#39;spm doctor&#39; to check it.")
+                self.log_message("vault migration aborted before write: %s", exc)
+                _reject("The vault could not be migrated to the current format, "
+                        "so it was left unchanged. Run &#39;spm doctor&#39; to check it.")
                 return
 
             try:
-                encrypt_vault(new_pw, plaintext)
+                # Only the small key envelope is rewritten. The vault
+                # ciphertext and the recovery file both key off the vault key,
+                # which does not change -- so a master-password change no
+                # longer depends on the recovery pubkey being usable at all.
+                rewrap_vault_key(master, new_pw)
             except Exception as exc:
-                self.log_message("master password change failed on re-encrypt: %s", exc)
-                # The recovery file now names a password the vault does not
-                # use. Put the old one back rather than leave the two
-                # disagreeing; a failure here is reported as-is because at
-                # that point only `spm doctor` can say which way it landed.
-                try:
-                    rewrite_recovery_file(plaintext, master)
-                except Exception:
-                    self.log_message("could not roll the recovery file back")
-                    _reject("The vault could not be re-encrypted AND the recovery "
-                            "file could not be rolled back. The vault still opens "
-                            "with your current password. Run &#39;spm doctor&#39;.")
-                    return
-                _reject("The vault could not be re-encrypted and was left unchanged.")
+                self.log_message("master password change failed on rewrap: %s", exc)
+                _reject("The master password could not be changed and the vault "
+                        "was left unchanged.")
                 return
 
             # Every other session is holding the old password in memory, and
@@ -12735,17 +13105,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # touching the live vault: restoring a snapshot written under an
             # older password would lock the user out of their own vault with
             # no way back.
-            pw_fd = _passphrase_fd(master)
+            # A snapshot is the same container the live vault is, and carries
+            # its own vault key. Open it through the shared reader; the key it
+            # yields is deliberately discarded, because restoring is a copy of
+            # the file and not a re-encryption under the live vault's key.
             try:
-                subprocess.check_output(
-                    ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
-                     "--passphrase-fd", str(pw_fd), "-d", source],
-                    stderr=subprocess.DEVNULL, timeout=15, pass_fds=(pw_fd,))
+                decrypt_vault_file(source, master)
             except Exception:
                 self.send_error(409, "Snapshot does not open with the current master password; vault unchanged")
                 return
-            finally:
-                os.close(pw_fd)
             vault_dir = os.path.dirname(os.path.abspath(VAULT_PATH)) or "."
             # Archive first: restoring is itself an edit, and undoing a restore
             # has to be possible too.
