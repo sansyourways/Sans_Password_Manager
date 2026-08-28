@@ -33,8 +33,13 @@ chmod 700 "$GNUPGHOME"
 gpgconf --launch gpg-agent
 
 AUDIT_PASSWORD="SPM-Regression-Only-42"
+TEST_RECOVERY_PRIVATE="$TEST_ROOT/recovery-private.pem"
+TEST_RECOVERY_PUBLIC="$TEST_ROOT/recovery-public.pem"
+openssl genrsa -out "$TEST_RECOVERY_PRIVATE" 2048 >/dev/null 2>&1
+openssl rsa -in "$TEST_RECOVERY_PRIVATE" -pubout -out "$TEST_RECOVERY_PUBLIC" >/dev/null 2>&1
+TEST_RECOVERY_B64="$(base64 <"$TEST_RECOVERY_PUBLIC" | tr -d '\n')"
 PLAIN="$TEST_ROOT/plain"
-printf 'META_RECOVERY_PUBKEY\tdGVzdA==\t-\t-\t-\t-\n1\tExample\tuser@example.invalid\tDemoSecret42\thttps://example.invalid\t2025-01-01T00:00:00Z\nNOTE\t1\tMemo\taGVsbG8gbm90ZQ==\t2025-01-01T00:00:00Z\t-\nPASSPHRASE\t1\tWords\taG9yc2UtYmF0dGVyeQ==\t2025-01-01T00:00:00Z\t-\nBACKUP_CODE\t1\tCodes\tY29kZTEKY29kZTI=\t2025-01-01T00:00:00Z\t-\nAUTH\t1\tOTP\tJBSWY3DPEHPK3PXP\t30\t2025-01-01T00:00:00Z\tsha1\n' > "$PLAIN"
+printf 'META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n1\tExample\tuser@example.invalid\tDemoSecret42\thttps://example.invalid\t2025-01-01T00:00:00Z\nNOTE\t1\tMemo\taGVsbG8gbm90ZQ==\t2025-01-01T00:00:00Z\t-\nPASSPHRASE\t1\tWords\taG9yc2UtYmF0dGVyeQ==\t2025-01-01T00:00:00Z\t-\nBACKUP_CODE\t1\tCodes\tY29kZTEKY29kZTI=\t2025-01-01T00:00:00Z\t-\nAUTH\t1\tOTP\tJBSWY3DPEHPK3PXP\t30\t2025-01-01T00:00:00Z\tsha1\n' "$TEST_RECOVERY_B64" > "$PLAIN"
 printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback \
 	--passphrase-fd 0 --symmetric --cipher-algo AES256 \
 	-o "$PASSWORD_VAULT" "$PLAIN"
@@ -50,6 +55,14 @@ source "$SPM_LIBRARY"
 trap 'status=$?; harness_cleanup "$status"; exit "$status"' EXIT INT TERM
 export MASTER_PW="$AUDIT_PASSWORD"
 export SPM_LANG="en"
+
+test_decrypt_vault() {
+	local path="$1" password="$2" output="$3"
+	(
+		export VAULT_FILE="$path" MASTER_PW="$password" VAULT_KEY=""
+		decrypt_vault_to_file "$output"
+	)
+}
 
 TERMUX_VERSION="regression" detect_env
 [ "$ENV_FLAVOR" = "termux" ]
@@ -426,8 +439,7 @@ curl -fsS -D "$TEST_ROOT/passphrase-edit.headers" -b "$TEST_ROOT/cookies" -o /de
 	-X POST --data-urlencode "csrf=$csrf" --data-urlencode 'label=Renamed words' \
 	--data-urlencode 'secret=' "http://127.0.0.1:$WEB_PORT/passphrase-edit?id=1"
 grep -q '302 Found' "$TEST_ROOT/passphrase-edit.headers"
-printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
-	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" > "$TEST_ROOT/passphrase-after"
+test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" "$TEST_ROOT/passphrase-after"
 [ "$(awk -F '\t' '$1=="PASSPHRASE"&&$2==1{print $4}' "$TEST_ROOT/passphrase-after" | base64 -d)" = 'horse-battery' ]
 printf 'type,id,label,username,secret,notes,created,extra\npassword,,Web import,demo,WebSecret42,synthetic,2026-01-01T00:00:00Z,\n' \
 	> "$TEST_ROOT/import.csv"
@@ -443,8 +455,7 @@ grep -qi '^Location: /?msg=import-ok' "$TEST_ROOT/import.headers"
 # trusted when it reaches an href or the browser extension.
 
 vault_plain() {
-	printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
-		--passphrase-fd 0 --decrypt "$PASSWORD_VAULT"
+	test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" /dev/stdout
 }
 
 curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/add.html" \
@@ -555,8 +566,7 @@ curl -fsS -D "$TEST_ROOT/backup-edit.headers" -b "$TEST_ROOT/cookies" -o /dev/nu
 	-X POST --data-urlencode "csrf=$csrf" --data-urlencode 'label=Renamed codes' \
 	--data-urlencode 'codes=' "http://127.0.0.1:$WEB_PORT/backup-codes-edit?id=1"
 grep -q '302 Found' "$TEST_ROOT/backup-edit.headers"
-printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
-	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" > "$TEST_ROOT/backup-after"
+test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" "$TEST_ROOT/backup-after"
 awk -F '\t' '$1=="BACKUP_CODE"{print $4}' "$TEST_ROOT/backup-after" | head -n1 | base64 -d \
 	| grep -q . || { printf 'blank backup-code edit erased the stored codes\n' >&2; exit 1; }
 
@@ -1113,8 +1123,7 @@ PYWEBAUTHN
 printf 'Web regression: vault format version and KDF policy\n'
 
 # Every write stamps exactly one current version row, wherever it came from.
-printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
-	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" > "$TEST_ROOT/fmt-plain"
+test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" "$TEST_ROOT/fmt-plain"
 stamped="$(awk -F '\t' '$1=="META_VAULT_VERSION"' "$TEST_ROOT/fmt-plain" | wc -l)"
 [ "$stamped" -eq 1 ] || { printf 'expected exactly 1 version row, found %s\n' "$stamped" >&2; exit 1; }
 [ "$(awk -F '\t' '$1=="META_VAULT_VERSION"{print $2}' "$TEST_ROOT/fmt-plain")" = "$VAULT_FORMAT_VERSION" ]
@@ -1179,7 +1188,10 @@ PYFMT
 # SHA1 (hash 2) for the digest. hash 10 is SHA512.
 # list-packets exits non-zero on a symmetric file it cannot decrypt, but it
 # still prints the header packet, which is the only part being asserted.
-gpg --list-packets "$PASSWORD_VAULT" >"$TEST_ROOT/vault-packets" 2>/dev/null || true
+awk 'NR==2{sub(/^KEY /,"");print;exit}' "$PASSWORD_VAULT" | base64 -d >"$TEST_ROOT/key-envelope.gpg"
+sed -n '/^DATA$/,$p' "$PASSWORD_VAULT" | sed '1d' | base64 -d >"$TEST_ROOT/vault-data.gpg"
+gpg --list-packets "$TEST_ROOT/key-envelope.gpg" >"$TEST_ROOT/vault-packets" 2>/dev/null || true
+gpg --list-packets "$TEST_ROOT/vault-data.gpg" >>"$TEST_ROOT/vault-packets" 2>/dev/null || true
 grep -q 'symkey enc packet' "$TEST_ROOT/vault-packets"
 if ! grep -qE 's2k 3, hash 10' "$TEST_ROOT/vault-packets"; then
 	printf 'vault was not written under the pinned s2k policy:\n' >&2
@@ -1196,7 +1208,7 @@ if ! grep -q 'Vault format version' "$TEST_ROOT/doctor-fmt.txt"; then
 	sed 's/^/    /' "$TEST_ROOT/doctor-fmt.txt" >&2
 	exit 1
 fi
-grep -q 'Vault format version 2 (current)' "$TEST_ROOT/doctor-fmt.txt" \
+grep -q 'Vault format version 3 (current)' "$TEST_ROOT/doctor-fmt.txt" \
 	|| { printf 'doctor did not see the upgraded format:\n' >&2
 	     grep -i 'format' "$TEST_ROOT/doctor-fmt.txt" >&2; exit 1; }
 
@@ -1208,8 +1220,7 @@ printf 'Web regression: master password change\n'
 # be proved end to end -- the refusal path is exercised separately below by
 # breaking it again on purpose.
 web_pub_b64="$(base64 < "$TEST_ROOT/public.pem" | tr -d '\n')"
-printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
-	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" > "$TEST_ROOT/rekey-plain"
+test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" "$TEST_ROOT/rekey-plain"
 awk -F '\t' -v pub="$web_pub_b64" 'BEGIN{OFS="\t"}
 	$1=="META_RECOVERY_PUBKEY"{$2=pub} {print}' \
 	"$TEST_ROOT/rekey-plain" > "$TEST_ROOT/rekey-plain.new"
@@ -1265,15 +1276,14 @@ mp_reject 'same as the current one' \
 # A vault whose recovery pubkey is unusable must fail BEFORE the vault is
 # touched: a rotated vault whose .recovery file still holds the old password
 # is the one state `spm forgot` cannot get out of.
-printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
-	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" > "$TEST_ROOT/nopub-plain"
+test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" "$TEST_ROOT/nopub-plain"
 awk -F '\t' 'BEGIN{OFS="\t"} $1=="META_RECOVERY_PUBKEY"{$2="dGVzdA=="} {print}' \
 	"$TEST_ROOT/nopub-plain" > "$TEST_ROOT/nopub-plain.new"
 printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback \
 	--passphrase-fd 0 --symmetric --cipher-algo AES256 \
 	-o "$PASSWORD_VAULT" "$TEST_ROOT/nopub-plain.new"
 vault_before="$(sha256sum < "$PASSWORD_VAULT")"
-mp_reject 'recovery file could not be updated' \
+mp_reject 'could not be migrated' \
 	"$AUDIT_PASSWORD" "$NEW_MASTER" "$NEW_MASTER"
 # Put the real key back for the success path.
 printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback \
@@ -1301,27 +1311,40 @@ curl -fsS -D "$TEST_ROOT/mp-ok.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
 grep -qi '^Location: /settings?msg=changed' "$TEST_ROOT/mp-ok.headers"
 
 # The vault now opens with the new password and no longer with the old one.
-printf '%s' "$NEW_MASTER" | gpg --batch --quiet --pinentry-mode loopback \
-	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" > "$TEST_ROOT/rotated-plain"
+test_decrypt_vault "$PASSWORD_VAULT" "$NEW_MASTER" "$TEST_ROOT/rotated-plain"
 grep -q 'DemoSecret42' "$TEST_ROOT/rotated-plain"
-if printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
-	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" >/dev/null 2>&1; then
+if test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" "$TEST_ROOT/old-master-should-fail" >/dev/null 2>&1; then
 	printf 'the old master password still opens the vault after a change\n' >&2
 	exit 1
 fi
 
-# The recovery file is the point of the whole ordering: it must now name the
-# NEW password, or `spm forgot` would restore one that opens nothing.
+# Recovery wraps the stable vault key, not either master password. Assert the
+# property that matters: the recovered secret opens the vault DATA section on
+# its own, and is neither password. A file that merely differs from the
+# password would pass a comparison and still recover nothing.
 openssl rsautl -decrypt -inkey "$TEST_ROOT/private.pem" \
-	-in "$PASSWORD_VAULT.recovery" > "$TEST_ROOT/recovered-master" 2>/dev/null
-if [ "$(cat "$TEST_ROOT/recovered-master")" != "$NEW_MASTER" ]; then
-	printf 'recovery file does not hold the new master password\n' >&2
-	exit 1
-fi
+	-in "$PASSWORD_VAULT.recovery" > "$TEST_ROOT/recovered-vault-key" 2>/dev/null
+[ -s "$TEST_ROOT/recovered-vault-key" ] || { printf 'recovery file is empty\n' >&2; exit 1; }
+for known in "$NEW_MASTER" "$AUDIT_PASSWORD"; do
+	if [ "$(cat "$TEST_ROOT/recovered-vault-key")" = "$known" ]; then
+		printf 'recovery file still holds a master password, not an independent vault key\n' >&2
+		exit 1
+	fi
+done
+sed -n '/^DATA$/,$p' "$PASSWORD_VAULT" | sed '1d' | base64 -d >"$TEST_ROOT/recover-data.gpg"
+gpg --batch --quiet --pinentry-mode loopback \
+	--passphrase-file "$TEST_ROOT/recovered-vault-key" \
+	--decrypt "$TEST_ROOT/recover-data.gpg" >"$TEST_ROOT/recovered-plain" 2>/dev/null \
+	|| { printf 'the recovered vault key does not decrypt the vault data\n' >&2; exit 1; }
+grep -q 'DemoSecret42' "$TEST_ROOT/recovered-plain" \
+	|| { printf 'vault key decrypted the container but the contents are wrong\n' >&2; exit 1; }
 
-# The previous vault is kept, still under the old password.
-printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
-	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT.bak" >/dev/null
+# The previous vault is kept, still under the old password. It is the same
+# container the live vault is, so it must open through the same reader -- a
+# .bak that only raw gpg could read would mean the two had diverged.
+test_decrypt_vault "$PASSWORD_VAULT.bak" "$AUDIT_PASSWORD" "$TEST_ROOT/bak-plain"
+grep -q 'DemoSecret42' "$TEST_ROOT/bak-plain" \
+	|| { printf 'the preserved .bak does not hold the previous vault\n' >&2; exit 1; }
 
 # The acting session survives without a re-login; every other one is gone.
 code="$(curl -sS -o /dev/null -w '%{http_code}' -b "$TEST_ROOT/cookies" \
@@ -1347,8 +1370,7 @@ curl -fsS -D "$TEST_ROOT/mp-back.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
 	--data-urlencode "new=$AUDIT_PASSWORD" --data-urlencode "confirm=$AUDIT_PASSWORD" \
 	"http://127.0.0.1:$WEB_PORT/settings/master-password"
 grep -qi '^Location: /settings?msg=changed' "$TEST_ROOT/mp-back.headers"
-printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
-	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" >/dev/null
+test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" "$TEST_ROOT/rotated-back-plain"
 
 # A WEBAUTHN row must be invisible to password parsing and to the security
 # score: it is neither a credential the user stores nor one that can be weak.
@@ -1477,6 +1499,260 @@ if ! grep -qE '^\[(✔|!)\] Duplicate IDs' "$TEST_ROOT/doctor.out"; then
 	printf 'doctor duplicate-ID line lost its verdict marker\n' >&2
 	exit 1
 fi
+
+# --- 2.14.0 wrapped vault key ------------------------------------------------
+# The point of a separate vault key is that it is STABLE: a master-password
+# change rewraps a small envelope and leaves the vault ciphertext, every .bak,
+# every history snapshot and the recovery file untouched. These assert that
+# property directly rather than only that the new password works.
+printf 'CLI regression: wrapped vault key\n'
+
+VK_ROOT="$TEST_ROOT/vaultkey"
+mkdir -p "$VK_ROOT"
+VK_OLD="VaultKey-Old-Password-1"
+VK_NEW="VaultKey-New-Password-2"
+
+# Drive the interactive flows without a terminal. Only the two stty-guarded
+# prompts are stubbed; every other line of change-master and forgot runs.
+prompt_master_password() { MASTER_PW="$STUB_NEW_MASTER"; }
+
+vk_data_section() { sed -n '/^DATA$/,$p' "$1" | sed '1d'; }
+vk_unwrap() {
+	# The vault key as `spm forgot` would recover it: straight out of the
+	# recovery file with the private key, no master password involved.
+	openssl rsautl -decrypt -inkey "$TEST_RECOVERY_PRIVATE" -in "$1.recovery" 2>/dev/null
+}
+vk_new_legacy_vault() {
+	# A format-1 vault: encrypted under the master password directly, exactly
+	# what every vault written before 2.14.0 looks like on disk.
+	local target="$1" password="$2"
+	printf '%s' "$password" | gpg --batch --yes --pinentry-mode loopback \
+		--passphrase-fd 0 --symmetric --cipher-algo AES256 -o "$target" "$PLAIN"
+	printf '%s' "$password" | openssl rsautl -encrypt -pubin \
+		-inkey "$TEST_RECOVERY_PUBLIC" -out "$target.recovery" 2>/dev/null
+}
+
+# --- migration, then a password change that does not re-encrypt anything -----
+(
+	export VAULT_FILE="$VK_ROOT/a.gpg" RECOVERY_FILE="$VK_ROOT/a.gpg.recovery"
+	vk_new_legacy_vault "$VAULT_FILE" "$VK_OLD"
+	# `if !`, never `... && { exit 1; }`: the latter makes the whole compound
+	# return 1 in the passing case, which errexit turns into a suite abort.
+	if is_vault_container "$VAULT_FILE"; then
+		printf 'fixture was not a legacy vault\n' >&2; exit 1
+	fi
+
+	MASTER_PW="$VK_OLD" VAULT_KEY="" STUB_NEW_MASTER="$VK_NEW" cmd_change_master </dev/null >/dev/null
+
+	is_vault_container "$VAULT_FILE" || { printf 'change-master did not migrate the vault\n' >&2; exit 1; }
+
+	# Two distinct steps, and this is what proves it: the .bak left behind is
+	# the MIGRATED container still sealed under the OLD password. Migrating and
+	# rekeying in one write would seal the envelope under the new password
+	# while .recovery still named the old one -- and the .bak would be the
+	# pre-migration legacy file instead of a container.
+	is_vault_container "$VAULT_FILE.bak" \
+		|| { printf 'the vault was migrated and rekeyed in a single write\n' >&2; exit 1; }
+	VAULT_KEY="" decrypt_vault_container "$VAULT_FILE.bak" "$VK_ROOT/bak-a" "$VK_OLD" \
+		|| { printf 'the migration step did not run under the old password\n' >&2; exit 1; }
+	vk_data_section "$VAULT_FILE" > "$VK_ROOT/data-after-change"
+
+	# The recovery file holds the vault key, and that key opens the data.
+	vk_unwrap "$VAULT_FILE" > "$VK_ROOT/key-a"
+	[ -s "$VK_ROOT/key-a" ] || { printf 'recovery file is empty after migration\n' >&2; exit 1; }
+	for known in "$VK_OLD" "$VK_NEW"; do
+		[ "$(cat "$VK_ROOT/key-a")" != "$known" ] \
+			|| { printf 'recovery file still holds a master password\n' >&2; exit 1; }
+	done
+	vk_data_section "$VAULT_FILE" | base64 -d > "$VK_ROOT/data-a.gpg"
+	gpg --batch --quiet --pinentry-mode loopback --passphrase-file "$VK_ROOT/key-a" \
+		--decrypt "$VK_ROOT/data-a.gpg" 2>/dev/null | grep -q 'DemoSecret42' \
+		|| { printf 'the recovered vault key does not open the vault\n' >&2; exit 1; }
+
+	# The new password opens it; the old one does not.
+	VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" "$VK_ROOT/plain-new" "$VK_NEW" \
+		|| { printf 'the new master password does not open the vault\n' >&2; exit 1; }
+	grep -q 'DemoSecret42' "$VK_ROOT/plain-new"
+	if VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" /dev/null "$VK_OLD" 2>/dev/null; then
+		printf 'the old master password still opens the vault\n' >&2; exit 1
+	fi
+
+	# Change it once more. This is the assertion the whole design exists for:
+	# only the envelope is rewritten, so the ciphertext and the recovery file
+	# are byte-identical afterwards.
+	MASTER_PW="$VK_NEW" VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" "$VK_ROOT/reload" "$VK_NEW" VAULT_KEY
+	rewrap_vault_key "$VK_OLD"
+	vk_data_section "$VAULT_FILE" > "$VK_ROOT/data-after-rewrap"
+	cmp -s "$VK_ROOT/data-after-change" "$VK_ROOT/data-after-rewrap" \
+		|| { printf 'a master-password change re-encrypted the vault data\n' >&2; exit 1; }
+	vk_unwrap "$VAULT_FILE" > "$VK_ROOT/key-a2"
+	cmp -s "$VK_ROOT/key-a" "$VK_ROOT/key-a2" \
+		|| { printf 'the vault key did not survive a master-password change\n' >&2; exit 1; }
+)
+
+# --- an ordinary write must never mint a new vault key -----------------------
+# Rotating the key on a save would strand every .bak, snapshot and synced copy
+# that the current recovery file can still open.
+(
+	export VAULT_FILE="$VK_ROOT/b.gpg" RECOVERY_FILE="$VK_ROOT/b.gpg.recovery"
+	vk_new_legacy_vault "$VAULT_FILE" "$VK_OLD"
+	MASTER_PW="$VK_OLD" VAULT_KEY="" encrypt_file_to_vault "$PLAIN"
+	vk_unwrap "$VAULT_FILE" > "$VK_ROOT/key-b1"
+
+	# VAULT_KEY deliberately empty, as it is for any caller that did not just
+	# decrypt: the write has to recover the key from the vault, not invent one.
+	MASTER_PW="$VK_OLD" VAULT_KEY="" encrypt_file_to_vault "$PLAIN"
+	vk_unwrap "$VAULT_FILE" > "$VK_ROOT/key-b2"
+	cmp -s "$VK_ROOT/key-b1" "$VK_ROOT/key-b2" \
+		|| { printf 'an ordinary vault write rotated the vault key\n' >&2; exit 1; }
+
+	# The .bak it left behind is the same container and opens the same way.
+	VAULT_KEY="" decrypt_vault_container "$VAULT_FILE.bak" "$VK_ROOT/bak-plain" "$VK_OLD" \
+		|| { printf 'the .bak from a format-3 write does not open\n' >&2; exit 1; }
+	grep -q 'DemoSecret42' "$VK_ROOT/bak-plain"
+)
+
+# --- the migration crash window is recoverable -------------------------------
+# Migration installs the container BEFORE it swaps the recovery file. A vault
+# caught between the two has a key envelope sealed under the master password
+# that .recovery still names, which is the route cmd_forgot tries second.
+(
+	export VAULT_FILE="$VK_ROOT/c.gpg" RECOVERY_FILE="$VK_ROOT/c.gpg.recovery"
+	vk_new_legacy_vault "$VAULT_FILE" "$VK_OLD"
+	cp "$RECOVERY_FILE" "$VK_ROOT/c-recovery-before"
+	MASTER_PW="$VK_OLD" VAULT_KEY="" encrypt_file_to_vault "$PLAIN"
+	# Put the pre-migration recovery file back: the container is installed but
+	# the swap never happened.
+	cp "$VK_ROOT/c-recovery-before" "$RECOVERY_FILE"
+
+	export RECOVERY_PRIV_DEFAULT="$TEST_RECOVERY_PRIVATE"
+	recovered="$(openssl rsautl -decrypt -inkey "$TEST_RECOVERY_PRIVATE" -in "$RECOVERY_FILE" 2>/dev/null)"
+	[ "$recovered" = "$VK_OLD" ] || { printf 'the stale recovery file did not hold the master password\n' >&2; exit 1; }
+	# Read as a vault key it opens nothing, so only the master-password
+	# fallback can rescue this vault.
+	vk_data_section "$VAULT_FILE" | base64 -d > "$VK_ROOT/data-c.gpg"
+	if printf '%s' "$recovered" | gpg --batch --quiet --pinentry-mode loopback \
+		--passphrase-fd 0 --decrypt "$VK_ROOT/data-c.gpg" >/dev/null 2>&1; then
+		printf 'the recovered secret should not have been a vault key\n' >&2; exit 1
+	fi
+
+	# Drive the real command, not just the helper it leans on.
+	MASTER_PW="" VAULT_KEY="" STUB_NEW_MASTER="$VK_NEW" cmd_forgot </dev/null >/dev/null
+	VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" "$VK_ROOT/plain-c" "$VK_NEW" \
+		|| { printf 'a vault caught mid-migration is unrecoverable\n' >&2; exit 1; }
+	grep -q 'DemoSecret42' "$VK_ROOT/plain-c"
+
+	# Recovering once by luck is not enough: the interrupted migration must be
+	# finished, or the next recovery would find a password that opens nothing.
+	vk_unwrap "$VAULT_FILE" > "$VK_ROOT/key-c"
+	[ "$(cat "$VK_ROOT/key-c")" != "$VK_OLD" ] \
+		|| { printf 'forgot left the stale recovery file in place\n' >&2; exit 1; }
+	vk_data_section "$VAULT_FILE" | base64 -d > "$VK_ROOT/data-c2.gpg"
+	gpg --batch --quiet --pinentry-mode loopback --passphrase-file "$VK_ROOT/key-c" \
+		--decrypt "$VK_ROOT/data-c2.gpg" 2>/dev/null | grep -q 'DemoSecret42' \
+		|| { printf 'the repaired recovery file does not hold the vault key\n' >&2; exit 1; }
+)
+
+# --- an unusable recovery pubkey must fail before the vault is touched -------
+(
+	export VAULT_FILE="$VK_ROOT/d.gpg" RECOVERY_FILE="$VK_ROOT/d.gpg.recovery"
+	printf '%s' "$VK_OLD" | gpg --batch --yes --pinentry-mode loopback \
+		--passphrase-fd 0 --symmetric --cipher-algo AES256 -o "$VAULT_FILE" "$PLAIN"
+	awk -F '\t' 'BEGIN{OFS="\t"} $1=="META_RECOVERY_PUBKEY"{$2="dGVzdA=="} {print}' \
+		"$PLAIN" > "$VK_ROOT/d-plain"
+	before="$(sha256sum < "$VAULT_FILE")"
+	# A nested subshell: the refusal is a `die`, which exits rather than
+	# returning, so it has to be contained before `if` can judge it.
+	if ( MASTER_PW="$VK_OLD" VAULT_KEY="" encrypt_file_to_vault "$VK_ROOT/d-plain" ) 2>/dev/null; then
+		printf 'migration proceeded with an unusable recovery public key\n' >&2; exit 1
+	fi
+	[ "$(sha256sum < "$VAULT_FILE")" = "$before" ] \
+		|| { printf 'a refused migration still rewrote the vault\n' >&2; exit 1; }
+	# And it must not litter the vault directory with staging files.
+	leftovers="$(find "$VK_ROOT" -maxdepth 1 -name '.d.gpg.*' | wc -l)"
+	[ "$leftovers" -eq 0 ] \
+		|| { printf 'a refused migration left %s staging file(s) behind\n' "$leftovers" >&2; exit 1; }
+)
+
+# --- forgot recovers a fully migrated vault ----------------------------------
+(
+	export VAULT_FILE="$VK_ROOT/e.gpg" RECOVERY_FILE="$VK_ROOT/e.gpg.recovery"
+	export RECOVERY_PRIV_DEFAULT="$TEST_RECOVERY_PRIVATE"
+	vk_new_legacy_vault "$VAULT_FILE" "$VK_OLD"
+	MASTER_PW="$VK_OLD" VAULT_KEY="" encrypt_file_to_vault "$PLAIN"
+	vk_unwrap "$VAULT_FILE" > "$VK_ROOT/key-e"
+
+	MASTER_PW="" VAULT_KEY="" STUB_NEW_MASTER="$VK_NEW" cmd_forgot </dev/null >/dev/null
+	# Recovery reset the password without re-encrypting the data, so the vault
+	# key -- and therefore the recovery file -- is unchanged.
+	vk_unwrap "$VAULT_FILE" > "$VK_ROOT/key-e2"
+	cmp -s "$VK_ROOT/key-e" "$VK_ROOT/key-e2" \
+		|| { printf 'forgot rotated the vault key\n' >&2; exit 1; }
+	VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" "$VK_ROOT/plain-e" "$VK_NEW" \
+		|| { printf 'the vault does not open with the password forgot set\n' >&2; exit 1; }
+	grep -q 'DemoSecret42' "$VK_ROOT/plain-e"
+
+	# doctor is the only place a user can learn their recovery file is stale,
+	# so it has to distinguish "decryptable" from "actually holds the key".
+	MASTER_PW="$VK_NEW" VAULT_KEY="" cmd_doctor 2>/dev/null > "$VK_ROOT/doctor-e" || true
+	grep -q 'Recovery file holds the current vault key' "$VK_ROOT/doctor-e" \
+		|| { printf 'doctor did not confirm the recovery file holds the vault key\n' >&2
+		     grep -i 'recovery' "$VK_ROOT/doctor-e" >&2; exit 1; }
+
+	# Break it on purpose: a recovery file holding a master password is exactly
+	# what an interrupted migration leaves behind, and doctor must say so.
+	printf '%s' "$VK_NEW" | openssl rsautl -encrypt -pubin \
+		-inkey "$TEST_RECOVERY_PUBLIC" -out "$RECOVERY_FILE" 2>/dev/null
+	MASTER_PW="$VK_NEW" VAULT_KEY="" cmd_doctor 2>/dev/null > "$VK_ROOT/doctor-e2" || true
+	grep -q "does not hold this vault's key" "$VK_ROOT/doctor-e2" \
+		|| { printf 'doctor did not flag a stale recovery file\n' >&2
+		     grep -i 'recovery' "$VK_ROOT/doctor-e2" >&2; exit 1; }
+)
+
+# --- every file that IS a vault must be read as one ---------------------------
+# .bak, history snapshots and synced copies are the same container as the live
+# vault. Each of these paths proves a file opens before it overwrites the live
+# one, and each of them read it with raw gpg until the container existed.
+(
+	export VAULT_FILE="$VK_ROOT/f.gpg" RECOVERY_FILE="$VK_ROOT/f.gpg.recovery"
+	vk_new_legacy_vault "$VAULT_FILE" "$VK_OLD"
+	export MASTER_PW="$VK_OLD"
+	VAULT_KEY="" encrypt_file_to_vault "$PLAIN"
+
+	# A second write archives the first generation as a snapshot.
+	VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" "$VK_ROOT/f-plain" "$VK_OLD" VAULT_KEY
+	printf '2\tSecond\tuser@example.invalid\tAddedLater99\t-\t2025-01-02T00:00:00Z\n' \
+		>> "$VK_ROOT/f-plain"
+	encrypt_file_to_vault "$VK_ROOT/f-plain"
+	VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" "$VK_ROOT/f-check" "$VK_OLD"
+	grep -q 'AddedLater99' "$VK_ROOT/f-check"
+
+	snapshot="$(cmd_history_list | head -n1)"
+	[ -n "$snapshot" ] || { printf 'no history snapshot was archived\n' >&2; exit 1; }
+	printf 'yes\n' | VAULT_KEY="" cmd_history_restore "$snapshot" >/dev/null
+	VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" "$VK_ROOT/f-restored" "$VK_OLD" \
+		|| { printf 'the restored snapshot does not open\n' >&2; exit 1; }
+	grep -q 'DemoSecret42' "$VK_ROOT/f-restored"
+	if grep -q 'AddedLater99' "$VK_ROOT/f-restored"; then
+		printf 'history-restore did not roll the vault back\n' >&2; exit 1
+	fi
+
+	# Sync stages an encrypted copy and proves it opens before pulling it.
+	VAULT_KEY="" cmd_sync push "$VK_ROOT/syncdir" >/dev/null
+	VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" "$VK_ROOT/f-plain2" "$VK_OLD" VAULT_KEY
+	printf '3\tThird\tuser@example.invalid\tLocalOnly77\t-\t2025-01-03T00:00:00Z\n' \
+		>> "$VK_ROOT/f-plain2"
+	encrypt_file_to_vault "$VK_ROOT/f-plain2"
+	VAULT_KEY="" SPM_SYNC_FORCE_INITIAL=1 cmd_sync pull "$VK_ROOT/syncdir" >/dev/null
+	VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" "$VK_ROOT/f-pulled" "$VK_OLD" \
+		|| { printf 'the pulled vault does not open\n' >&2; exit 1; }
+	if grep -q 'LocalOnly77' "$VK_ROOT/f-pulled"; then
+		printf 'sync pull did not replace the local vault\n' >&2; exit 1
+	fi
+	grep -q 'DemoSecret42' "$VK_ROOT/f-pulled"
+)
+
+printf '  vault key stability, migration ordering and recovery verified\n'
 
 printf 'SPM regression suite passed (%s formats plus web and advanced features).\n' \
 	"$(printf '%s\n' "$formats" | awk '{ print NF }')"

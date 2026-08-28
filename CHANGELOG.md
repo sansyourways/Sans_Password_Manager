@@ -23,6 +23,28 @@ is a planning decision rather than an implementation one.
   next write will upgrade it. It reports only — a diagnostic must never be the
   thing that rewrites a vault.
 
+- **The master password no longer encrypts the vault.** Format 3 seals the
+  vault under a random 256-bit *vault key*, and seals only that key under the
+  master password. Both live in one file, so nothing that copies, backs up,
+  syncs or bundles "the vault" had to change.
+
+  The consequence is the point: changing the master password rewrites a few
+  hundred bytes of key envelope instead of re-encrypting the whole vault, and
+  the vault key — the thing `.recovery` protects — stays the same across every
+  password change the user will ever make. A recovery file therefore stops
+  going stale, and `spm forgot` stops depending on when it was last written.
+
+  This also removes the sharpest edge in the old design. `.recovery` used to
+  hold the master password itself, which made it password-equivalent and made
+  the *ordering* of two writes load-bearing: a vault re-encrypted while
+  `.recovery` still named the old password was the one state recovery could not
+  undo. It now holds a key that no password change invalidates.
+
+- `spm doctor` distinguishes a recovery file that merely *decrypts* from one
+  that actually holds the current vault key, and names the command that fixes
+  the difference. A vault interrupted mid-migration is the only way to reach
+  that state, and nothing else in the tool could report it.
+
 ### Changed
 - **Key derivation is pinned rather than inherited.** Both writers — the CLI
   and the SPM Dashboard — now pass `--s2k-mode 3 --s2k-digest-algo SHA512
@@ -35,15 +57,38 @@ is a planning decision rather than an implementation one.
   application, and a security parameter that is implicit can be neither
   reviewed nor migrated.
 
+  The same policy is applied to both layers of a format-3 vault. The data layer
+  is keyed by a random 256-bit value that needs no stretching, so a cheaper KDF
+  there would be defensible; benchmarking says it would also be pointless. At
+  this iteration count the cost is ~420 ms per gpg invocation either way,
+  entirely process startup, so the policy stays uniform and there is one fewer
+  parameter to explain.
+
   Reading is unaffected: the parameters live in the file's own header, so every
   existing vault still opens, and each one is rewritten under the new policy the
   first time it is saved.
 
-- **Argon2id is deliberately not adopted yet.** OpenPGP Argon2 requires GnuPG
-  2.4 or newer and this project's baseline, Debian bookworm, ships 2.2.40.
-  Asking for it there fails the write rather than degrading. Recording the
-  format version is what turns adopting it later into a migration instead of a
-  rewrite.
+- **Migration is ordered so that no instant is unrecoverable.** A legacy vault
+  is migrated as its own write, under the password it already has, before any
+  password change is applied to it — so `change-master` and `forgot` are two
+  steps rather than one. The container is installed before the recovery file is
+  swapped, and the key envelope is sealed under the password `.recovery` still
+  names, which makes the window between them harmless: `spm forgot` tries the
+  recovered secret as a vault key first and as a master password second, and
+  the second route opens exactly the vaults caught in between. It then finishes
+  the interrupted migration rather than leaving it to be discovered later.
+
+  A migration whose recovery public key is unusable refuses before anything is
+  encrypted, leaving the vault byte-identical and no staging files behind.
+
+### Fixed
+- Reading a vault and reading *a file that is a vault* are now the same code
+  path. History snapshots, `.bak` files and synced copies are the same
+  container as the live vault, and three places — the CLI's `history-restore`
+  and `sync pull`, and the dashboard's `/history-restore` — proved a file
+  opened by handing it straight to `gpg`. Each would have refused every
+  snapshot taken after the format changed, with the live vault left correctly
+  untouched.
 
 ## [2.13.0] - 2026-08-28
 
