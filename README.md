@@ -994,32 +994,39 @@ The universal extension is in `browser-extension-universal/` and supports
 Chrome, Chromium, Edge, Brave, Opera, Vivaldi, and Firefox desktop from one
 source tree. First install SPM 3.1.0 or later, then unpack the release archive.
 
-For Chrome-family browsers:
+### One-command guided setup
 
 ```bash
-./browser-extension-universal/build.sh chromium
+./browser-extension-universal/setup.sh
 ```
 
-Open the browser's extensions page (for example `chrome://extensions` or
-`edge://extensions`), enable **Developer mode**, choose **Load unpacked**, and
-select `browser-extension-universal/dist/chromium`. Copy the 32-character
-extension ID shown there, register the local bridge, and restart the browser:
+This detects an installed browser, builds the correct package, registers the
+native host, opens the browser extension page and prepared folder, and prints
+the final three clicks. Choose a browser explicitly when needed:
+
+![Chrome Extensions showing Developer mode enabled and Load unpacked ready](docs/screenshots/browser-extension-setup/chrome-load-unpacked.png)
+
+The screenshot uses a disposable empty Chrome profile and contains no account,
+browsing, vault, or credential data.
 
 ```bash
-./browser-extension-universal/install-host.sh YOUR_EXTENSION_ID
+./browser-extension-universal/setup.sh --browser chrome
+./browser-extension-universal/setup.sh --browser firefox
 ```
 
-For Firefox desktop:
+For Chromium-family browsers, enable **Developer mode**, click **Load
+unpacked**, and select the folder printed by the setup command. For Firefox,
+click **Load Temporary Add-on** and select the printed `manifest.json`.
+
+For remote or scripted preparation without opening windows:
 
 ```bash
-./browser-extension-universal/build.sh firefox
-./browser-extension-universal/install-host.sh
+./browser-extension-universal/setup.sh --browser chromium --no-open
 ```
 
-Open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on**,
-and select `browser-extension-universal/dist/firefox/manifest.json`. Temporary
-Firefox add-ons must be loaded again after restart unless installed through a
-signed distribution.
+The previous manual `build.sh` and `install-host.sh` flow remains documented in
+the extension guide for troubleshooting. Temporary Firefox add-ons must still
+be loaded again after restart unless installed through a signed distribution.
 
 Open an HTTP(S) login page and select the SPM toolbar icon. Unlock once, then
 choose one of the accounts bound to that exact hostname. The master password is

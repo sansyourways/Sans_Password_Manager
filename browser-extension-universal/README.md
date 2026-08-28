@@ -4,15 +4,41 @@ This folder contains one extension codebase for Chrome, Chromium, Edge, Brave,
 Opera, Vivaldi, and Firefox desktop. It lists only accounts bound to the active
 tab's exact hostname and fills only the account you explicitly choose.
 
-## Build the unpacked extension
+## Recommended: guided one-command setup
 
 ```bash
-./browser-extension-universal/build.sh chromium
-./browser-extension-universal/build.sh firefox
+./browser-extension-universal/setup.sh
 ```
 
-The commands create `dist/chromium/` and `dist/firefox/`. These generated
-directories are local build output and are not committed.
+The setup command detects your browser, builds the correct extension, registers
+the native host, opens the browser's extension page and the prepared folder,
+and prints the final three clicks. Nothing needs to be copied back into the
+terminal. To select a browser explicitly:
+
+In Chrome, turn on **Developer mode** at the top right, then choose **Load
+unpacked** at the top left:
+
+![Chrome Extensions with Developer mode enabled and the Load unpacked button visible](../docs/screenshots/browser-extension-setup/chrome-load-unpacked.png)
+
+This screenshot was captured in Chrome 151 with a disposable empty profile. It
+contains no account, browsing, vault, or credential data.
+
+```bash
+./browser-extension-universal/setup.sh --browser chrome
+./browser-extension-universal/setup.sh --browser firefox
+```
+
+Use `--no-open` on a remote machine or when you only want to prepare the files.
+Run `setup.sh --help` for the supported browser names.
+
+The Chromium build carries a public development key that gives unpacked copies
+the stable ID `infdncbkefpjncplegccokcfpiicadlo`. This is not a secret or a
+signing credential; it only removes the old copy-ID-and-run-another-command
+loop. Browser store signing remains separate.
+
+## Manual installation
+
+The guided flow is recommended. These steps remain available for troubleshooting.
 
 ## Chromium-family installation
 
@@ -21,11 +47,10 @@ directories are local build output and are not committed.
    `edge://extensions`, `brave://extensions`, or the equivalent).
 3. Enable Developer mode and choose **Load unpacked**. Select
    `browser-extension-universal/dist/chromium`.
-4. Copy the extension ID shown by the browser.
-5. Register the native host, then fully restart the browser:
+4. Register the native host, then fully restart the browser:
 
    ```bash
-   ./browser-extension-universal/install-host.sh YOUR_32_CHARACTER_EXTENSION_ID
+   ./browser-extension-universal/install-host.sh
    ```
 
 ## Firefox desktop installation
@@ -33,7 +58,7 @@ directories are local build output and are not committed.
 1. Build the Firefox variant.
 2. Open `about:debugging#/runtime/this-firefox`, choose **Load Temporary
    Add-on**, and select `dist/firefox/manifest.json`.
-3. Register the Firefox native host without a Chromium ID:
+3. Register the Firefox native host:
 
    ```bash
    ./browser-extension-universal/install-host.sh

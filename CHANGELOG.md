@@ -7,6 +7,19 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+### Added
+- A guided `browser-extension-universal/setup.sh` flow now detects an installed
+  browser, builds the matching Chromium or Firefox package, registers the
+  native host, opens the required browser page and prepared folder, and prints
+  the final three clicks. `--browser` supports explicit selection and
+  `--no-open` supports remote/scripted preparation.
+
+### Changed
+- The unpacked Chromium extension now has a stable public development identity,
+  removing the copy-generated-ID-and-rerun-installer loop. Manual setup remains
+  available for troubleshooting, and README documentation leads with the
+  guided command.
+
 ## [3.1.0] - 2026-08-29
 
 ### Added
