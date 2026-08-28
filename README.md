@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.0.2**
+Current release: **3.1.0**
 
 ---
 
@@ -39,6 +39,7 @@ Current release: **3.0.2**
   - [SPM Dashboard](#spm-dashboard)
   - [Publish the SPM Dashboard on a domain with HTTPS](#publish-the-spm-dashboard-on-a-domain-with-https)
   - [Install the SPM Dashboard as an iOS app](#install-the-spm-dashboard-as-an-ios-app)
+  - [Install the browser extension](#install-the-browser-extension)
   - [CLI Commands](#cli-commands)
   - [Secure Notes](#secure-notes)
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
@@ -304,7 +305,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.0.2
+bash install.sh --version 3.1.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -316,7 +317,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.0.2 at /home/you/.local/bin/spm
+Installed SPM 3.1.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -917,7 +918,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.0.2**
+Version: **3.1.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
@@ -987,12 +988,53 @@ holding the private key can use lower-level cryptographic tools. Passkey private
 keys remain non-exportable in the operating-system or hardware authenticator;
 SPM stores only discovery and recovery metadata.
 
-The unpacked Chrome/Chromium companion is in `browser-extension/`. Autofill
-requires an exact hostname match against the record's URL field, its label, or
-an HTTP(S) URL in its notes -- the notes fallback is what makes vaults written
-before 2.12.0 keep working. Matching is exact: a record bound to
-`example.com` does not autofill on `login.example.com`. See its README for
-native-host registration.
+### Install the browser extension
+
+The universal extension is in `browser-extension-universal/` and supports
+Chrome, Chromium, Edge, Brave, Opera, Vivaldi, and Firefox desktop from one
+source tree. First install SPM 3.1.0 or later, then unpack the release archive.
+
+For Chrome-family browsers:
+
+```bash
+./browser-extension-universal/build.sh chromium
+```
+
+Open the browser's extensions page (for example `chrome://extensions` or
+`edge://extensions`), enable **Developer mode**, choose **Load unpacked**, and
+select `browser-extension-universal/dist/chromium`. Copy the 32-character
+extension ID shown there, register the local bridge, and restart the browser:
+
+```bash
+./browser-extension-universal/install-host.sh YOUR_EXTENSION_ID
+```
+
+For Firefox desktop:
+
+```bash
+./browser-extension-universal/build.sh firefox
+./browser-extension-universal/install-host.sh
+```
+
+Open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on**,
+and select `browser-extension-universal/dist/firefox/manifest.json`. Temporary
+Firefox add-ons must be loaded again after restart unless installed through a
+signed distribution.
+
+Open an HTTP(S) login page and select the SPM toolbar icon. Unlock once, then
+choose one of the accounts bound to that exact hostname. The master password is
+kept only in the native host process and is discarded on explicit lock, idle
+timeout, native-port disconnect, or browser exit. The hostname is verified
+again before the selected password is returned. A record for `example.com`
+does not match `login.example.com`.
+
+Safari and iOS browsers cannot use this native-messaging package. Safari needs
+a separately signed Xcode application wrapper; on iOS, use the installable SPM
+Dashboard web app. See
+[`browser-extension-universal/README.md`](browser-extension-universal/README.md)
+for browser-specific paths, behavior, and troubleshooting. The older
+`browser-extension/` remains in the archive only as a compatibility client for
+existing installations.
 Uses **semantic versioning**.  
 `./spm.sh update` fetches the latest GitHub ZIP, verifies its published SHA-256 and the extracted script syntax, then installs to `/usr/local/bin/spm` (sudo may be required).
 See `CHANGELOG.md` for details.

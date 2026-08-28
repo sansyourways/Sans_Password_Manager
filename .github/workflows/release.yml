@@ -43,20 +43,28 @@ jobs:
           # than not tagging. ci.yml already chmods for exactly this reason;
           # this job did not, and 2.11.0 is a real commit it would have failed
           # on. Restore the bits rather than trusting the tree's modes.
-          chmod +x spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh
+          chmod +x spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh \
+            browser-extension-universal/build.sh browser-extension-universal/install-host.sh \
+            browser-extension-universal/native_host.py tests/native_host_protocol.py
           # The tagged spm.sh must be what src/ produces. A tag whose shipped
           # script does not match its own sources is unauditable, and this is
           # the last point at which that can still be caught.
           ./build.sh --check
-          bash -n spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh
+          bash -n spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh \
+            browser-extension-universal/build.sh browser-extension-universal/install-host.sh
           shellcheck -x -S warning spm.sh install.sh build.sh \
-            tests/regression.sh tests/dco-check.sh
+            tests/regression.sh tests/dco-check.sh \
+            browser-extension-universal/build.sh browser-extension-universal/install-host.sh
+          python3 -m compileall -q browser-extension-universal/native_host.py \
+            tests/native_host_protocol.py
           ./tests/regression.sh
           version="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' spm.sh)"
           tag_version="${RELEASE_TAG#v}"
           test "$version" = "$tag_version"
           grep -q "## \[$version\]" CHANGELOG.md
           grep -q '"version": "'"$version"'"' browser-extension/manifest.json
+          grep -q '"version": "'"$version"'"' browser-extension-universal/manifest.chromium.json
+          grep -q '"version": "'"$version"'"' browser-extension-universal/manifest.firefox.json
 
       - name: Build and verify release archive
         run: |
@@ -68,9 +76,9 @@ jobs:
           # were given is exactly what these sources produce.
           zip -9 -r "$archive" \
             spm.sh install.sh build.sh README.md ROADMAP.md CHANGELOG.md CONTRIBUTING.md LICENSE NOTICE DCO \
-            src docs browser-extension tests \
+            src docs browser-extension browser-extension-universal tests \
             .github/PULL_REQUEST_TEMPLATE.md .github/ISSUE_TEMPLATE \
-            -x '*.bak'
+            -x '*.bak' '*/dist/*'
           sha256sum "$archive" > "$archive.sha256"
           unzip -t "$archive"
           sha256sum -c "$archive.sha256"

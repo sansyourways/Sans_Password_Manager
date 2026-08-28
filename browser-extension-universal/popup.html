@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sans Password Manager</title>
+  <style>
+    :root{color-scheme:light dark;font:14px system-ui,sans-serif}body{width:320px;margin:0;padding:16px;background:#16161a;color:#f5f5f7}h1{font-size:17px;margin:0 0 4px}.host{color:#a9a9b2;overflow-wrap:anywhere;margin:0 0 14px}label{display:block;margin:10px 0 5px}input,button{box-sizing:border-box;width:100%;min-height:38px;border-radius:8px;border:1px solid #555;padding:8px}button{cursor:pointer;background:#d8d2ff;color:#17131f;border:0;font-weight:700;margin-top:8px}button.secondary{background:#34343b;color:#eee}button.account{text-align:left;background:#25252b;color:#fff;border:1px solid #46464f}button.account small{display:block;color:#b7b7bf;font-weight:400}.hidden{display:none}.status{min-height:20px;margin:10px 0 0;color:#d2d2da}.error{color:#ffaca7}
+  </style>
+</head>
+<body>
+  <h1>Sans Password Manager</h1>
+  <p class="host" id="host">Checking this tab…</p>
+  <section id="unlock" class="hidden">
+    <label for="master">Master password</label>
+    <input id="master" type="password" autocomplete="current-password">
+    <button id="unlockButton" type="button">Unlock for this browser session</button>
+  </section>
+  <section id="accounts" class="hidden">
+    <div id="accountList"></div>
+    <button id="refresh" class="secondary" type="button">Refresh accounts</button>
+    <button id="lock" class="secondary" type="button">Lock SPM</button>
+  </section>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+  <script src="popup.js"></script>
+</body>
+</html>

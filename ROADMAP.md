@@ -20,12 +20,18 @@ co-owners of it. That review is a design concept, not a formal security audit.
 - Improve accessibility and keyboard-only verification for every SPM Dashboard page.
 - Keep import/export fixtures synchronized across every documented format.
 
+## Shipped integrations
+
+- **Universal browser-extension popup picker — shipped in 3.1.0.** Chrome,
+  Chromium, Edge, Brave, Opera, Vivaldi, and Firefox desktop share one source
+  tree. The secret-free account-list protocol, memory-only native-host session,
+  exact-host selection, installers, and installation tutorials are delivered.
+  The in-field picker and optional WebAuthn unlock remain phased in
+  [`docs/BROWSER-EXTENSION-ROADMAP.md`](docs/BROWSER-EXTENSION-ROADMAP.md).
+
 ## Next — safer integrations
 
-- Harden and document browser-extension installation on each supported platform.
-  A detailed plan for URL auto-bind and an in-field account picker, including
-  the browsers this can and cannot reach, is in
-  [`docs/BROWSER-EXTENSION-ROADMAP.md`](docs/BROWSER-EXTENSION-ROADMAP.md).
+- Continue the browser-extension work with an origin-isolated in-field picker.
 - Design pluggable, encrypted synchronization transports without introducing a
   maintainer-operated cloud service.
 - Add machine-readable doctor output for support and automation.
