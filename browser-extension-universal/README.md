@@ -13,15 +13,9 @@ tab's exact hostname and fills only the account you explicitly choose.
 The setup command detects your browser, builds the correct extension, registers
 the native host, opens the browser's extension page and the prepared folder,
 and prints the final three clicks. Nothing needs to be copied back into the
-terminal. To select a browser explicitly:
+terminal.
 
-In Chrome, turn on **Developer mode** at the top right, then choose **Load
-unpacked** at the top left:
-
-![Chrome Extensions with Developer mode enabled and the Load unpacked button visible](../docs/screenshots/browser-extension-setup/chrome-load-unpacked.png)
-
-This screenshot was captured in Chrome 151 with a disposable empty profile. It
-contains no account, browsing, vault, or credential data.
+To select a browser explicitly:
 
 ```bash
 ./browser-extension-universal/setup.sh --browser chrome
@@ -31,16 +25,45 @@ contains no account, browsing, vault, or credential data.
 Use `--no-open` on a remote machine or when you only want to prepare the files.
 Run `setup.sh --help` for the supported browser names.
 
+The command leaves the browser on its extensions page. In Chrome, turn on
+**Developer mode** at the top right, then choose **Load unpacked** at the top
+left and select the folder the command printed:
+
+![Chrome Extensions with Developer mode enabled and the Load unpacked button visible](../docs/screenshots/browser-extension-setup/chrome-load-unpacked.png)
+
+This screenshot was captured in Chrome 151 with a disposable empty profile. It
+contains no account, browsing, vault, or credential data.
+
 The Chromium build carries a public development key that gives unpacked copies
 the stable ID `infdncbkefpjncplegccokcfpiicadlo`. This is not a secret or a
 signing credential; it only removes the old copy-ID-and-run-another-command
-loop. Browser store signing remains separate.
+loop. Browser store signing remains separate. `extension-id.sh` derives that ID
+from the manifest key exactly as the browser does, so the registration can
+never drift from the identity the browser actually assigns.
+
+### Upgrading from an earlier unpacked install
+
+Earlier unpacked builds carried no key, so the browser derived the ID from the
+directory path and every machine got a different one. Adding the key changes
+that ID, and the browser treats the result as a separate extension. Remove the
+previously loaded SPM entry from the extensions page before loading the new
+one; otherwise the stale copy stays installed and its native-host registration
+no longer matches. Re-running `install-host.sh` also rewrites any Chromium
+manifest that was registered against an old ID.
 
 ## Manual installation
 
-The guided flow is recommended. These steps remain available for troubleshooting.
+The guided flow is recommended. These steps remain available for
+troubleshooting. Both variants are produced by `build.sh`, which writes the
+generated `dist/chromium/` and `dist/firefox/` directories. That output is
+local and is not committed.
 
-## Chromium-family installation
+```bash
+./browser-extension-universal/build.sh chromium
+./browser-extension-universal/build.sh firefox
+```
+
+### Chromium-family installation
 
 1. Build the Chromium variant.
 2. Open the browser's extensions page (`chrome://extensions`,
@@ -53,7 +76,7 @@ The guided flow is recommended. These steps remain available for troubleshooting
    ./browser-extension-universal/install-host.sh
    ```
 
-## Firefox desktop installation
+### Firefox desktop installation
 
 1. Build the Firefox variant.
 2. Open `about:debugging#/runtime/this-firefox`, choose **Load Temporary

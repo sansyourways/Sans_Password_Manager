@@ -19,6 +19,18 @@ Keep-a-Changelog style format.
   removing the copy-generated-ID-and-rerun-installer loop. Manual setup remains
   available for troubleshooting, and README documentation leads with the
   guided command.
+- `install-host.sh` and `setup.sh` now derive the Chromium extension ID from
+  the manifest key the same way the browser does, rather than each carrying a
+  hardcoded copy that could drift from the key.
+
+### Upgrading
+- **Remove any previously loaded unpacked SPM extension before loading the new
+  one.** Earlier builds carried no manifest key, so the browser derived the
+  extension ID from the install directory. The key changes that ID, and the
+  browser treats the rebuilt extension as a separate one: the old entry stays
+  installed and its native-host registration no longer matches. Re-running
+  `install-host.sh` also rewrites any Chromium manifest that had been
+  registered against a previous ID.
 
 ## [3.1.0] - 2026-08-29
 

@@ -5,8 +5,10 @@ ROOT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 HOST_NAME="xyz.sansyourways.spm"
 HOST_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/spm/browser-extension"
 HOST_PATH="$HOST_DIR/native_host.py"
-DEFAULT_CHROMIUM_ID="infdncbkefpjncplegccokcfpiicadlo"
-CHROMIUM_ID="${1:-$DEFAULT_CHROMIUM_ID}"
+# Default to the ID the browser itself will derive from the manifest key, so
+# the registration cannot drift from the loaded extension's real identity. An
+# explicit argument still wins, for a build carrying a different key.
+CHROMIUM_ID="${1:-$("$ROOT_DIR/extension-id.sh")}"
 
 printf '%s' "$CHROMIUM_ID" | grep -Eq '^[a-p]{32}$' || { printf 'Invalid Chromium extension ID.\n' >&2; exit 2; }
 mkdir -p "$HOST_DIR"
@@ -48,4 +50,5 @@ case "$(uname -s)" in
 		;;
 	*) printf 'Automatic native-host installation supports Linux and macOS.\n' >&2; exit 1 ;;
 esac
-printf 'Installed %s. Fully restart the browser before testing.\n' "$HOST_NAME"
+printf 'Installed %s for extension ID %s. Fully restart the browser before testing.\n' \
+	"$HOST_NAME" "$CHROMIUM_ID"

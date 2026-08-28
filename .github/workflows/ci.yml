@@ -44,11 +44,11 @@ jobs:
         run: |
           bash -n spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh \
             browser-extension-universal/build.sh browser-extension-universal/install-host.sh \
-            browser-extension-universal/setup.sh
+            browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh
           shellcheck -x -S warning spm.sh install.sh build.sh \
             tests/regression.sh tests/dco-check.sh \
             browser-extension-universal/build.sh browser-extension-universal/install-host.sh \
-            browser-extension-universal/setup.sh
+            browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh
           # The trusted core and the dashboard are Python that ships inside a
           # shell script. Compile them as themselves, so a syntax error cannot
           # reach a release disguised as a valid shell heredoc.
@@ -71,6 +71,13 @@ jobs:
           grep -q '"version": "'"$version"'"' browser-extension/manifest.json
           grep -q '"version": "'"$version"'"' browser-extension-universal/manifest.chromium.json
           grep -q '"version": "'"$version"'"' browser-extension-universal/manifest.firefox.json
+          # The extension ID is derived from the manifest key, but the READMEs
+          # quote it as a literal. A key rotation that left the docs behind
+          # would send people to register a host for an ID no browser assigns.
+          chmod +x browser-extension-universal/extension-id.sh
+          extension_id="$(./browser-extension-universal/extension-id.sh)"
+          grep -q "$extension_id" browser-extension-universal/README.md
+          grep -q "$extension_id" tests/regression.sh
 
   termux:
     name: termux

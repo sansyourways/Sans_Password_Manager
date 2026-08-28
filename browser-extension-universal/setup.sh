@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
-CHROMIUM_ID="infdncbkefpjncplegccokcfpiicadlo"
+CHROMIUM_ID="$("$ROOT_DIR/extension-id.sh")"
 BROWSER="auto"
 OPEN_BROWSER=1
 

@@ -1004,19 +1004,20 @@ This detects an installed browser, builds the correct package, registers the
 native host, opens the browser extension page and prepared folder, and prints
 the final three clicks. Choose a browser explicitly when needed:
 
-![Chrome Extensions showing Developer mode enabled and Load unpacked ready](docs/screenshots/browser-extension-setup/chrome-load-unpacked.png)
-
-The screenshot uses a disposable empty Chrome profile and contains no account,
-browsing, vault, or credential data.
-
 ```bash
 ./browser-extension-universal/setup.sh --browser chrome
 ./browser-extension-universal/setup.sh --browser firefox
 ```
 
-For Chromium-family browsers, enable **Developer mode**, click **Load
-unpacked**, and select the folder printed by the setup command. For Firefox,
-click **Load Temporary Add-on** and select the printed `manifest.json`.
+For Chromium-family browsers, enable **Developer mode** at the top right, click
+**Load unpacked** at the top left, and select the folder printed by the setup
+command. For Firefox, click **Load Temporary Add-on** and select the printed
+`manifest.json`.
+
+![Chrome Extensions showing Developer mode enabled and Load unpacked ready](docs/screenshots/browser-extension-setup/chrome-load-unpacked.png)
+
+The screenshot uses a disposable empty Chrome profile and contains no account,
+browsing, vault, or credential data.
 
 For remote or scripted preparation without opening windows:
 
@@ -1024,9 +1025,15 @@ For remote or scripted preparation without opening windows:
 ./browser-extension-universal/setup.sh --browser chromium --no-open
 ```
 
-The previous manual `build.sh` and `install-host.sh` flow remains documented in
-the extension guide for troubleshooting. Temporary Firefox add-ons must still
-be loaded again after restart unless installed through a signed distribution.
+The unpacked Chromium build now carries a public development key, so every copy
+loads under the same extension ID and nothing has to be pasted back into the
+terminal. If you already had the extension loaded from an earlier build, remove
+that entry from the extensions page first: its ID changes, so the browser would
+otherwise keep the stale copy alongside the new one. The manual `build.sh` and
+`install-host.sh` flow, and the full upgrade note, are in
+[`browser-extension-universal/README.md`](browser-extension-universal/README.md).
+Temporary Firefox add-ons must still be loaded again after restart unless
+installed through a signed distribution.
 
 Open an HTTP(S) login page and select the SPM toolbar icon. Unlock once, then
 choose one of the accounts bound to that exact hostname. The master password is
