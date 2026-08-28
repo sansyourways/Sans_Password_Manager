@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.0.0"
+VERSION="3.0.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -3932,7 +3932,7 @@ cmd_doctor() {
 					printf "[✔] Private key and recovery file match.\n"
 				fi
 				# Holding a decryptable recovery file is not the same as
-				# holding a USEFUL one. Since 2.14.0 it must contain the vault
+				# holding a USEFUL one. Since 3.0.0 it must contain the vault
 				# key; one still holding a master password recovers a vault
 				# only until the next password change, and nothing else in the
 				# tool can tell the user which of the two they have.
@@ -7277,6 +7277,11 @@ main() {
 # PASSWORD_VAULT is the operator's real vault. A sourced helper that silently
 # locks a live vault until it is killed is not a footgun anyone should have to
 # know about; the guard removes it rather than documenting it.
-if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+#
+# The `:-$0` default matters: piped to a shell (`curl ... | bash`) there is no
+# BASH_SOURCE at all, and under `set -o nounset` a bare reference aborts with
+# "unbound variable" instead of running. Defaulting to $0 makes that case
+# compare equal, so a piped script still runs.
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
 	main "$@"
 fi
