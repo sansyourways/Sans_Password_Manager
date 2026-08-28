@@ -46,6 +46,30 @@ is a planning decision rather than an implementation one.
   that state, and nothing else in the tool could report it.
 
 ### Changed
+- **One trusted core, not two implementations of it.** Every operation that
+  touches the vault's bytes -- unwrapping the key, reading, writing, rewrapping,
+  stamping the version, staging and installing `.recovery`, archiving a history
+  generation -- now lives in a single Python module, `spm_core.py`. The CLI
+  invokes it as a subprocess and passes secrets on stdin; the SPM Dashboard
+  imports the same file by path. Neither carries its own copy of the format any
+  more.
+
+  The reason is the bug class the previous release kept producing. The CLI's
+  shell and the dashboard's Python each implemented format 3 separately, and
+  three call sites still handed a container straight to `gpg` -- a divergence
+  that the byte-parity test could only detect *after* it had been written. With
+  one implementation there is nothing left to diverge: 343 lines of duplicated
+  crypto in the dashboard became a 72-line adapter that only forwards, and the
+  regression suite asserts that -- it parses the dashboard's AST and fails if
+  any of those functions grows a body of its own.
+
+  The module ships inside `spm.sh` and is written out beside the dashboard on
+  first use, so SPM is still one file to install and nothing about deployment
+  changes. `tests/core-test.py` exercises the core directly in 24 tests --
+  container round-trip and corruption, the migration crash window, recovery
+  failing closed, snapshot dedup and retention, and the command interface's
+  refusals -- and CI byte-compiles it.
+
 - **Key derivation is pinned rather than inherited.** Both writers — the CLI
   and the SPM Dashboard — now pass `--s2k-mode 3 --s2k-digest-algo SHA512
   --s2k-count 65011712` alongside the cipher.

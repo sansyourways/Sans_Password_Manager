@@ -455,7 +455,10 @@ grep -qi '^Location: /?msg=import-ok' "$TEST_ROOT/import.headers"
 # trusted when it reaches an href or the browser extension.
 
 vault_plain() {
-	test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" /dev/stdout
+	# To a file, then cat: the core returns the vault key on its stdout, so
+	# decrypting straight into a pipe would interleave the two.
+	test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" "$TEST_ROOT/vault-plain.tmp"
+	cat "$TEST_ROOT/vault-plain.tmp"
 }
 
 curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/add.html" \
@@ -1122,6 +1125,19 @@ PYWEBAUTHN
 # --- 2.14.0 vault format version and pinned key derivation -------------------
 printf 'Web regression: vault format version and KDF policy\n'
 
+# The trusted core is tested on its own first: the vault format, key handling
+# and vault mutation are exercised against the module directly, without a
+# shell or a web server in the way. That this file can exist at all is the
+# point of extracting it.
+printf 'Core regression: trusted core\n'
+SPM_CORE_DIR="$XDG_DATA_HOME/spm" ensure_core_script "$XDG_DATA_HOME/spm"
+SPM_CORE_PATH="$SPM_CORE_PATH" python3 "$ROOT_DIR/tests/core-test.py" \
+	|| { printf 'the trusted core failed its own tests\n' >&2; exit 1; }
+
+# The format version is the core's to state; nothing else may hold a copy.
+VAULT_FORMAT_VERSION="$(core current-version)"
+[ -n "$VAULT_FORMAT_VERSION" ] || { printf 'the core did not report a format version\n' >&2; exit 1; }
+
 # Every write stamps exactly one current version row, wherever it came from.
 test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" "$TEST_ROOT/fmt-plain"
 stamped="$(awk -F '\t' '$1=="META_VAULT_VERSION"' "$TEST_ROOT/fmt-plain" | wc -l)"
@@ -1147,21 +1163,52 @@ stamp_vault_version "$TEST_ROOT/stale-plain" "$TEST_ROOT/stale-out"
 [ "$(awk -F '\t' '$1=="META_VAULT_VERSION"' "$TEST_ROOT/stale-out" | wc -l)" -eq 1 ]
 [ "$(vault_format_version "$TEST_ROOT/stale-out")" = "$VAULT_FORMAT_VERSION" ]
 
-# The CLI and the dashboard must stamp byte-identically. If they disagree, each
-# save rewrites the other's row and every write logs a no-op history generation.
-python3 - "$web_script" "$VAULT_FORMAT_VERSION" <<'PYFMT'
-import ast, subprocess, sys, tempfile, os
-src = open(sys.argv[1], encoding="utf-8").read()
-ns = {}
-tree = ast.parse(src)
-keep = [n for n in tree.body
-        if (isinstance(n, ast.FunctionDef) and n.name in
-            ("stamp_vault_version", "vault_format_version"))
-        or (isinstance(n, ast.Assign) and
-            any(getattr(t, "id", "") == "VAULT_FORMAT_VERSION" for t in n.targets))]
-exec(compile(ast.Module(body=keep, type_ignores=[]), "gen", "exec"), ns)
-assert str(ns["VAULT_FORMAT_VERSION"]) == sys.argv[2], (
-    "dashboard version %r != CLI %r" % (ns["VAULT_FORMAT_VERSION"], sys.argv[2]))
+# There is one implementation, not two that agree. Before the trusted core the
+# CLI and the dashboard each carried their own stamping, key wrapping and
+# vault mutation, and this test compared them byte for byte; a shared core
+# makes that comparison vacuous, so what is asserted now is the sharing itself.
+python3 - "$web_script" "$VAULT_FORMAT_VERSION" "$SPM_LIBRARY" <<'PYFMT'
+import ast, os, subprocess, sys, tempfile
+
+web_src = open(sys.argv[1], encoding="utf-8").read()
+tree = ast.parse(web_src)
+
+# The dashboard must not define vault crypto of its own. Adapters that forward
+# to the core are fine; a function body that reimplements one is not.
+OWNED = {"stamp_vault_version", "vault_format_version", "encrypt_vault",
+         "rewrap_vault_key", "unwrap_vault_key", "decrypt_vault_file",
+         "recovery_pubkey_pem", "_archive_vault_generation"}
+for node in tree.body:
+    if isinstance(node, ast.FunctionDef) and node.name in OWNED:
+        body = [n for n in node.body if not isinstance(n, ast.Expr)
+                or not isinstance(n.value, ast.Constant)]
+        assert len(body) == 1 and isinstance(body[0], (ast.Return, ast.Expr)), (
+            "the dashboard reimplements %s instead of delegating to the core"
+            % node.name)
+        assert "core." in ast.unparse(body[0]), (
+            "%s does not delegate to the core" % node.name)
+assert "_load_core()" in web_src, "the dashboard does not load the trusted core"
+
+# Locate the one core the CLI installs, and confirm the dashboard resolves to
+# a byte-identical file.
+lib = sys.argv[3]
+core_path = subprocess.check_output(
+    ["bash", "-c", 'source "%s" >/dev/null 2>&1; ensure_core_script; printf %%s "$SPM_CORE_PATH"' % lib],
+    text=True)
+assert os.path.isfile(core_path), "the CLI did not install a core at %r" % core_path
+web_core = os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])), "spm_core.py")
+assert os.path.isfile(web_core), "no core beside the dashboard at %r" % web_core
+assert open(core_path, "rb").read() == open(web_core, "rb").read(), (
+    "the CLI and the dashboard resolved to different cores")
+
+sys.path.insert(0, os.path.dirname(core_path))
+import spm_core
+
+assert str(spm_core.VAULT_FORMAT_VERSION) == sys.argv[2], (
+    "core version %r != what the CLI reports %r"
+    % (spm_core.VAULT_FORMAT_VERSION, sys.argv[2]))
+
+# The shell wrapper must pass through to the core without altering anything.
 cases = [
     "META_RECOVERY_PUBKEY\tabc\t-\t-\t-\t-\n1\tA\tb\tc\td\te\n",
     "META_VAULT_VERSION\t2\t-\t-\t-\t-\n1\tA\tb\tc\td\te\n",
@@ -1171,16 +1218,15 @@ cases = [
     "META_RECOVERY_PUBKEY\tabc\t-\t-\t-\t-\n\n1\tA\tb\tc\td\te\n",
 ]
 d = tempfile.mkdtemp()
-lib = os.environ["SPM_LIBRARY"]
 for i, text in enumerate(cases):
     open(d + "/in", "w", encoding="utf-8").write(text)
     subprocess.run(["bash", "-c",
         'source "%s" >/dev/null 2>&1; stamp_vault_version "%s/in" "%s/out"' % (lib, d, d)],
         check=True)
     sh = open(d + "/out", encoding="utf-8").read()
-    py = ns["stamp_vault_version"](text)
-    assert sh == py, "case %d diverged\n  bash %r\n  py   %r" % (i, sh, py)
-print("  CLI/dashboard stamping parity verified over %d cases" % len(cases))
+    py = spm_core.stamp_version(text)
+    assert sh == py, "case %d diverged\n  shell %r\n  core  %r" % (i, sh, py)
+print("  one shared core; shell wrapper verified over %d cases" % len(cases))
 PYFMT
 
 # Key derivation is pinned, not inherited. The measurable part is the digest:
@@ -1375,7 +1421,10 @@ test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" "$TEST_ROOT/rotated-back-
 # A WEBAUTHN row must be invisible to password parsing and to the security
 # score: it is neither a credential the user stores nor one that can be weak.
 python3 - "$web_script" <<'PYWEBROW'
-import sys
+import os, sys
+# Exec'ing the module head rather than importing it means there is no __file__
+# for the core loader to work from, so point it at the core explicitly.
+os.environ["SPM_CORE_DIR"] = os.path.dirname(os.path.abspath(sys.argv[1]))
 src = open(sys.argv[1], encoding="utf-8").read()
 head = src.split("class Handler")[0]
 head = head.replace('VAULT_PATH = os.environ.get("SPM_VAULT_PATH")', 'VAULT_PATH = "/dev/null"')
@@ -1580,7 +1629,11 @@ vk_new_legacy_vault() {
 	# Change it once more. This is the assertion the whole design exists for:
 	# only the envelope is rewritten, so the ciphertext and the recovery file
 	# are byte-identical afterwards.
-	MASTER_PW="$VK_NEW" VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" "$VK_ROOT/reload" "$VK_NEW" VAULT_KEY
+	# decrypt_vault_to_file, not the container reader: only the former loads
+	# VAULT_KEY, and the rewrap below must use a key this call produced.
+	MASTER_PW="$VK_NEW"; VAULT_KEY=""
+	decrypt_vault_to_file "$VK_ROOT/reload"
+	[ -n "$VAULT_KEY" ] || { printf 'reading the vault did not load its key\n' >&2; exit 1; }
 	rewrap_vault_key "$VK_OLD"
 	vk_data_section "$VAULT_FILE" > "$VK_ROOT/data-after-rewrap"
 	cmp -s "$VK_ROOT/data-after-change" "$VK_ROOT/data-after-rewrap" \
@@ -1720,7 +1773,7 @@ vk_new_legacy_vault() {
 	VAULT_KEY="" encrypt_file_to_vault "$PLAIN"
 
 	# A second write archives the first generation as a snapshot.
-	VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" "$VK_ROOT/f-plain" "$VK_OLD" VAULT_KEY
+	VAULT_KEY=""; decrypt_vault_to_file "$VK_ROOT/f-plain"
 	printf '2\tSecond\tuser@example.invalid\tAddedLater99\t-\t2025-01-02T00:00:00Z\n' \
 		>> "$VK_ROOT/f-plain"
 	encrypt_file_to_vault "$VK_ROOT/f-plain"
@@ -1739,7 +1792,7 @@ vk_new_legacy_vault() {
 
 	# Sync stages an encrypted copy and proves it opens before pulling it.
 	VAULT_KEY="" cmd_sync push "$VK_ROOT/syncdir" >/dev/null
-	VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" "$VK_ROOT/f-plain2" "$VK_OLD" VAULT_KEY
+	VAULT_KEY=""; decrypt_vault_to_file "$VK_ROOT/f-plain2"
 	printf '3\tThird\tuser@example.invalid\tLocalOnly77\t-\t2025-01-03T00:00:00Z\n' \
 		>> "$VK_ROOT/f-plain2"
 	encrypt_file_to_vault "$VK_ROOT/f-plain2"
