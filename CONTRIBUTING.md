@@ -15,10 +15,36 @@ credential data.
 5. Confirm that you can license every part of the contribution under
    Apache-2.0.
 
+## How SPM is built
+
+SPM *ships* as one file and is *written* as several. `spm.sh` is generated --
+never edit it directly, because the next build silently reverts anything you
+put there, and CI fails the pull request that tries.
+
+| Edit this | To change |
+| --- | --- |
+| `src/spm_core.py` | Anything that touches the vault's bytes: key wrapping, reading, writing, rewrapping, format stamping, recovery, history snapshots. |
+| `src/spm_web_server.py` | The SPM Dashboard. |
+| `src/spm.sh.in` | The CLI itself -- commands, menus, help text, everything else. |
+
+```bash
+./build.sh          # regenerate spm.sh from src/
+./build.sh --check  # fail if spm.sh is not what src/ would produce
+```
+
+Commit the regenerated `spm.sh` alongside your source change. Both the core and
+the dashboard are real Python modules, so a linter, a type checker and an editor
+all read them as themselves rather than as shell heredocs.
+
 ## Development expectations
 
-- Keep core behavior in `spm.sh` and match its Bash style, tab indentation,
-  `snake_case` functions, and explicit command flags.
+- Keep vault behavior in `src/spm_core.py`. There is one implementation of the
+  vault format; the CLI runs it as a subprocess and the dashboard imports it.
+  A second copy in either surface is the bug class this structure exists to
+  prevent, and the regression suite fails a dashboard function that grows a
+  body of its own instead of delegating.
+- Keep CLI behavior in `src/spm.sh.in` and match its Bash style, tab
+  indentation, `snake_case` functions, and explicit command flags.
 - Keep direct CLI, interactive menus, help text, and web behavior aligned.
 - Preserve compatibility with standard utilities across Linux, macOS, and
   Termux where practical.
@@ -28,8 +54,11 @@ credential data.
 ## Required verification
 
 ```bash
-bash -n spm.sh install.sh tests/regression.sh tests/dco-check.sh
-shellcheck -x -S warning spm.sh install.sh tests/regression.sh tests/dco-check.sh
+./build.sh --check
+bash -n spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh
+shellcheck -x -S warning spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh
+python3 -m compileall -q src/spm_core.py src/spm_web_server.py tests/core-test.py
+python3 tests/core-test.py
 ./tests/regression.sh
 ```
 

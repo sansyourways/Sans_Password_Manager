@@ -18,12 +18,16 @@ ROOT_DIR = os.path.dirname(HERE)
 
 
 def _extract_core():
-    """Pull spm_core.py out of spm.sh so this file runs on its own.
+    """Locate spm_core.py, preferring the source tree over the built script.
 
-    The core is shipped inside the single script, so a test that wants to
-    exercise it directly has to lift it back out. Extracting rather than
-    keeping a second copy is the point: there is exactly one core.
+    In a checkout the core is a real module at src/spm_core.py, and CI proves
+    that spm.sh is built from it. Handed only a shipped spm.sh, lift the core
+    back out of the heredoc instead -- extracting rather than keeping a second
+    copy is the point: there is exactly one core.
     """
+    in_tree = os.path.join(ROOT_DIR, "src", "spm_core.py")
+    if os.path.isfile(in_tree):
+        return in_tree
     target = os.path.join(tempfile.mkdtemp(prefix="spm-core."), "spm_core.py")
     with open(os.path.join(ROOT_DIR, "spm.sh"), encoding="utf-8") as handle:
         body, capturing = [], False
