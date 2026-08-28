@@ -44,12 +44,26 @@ printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback \
 	--passphrase-fd 0 --symmetric --cipher-algo AES256 \
 	-o "$PASSWORD_VAULT" "$PLAIN"
 
-# Load functions without executing main. A real temporary file avoids the
-# process-substitution truncation seen with Bash 3 and BSD sed on macOS.
-export SPM_LIBRARY="$TEST_ROOT/spm-library.sh"
-sed '$d' "$ROOT_DIR/spm.sh" > "$SPM_LIBRARY"
+# Load the functions without executing main. The script guards its own entry
+# point now, so this sources it directly -- no copy, and no `sed '$d'` that
+# would silently start including real code the day anything follows the call
+# to main.
+export SPM_LIBRARY="$ROOT_DIR/spm.sh"
 # shellcheck source=/dev/null
 source "$SPM_LIBRARY"
+
+# The harness must not be able to reach a real vault. Everything above
+# redirects HOME, XDG and PASSWORD_VAULT into $TEST_ROOT; assert that it
+# actually took, because the failure mode here is not a failing test but an
+# exclusive lock held on the operator's live vault.
+case "$VAULT_FILE" in
+	"$TEST_ROOT"/*) ;;
+	*)
+		printf 'harness isolation failed: VAULT_FILE=%s is outside %s\n' \
+			"$VAULT_FILE" "$TEST_ROOT" >&2
+		exit 1
+		;;
+esac
 # The application library installs its own cleanup traps. Restore the harness
 # trap so failures retain the generated SPM Dashboard server log before disposal.
 trap 'status=$?; harness_cleanup "$status"; exit "$status"' EXIT INT TERM
@@ -1129,6 +1143,40 @@ printf 'Web regression: vault format version and KDF policy\n'
 # and vault mutation are exercised against the module directly, without a
 # shell or a web server in the way. That this file can exist at all is the
 # point of extracting it.
+# Sourcing the script must never execute main. Before the entry-point guard,
+# `source spm.sh` fell straight into the interactive menu, and a menu blocked
+# on `read` keeps whatever it already acquired -- including an exclusive flock
+# on ${VAULT_FILE}.lock, which for a caller that had not set PASSWORD_VAULT is
+# the operator's real vault. It was found holding one for fourteen hours.
+#
+# stdin is a pipe that stays open without ever delivering a line, which is the
+# condition that hung: with the guard the source returns at once, without it
+# the read blocks until `timeout` kills the shell.
+printf 'CLI regression: sourcing does not run main\n'
+guard_out="$TEST_ROOT/source-guard.out"
+# The path travels in the environment, not as a positional: an argument would
+# reach `main "$@"` as a command name, and main would exit on the unknown
+# command instead of reaching the menu -- so the probe would pass even with the
+# guard removed. Verified by removing the guard and watching this block.
+if sleep 5 | SPM_GUARD_PROBE="$ROOT_DIR/spm.sh" timeout 9 bash -c \
+	'source "$SPM_GUARD_PROBE" >/dev/null 2>&1; printf ready' > "$guard_out" 2>/dev/null; then
+	[ "$(cat "$guard_out")" = "ready" ] \
+		|| { printf 'sourcing spm.sh did not complete cleanly\n' >&2; exit 1; }
+else
+	printf 'sourcing spm.sh executed main and blocked; the entry-point guard is gone\n' >&2
+	exit 1
+fi
+# It must still run main when executed, or the guard has broken the CLI.
+# Deliberately not `... | grep -q`: under `set -o pipefail` grep exits on the
+# first match, the writer takes SIGPIPE, and the pipeline reports 141 -- which
+# fails the check for a reason that has nothing to do with the guard. This
+# suite has been bitten by that shape before; capture, then match.
+guard_help="$TEST_ROOT/source-guard.help"
+timeout 20 bash "$ROOT_DIR/spm.sh" help > "$guard_help" 2>/dev/null || true
+grep -q "Sans Password Manager" "$guard_help" \
+	|| { printf 'executing spm.sh no longer runs main\n' >&2; exit 1; }
+printf '  source is inert; execution still dispatches\n'
+
 printf 'Core regression: trusted core\n'
 SPM_CORE_DIR="$XDG_DATA_HOME/spm" ensure_core_script "$XDG_DATA_HOME/spm"
 SPM_CORE_PATH="$SPM_CORE_PATH" python3 "$ROOT_DIR/tests/core-test.py" \
