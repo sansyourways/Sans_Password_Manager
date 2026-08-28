@@ -75,7 +75,7 @@ jobs:
             echo "Release $RELEASE_TAG already exists; refusing to overwrite it." >&2
             exit 1
           fi
-          notes="release-${version}.md"
+          notes="docs/releases/${version}.md"
           if test -f "$notes"; then
             gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" \
               --verify-tag --title "Sans Password Manager $version" \
