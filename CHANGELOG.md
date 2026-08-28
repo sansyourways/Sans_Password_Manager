@@ -5,6 +5,46 @@ All notable changes to **Sans Password Manager (SPM)** are documented in this fi
 This project loosely follows [Semantic Versioning](https://semver.org/) and a
 Keep-a-Changelog style format.
 
+## [Unreleased]
+
+Deliberately not assigned a version yet: `docs/BROWSER-EXTENSION-ROADMAP.md`
+claims 2.14.0 for the bridge protocol, and which of the two takes that number
+is a planning decision rather than an implementation one.
+
+### Added
+- **The vault records its own format version.** A `META_VAULT_VERSION` row,
+  written on every vault write. A vault without one predates this and is
+  format 1; opening and saving any vault upgrades it in place, so there is no
+  separate migration step and no flag day. This is the first of the three P0
+  architecture items, and the one the other two migrate through: nothing can
+  change the vault's shape safely while the vault cannot say what shape it is.
+
+- `spm doctor` reports the vault's format version, and says plainly when the
+  next write will upgrade it. It reports only — a diagnostic must never be the
+  thing that rewrites a vault.
+
+### Changed
+- **Key derivation is pinned rather than inherited.** Both writers — the CLI
+  and the SPM Dashboard — now pass `--s2k-mode 3 --s2k-digest-algo SHA512
+  --s2k-count 65011712` alongside the cipher.
+
+  Measured rather than assumed: GnuPG 2.2 already defaults to s2k mode 3 at the
+  maximum iteration count, so the concrete change is the digest, which defaults
+  to **SHA1**. The larger point is that these stop being whatever the local gpg
+  happens to do — a user's `gpg.conf` can change all of it underneath the
+  application, and a security parameter that is implicit can be neither
+  reviewed nor migrated.
+
+  Reading is unaffected: the parameters live in the file's own header, so every
+  existing vault still opens, and each one is rewritten under the new policy the
+  first time it is saved.
+
+- **Argon2id is deliberately not adopted yet.** OpenPGP Argon2 requires GnuPG
+  2.4 or newer and this project's baseline, Debian bookworm, ships 2.2.40.
+  Asking for it there fails the write rather than degrading. Recording the
+  format version is what turns adopting it later into a migration instead of a
+  rewrite.
+
 ## [2.13.0] - 2026-08-28
 
 ### Added

@@ -41,7 +41,7 @@ printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback \
 
 # Load functions without executing main. A real temporary file avoids the
 # process-substitution truncation seen with Bash 3 and BSD sed on macOS.
-SPM_LIBRARY="$TEST_ROOT/spm-library.sh"
+export SPM_LIBRARY="$TEST_ROOT/spm-library.sh"
 sed '$d' "$ROOT_DIR/spm.sh" > "$SPM_LIBRARY"
 # shellcheck source=/dev/null
 source "$SPM_LIBRARY"
@@ -1108,6 +1108,97 @@ assert code == 429, ("repeated unlock failures are not throttled", code, res)
 
 print("webauthn unlock ceremonies verified")
 PYWEBAUTHN
+
+# --- 2.14.0 vault format version and pinned key derivation -------------------
+printf 'Web regression: vault format version and KDF policy\n'
+
+# Every write stamps exactly one current version row, wherever it came from.
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --quiet --pinentry-mode loopback \
+	--passphrase-fd 0 --decrypt "$PASSWORD_VAULT" > "$TEST_ROOT/fmt-plain"
+stamped="$(awk -F '\t' '$1=="META_VAULT_VERSION"' "$TEST_ROOT/fmt-plain" | wc -l)"
+[ "$stamped" -eq 1 ] || { printf 'expected exactly 1 version row, found %s\n' "$stamped" >&2; exit 1; }
+[ "$(awk -F '\t' '$1=="META_VAULT_VERSION"{print $2}' "$TEST_ROOT/fmt-plain")" = "$VAULT_FORMAT_VERSION" ]
+# It must be first, so a reader can identify the format without scanning.
+[ "$(head -n1 "$TEST_ROOT/fmt-plain" | cut -f1)" = "META_VAULT_VERSION" ]
+
+# A vault with no version row is format 1, and upgrades on the next write
+# rather than through a separate migration step.
+printf '1\tLegacy\tuser\tsecret\t-\t2025-01-01T00:00:00Z\t-\n' > "$TEST_ROOT/legacy-plain"
+[ "$(vault_format_version "$TEST_ROOT/legacy-plain")" = "1" ]
+stamp_vault_version "$TEST_ROOT/legacy-plain" "$TEST_ROOT/legacy-stamped"
+[ "$(vault_format_version "$TEST_ROOT/legacy-stamped")" = "$VAULT_FORMAT_VERSION" ]
+# Stamping is idempotent: a second pass must not add a second row.
+stamp_vault_version "$TEST_ROOT/legacy-stamped" "$TEST_ROOT/legacy-twice"
+[ "$(awk -F '\t' '$1=="META_VAULT_VERSION"' "$TEST_ROOT/legacy-twice" | wc -l)" -eq 1 ]
+cmp -s "$TEST_ROOT/legacy-stamped" "$TEST_ROOT/legacy-twice" \
+	|| { printf 'stamping is not idempotent\n' >&2; exit 1; }
+# A stale version row is replaced, never duplicated.
+printf 'META_VAULT_VERSION\t1\t-\t-\t-\t-\n1\tA\tb\tc\td\te\n' > "$TEST_ROOT/stale-plain"
+stamp_vault_version "$TEST_ROOT/stale-plain" "$TEST_ROOT/stale-out"
+[ "$(awk -F '\t' '$1=="META_VAULT_VERSION"' "$TEST_ROOT/stale-out" | wc -l)" -eq 1 ]
+[ "$(vault_format_version "$TEST_ROOT/stale-out")" = "$VAULT_FORMAT_VERSION" ]
+
+# The CLI and the dashboard must stamp byte-identically. If they disagree, each
+# save rewrites the other's row and every write logs a no-op history generation.
+python3 - "$web_script" "$VAULT_FORMAT_VERSION" <<'PYFMT'
+import ast, subprocess, sys, tempfile, os
+src = open(sys.argv[1], encoding="utf-8").read()
+ns = {}
+tree = ast.parse(src)
+keep = [n for n in tree.body
+        if (isinstance(n, ast.FunctionDef) and n.name in
+            ("stamp_vault_version", "vault_format_version"))
+        or (isinstance(n, ast.Assign) and
+            any(getattr(t, "id", "") == "VAULT_FORMAT_VERSION" for t in n.targets))]
+exec(compile(ast.Module(body=keep, type_ignores=[]), "gen", "exec"), ns)
+assert str(ns["VAULT_FORMAT_VERSION"]) == sys.argv[2], (
+    "dashboard version %r != CLI %r" % (ns["VAULT_FORMAT_VERSION"], sys.argv[2]))
+cases = [
+    "META_RECOVERY_PUBKEY\tabc\t-\t-\t-\t-\n1\tA\tb\tc\td\te\n",
+    "META_VAULT_VERSION\t2\t-\t-\t-\t-\n1\tA\tb\tc\td\te\n",
+    "META_VAULT_VERSION\t1\t-\t-\t-\t-\nMETA_VAULT_VERSION\t9\t-\t-\t-\t-\n1\tA\tb\tc\td\te\n",
+    "",
+    "META_RECOVERY_PUBKEY\tabc\t-\t-\t-\t-\n1\tA\tb\tc\td\te",
+    "META_RECOVERY_PUBKEY\tabc\t-\t-\t-\t-\n\n1\tA\tb\tc\td\te\n",
+]
+d = tempfile.mkdtemp()
+lib = os.environ["SPM_LIBRARY"]
+for i, text in enumerate(cases):
+    open(d + "/in", "w", encoding="utf-8").write(text)
+    subprocess.run(["bash", "-c",
+        'source "%s" >/dev/null 2>&1; stamp_vault_version "%s/in" "%s/out"' % (lib, d, d)],
+        check=True)
+    sh = open(d + "/out", encoding="utf-8").read()
+    py = ns["stamp_vault_version"](text)
+    assert sh == py, "case %d diverged\n  bash %r\n  py   %r" % (i, sh, py)
+print("  CLI/dashboard stamping parity verified over %d cases" % len(cases))
+PYFMT
+
+# Key derivation is pinned, not inherited. The measurable part is the digest:
+# GnuPG 2.2 already defaults to s2k mode 3 at the maximum count, but defaults to
+# SHA1 (hash 2) for the digest. hash 10 is SHA512.
+# list-packets exits non-zero on a symmetric file it cannot decrypt, but it
+# still prints the header packet, which is the only part being asserted.
+gpg --list-packets "$PASSWORD_VAULT" >"$TEST_ROOT/vault-packets" 2>/dev/null || true
+grep -q 'symkey enc packet' "$TEST_ROOT/vault-packets"
+if ! grep -qE 's2k 3, hash 10' "$TEST_ROOT/vault-packets"; then
+	printf 'vault was not written under the pinned s2k policy:\n' >&2
+	grep 'symkey enc packet' "$TEST_ROOT/vault-packets" >&2
+	exit 1
+fi
+grep -qE 'count 65011712' "$TEST_ROOT/vault-packets"
+
+# The new row must be invisible to every parser and to the integrity scanner.
+[ "$(awk -F '\t' '$1 ~ /^[0-9]+$/' "$TEST_ROOT/fmt-plain" | wc -l)" -ge 1 ]
+cmd_doctor >"$TEST_ROOT/doctor-fmt.txt" 2>&1 || true
+if ! grep -q 'Vault format version' "$TEST_ROOT/doctor-fmt.txt"; then
+	printf 'doctor does not report the vault format version. Output was:\n' >&2
+	sed 's/^/    /' "$TEST_ROOT/doctor-fmt.txt" >&2
+	exit 1
+fi
+grep -q 'Vault format version 2 (current)' "$TEST_ROOT/doctor-fmt.txt" \
+	|| { printf 'doctor did not see the upgraded format:\n' >&2
+	     grep -i 'format' "$TEST_ROOT/doctor-fmt.txt" >&2; exit 1; }
 
 # --- 2.13.0 master password change from the SPM Dashboard --------------------
 printf 'Web regression: master password change\n'
