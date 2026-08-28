@@ -7,9 +7,40 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
-Deliberately not assigned a version yet: `docs/BROWSER-EXTENSION-ROADMAP.md`
-claims 2.14.0 for the bridge protocol, and which of the two takes that number
-is a planning decision rather than an implementation one.
+## [3.0.0] - 2026-08-29
+
+**A major version because the vault format changed, not because the feature
+list is long.** A vault saved by 3.0.0 cannot be opened by 2.13.0 or earlier:
+those releases hand the file straight to GnuPG, which answers `no valid
+OpenPGP data found`. The upgrade happens in place the first time a vault is
+written, so it is not a step you can decline, and it is not a step you can
+reverse by reinstalling an older release.
+
+**Before upgrading, keep a copy of your vault and your `.recovery` file.**
+Nothing here is expected to need them -- the migration is ordered so that no
+instant is unrecoverable, and `spm forgot` finishes an interrupted one -- but
+a backup taken before a one-way format change costs nothing and is the only
+thing that makes the change reversible.
+
+Everything else is compatible. No command changed its name, its arguments or
+its output. Reading is unaffected in both directions of the migration: every
+existing vault still opens, and each is rewritten in the new format the first
+time it is saved.
+
+This release is the "Foundation -- make the core auditable" section of
+`ROADMAP.md`, shipped on its own. Bundling a vault-format migration with
+unrelated work would mean that backing the migration out backs out the
+unrelated work too, so it carries nothing else.
+
+All three items of that section are delivered, with one clause of one item
+explicitly not: the roadmap asked for "Argon2id where available", and Argon2id
+is not available. GnuPG cannot express it, and neither can the OpenSSL that
+current Debian, Ubuntu and macOS actually ship -- Argon2 arrived in OpenSSL
+3.2, and `hashlib` has never offered it. What this release delivers instead is
+a KDF policy that is *pinned and inspectable* rather than inherited from
+whatever the local GnuPG was configured to do, which is the part of that clause
+the platforms permit today. `ROADMAP.md` states the rest as outstanding rather
+than quietly closing it.
 
 ### Added
 - **The vault records its own format version.** A `META_VAULT_VERSION` row,
@@ -104,10 +135,16 @@ is a planning decision rather than an implementation one.
 
   The same policy is applied to both layers of a format-3 vault. The data layer
   is keyed by a random 256-bit value that needs no stretching, so a cheaper KDF
-  there would be defensible; benchmarking says it would also be pointless. At
-  this iteration count the cost is ~420 ms per gpg invocation either way,
-  entirely process startup, so the policy stays uniform and there is one fewer
-  parameter to explain.
+  there would be defensible; against gpg it would also be almost free of
+  effect. A format-3 read costs ~450 ms in two gpg invocations, and the
+  iteration count is not what dominates either of them -- the cost is fixed
+  inside gpg's symmetric path, and payload size barely moves it. The policy
+  therefore stays uniform, and there is one fewer parameter to explain.
+
+  That the data layer pays for stretching it does not need is a real cost, but
+  it is not one a KDF parameter can recover. It is recovered by not invoking
+  gpg for the data layer at all, which is the next architecture item in
+  `ROADMAP.md` and deliberately not part of this release.
 
   Reading is unaffected: the parameters live in the file's own header, so every
   existing vault still opens, and each one is rewritten under the new policy the

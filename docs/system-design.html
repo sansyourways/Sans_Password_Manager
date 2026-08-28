@@ -305,7 +305,7 @@
         <h3>Make the core auditable</h3>
         <div class="feature"><b>Vault-key architecture</b><span class="priority good">Shipped</span><br><small>Random vault key, separately wrapped by master password and recovery.</small></div>
         <div class="feature"><b>Versioned vault format + explicit KDF policy</b><span class="priority good">Shipped</span><br><small>Format version recorded in the vault; derivation pinned rather than inherited.</small></div>
-        <div class="feature"><b>Argon2id</b><span class="priority">P0</span><br><small>Blocked while GnuPG encrypts the vault: OpenPGP string-to-key offers no memory-hard function. Arrives with the data-layer replacement.</small></div>
+        <div class="feature"><b>Argon2id</b><span class="priority">P0</span><br><small>Not reachable on supported platforms: OpenPGP string-to-key offers no memory-hard function, and Argon2 needs OpenSSL 3.2+ (Debian/Ubuntu ship 3.0; macOS ships LibreSSL). The data-layer replacement brings scrypt; Argon2id follows a platform floor that can test it.</small></div>
         <div class="feature"><b>Modular core</b><span class="priority good">Shipped</span><br><small>One trusted core; CLI, Dashboard and browser bridge are clients of it.</small></div>
         <div class="feature"><b>doctor --json</b><span class="priority">P1</span><br><small>Machine-readable diagnostics.</small></div>
         <div class="feature"><b>Fault-injection test suite</b><span class="priority">P1</span><br><small>Disk-full, killed process, corrupted files, concurrent writers.</small></div>
