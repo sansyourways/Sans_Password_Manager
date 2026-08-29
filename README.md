@@ -956,7 +956,12 @@ behind a TLS reverse proxy — work. Set `SPM_WEB_ORIGIN` to override it
 explicitly if your proxy publishes a non-default port.
 Authenticated web mutations also require an exact same-origin request and are serialized across threads/processes to prevent CSRF and lost vault writes. Decrypted web responses use `Cache-Control: no-store`.
 All listed import formats are round-trip compatible with their matching CLI and web exports.
-Vault writes are staged and atomically installed. CLI and web processes share an advisory vault lock when `flock` is available; avoid concurrent access on systems without it. `save` verifies the archived vault before removing the local copy.
+Vault writes are staged and atomically installed. CLI and web processes share
+an advisory vault lock where `flock(1)` exists. **macOS does not ship `flock`**,
+so on macOS there is no lock: a CLI write and a dashboard write at the same
+moment can lose one of them. SPM warns when it runs without a lock. A portable
+lock is planned; until then avoid concurrent access there. `save` verifies the
+archived vault before removing the local copy.
 
 ### Local-first 2.10 commands
 

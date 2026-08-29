@@ -35,6 +35,14 @@ Keep-a-Changelog style format.
 - The record-integrity scan moved into the trusted core. The CLI's doctor and
   the JSON report now read one implementation rather than two that agree.
 
+### Known limitations
+- **macOS has no vault lock.** The advisory lock is `flock(1)`, which macOS
+  does not ship, so concurrent CLI and dashboard writes there can lose
+  records. SPM warns at startup when it runs without a lock. This predates
+  this release and is not fixed by it; the README and `docs/SECURITY.md` now
+  name macOS rather than saying only "when `flock` is available". A portable
+  lock is planned.
+
 ### Fixed
 - **Version ordering no longer depends on `sort -V`, a GNU extension.** BSD
   sort has no `-V`, so on macOS the command fails and the comparison reads an
