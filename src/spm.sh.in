@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.4.3"
+VERSION="3.5.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -823,6 +823,11 @@ decrypt_vault_to_file() {
 			die "Failed to decrypt vault. Wrong master password?"
 		fi
 	fi
+
+	# A copy of what was just decrypted, before any caller edits it. This is
+	# what the write boundary compares against to find changed passwords.
+	SPM_VAULT_PRISTINE="$(make_tmp)"
+	cat "$out_file" > "$SPM_VAULT_PRISTINE" 2>/dev/null || SPM_VAULT_PRISTINE=""
 }
 
 # Decrypt any SPM vault file -- a .bak, a history snapshot, a synced copy --
@@ -835,9 +840,28 @@ decrypt_vault_container() {
 	printf '%s' "$3" | core read "$1" "$2" >/dev/null 2>&1
 }
 
+# The plaintext as it was when this process decrypted it, so a write can tell
+# which passwords changed. Set by decrypt_vault_to_file and consumed here.
+SPM_VAULT_PRISTINE=""
+
 encrypt_file_to_vault() {
 	local in_file="$1"
 	[ "${MASTER_PW:-}" ] || die "MASTER_PW is empty in encrypt_file_to_vault"
+
+	# Per-record password history is recorded at the write boundary rather
+	# than at each of the twenty-one places that edit a record, so a new edit
+	# path cannot forget to record it. A write with no pristine copy -- an
+	# import that never read the old vault, a first init -- simply records
+	# nothing, which is correct rather than merely convenient.
+	if [ -n "${SPM_VAULT_PRISTINE:-}" ] && [ -f "$SPM_VAULT_PRISTINE" ]; then
+		local with_history
+		with_history="$(make_tmp)"
+		if core record-history "$SPM_VAULT_PRISTINE" "$in_file" "$with_history"; then
+			in_file="$with_history"
+		else
+			printf 'Warning: password history was not recorded for this change.\n' >&2
+		fi
+	fi
 
 	# The key is passed back in so an ordinary write does not pay to unwrap
 	# the envelope it already holds. Passing none makes the core recover it
@@ -4077,6 +4101,55 @@ cmd_doctor() {
 	fi
 }
 
+# Previous passwords for one record, oldest first.
+#
+# Named password-history rather than folded into history-list because that
+# command restores whole vault generations: overloading it would put a
+# destructive operation one ambiguous argument away from a read-only one.
+cmd_password_history() {
+	local id="${1:-}"
+	[ -n "$id" ] || die "Usage: $0 password-history <record id>"
+	printf '%s' "$id" | grep -Eq '^[0-9]+$' || die "Numeric record ID required."
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	local label
+	label="$(awk -F '\t' -v want="$id" '$1==want {print $2; exit}' "$tmp")"
+	if [ -z "$label" ]; then
+		secure_wipe "$tmp"
+		die "No entry with ID $id."
+	fi
+
+	local rows
+	rows="$(core password-history "$tmp" "$id" 2>/dev/null || true)"
+	if [ -z "$rows" ]; then
+		if [ "$SPM_LANG" = "id" ]; then
+			printf 'Belum ada kata sandi sebelumnya untuk %s (ID %s).\n' "$label" "$id"
+		else
+			printf 'No previous passwords recorded for %s (ID %s).\n' "$label" "$id"
+		fi
+		secure_wipe "$tmp"
+		return 0
+	fi
+
+	if [ "$SPM_LANG" = "id" ]; then
+		printf 'Kata sandi sebelumnya untuk %s (ID %s), terlama dulu:\n\n' "$label" "$id"
+	else
+		printf 'Previous passwords for %s (ID %s), oldest first:\n\n' "$label" "$id"
+	fi
+	printf '%s\n' "$rows" | awk -F '\t' '{ printf "  %d. %s  %s\n", NR, $1, $2 }'
+	printf '\n'
+	if [ "$SPM_LANG" = "id" ]; then
+		printf 'Kata sandi saat ini tidak ditampilkan di sini; gunakan "%s get %s".\n' "$0" "$id"
+	else
+		printf 'The current password is not shown here; use "%s get %s".\n' "$0" "$id"
+	fi
+	secure_wipe "$tmp"
+}
+
 cmd_export() {
 	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
 	require_cmd python3
@@ -5105,6 +5178,7 @@ Perintah utama (CLI):
   ./spm.sh forgot          → Reset kata sandi utama dengan private key
   ./spm.sh doctor          → Health / integrity check vault
   ./spm.sh doctor --json   → the same checks as JSON, for scripts
+  ./spm.sh password-history <id> → previous passwords for one entry
   ./spm.sh generate        → Generator kata sandi (panjang, mode mudah/aman/angka, simbol opsional)
   ./spm.sh web|dashboard   → SPM Dashboard (sementara / background via pm2)
   ./spm.sh help            → Tampilkan bantuan ini
@@ -5216,6 +5290,7 @@ Main commands (CLI):
   ./spm.sh forgot          → Reset master password using the private key
   ./spm.sh doctor          → Vault health / integrity check
   ./spm.sh doctor --json   → the same checks as JSON, for scripts
+  ./spm.sh password-history <id> → previous passwords for one entry
   ./spm.sh generate        → Password generator (length, easy/secure/numeric, optional symbols/upper/lower/digits)
   ./spm.sh web|dashboard   → SPM Dashboard (foreground or pm2 background)
   ./spm.sh help            → Show this help
@@ -7309,6 +7384,7 @@ main() {
 		auto-update)      cmd_autoupdate "$@" ;;
 		forgot|forgotten) cmd_forgot "$@" ;;
 		doctor)           cmd_doctor "$@" ;;
+		password-history) cmd_password_history "$@" ;;
 		export)           cmd_export "$@" ;;
 		import)           cmd_import "$@" ;;
 		security|security-dashboard) cmd_security_dashboard "$@" ;;

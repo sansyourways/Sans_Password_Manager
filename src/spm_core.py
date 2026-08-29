@@ -802,6 +802,101 @@ def bitwarden_csv_rows(records):
     return rows
 
 
+# ----- per-record password history -------------------------------------------
+
+# A rotated credential keeps its predecessors, so a bad rotation is recoverable
+# without restoring a whole vault generation. Distinct from the vault-level
+# snapshots in history_dir(), which capture everything at a point in time; this
+# captures one field's past.
+HISTORY_TAG = "PWHIST"
+
+# Per record, not per vault. A credential rotated on a schedule would otherwise
+# grow without bound inside the vault it is stored in.
+HISTORY_KEEP = 10
+
+
+def _password_rows(plaintext):
+    """{id: fields} for password rows, identified the way every surface does."""
+    rows = {}
+    for line in plaintext.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 6 and parts[0].isdigit():
+            rows[parts[0]] = parts
+    return rows
+
+
+def record_password_history(old_plaintext, new_plaintext, when=None,
+                            keep=HISTORY_KEEP):
+    """new_plaintext with a history row for every password that just changed.
+
+    Called at the write boundary rather than at each place that edits a record,
+    so a new edit path cannot forget to record history -- the same reasoning
+    that makes parse_entries an allowlist.
+
+    Three rules, all of them things a caller would otherwise get wrong:
+
+    - A secret that did not change writes nothing. Saving an unrelated field
+      must not manufacture a history entry.
+    - An empty previous secret is not history. A record created empty and then
+      filled in has no predecessor worth keeping.
+    - History for a deleted record is deleted with it. Otherwise removing an
+      entry would leave its old passwords in the vault, which is the opposite
+      of what deleting it means.
+    """
+    stamp = when or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    before = _password_rows(old_plaintext)
+    after = _password_rows(new_plaintext)
+
+    kept = []
+    carried = {}
+    for line in new_plaintext.splitlines():
+        parts = line.split("\t")
+        if parts and parts[0] == HISTORY_TAG and len(parts) >= 4:
+            carried.setdefault(parts[1], []).append(parts)
+            continue
+        kept.append(line)
+
+    for record_id, old_parts in before.items():
+        new_parts = after.get(record_id)
+        if new_parts is None:
+            continue
+        old_secret = old_parts[3] if len(old_parts) > 3 else ""
+        new_secret = new_parts[3] if len(new_parts) > 3 else ""
+        if not old_secret or old_secret == new_secret:
+            continue
+        carried.setdefault(record_id, []).append([
+            HISTORY_TAG, record_id,
+            base64.b64encode(old_secret.encode("utf-8")).decode("ascii"),
+            stamp, "-", "-",
+        ])
+
+    lines = [line for line in kept if line != ""]
+    for record_id in sorted(carried, key=lambda v: (len(v), v)):
+        if record_id not in after:
+            # The record is gone; its history goes with it.
+            continue
+        entries = carried[record_id][-keep:]
+        for parts in entries:
+            lines.append("\t".join(parts))
+    return "\n".join(lines) + "\n"
+
+
+def password_history(plaintext, record_id):
+    """[(when, secret)] oldest first, for one record."""
+    out = []
+    for line in plaintext.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 4 and parts[0] == HISTORY_TAG and parts[1] == record_id:
+            try:
+                secret = base64.b64decode(parts[2]).decode("utf-8", errors="replace")
+            except Exception:
+                continue
+            out.append((parts[3], secret))
+    return out
+
+
 # ----- diagnostics -----------------------------------------------------------
 
 # Characters that splitlines() honours but a TAB-delimited, line-based record
@@ -1077,6 +1172,20 @@ def main(argv):
             sys.stdout.write(history_dir(argv[2]) + "\n")
         elif command == "archive":
             archive_generation(argv[2])
+        elif command == "record-history":
+            # record-history <previous plainfile> <new plainfile> <out>
+            # Writes <new> plus a history row for every password that changed.
+            with open(argv[2], "r", encoding="utf-8", errors="surrogateescape") as handle:
+                previous = handle.read()
+            with open(argv[3], "r", encoding="utf-8", errors="surrogateescape") as handle:
+                current = handle.read()
+            write_plaintext(argv[4], record_password_history(previous, current))
+        elif command == "password-history":
+            # password-history <plainfile> <record id> ; stdout: TSV of when/secret
+            with open(argv[2], "r", encoding="utf-8", errors="surrogateescape") as handle:
+                plaintext = handle.read()
+            for when, secret in password_history(plaintext, argv[3]):
+                sys.stdout.write("%s\t%s\n" % (when, secret))
         elif command == "scan-records":
             # scan-records <plainfile> ; stdout: the TSV the CLI's doctor renders
             with open(argv[2], "r", encoding="utf-8", errors="surrogateescape") as handle:

@@ -294,6 +294,8 @@ I18N_SCRIPT = """
       "view.label.url": "URL",
       "view.label.password": "Password",
       "view.label.notes": "Notes",
+      "view.label.previous": "Previous passwords",
+      "view.previous.hint": "Newest first. Recorded when the password changed; deleting this entry deletes them with it.",
       "view.label.created": "Created at",
       "view.sub_prefix": "Vault:",
       "btn.copy_username": "Copy Username",
@@ -553,6 +555,8 @@ I18N_SCRIPT = """
       "view.label.url": "URL",
       "view.label.password": "Kata sandi",
       "view.label.notes": "Catatan",
+      "view.label.previous": "Kata sandi sebelumnya",
+      "view.previous.hint": "Terbaru dulu. Dicatat saat kata sandi diubah; menghapus entri ini menghapusnya juga.",
       "view.label.created": "Dibuat",
       "view.sub_prefix": "Brankas:",
       "btn.copy_username": "Salin pengguna",
@@ -812,6 +816,8 @@ I18N_SCRIPT = """
       "view.label.url": "URL",
       "view.label.password": "パスワード",
       "view.label.notes": "メモ",
+      "view.label.previous": "\u4ee5\u524d\u306e\u30d1\u30b9\u30ef\u30fc\u30c9",
+      "view.previous.hint": "\u65b0\u3057\u3044\u9806\u3002\u30d1\u30b9\u30ef\u30fc\u30c9\u5909\u66f4\u6642\u306b\u8a18\u9332\u3055\u308c\u3001\u3053\u306e\u30a8\u30f3\u30c8\u30ea\u3092\u524a\u9664\u3059\u308b\u3068\u4e00\u7dd2\u306b\u524a\u9664\u3055\u308c\u307e\u3059\u3002",
       "view.label.created": "作成日時",
       "view.sub_prefix": "ボールト:",
       "btn.copy_username": "ユーザー名をコピー",
@@ -2993,7 +2999,37 @@ window.SPM_reveal = function (id, btn) {
 """
 
 
-def view_entry_page(parts):
+def _history_block(history):
+    """Previous passwords for an entry, masked like the current one.
+
+    Deliberately not called "History": the sidebar already has a History item
+    for vault snapshots, and two things called history on one screen meaning
+    different scopes is a maze. "Previous passwords" says which it is.
+    """
+    if not history:
+        return ""
+    rows = []
+    for index, (when, secret) in enumerate(reversed(history), start=1):
+        elem = "pwhist-%d" % index
+        dots = "&bull;" * min(len(secret), 24) if secret else "&mdash;"
+        rows.append(f"""
+  <div class="secret" style="margin-bottom:var(--sp-2)">
+    <span class="faint mono" style="min-width:20ch">{html.escape(when)}</span>
+    <span class="secret-val masked" id="{elem}" data-val="{html.escape(secret)}">{dots}</span>
+    <button class="icon-btn" type="button" data-act="reveal" data-target="{elem}"
+      data-title-show="Show" aria-label="Show">{_icon("view", "icon icon-sm")}</button>
+    <button class="icon-btn" type="button" data-act="copy-val" data-target="{elem}"
+      aria-label="Copy">{_icon("copy", "icon icon-sm")}</button>
+  </div>""")
+    return f"""
+<div class="field">
+  <label data-i18n="view.label.previous">Previous passwords</label>
+  {"".join(rows)}
+  <div class="hint" data-i18n="view.previous.hint">Newest first. Recorded when the password changed; deleting this entry deletes them with it.</div>
+</div>"""
+
+
+def view_entry_page(parts, history=()):
     """Full page for a single password entry."""
     eid, name, user, pw = _esc(parts[0]), _esc(parts[1]), _esc(parts[2]), parts[3] if len(parts) > 3 else ""
     notes = parts[4] if len(parts) > 4 else ""
@@ -3034,6 +3070,7 @@ def view_entry_page(parts):
   <div class="field"><label data-i18n="view.label.created">Created</label>
     <div class="faint mono">{created or "&mdash;"}</div>
   </div>
+  {_history_block(history)}
 </div></div>
 {REVEAL_SCRIPT}"""
     return render_shell(content, "passwords", VERSION, VAULT_PATH, title=name)
@@ -3901,6 +3938,14 @@ def decrypt_vault(master: str) -> str:
     return core.read_vault(VAULT_PATH, master)[0]
 
 
+# The plaintext this request last read, so a write can tell which passwords
+# changed without every one of the nineteen save sites threading it through.
+# Thread-local because the server is threaded: two requests must never see
+# each other's vault contents, and a stale value would attribute one user's
+# rotation to another request.
+_LAST_READ = threading.local()
+
+
 def load_vault(master: str, session=None) -> str:
     """Vault plaintext, reusing this session's unwrapped vault key when it can.
 
@@ -3927,13 +3972,17 @@ def load_vault(master: str, session=None) -> str:
             try:
                 plaintext = core.read_vault_with_key(VAULT_PATH, cached)
                 if plaintext is not None:
+                    _LAST_READ.plaintext = plaintext
                     return plaintext
             except Exception:
                 pass
         plaintext, key = core.read_vault(VAULT_PATH, master)
         session["vault_key"] = key or ""
+        _LAST_READ.plaintext = plaintext
         return plaintext
-    return decrypt_vault(master)
+    plaintext = decrypt_vault(master)
+    _LAST_READ.plaintext = plaintext
+    return plaintext
 
 
 def unwrap_vault_key(master: str, path=None):
@@ -3951,7 +4000,18 @@ def save_vault(master: str, plaintext: str, session=None) -> None:
     the same expensive invocation the read path avoids, paid again on every
     save. The write returns the key it used, which is also how a session that
     has just migrated a legacy vault picks one up.
+
+    Per-record password history is recorded here rather than at each of the
+    nineteen places that edit a record, so a new edit path cannot forget it.
+    Every one of those places reads the vault first, which is what makes the
+    comparison available without threading it through them all.
     """
+    previous = getattr(_LAST_READ, "plaintext", None)
+    if previous is not None:
+        plaintext = core.record_password_history(previous, plaintext)
+        # Consumed, not kept: a second save in the same request must compare
+        # against what it actually read, not against a stale first read.
+        _LAST_READ.plaintext = None
     key = session.get("vault_key") or None if session is not None else None
     written = encrypt_vault(master, plaintext, key)
     if session is not None:
@@ -5982,7 +6042,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Entry not found")
                 return
 
-            page = view_entry_page(found)
+            page = view_entry_page(found, core.password_history(plaintext, entry_id))
             self._send_html(200, page)
             return
 
