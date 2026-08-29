@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sans Password Manager",
-  "version": "3.7.0",
+  "version": "3.7.1",
   "description": "Explicit, domain-bound autofill through the local SPM native host.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA03Emup6GZ4vj2uq/vG7vtNwyhau1M8xhLQ88sVrRSWCex1V3DORX+rT0/U3t0Ss6BfFpfRVGHU64lNH//UWlw4eZM9hr66qQYbAVFoKWZQTieFvAs9A21ekCE/6pkqPTCYicmX8j0V5CM57Ifl4lktd7nTCz3tRfY07fndH+tbBVNmOia+UwB3YmNyid72BtzZm7xrloYuXJEFjQKrZnoLMeCFRiFHwSB3X3ZD2jowUVqydBj6xbjHXLdPSlA0Ty//5sSDTQ1flMs/KBXNgb9JTLrL/t1llGSXaQMJrsNBoQ+AE69k9ILitAFvZrU1vWJM5okHwXHLqzGFrENMMcRwIDAQAB",
   "permissions": ["activeTab", "nativeMessaging", "scripting"],
