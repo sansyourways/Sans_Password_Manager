@@ -7,6 +7,39 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-08-29
+
+### Changed
+- **The native-messaging host is now a declared contract rather than a pipe.**
+  Responses are *projected* onto the fields each action declares instead of
+  being forwarded from the CLI:
+
+  | Action | Returns |
+  |---|---|
+  | `unlock` | `ok` only — the verdict, not the list used to reach it |
+  | `lock` | `ok` |
+  | `list` | `matches`, each row reduced to `id`, `label`, `username`, `url` |
+  | `get` | `username`, `password` |
+
+  `bridge-get` returns a username and a password today. If it ever returns a
+  note, a URL or a TOTP seed, that field can no longer reach the extension
+  without someone editing the table — which is the review this boundary exists
+  to force. Forwarding whatever the CLI printed made the extension's view of
+  the vault whatever the CLI happened to print, which is not a contract.
+- Failures are chosen from a fixed set of messages rather than echoed. An
+  unexpected error becomes a generic refusal, because a message such as
+  `gpg: /home/you/.spm_vault.gpg: decryption failed` carries a filesystem path
+  across a boundary whose purpose is that nothing crosses unnamed.
+- Actions are checked against the table before dispatch, so a branch added
+  without declaring it returns a verdict and nothing else.
+
+### Documented
+- What the boundary does **not** do. The original one-shot extension sends the
+  master password with every `get` and holds no session, so it is not
+  constrained by Lock or by either timeout. That path is kept so it does not
+  break, and is now stated plainly rather than left as a quiet exception: it is
+  a property of a one-shot protocol, not something the table can close.
+
 ## [3.6.0] - 2026-08-29
 
 ### Fixed

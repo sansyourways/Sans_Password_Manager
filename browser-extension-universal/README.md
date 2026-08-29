@@ -89,6 +89,47 @@ local and is not committed.
 4. Fully restart Firefox. Temporary add-ons must be loaded again after a
    Firefox restart; signed distribution is required for permanent installation.
 
+## The boundary
+
+The extension talks to SPM through one native-messaging host, and that host is
+a contract rather than a pipe. Two halves:
+
+**Inbound.** Four actions exist — `unlock`, `lock`, `list`, `get` — and an
+action not named in the host's table is refused. The extension never chooses
+what SPM command runs: each branch names a literal `bridge-*` command, so
+there is no path from a message to an arbitrary CLI invocation. A hostname is
+validated against a pattern and a record id must be digits.
+
+**Outbound.** A response is *projected* onto the fields the action declares,
+never forwarded:
+
+| Action | Returns |
+|---|---|
+| `unlock` | `ok` only — the verdict, not the list used to reach it |
+| `lock` | `ok` |
+| `list` | `matches`, each row reduced to `id`, `label`, `username`, `url` |
+| `get` | `username`, `password` |
+
+This is the half worth having. `bridge-get` returns a username and a password
+today; if it ever returns a note, a URL or a TOTP seed, that field cannot reach
+the extension without someone editing the table — which is the review the
+boundary exists to force. Forwarding whatever the CLI printed made the
+extension's view of the vault whatever the CLI happened to print, which is not
+a contract.
+
+Failures are chosen from a fixed set of messages rather than echoed. An
+unexpected error becomes a generic refusal, because a message like
+`gpg: /home/you/.spm_vault.gpg: decryption failed` carries a filesystem path
+across a boundary whose entire purpose is that nothing crosses unnamed.
+
+**What the boundary does not do.** The original one-shot extension, still in
+this repository, sends the master password with every `get` and holds no
+session. That path is kept so it does not break, and it is not constrained by
+**Lock** or by either timeout — a caller supplying the password directly has no
+session for them to act on. That is a property of a one-shot protocol, not
+something this table can close. The popup in this folder never sends the master
+password except to `unlock`.
+
 ## Use
 
 Open an HTTP(S) login page, select the SPM toolbar icon, enter the master
