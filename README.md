@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.4.2**
+Current release: **3.4.3**
 
 ---
 
@@ -305,7 +305,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.4.2
+bash install.sh --version 3.4.3
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -317,7 +317,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.4.2 at /home/you/.local/bin/spm
+Installed SPM 3.4.3 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -733,7 +733,41 @@ Exports passwords, secure notes, passphrases, backup codes, and authenticators. 
 ./spm.sh import json backup.json
 ```
 
-Imports passwords, secure notes, passphrases, backup codes, and authenticators from supported export formats (csv/json primary; advanced formats accepted as listed above). Entries are appended and IDs auto-renumbered. Imports fail if no supported records are detected. Web mode overlays the entire Export/Import card with a loader during uploads, reports how many rows of each type were added, and automatically reloads the dashboard on success so the new rows appear immediately (errors show inline without redirect). Status messages and overlay text follow the selected language (EN/ID/JP) so users get consistent feedback during uploads.
+Imports passwords, secure notes, passphrases, backup codes, and authenticators from supported export formats (csv/json primary; advanced formats accepted as listed above). Entries are appended and IDs auto-renumbered. Imports fail if no supported records are detected.
+
+### Importing from Bitwarden
+
+Web mode reads all three Bitwarden vault exports. Pick the matching entry in
+the import format list:
+
+| Bitwarden export | Choose |
+|---|---|
+| `.json` (unencrypted) | **Bitwarden — JSON export** |
+| `.csv` | **Bitwarden — CSV export** |
+| `.json` password-protected | **Bitwarden — password-protected JSON** |
+
+The password-protected option asks for the password you set when exporting.
+It is used to read the file and is never stored.
+
+Logins become password entries with their username, URI and notes. A login's
+TOTP becomes an authenticator: an `otpauth://` URI is unpacked into its
+secret, period and algorithm rather than stored whole, which would not
+generate codes. Secure notes become notes. Cards and identities have no SPM
+equivalent, so they are kept as readable notes rather than dropped. Folder
+names and Bitwarden custom fields are appended to each entry's notes.
+
+Choosing plain `json` or `csv` for a Bitwarden file also works — the format is
+detected. That matters because before 3.4.3 a Bitwarden CSV imported as a
+single empty note and every login was silently lost while the dashboard
+reported success.
+
+Two limits, both reported rather than guessed at. An export protected with
+**Argon2id** cannot be read: there is no Argon2 implementation SPM can reach
+without a third-party dependency, which is the same wall described in
+`ROADMAP.md`. Re-export without a password, or as CSV. A password-protected
+export also needs the `cryptography` Python package for AES-256-CBC; where it
+is absent the import says so instead of failing obscurely. The unencrypted
+JSON and CSV paths need nothing beyond the standard library. Web mode overlays the entire Export/Import card with a loader during uploads, reports how many rows of each type were added, and automatically reloads the dashboard on success so the new rows appear immediately (errors show inline without redirect). Status messages and overlay text follow the selected language (EN/ID/JP) so users get consistent feedback during uploads.
 
 ---
 
@@ -918,7 +952,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.4.2**
+Version: **3.4.3**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
@@ -997,7 +1031,7 @@ SPM stores only discovery and recovery metadata.
 
 The universal extension is in `browser-extension-universal/` and supports
 Chrome, Chromium, Edge, Brave, Opera, Vivaldi, and Firefox desktop from one
-source tree. First install SPM 3.4.2 or later, then unpack the release archive.
+source tree. First install SPM 3.4.3 or later, then unpack the release archive.
 
 ### One-command guided setup
 
