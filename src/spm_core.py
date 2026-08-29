@@ -367,6 +367,27 @@ def read_vault(vault_path, master):
     return gpg_decrypt(key, parts[1]).decode("utf-8", errors="ignore"), key
 
 
+def read_vault_with_key(vault_path, vault_key):
+    """Plaintext from a format-3 vault using a key that is already unwrapped.
+
+    Returns None when the file is not a container -- formats 1 and 2 are sealed
+    under the master password directly and have no separate key -- so a caller
+    holding a stale key falls back to the master rather than failing.
+
+    A format-3 read is two gpg invocations: one to unwrap the key envelope
+    under the master password, one to decrypt the data under that key. The
+    envelope is the expensive half and its answer does not change between
+    reads, so a caller that can hold the key skips it. Nothing here weakens the
+    format: the key is exactly what the master password would have produced.
+    """
+    with open(vault_path, "rb") as handle:
+        raw = handle.read()
+    parts = parse_container(raw)
+    if parts is None:
+        return None
+    return gpg_decrypt(vault_key, parts[1]).decode("utf-8", errors="ignore")
+
+
 # ----- writing ---------------------------------------------------------------
 
 def write_vault(vault_path, master, plaintext, vault_key=None):

@@ -451,6 +451,52 @@ def t_rewrap_with_key_matches_rewrap():
     eq(got, key)
 
 
+def t_read_with_key_matches_a_full_read():
+    """The cached read must be the same read, not a cheaper approximation."""
+    path = fresh("withkey")
+    legacy_vault(path, MASTER)
+    key = core.write_vault(path, MASTER, sample())
+    full, full_key = core.read_vault(path, MASTER)
+    eq(full_key, key, "the full read must report the key the write used")
+    eq(core.read_vault_with_key(path, key), full,
+       "a keyed read must return exactly what the master-password read returns")
+
+
+def t_read_with_key_declines_a_legacy_vault():
+    """Formats 1 and 2 have no separate key, so the caller must fall back.
+
+    Returning None rather than raising is what lets a cached-key reader keep
+    working against a vault that was restored from before the migration.
+    """
+    path = fresh("withkey-legacy")
+    legacy_vault(path, MASTER)
+    eq(core.read_vault_with_key(path, "irrelevant"), None,
+       "a non-container vault must report that it has no separate key")
+
+
+def t_read_with_key_refuses_the_wrong_key():
+    """A stale key must fail loudly, never return partial or empty plaintext."""
+    path = fresh("withkey-wrong")
+    legacy_vault(path, MASTER)
+    core.write_vault(path, MASTER, sample())
+    other = core.new_vault_key()
+    try:
+        core.read_vault_with_key(path, other)
+    except Exception:
+        return
+    raise AssertionError("a wrong vault key was accepted")
+
+
+def t_read_with_key_survives_a_password_change():
+    """rewrap re-seals the same key, so a held key stays valid across one."""
+    path = fresh("withkey-rewrap")
+    legacy_vault(path, MASTER)
+    key = core.write_vault(path, MASTER, sample())
+    core.rewrap(path, MASTER, "a-different-master-9137")
+    eq(core.read_vault_with_key(path, key), core.read_vault(path, "a-different-master-9137")[0],
+       "the vault key must outlive a password change")
+
+
 def _write_temp(text):
     fd, path = tempfile.mkstemp(dir=ROOT)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:

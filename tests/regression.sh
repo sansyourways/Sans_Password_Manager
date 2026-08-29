@@ -1337,6 +1337,63 @@ printf '  source is inert; execution and a real pipe still dispatch\n'
 # and vault mutation are exercised against the module directly, without a
 # shell or a web server in the way. That this file can exist at all is the
 # point of extracting it.
+printf 'Web regression: session vault-key cache\n'
+# The dashboard holds a session's unwrapped vault key so every read after the
+# first skips the key envelope. Three things have to hold, and only the first
+# is about speed:
+#   - a cached read returns exactly what a master-password read returns
+#   - a key that no longer opens the vault falls back instead of failing, since
+#     a restore or a sync can replace the file under a live session
+#   - the key never outlives the session that holds it
+python3 - "$web_script" "$PASSWORD_VAULT" "$AUDIT_PASSWORD" <<'CACHEPY'
+import importlib.util
+import os
+import sys
+
+spec = importlib.util.spec_from_file_location("spmweb", sys.argv[1])
+web = importlib.util.module_from_spec(spec)
+os.environ["SPM_VAULT_PATH"] = sys.argv[2]
+try:
+    spec.loader.exec_module(web)
+except SystemExit:
+    pass
+
+vault, master = sys.argv[2], sys.argv[3]
+web.VAULT_PATH = vault
+
+session = {"master": master}
+first = web.load_vault(master, session)
+if not session.get("vault_key"):
+    # A legacy vault has no separate key; the cache is a no-op and that is
+    # correct, so the rest of this only applies to a container.
+    print("  vault-key cache: legacy vault, nothing to cache (correct)")
+    sys.exit(0)
+
+second = web.load_vault(master, session)
+if first != second:
+    sys.exit("a cached read returned different plaintext from the first read")
+
+# A key that does not open this vault must not break the session.
+session["vault_key"] = "not-this-vaults-key"
+recovered = web.load_vault(master, session)
+if recovered != first:
+    sys.exit("a stale cached key was not recovered from")
+if session["vault_key"] == "not-this-vaults-key":
+    sys.exit("the stale key was left in the session")
+print("  vault-key cache: cached read matches, stale key falls back and re-caches")
+CACHEPY
+
+# The cached key must live in the session record and nowhere else, so that
+# popping the session is enough to forget it. A module-level cache would
+# survive logout, which is the one thing this must not do.
+if grep -nE '^[A-Z_]*(KEY_CACHE|VAULT_KEY_CACHE)' "$web_script"; then
+	printf 'the vault key is cached outside the session record\n' >&2
+	exit 1
+fi
+grep -q '"vault_key": opened_key or ""' "$web_script" || {
+	printf 'login does not seed the session vault key\n' >&2; exit 1
+}
+
 printf 'CLI regression: doctor --json\n'
 # doctor --json is the machine-readable half of the same checks. Two things
 # make it useful and both are asserted: stdout carries the document and
