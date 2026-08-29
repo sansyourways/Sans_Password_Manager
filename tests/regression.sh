@@ -1453,6 +1453,7 @@ race_writer() {
 	(
 		exec 9>"$race_vault.lock"
 		flock -x 9
+		# shellcheck disable=SC2317
 		printf '%s' "$AUDIT_PASSWORD" | \
 			python3 "$SPM_CORE_PATH" read "$race_vault" "$plain" >/dev/null
 		printf '%s\tRacer%s\tu%s\ts%s\thttps://r%s.invalid\t2025-01-01T00:00:00Z\n' \
@@ -1463,6 +1464,24 @@ race_writer() {
 }
 
 SPM_CORE_DIR="$XDG_DATA_HOME/spm" ensure_core_script "$XDG_DATA_HOME/spm" >/dev/null
+
+# macOS ships no flock(1). SPM already knows this -- acquire_cli_vault_lock
+# warns and continues -- so the honest thing here is to assert that warning
+# rather than to fake a lock the platform does not have and call it a pass.
+# The race itself only means something where the lock is real.
+if ! command -v flock >/dev/null 2>&1; then
+	lock_warning="$TEST_ROOT/lock-warning.txt"
+	( export VAULT_FILE="$race_vault"
+	  acquire_cli_vault_lock ) > "$lock_warning" 2>&1 || true
+	grep -q "flock' is unavailable" "$lock_warning" || {
+		printf 'flock is missing and SPM did not warn about it\n' >&2
+		cat "$lock_warning" >&2
+		exit 1
+	}
+	printf '  no flock(1) on this platform: SPM warns, and the race is not asserted\n'
+	printf '  (concurrent CLI and web writes are unprotected here -- see ROADMAP)\n'
+else
+
 race_pids=""
 for racer in 1 2 3 4 5; do
 	race_writer "$racer" &
@@ -1488,6 +1507,7 @@ race_stage_files="$(find "$race_dir" -name '*.stage.*' -print -quit)"
 	exit 1
 }
 printf '  5 concurrent writers, all 5 records survived, no staging files left\n'
+fi
 
 printf 'Web regression: session vault-key cache\n'
 # The dashboard holds a session's unwrapped vault key so every read after the
