@@ -14,14 +14,13 @@ co-owners of it. That review is a design concept, not a formal security audit.
 
 - Expand Linux, macOS, and Termux regression coverage for platform-specific
   command behavior.
-- **A portable vault lock.** The advisory lock is `flock(1)`, which macOS does
-  not ship, so on macOS SPM runs with no lock at all and concurrent CLI and
-  dashboard writes can lose records. Measured on Linux by removing the lock:
-  one of five concurrent writers' records survived. SPM warns rather than
-  failing, which is the right default — a password manager that refuses to
-  start is worse — but the warning is not protection. `mkdir` is atomic on
-  every POSIX filesystem and is the usual answer; the work is in staleness
-  detection, not in taking the lock.
+- **A portable vault lock — shipped in 3.4.1.** The lock was `flock(1)`, which
+  macOS does not ship, so the CLI took no lock there while the dashboard did:
+  one side believed it was protected. The CLI now takes the same lock through
+  python3's `fcntl` where `flock` is absent — the primitive the dashboard
+  already used, so the two genuinely exclude each other. `mkdir` was the
+  obvious answer and the wrong one: it would have needed stale-lock detection,
+  and an advisory lock the kernel drops when its holder dies needs none.
 - Fault injection around restore failures, interrupted writes and concurrent
   mutations — disk-full, process killed mid-write, corrupted vault, competing
   writers — **shipped in 3.4.0** for the write path and the lock. What remains

@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.4.0"
+VERSION="3.4.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -860,14 +860,40 @@ vault_format_version() {
 }
 
 
+# The advisory lock the CLI shares with the SPM Dashboard.
+#
+# This used to require flock(1), which is util-linux and which macOS does not
+# ship. The dashboard never needed it -- Python's fcntl.flock exists on every
+# platform SPM supports -- so on macOS the dashboard was locking and the CLI
+# was not. That is the worst of the two arrangements, because one side
+# believed it was protected while the other walked straight through.
+#
+# python3 is already a hard dependency, and locking through it uses the same
+# primitive on the same file, so the two genuinely exclude each other. The
+# lock is taken on fd 9, which this shell holds open for the duration: the
+# helper exiting does not release it, because the lock belongs to the open
+# file description and the shell still has a descriptor for it.
+#
+# There is no stale lock to detect and no PID file to get wrong. The kernel
+# drops the lock when the last descriptor for it closes, which includes the
+# process being killed. That is the property a mkdir-based lock would have had
+# to reimplement badly.
+vault_lock_hold_fd9() {
+	if command -v flock >/dev/null 2>&1; then
+		flock -x 9
+		return $?
+	fi
+	python3 -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX)' 2>/dev/null
+}
+
 acquire_cli_vault_lock() {
-	command -v flock >/dev/null 2>&1 || {
-		printf "Warning: 'flock' is unavailable; do not run concurrent CLI or web vault operations.\n" >&2
+	if ! command -v flock >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
+		printf "Warning: neither 'flock' nor python3 is available; do not run concurrent CLI or web vault operations.\n" >&2
 		return 0
-	}
+	fi
 	exec 9>"${VAULT_FILE}.lock" || die "Cannot open vault lock file."
 	chmod 600 "${VAULT_FILE}.lock" 2>/dev/null || true
-	flock -x 9 || die "Cannot lock vault."
+	vault_lock_hold_fd9 || die "Cannot lock vault."
 	CLI_VAULT_LOCKED=1
 }
 
@@ -926,6 +952,9 @@ maybe_auto_backup() {
 
 release_cli_vault_lock() {
 	[ "${CLI_VAULT_LOCKED:-0}" = "1" ] || return 0
+	# Closing the descriptor releases the lock on every platform, which is the
+	# only mechanism available where flock(1) is not. `flock -u` is kept for
+	# the platforms that have it, but it is no longer what does the work.
 	flock -u 9 2>/dev/null || true
 	exec 9>&-
 	CLI_VAULT_LOCKED=0
