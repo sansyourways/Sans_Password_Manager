@@ -436,7 +436,23 @@ for language in ("id", "ja"):
     if extra:
         sys.exit("%s has %d key(s) English does not, e.g. %s"
                  % (language, len(extra), sorted(extra)[0]))
-print("  i18n: 3 languages, %d keys each, dictionary parses as delivered" % len(english))
+# A key referenced from the markup but absent from every dictionary renders as
+# its English fallback forever, in all three languages. The parity check above
+# cannot see it: it compares the dictionaries to each other, and a key missing
+# from all three is perfectly consistent. This found four, three of them added
+# with the Bitwarden import UI, which shipped untranslated.
+referenced = {
+    key for key in re.findall(
+        r'data-i18n(?:-placeholder|-title|-label)?="([^"{}]+)"', source)
+    if re.fullmatch(r"[a-z0-9_]+(\.[a-z0-9_]+)+", key)
+}
+unknown = sorted(key for key in referenced if key not in english)
+if unknown:
+    sys.exit("%d key(s) used in the markup but in no dictionary: %s"
+             % (len(unknown), ", ".join(unknown)))
+
+print("  i18n: 3 languages, %d keys each, %d referenced from markup, all present"
+      % (len(english), len(referenced)))
 I18NPY
 
 # The hamburger exists at every width: under 900px it opens the drawer, above
@@ -1337,6 +1353,115 @@ printf '  source is inert; execution and a real pipe still dispatch\n'
 # and vault mutation are exercised against the module directly, without a
 # shell or a web server in the way. That this file can exist at all is the
 # point of extracting it.
+printf 'Web regression: accessibility and the import form\n'
+# Every form control needs a name a screen reader can announce. These were all
+# unnamed: the add and edit forms rendered <label> elements with no for= and
+# inputs with no id, so the labels were loose text and each field read as
+# "edit text, blank". Asserted against rendered markup, not the source, because
+# the source looked correct.
+python3 - "$web_script" "$PASSWORD_VAULT" <<'A11YPY'
+import importlib.util
+import os
+import re
+import sys
+
+spec = importlib.util.spec_from_file_location("spmweb", sys.argv[1])
+web = importlib.util.module_from_spec(spec)
+os.environ["SPM_VAULT_PATH"] = sys.argv[2]
+try:
+    spec.loader.exec_module(web)
+except SystemExit:
+    pass
+
+CONTROL = re.compile(r"<(input|select|textarea)\b([^>]*)>", re.I)
+LABEL_FOR = re.compile(r'<label[^>]*\bfor="([^"]+)"')
+
+
+def unnamed(markup):
+    targets = set(LABEL_FOR.findall(markup))
+    bad = []
+    for tag, attrs in CONTROL.findall(markup):
+        if re.search(r'type="(hidden|submit|button)"', attrs, re.I):
+            continue
+        if "aria-label" in attrs or "aria-labelledby" in attrs:
+            continue
+        found = re.search(r'\bid="([^"]+)"', attrs)
+        if not found or found.group(1) not in targets:
+            bad.append((tag, attrs.strip()[:70]))
+    return bad
+
+
+pages = {
+    "add form": web.build_entry_form("Add", "/v", "/add"),
+    "edit form": web.build_entry_form("Edit", "/v", "/edit",
+                                      values={"id": "1", "name": "n"}),
+    "note form": web.build_note_form("Note", "/v", "/notes-add"),
+    "transfer": web.transfer_page(),
+}
+for name, markup in pages.items():
+    bad = unnamed(markup)
+    if bad:
+        sys.exit("%s has %d control(s) with no accessible name: %r"
+                 % (name, len(bad), bad[:3]))
+
+if "<nav" not in web.render_shell("<p>x</p>", "overview", "0", "/v"):
+    sys.exit("the sidebar is not exposed as a navigation landmark")
+
+# Bitwarden entries belong on the import form. They shipped on the export form
+# in 3.4.3, which made the feature unreachable from the picker: the tests
+# exercised _apply_import directly and never rendered the page.
+forms = dict((m.group(1), m.group(2)) for m in
+             re.finditer(r'<form[^>]*action="(/[a-z]+)"[^>]*>(.*?)</form>',
+                         pages["transfer"], re.S))
+if "bitwarden" not in forms.get("/import", ""):
+    sys.exit("the import form does not offer the Bitwarden formats")
+if "bitwarden" in forms.get("/export", ""):
+    sys.exit("the export form offers Bitwarden formats, which cannot be exported")
+
+# A focus indicator has to be visible. This one was box-shadow in
+# --accent-soft, measured at 1.15:1 against the field it surrounded: present
+# in the DOM, invisible on screen, on every form in the dashboard. WCAG 1.4.11
+# wants 3.0:1 for a non-text indicator.
+css = web.DESIGN_CSS
+
+
+def _luminance(value):
+    value = value.lstrip("#")
+    channels = []
+    for index in (0, 2, 4):
+        part = int(value[index:index + 2], 16) / 255
+        channels.append(part / 12.92 if part <= 0.03928
+                        else ((part + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def contrast(one, two):
+    first, second = _luminance(one), _luminance(two)
+    high, low = max(first, second), min(first, second)
+    return (high + 0.05) / (low + 0.05)
+
+
+tokens = dict(re.findall(r"(--[a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{6})", css))
+for rule in re.findall(r"\.(?:input|search input|select):focus\s*\{([^}]*)\}", css):
+    if "outline: none" not in rule:
+        continue
+    ring = re.search(r"box-shadow:[^;]*var\((--[a-z0-9-]+)\)", rule)
+    if not ring:
+        sys.exit("a control removes its outline without a replacement ring")
+    colour = tokens.get(ring.group(1))
+    ground = tokens.get("--surface-2") or tokens.get("--surface")
+    if not colour or not ground:
+        continue
+    measured = contrast(colour, ground)
+    if measured < 3.0:
+        sys.exit("the focus ring is %s on %s, %.2f:1; WCAG 1.4.11 wants 3.0:1"
+                 % (colour, ground, measured))
+
+print("  a11y: form controls named, sidebar is a landmark, focus ring "
+      "%.1f:1, Bitwarden is on the import form" % measured)
+A11YPY
+
+
 printf 'Import regression: Bitwarden JSON, CSV and password-protected exports\n'
 # People arrive from Bitwarden, and its export shares no field names with SPM's.
 # Before this, a Bitwarden CSV imported as one empty note and every login was
