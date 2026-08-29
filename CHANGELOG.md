@@ -7,6 +7,26 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.4.2] - 2026-08-29
+
+### Fixed
+- **`spm doctor --json` printed a banner and a password prompt on stdout**, so
+  the one thing it promised — a lone JSON document that pipes into `jq` — was
+  not true when it was run as a command. 3.4.0's tests called the function
+  after sourcing the library, which skips `main()`, and `main()` is where the
+  banner, the language prompt and the consent gate live. The function worked;
+  the command never did.
+
+  `doctor --json` now dispatches before any of that, the way `bridge-get` and
+  `bridge-list` already did for the same reason. The regression suite runs the
+  real command and asserts the first byte of stdout is `{` — parsing alone
+  would accept a banner ending in a newline, because a JSON parser skips
+  leading whitespace and `jq` does not care but a human reading the output
+  does.
+- The master-password prompt moved from stdout to stderr, where prompts
+  belong. An interactive user sees no difference, since stderr is the same
+  terminal, and no command's stdout can be polluted by it again.
+
 ## [3.4.1] - 2026-08-29
 
 ### Fixed
