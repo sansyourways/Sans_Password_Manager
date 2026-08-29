@@ -1353,6 +1353,72 @@ printf '  source is inert; execution and a real pipe still dispatch\n'
 # and vault mutation are exercised against the module directly, without a
 # shell or a web server in the way. That this file can exist at all is the
 # point of extracting it.
+printf 'Extension regression: the native-messaging boundary\n'
+# What the extension may ask for, and -- the half that needed writing down --
+# what it may receive. The host used to forward whatever the CLI printed, so
+# the extension's view of the vault was whatever bridge-get happened to emit.
+# A field added there later would have reached the extension with no code
+# change and no review. These assert the projection, not the plumbing.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - \
+	"$ROOT_DIR/browser-extension-universal/native_host.py" <<'BOUNDPY'
+import sys
+
+source = open(sys.argv[1], encoding="utf-8").read()
+namespace = {}
+# The module ends in a read loop, so only the definitions above it are run.
+exec(source[:source.index("while True:")], namespace)
+project = namespace["project"]
+actions = namespace["ACTIONS"]
+allowed_errors = namespace["ALLOWED_ERRORS"]
+
+# A get returns a username and a password. Nothing else, however much the
+# layer below decides to hand over.
+leaky = {"ok": True, "username": "u", "password": "p",
+         "notes": "private note", "url": "https://x", "totp": "JBSWY3DPEHPK3PXP"}
+got = project("get", leaky)
+if set(got) != {"ok", "username", "password"}:
+    sys.exit("a get response carried %r" % sorted(set(got) - {"ok", "username", "password"}))
+
+# A match is a summary. A secret appearing in one must not cross.
+listed = project("list", {"ok": True, "matches": [
+    {"id": "1", "label": "GitHub", "username": "u", "url": "https://g",
+     "password": "should-not-cross", "notes": "should-not-cross"}]})
+row = listed["matches"][0]
+if set(row) != {"id", "label", "username", "url"}:
+    sys.exit("a list match carried %r" % sorted(set(row) - {"id", "label", "username", "url"}))
+if "should-not-cross" in repr(listed):
+    sys.exit("a secret crossed the boundary inside a match")
+
+# unlock answers whether the password worked, not what it found.
+if project("unlock", {"ok": True, "matches": [{"id": "1"}]}) != {"ok": True}:
+    sys.exit("unlock returned more than a verdict")
+
+# Failures are chosen from a fixed set. Echoing an unexpected message is how a
+# path or a gpg diagnostic reaches the extension.
+for supplied in ("gpg: /home/someone/.spm_vault.gpg: decryption failed",
+                 {"vault": "/home/someone/.spm_vault.gpg"},
+                 None, 42):
+    out = project("get", {"ok": False, "error": supplied})
+    if out["error"] not in allowed_errors and out["error"] != namespace["GENERIC_ERROR"]:
+        sys.exit("an unexpected error crossed: %r" % out["error"])
+    if "/home/someone" in out["error"]:
+        sys.exit("a filesystem path crossed the boundary in an error")
+if project("get", {"ok": False, "error": "record not found"})["error"] != "record not found":
+    sys.exit("a known error was replaced by the generic one")
+
+# An action absent from the table returns nothing but a verdict, so adding a
+# branch without declaring it cannot expose fields.
+if project("some-new-action", {"ok": True, "password": "p"}) != {"ok": True}:
+    sys.exit("an undeclared action returned fields")
+
+if set(actions) != {"unlock", "lock", "list", "get"}:
+    sys.exit("the action table changed without this test changing: %r" % sorted(actions))
+
+print("  boundary: %d actions declared, responses projected, errors from a "
+      "fixed set of %d" % (len(actions), len(allowed_errors)))
+BOUNDPY
+
+
 printf 'Web regression: accessibility and the import form\n'
 # Every form control needs a name a screen reader can announce. These were all
 # unnamed: the add and edit forms rendered <label> elements with no for= and

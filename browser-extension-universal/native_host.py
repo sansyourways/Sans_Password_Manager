@@ -43,6 +43,72 @@ def valid_host(value):
         raise ValueError("invalid browser hostname")
     return value
 
+# The boundary the extension cannot talk past.
+#
+# Two halves, and the second is the one that needed writing down. Inbound, an
+# action the extension names must appear here or it is refused -- that was
+# already true, as a chain of if-statements. Outbound, a response is PROJECTED
+# onto the fields named here rather than forwarded: today `bridge-get` returns
+# a username and a password, but if it ever returns a note, a URL or a TOTP
+# seed, that field cannot reach the extension without someone editing this
+# table. Forwarding whatever the CLI printed made the extension's view of the
+# vault whatever the CLI happened to print, which is not a contract.
+#
+# MATCH_FIELDS does the same for each row of a list response, because a match
+# is a record summary and record summaries are exactly where an extra field
+# would appear.
+ACTIONS = {
+    "unlock": (),
+    "lock": (),
+    "list": ("matches",),
+    "get": ("username", "password"),
+}
+MATCH_FIELDS = ("id", "label", "username", "url")
+
+# Errors are chosen from this set, not echoed. Stringifying an unexpected error
+# changes its type without closing the channel -- a message that embeds a path
+# still carries the path across. Every error the CLI's bridge commands and this
+# host can produce is named here; anything else becomes the generic refusal, so
+# the outbound side of the contract is closed for failures as well as successes.
+ALLOWED_ERRORS = frozenset((
+    "invalid browser hostname",
+    "record is not bound to this hostname",
+    "record not found",
+    "master password required",
+    "numeric record ID required",
+    "SPM is locked or the session expired",
+    "unsupported native messaging action",
+    "SPM bridge returned an invalid response",
+    "SPM bridge refused the request",
+))
+GENERIC_ERROR = "SPM refused the request"
+
+
+def project(action, response):
+    """A response reduced to the fields this action is allowed to return."""
+    if not isinstance(response, dict):
+        return {"ok": False, "error": "SPM bridge returned an invalid response"}
+    if not response.get("ok"):
+        reason = response.get("error")
+        if not isinstance(reason, str) or reason not in ALLOWED_ERRORS:
+            reason = GENERIC_ERROR
+        return {"ok": False, "error": reason}
+    out = {"ok": True}
+    for field in ACTIONS.get(action, ()):
+        if field not in response:
+            continue
+        if field == "matches":
+            rows = response[field]
+            out[field] = [
+                {k: row.get(k, "") for k in MATCH_FIELDS}
+                for row in (rows if isinstance(rows, list) else [])
+                if isinstance(row, dict)
+            ]
+        else:
+            out[field] = response[field]
+    return out
+
+
 def run_spm(command, *args, password):
     result = subprocess.run([SPM_BIN, command, *args], input=password + "\n", text=True,
                             capture_output=True, timeout=30, env={**os.environ, "NO_COLOR":"1"})
@@ -64,6 +130,8 @@ def is_unlocked():
 def handle(message):
     global master, unlocked_at, last_used
     action = message.get("action")
+    if action not in ACTIONS:
+        return {"ok":False,"error":"unsupported native messaging action"}
     if action == "lock":
         master = None
         return {"ok":True}
@@ -74,12 +142,22 @@ def handle(message):
         response = run_spm("bridge-list", valid_host(message.get("host")), password=candidate)
         if response.get("ok"):
             master = candidate; unlocked_at = last_used = time.monotonic()
-        return response
-    # Compatibility with the original one-shot extension during migration.
+        # unlock reports success or failure and nothing else: the list it used
+        # to verify the password is not the caller's to receive here.
+        return project("unlock", response)
+    # The original one-shot extension, which is still in this repository and
+    # still connects to this host: it sends the master password with each get
+    # and holds no session. Kept because removing it breaks that extension
+    # silently, and stated plainly rather than left as a quiet exception --
+    # a caller supplying the password directly is not constrained by `lock` or
+    # by either timeout, because it has no session for them to act on. That is
+    # a property of a one-shot protocol, not a hole this table can close.
     if action == "get" and isinstance(message.get("master"), str):
         record = str(message.get("record", ""))
         if not record.isdigit(): return {"ok":False,"error":"numeric record ID required"}
-        return run_spm("bridge-get", record, valid_host(message.get("host")), password=message["master"])
+        return project("get", run_spm("bridge-get", record,
+                                      valid_host(message.get("host")),
+                                      password=message["master"]))
     if action in ("list", "get"):
         if not is_unlocked():
             return {"ok":False,"error":"SPM is locked or the session expired"}
@@ -90,7 +168,7 @@ def handle(message):
             if not record.isdigit(): return {"ok":False,"error":"numeric record ID required"}
             response = run_spm("bridge-get", record, host, password=master)
         if response.get("ok"): last_used = time.monotonic()
-        return response
+        return project(action, response)
     return {"ok":False,"error":"unsupported native messaging action"}
 
 while True:
