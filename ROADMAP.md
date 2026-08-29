@@ -221,12 +221,21 @@ as such below rather than quietly dropped.
 - Duplicate and breach review that performs its analysis without disclosing a
   secret to any third party.
 - Folders and custom fields for records that do not fit the current shape.
-- Import preview, so a Bitwarden, 1Password, KeePass or browser export can be
-  inspected and corrected before it is committed to the vault. 3.4.3 made this
-  sharper rather than answering it: a Bitwarden export now imports correctly
-  and goes straight in, and the failure it replaced — a CSV that produced one
-  empty note and dropped every login while reporting success — is exactly the
-  kind a preview would have shown the user before it happened.
+- **Import preview — shipped in 3.8.0.** A web-mode upload is parsed and shown
+  before anything is written: every record the file would add, with its type,
+  service, username and a masked secret, plus a named list of rows SPM has no
+  record type for. The vault is untouched until the review is confirmed, the
+  confirmation is single-use so a refresh cannot import twice, and the parsed
+  rows stay on the server rather than being round-tripped through the browser,
+  which would hand a decrypted password-protected export back to the page that
+  uploaded it.
+
+  3.4.3 had made this sharper rather than answering it: a Bitwarden export
+  imported correctly but went straight in, and the failure it replaced — a CSV
+  that produced one empty note and dropped every login while reporting success
+  — is exactly the kind the review now shows first. Correcting an export
+  before importing it is still done in the file; the review says what will
+  happen, not which rows to keep.
 
 ### What is left, and what decides when
 
@@ -247,6 +256,17 @@ function underneath it.
 
 Crypto and extension UI are the two worst places to accept that gap, so these
 two wait for a way to run them rather than for someone to write them.
+
+3.8.0 is the first item on this board built the other way round, and the
+result argues for the rule. Its review page passed the suite — ten mutants
+across the token, the expiry, the classification and the masking were all
+killed — and was then opened in a browser, where four defects were visible
+immediately: "1 passwords · 1 notes", "1 row(s)", a five-column table header
+over no rows in the empty state, and the secret column headed "Password" for
+note bodies and backup codes. None of them could have failed a test of the
+function underneath; all four were fixed before the release rather than after
+it. The tally above stays at five because rendering happened first this time,
+which is the whole point.
 
 ### Trust expansion — hardware and recovery
 

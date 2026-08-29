@@ -557,9 +557,21 @@ test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" "$TEST_ROOT/passphrase-af
 [ "$(awk -F '\t' '$1=="PASSPHRASE"&&$2==1{print $4}' "$TEST_ROOT/passphrase-after" | base64 -d)" = 'horse-battery' ]
 printf 'type,id,label,username,secret,notes,created,extra\npassword,,Web import,demo,WebSecret42,synthetic,2026-01-01T00:00:00Z,\n' \
 	> "$TEST_ROOT/import.csv"
-curl -fsS -D "$TEST_ROOT/import.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
+# Since 3.8.0 an upload is reviewed first, so the smoke test is two posts:
+# the upload, which answers with the review page, and the confirmation it
+# carries. The full behaviour of the review is asserted further down.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/import.html" \
 	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" -F 'fmt=csv' \
 	-F "file=@$TEST_ROOT/import.csv;type=text/csv" "http://127.0.0.1:$WEB_PORT/import"
+smoke_token="$(sed -n 's/.*name="confirm" value="\([^"]*\)".*/\1/p' \
+	"$TEST_ROOT/import.html" | head -n1)"
+smoke_csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' \
+	"$TEST_ROOT/import.html" | head -n1)"
+[ "${#smoke_token}" -eq 32 ]
+curl -fsS -D "$TEST_ROOT/import.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
+	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$smoke_csrf" --data-urlencode "confirm=$smoke_token" \
+	"http://127.0.0.1:$WEB_PORT/import"
 grep -qi '^Location: /?msg=import-ok' "$TEST_ROOT/import.headers"
 
 # --- 2.12.0 URL field --------------------------------------------------------
@@ -962,6 +974,184 @@ names = re.findall(r'name="name" value="([^"]+)"', html)
 assert names, "history page listed no snapshots"
 assert names == sorted(names, reverse=True), "snapshots are not newest-first: %r" % names
 PYORDER
+
+printf 'Web regression: an import is reviewed before it is written\n'
+# Until 3.8.0 an upload went straight in: the first sight of what a Bitwarden
+# export actually contained was the vault already containing it. This is
+# checked against the running server rather than against preview_import,
+# because every defect this project has shipped was in the wiring above a
+# function that passed its own test.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/transfer.html" \
+	"http://127.0.0.1:$WEB_PORT/transfer"
+imp_csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' \
+	"$TEST_ROOT/transfer.html" | head -n1)"
+[ "${#imp_csrf}" -eq 64 ]
+vault_before_import="$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)"
+cat > "$TEST_ROOT/preview.csv" <<'PREVIEWCSV'
+folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp
+,0,login,Preview Site,,,0,https://preview.example,previewer,Pv9!wwwwwwwwww,
+,0,note,Preview Note,a note body,,0,,,,
+PREVIEWCSV
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/import-preview.html" \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	-F "csrf=$imp_csrf" -F 'fmt=bitwarden-csv' \
+	-F "file=@$TEST_ROOT/preview.csv" \
+	"http://127.0.0.1:$WEB_PORT/import"
+grep -q 'Review this import' "$TEST_ROOT/import-preview.html"
+grep -q 'Preview Site' "$TEST_ROOT/import-preview.html"
+grep -q 'name="confirm"' "$TEST_ROOT/import-preview.html"
+# "1 passwords" is the sort of thing only a rendered page shows you, and the
+# heading is the first line a reader checks the file against.
+grep -q '1 password &middot; 1 note<' "$TEST_ROOT/import-preview.html"
+# The whole point: reviewing wrote nothing.
+[ "$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)" = "$vault_before_import" ] || {
+	printf 'the import preview modified the vault\n' >&2; exit 1
+}
+# A review page that prints every password in clear text is worse than the
+# mistake it guards against. The secret may reach the page only in the
+# data-val attribute the reveal control reads; the cell itself shows bullets.
+python3 - "$TEST_ROOT/import-preview.html" <<'PYMASK'
+import re, sys
+page = open(sys.argv[1], encoding="utf-8").read()
+secret = "Pv9!wwwwwwwwww"
+occurrences = [m.start() for m in re.finditer(re.escape(secret), page)]
+assert occurrences, "the password never reached the review page at all"
+for at in occurrences:
+    before = page.rfind("<", 0, at)
+    assert 'data-val="' in page[before:at], (
+        "the password appears outside data-val: %r" % page[max(0, at - 90):at + 20])
+cell = re.search(r'<span class="secret-val masked"[^>]*>([^<]*)</span>', page)
+assert cell and "&bull;" in cell.group(1), "the secret cell is not masked"
+PYMASK
+imp_token="$(sed -n 's/.*name="confirm" value="\([^"]*\)".*/\1/p' \
+	"$TEST_ROOT/import-preview.html" | head -n1)"
+[ "${#imp_token}" -eq 32 ]
+curl -fsS -D "$TEST_ROOT/import-confirm.headers" -b "$TEST_ROOT/cookies" \
+	-o /dev/null -X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$imp_csrf" --data-urlencode "confirm=$imp_token" \
+	"http://127.0.0.1:$WEB_PORT/import"
+grep -qi 'Location: /?msg=import-ok' "$TEST_ROOT/import-confirm.headers"
+vault_after_import="$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)"
+[ "$vault_after_import" != "$vault_before_import" ] || {
+	printf 'the confirmed import wrote nothing\n' >&2; exit 1
+}
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/after-import.html" \
+	"http://127.0.0.1:$WEB_PORT/"
+grep -q 'Preview Site' "$TEST_ROOT/after-import.html"
+# The note does not appear on the password list, so it is checked where it
+# actually landed: a confirmed import must commit every kind it previewed,
+# not only the one the dashboard happens to show first.
+test_decrypt_vault "$PASSWORD_VAULT" "$AUDIT_PASSWORD" "$TEST_ROOT/after-import.plain"
+[ "$(awk -F '\t' '$1=="NOTE"&&$3=="Preview Note"{print $4}' \
+	"$TEST_ROOT/after-import.plain" | base64 -d)" = 'a note body' ] || {
+	printf 'the previewed note was not committed\n' >&2; exit 1
+}
+# One token, one import. Re-posting a confirmation -- a refresh, a back button,
+# a resend -- must not add the same records a second time.
+curl -sS -o /dev/null -b "$TEST_ROOT/cookies" -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$imp_csrf" --data-urlencode "confirm=$imp_token" \
+	"http://127.0.0.1:$WEB_PORT/import"
+[ "$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)" = "$vault_after_import" ] || {
+	printf 'a replayed confirmation imported the same records twice\n' >&2; exit 1
+}
+# An invented token must be refused outright rather than committing whatever
+# happens to be pending.
+curl -sS -o /dev/null -b "$TEST_ROOT/cookies" -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$imp_csrf" \
+	--data-urlencode 'confirm=00000000000000000000000000000000' \
+	"http://127.0.0.1:$WEB_PORT/import"
+[ "$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)" = "$vault_after_import" ] || {
+	printf 'an unmatched confirmation token still wrote to the vault\n' >&2; exit 1
+}
+# A wrong token against a review that IS pending. The check above cannot reach
+# the comparison -- by then nothing is pending and the refusal comes from that
+# instead -- so removing the comparison altogether survived it. This uploads a
+# fresh file first, so the only thing standing between an invented token and
+# the vault is the comparison itself.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/import-preview2.html" \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	-F "csrf=$imp_csrf" -F 'fmt=bitwarden-csv' \
+	-F "file=@$TEST_ROOT/preview.csv" \
+	"http://127.0.0.1:$WEB_PORT/import"
+real_token="$(sed -n 's/.*name="confirm" value="\([^"]*\)".*/\1/p' \
+	"$TEST_ROOT/import-preview2.html" | head -n1)"
+[ "${#real_token}" -eq 32 ]
+[ "$real_token" != "$imp_token" ]
+curl -sS -o /dev/null -b "$TEST_ROOT/cookies" -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$imp_csrf" \
+	--data-urlencode 'confirm=ffffffffffffffffffffffffffffffff' \
+	"http://127.0.0.1:$WEB_PORT/import"
+[ "$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)" = "$vault_after_import" ] || {
+	printf 'a wrong token committed the review that was pending\n' >&2; exit 1
+}
+# And the wrong attempt spent it: the real token is no longer good either.
+curl -sS -o /dev/null -b "$TEST_ROOT/cookies" -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$imp_csrf" --data-urlencode "confirm=$real_token" \
+	"http://127.0.0.1:$WEB_PORT/import"
+[ "$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)" = "$vault_after_import" ] || {
+	printf 'a failed confirmation left the review committable\n' >&2; exit 1
+}
+
+# A file with nothing SPM can store must not offer a button whose only outcome
+# is a failure. It gets the same review page, naming every row, with no confirm.
+printf 'type,id,label,username,secret,notes,created,extra\nwidget,,Passport,,,,,\n' \
+	> "$TEST_ROOT/nothing.csv"
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/import-nothing.html" \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	-F "csrf=$imp_csrf" -F 'fmt=csv' -F "file=@$TEST_ROOT/nothing.csv" \
+	"http://127.0.0.1:$WEB_PORT/import"
+grep -q 'Nothing in this file can be imported' "$TEST_ROOT/import-nothing.html"
+grep -q 'Passport' "$TEST_ROOT/import-nothing.html"
+if grep -q 'name="confirm"' "$TEST_ROOT/import-nothing.html"; then
+	printf 'an unimportable file was still offered a confirm button\n' >&2; exit 1
+fi
+# Nor a five-column header over no rows, which reads as a table that failed.
+if grep -q '<table' "$TEST_ROOT/import-nothing.html"; then
+	printf 'the empty review still rendered a table with no rows\n' >&2; exit 1
+fi
+grep -q '1 row will not be imported' "$TEST_ROOT/import-nothing.html"
+
+# Expiry, which no HTTP test can reach without waiting five minutes. The held
+# review is a plain record, so the clock is moved instead: a review left open
+# over lunch must not still be committable.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$web_script" "$PASSWORD_VAULT" <<'PYTTL'
+import importlib.util, os, sys, time
+
+spec = importlib.util.spec_from_file_location("spmweb_ttl", sys.argv[1])
+web = importlib.util.module_from_spec(spec)
+os.environ["SPM_VAULT_PATH"] = sys.argv[2]
+try:
+    spec.loader.exec_module(web)
+except SystemExit:
+    pass
+
+rows = [("password", {"type": "password", "label": "X", "secret": "s"})]
+stats = {"passwords": 1}
+
+session = {}
+token = web.stash_pending_import(session, rows, stats, [])
+assert web.take_pending_import(session, token) == rows, "a fresh review did not come back"
+
+session = {}
+token = web.stash_pending_import(session, rows, stats, [])
+session["pending_import"]["at"] -= web.PENDING_IMPORT_TTL + 1
+try:
+    web.take_pending_import(session, token)
+except ValueError as exc:
+    assert "expired" in str(exc), "a stale review was refused for the wrong reason: %s" % exc
+else:
+    sys.exit("a review older than the TTL was still committable")
+
+# Expiry must also spend it, or a stale token could be retried until the clock
+# happened to suit it.
+assert session.get("pending_import") is None, "an expired review was left in place"
+print("  import: expiry refuses and consumes a stale review")
+PYTTL
+printf '  import: previewed without writing, masked, committed once, replay refused\n'
 
 # Tags are a convention inside existing plaintext fields. "C#" and a URL
 # fragment must not become tags, or every note with a link would sprout one.
