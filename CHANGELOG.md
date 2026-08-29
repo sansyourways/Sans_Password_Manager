@@ -7,6 +7,41 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-08-30
+
+### Added
+- **An import is reviewed before it is written.** A web-mode upload is parsed
+  and shown first: every record the file would add, with its type, service,
+  username and a masked secret that reveals one at a time, plus a named list of
+  any rows SPM has no record type for. The vault is untouched until the review
+  is confirmed. Cancelling leaves it exactly as it was.
+
+  The review is held on the server for five minutes and is single-use, so a
+  refresh, a back button or a re-sent form cannot import the same file twice.
+  Parsed rows are deliberately not round-tripped through the browser: sending
+  them back would hand a decrypted password-protected export to the page that
+  uploaded it, which is strictly worse than holding them next to the session's
+  cached vault key, where they die with the session.
+
+  The preview and the commit share one classification, so the two cannot
+  disagree about what a row becomes — the failure a preview exists to catch.
+
+  The CLI `spm import` is unchanged and still writes in one step.
+
+### Changed
+- The `/import` endpoint answers an upload with the review page (HTTP 200)
+  rather than a redirect. A JSON caller (`X-Requested-With: fetch`) gets the
+  same verdict as a document with the confirmation token in it. The redirect to
+  `/?msg=import-ok` now follows the confirmation.
+
+### Tested
+- The whole flow is asserted against the running server rather than against
+  the parsing function: the upload leaves the vault byte-identical, the secret
+  reaches the page only inside the attribute the reveal control reads, the
+  confirmation commits every kind it previewed, and a replayed or invented
+  token writes nothing. Every one of the five defects this project shipped
+  across 3.2.0–3.7.0 was in wiring above a function that passed its own test.
+
 ## [3.7.1] - 2026-08-29
 
 Documentation only. No code changed: `spm.sh` is byte-identical to 3.7.0 apart

@@ -259,6 +259,12 @@ I18N_SCRIPT = """
       "import.status_uploading": "Uploading...",
       "import.success_default": "Import complete.",
       "import.error_default": "Import failed.",
+      "import.preview.title": "Review this import",
+      "import.preview.sub": "Nothing has been written yet.",
+      "import.preview.kind": "Type",
+      "import.preview.confirm": "Import these records",
+      "import.preview.cancel": "Cancel",
+      "import.preview.back": "Back to Export / Import",
       "section.passphrases": "Passphrases",
       "section.passphrases_desc": "Store API tokens or recovery phrases. View prompts master re-check.",
       "btn.add_passphrase": "+ Add Passphrase",
@@ -526,6 +532,12 @@ I18N_SCRIPT = """
       "import.status_uploading": "Mengunggah...",
       "import.success_default": "Impor selesai.",
       "import.error_default": "Impor gagal.",
+      "import.preview.title": "Tinjau impor ini",
+      "import.preview.sub": "Belum ada yang ditulis.",
+      "import.preview.kind": "Jenis",
+      "import.preview.confirm": "Impor catatan ini",
+      "import.preview.cancel": "Batal",
+      "import.preview.back": "Kembali ke Ekspor / Impor",
       "section.passphrases": "Frasa Sandi",
       "section.passphrases_desc": "Simpan token API atau frasa pemulihan. Tampilan meminta master lagi.",
       "btn.add_passphrase": "+ Tambah Frasa Sandi",
@@ -793,6 +805,12 @@ I18N_SCRIPT = """
       "import.status_uploading": "アップロード中...",
       "import.success_default": "インポート完了。",
       "import.error_default": "インポート失敗。",
+      "import.preview.title": "このインポートを確認",
+      "import.preview.sub": "まだ何も書き込まれていません。",
+      "import.preview.kind": "種類",
+      "import.preview.confirm": "これらのレコードをインポート",
+      "import.preview.cancel": "キャンセル",
+      "import.preview.back": "エクスポート / インポートに戻る",
       "section.passphrases": "パスフレーズ",
       "section.passphrases_desc": "APIトークンや復旧フレーズを保存。閲覧時に再確認します。",
       "btn.add_passphrase": "+ パスフレーズ追加",
@@ -3859,6 +3877,89 @@ def transfer_page():
     return render_shell(content, "transfer", VERSION, VAULT_PATH, title="Export / Import")
 
 
+def import_preview_page(classified, stats, skipped, token, csrf):
+    """What an upload would add, before anything is written.
+
+    Secrets are masked with the same control the rest of the dashboard uses.
+    A review page that prints every imported password in clear text on one
+    screen is a worse hazard than the mistake it is guarding against.
+    """
+    label_for = {"password": "Password", "note": "Note",
+                 "passphrase": "Passphrase", "backup_code": "Backup codes",
+                 "authenticator": "Authenticator"}
+    body = []
+    for index, (kind, row) in enumerate(classified, start=1):
+        elem = "imp-%d" % index
+        secret = str(row.get("secret", "") or "")
+        dots = "&bull;" * min(len(secret), 24) if secret else "&mdash;"
+        body.append(
+            "<tr>"
+            f'<td class="num">{index}</td>'
+            f'<td><span class="chip">{html.escape(label_for.get(kind, kind))}</span></td>'
+            f'<td class="strong">{_esc(row.get("label", "")) or "&mdash;"}</td>'
+            f'<td class="muted">{_esc(row.get("username", "")) or "&mdash;"}</td>'
+            f'<td><span class="secret-val masked" id="{elem}" '
+            f'data-val="{html.escape(secret)}">{dots}</span> '
+            f'<button class="icon-btn" type="button" data-act="reveal" '
+            f'data-target="{elem}" aria-label="Show">{_icon("view", "icon icon-sm")}</button></td>'
+            "</tr>")
+
+    counts = (" &middot; ".join(f"{v} {k}" for k, v in stats.items() if v)
+              or "Nothing in this file can be imported")
+    skipped_html = ""
+    if skipped:
+        rows = "".join(
+            f'<li>{_esc(str(r.get("label") or r.get("type") or "(unnamed)"))}</li>'
+            for r in skipped[:20])
+        more = (f"<li>and {len(skipped) - 20} more</li>" if len(skipped) > 20 else "")
+        skipped_html = f"""
+<div class="flash error" style="display:block">
+  <div><strong>{len(skipped)} row(s) will not be imported</strong>, because SPM has no
+  matching record type for them. They are listed so nothing disappears without being named.</div>
+  <ul style="margin:var(--sp-2) 0 0 var(--sp-4)">{rows}{more}</ul>
+</div>"""
+
+    # Nothing importable is a real outcome, not an error page: the rows above
+    # name what the file held and why none of it fits. Offering a confirm
+    # button here would offer a button whose only outcome is a failure.
+    if classified:
+        actions = f"""<form method="post" action="/import" class="form-actions">
+      <input type="hidden" name="csrf" value="{html.escape(csrf)}">
+      <input type="hidden" name="confirm" value="{html.escape(token)}">
+      <button class="btn btn-primary" type="submit" data-i18n="import.preview.confirm">Import these records</button>
+      <a class="btn btn-ghost" href="/transfer" data-i18n="import.preview.cancel">Cancel</a>
+    </form>"""
+    else:
+        actions = ('<a class="btn btn-ghost" href="/transfer" '
+                   'data-i18n="import.preview.back">Back to Export / Import</a>')
+
+    content = f"""
+<div class="page-head">
+  <div>
+    <h1 class="page-title" data-i18n="import.preview.title">Review this import</h1>
+    <div class="page-sub" data-i18n="import.preview.sub">Nothing has been written yet.</div>
+  </div>
+</div>
+{skipped_html}
+<div class="card">
+  <div class="card-head"><h2>{counts}</h2></div>
+  <div class="table-wrap"><table class="t">
+    <thead><tr>
+      <th scope="col" data-i18n="table.id">ID</th>
+      <th scope="col" data-i18n="import.preview.kind">Type</th>
+      <th scope="col" data-i18n="table.service">Service</th>
+      <th scope="col" data-i18n="table.username">Username</th>
+      <th scope="col" data-i18n="view.label.password">Password</th>
+    </tr></thead>
+    <tbody>{"".join(body)}</tbody>
+  </table></div>
+  <div class="card-foot">{actions}</div>
+</div>
+{REVEAL_SCRIPT}"""
+    return render_shell(content, "transfer", VERSION, VAULT_PATH,
+                        title="Review this import")
+
+
 def auth_view_page(aid, label, secret, period, algo, created):
     content = f"""
 <div class="page-head">
@@ -4418,12 +4519,160 @@ def _bitwarden_import_rows(fmt: str, content: str, export_password: str = ""):
     return core.bitwarden_rows(payload)
 
 
+def parse_plain_table(text):
+    import json
+    rows=[]
+    headers=None
+    for ln in text.splitlines():
+        ln=ln.strip()
+        if not ln or ln.startswith("#") or ln.startswith("| ---") or ln.startswith("+"):
+            continue
+        if "|" in ln:
+            parts=[p.strip() for p in ln.strip("|").split("|")]
+        else:
+            parts=[p.strip() for p in ln.split()]
+        if len(parts) < 2:
+            continue
+        if parts[0].lower() == "type":
+            headers=[p.lower() for p in parts]
+            continue
+        parts=[json.loads(p) if p.startswith('"') and p.endswith('"') else p for p in parts]
+        if headers:
+            rows.append(dict(zip(headers, parts)))
+        else:
+            rows.append({
+                "type": parts[0],
+                "label": parts[1] if len(parts)>1 else "",
+                "username": parts[2] if len(parts)>2 else "",
+                "secret": parts[3] if len(parts)>3 else "",
+                "notes": parts[4] if len(parts)>4 else "",
+                "created": parts[5] if len(parts)>5 else "",
+                "extra": parts[6] if len(parts)>6 else "",
+                "url": parts[7] if len(parts)>7 else "",
+            })
+    return rows
+
+
+def _import_rows(fmt: str, content: str, export_password: str = ""):
+    """Rows an upload would add, without touching the vault.
+
+    Split out of _apply_import so a preview runs exactly the parse the commit
+    will run. Two code paths that agree today would not agree for long, and a
+    preview that shows something other than what gets written is worse than no
+    preview at all.
+    """
+    if fmt in BITWARDEN_FORMATS:
+        rows = _bitwarden_import_rows(fmt, content, export_password)
+    elif fmt in ("json","jsonc","ndjson","jsonl","csv","csv-noheader","tsv","scsv","psv","txt","html","yaml","yml","xml","sql","ini","toml"):
+        # A Bitwarden file picked as plain json or csv is still a Bitwarden
+        # file. Detecting it rather than failing means choosing the wrong entry
+        # in the dropdown is not a silent, partial import -- which is what a
+        # Bitwarden CSV used to produce: one empty note and every login lost.
+        detected = _detect_bitwarden(fmt, content)
+        rows = (_bitwarden_import_rows(detected, content, export_password)
+                if detected else _parse_import_rows(fmt, content))
+    else:
+        rows = parse_plain_table(content)
+    if not rows:
+        raise ValueError("No records detected in upload.")
+    return rows
+
+
+IMPORT_KINDS = (
+    ("password", ("password", "pass", "")),
+    ("note", ("note", "notes")),
+    ("passphrase", ("phrase", "passphrase", "secret")),
+    ("backup_code", ("backup_code", "backup", "codes", "backupcode")),
+    ("authenticator", ("authenticator", "auth")),
+)
+
+
+def classify_import_row(row):
+    """The record kind an import row becomes, or "" when it becomes nothing.
+
+    The same reading the commit uses, so a preview cannot count a row the
+    commit then drops -- which is the failure a preview exists to catch.
+    """
+    kind = (row.get("type", "") or "").lower()
+    for name, aliases in IMPORT_KINDS:
+        if kind in aliases:
+            return name
+    return ""
+
+
+def preview_import(fmt: str, content: str, export_password: str = ""):
+    """(rows, stats, skipped) for an upload, having written nothing."""
+    rows = _import_rows(fmt, content, export_password)
+    stats = {"passwords": 0, "notes": 0, "passphrases": 0,
+             "backups": 0, "authenticators": 0}
+    bucket = {"password": "passwords", "note": "notes",
+              "passphrase": "passphrases", "backup_code": "backups",
+              "authenticator": "authenticators"}
+    kept, skipped = [], []
+    for row in rows:
+        kind = classify_import_row(row)
+        if not kind:
+            skipped.append(row)
+            continue
+        stats[bucket[kind]] += 1
+        kept.append((kind, row))
+    return kept, stats, skipped
+
+
+# A reviewed import waits here, not in the browser. Sending parsed rows back to
+# the client for the confirm step would mean handing a decrypted
+# password-protected export to the page that just uploaded it -- strictly worse
+# than today, where the decrypted form never leaves the server. It lives in the
+# session record instead, so it dies with the session exactly as the vault key
+# does, and it is short-lived on top of that: a review left open over lunch
+# should not still be committable.
+PENDING_IMPORT_TTL = 300
+
+
+def stash_pending_import(session, classified, stats, skipped):
+    """Hold a reviewed import for confirmation; returns its one-use token."""
+    token = secrets.token_hex(16)
+    session["pending_import"] = {
+        "token": token, "classified": classified, "stats": stats,
+        "skipped": len(skipped), "at": time.time(),
+    }
+    return token
+
+
+def take_pending_import(session, token):
+    """The held import, consumed. Raises if it is absent, stale or unmatched."""
+    pending = session.get("pending_import")
+    # Cleared whatever happens next: a token that failed to match must not get
+    # a second attempt, and a successful one must not be replayable.
+    session["pending_import"] = None
+    if not pending:
+        raise ValueError("Nothing to confirm. Upload the file again.")
+    if time.time() - pending["at"] > PENDING_IMPORT_TTL:
+        raise ValueError("That preview expired. Upload the file again.")
+    if not hmac.compare_digest(pending["token"], str(token or "")):
+        raise ValueError("That confirmation did not match the preview.")
+    return pending["classified"]
+
+
 def _apply_import(fmt: str, content: str, plaintext: str, export_password: str = ""):
-    import base64
-    tab = "\t"
+    """Parse an upload and apply it. Kept for callers that do both at once."""
     fmt = fmt.lower()
     if fmt not in SUPPORTED_FORMATS:
         raise ValueError("Unsupported format")
+    classified, _stats, _skipped = preview_import(fmt, content, export_password)
+    return apply_import_rows(classified, plaintext)
+
+
+def apply_import_rows(classified, plaintext: str):
+    """Write already-classified rows into `plaintext`.
+
+    Takes the classification rather than redoing it, so a confirmed import
+    writes exactly the records the preview showed. Re-parsing here would let
+    the two drift, and a preview that disagrees with the commit is worse than
+    no preview: it invites trust it has not earned.
+    """
+    import base64
+    tab = "\t"
 
     def next_id(tag, lines):
         max_id = 0
@@ -4531,70 +4780,11 @@ def _apply_import(fmt: str, content: str, plaintext: str, export_password: str =
         ]))
         stats["authenticators"] += 1
 
-    def parse_plain_table(text):
-        import json
-        rows=[]
-        headers=None
-        for ln in text.splitlines():
-            ln=ln.strip()
-            if not ln or ln.startswith("#") or ln.startswith("| ---") or ln.startswith("+"):
-                continue
-            if "|" in ln:
-                parts=[p.strip() for p in ln.strip("|").split("|")]
-            else:
-                parts=[p.strip() for p in ln.split()]
-            if len(parts) < 2:
-                continue
-            if parts[0].lower() == "type":
-                headers=[p.lower() for p in parts]
-                continue
-            parts=[json.loads(p) if p.startswith('"') and p.endswith('"') else p for p in parts]
-            if headers:
-                rows.append(dict(zip(headers, parts)))
-            else:
-                rows.append({
-                    "type": parts[0],
-                    "label": parts[1] if len(parts)>1 else "",
-                    "username": parts[2] if len(parts)>2 else "",
-                    "secret": parts[3] if len(parts)>3 else "",
-                    "notes": parts[4] if len(parts)>4 else "",
-                    "created": parts[5] if len(parts)>5 else "",
-                    "extra": parts[6] if len(parts)>6 else "",
-                    "url": parts[7] if len(parts)>7 else "",
-                })
-        return rows
-
-    if fmt in BITWARDEN_FORMATS:
-        rows = _bitwarden_import_rows(fmt, content, export_password)
-    elif fmt in ("json","jsonc","ndjson","jsonl","csv","csv-noheader","tsv","scsv","psv","txt","html","yaml","yml","xml","sql","ini","toml"):
-        # A Bitwarden file picked as plain json or csv is still a Bitwarden
-        # file. Detecting it rather than failing means choosing the wrong entry
-        # in the dropdown is not a silent, partial import -- which is what a
-        # Bitwarden CSV used to produce: one empty note and every login lost.
-        detected = _detect_bitwarden(fmt, content)
-        rows = (_bitwarden_import_rows(detected, content, export_password)
-                if detected else _parse_import_rows(fmt, content))
-    else:
-        rows = parse_plain_table(content)
-
-    if not rows:
-        raise ValueError("No records detected in upload.")
-
-    types_seen = set()
-    for row in rows:
-        t = (row.get("type","") or "").lower()
-        if t:
-            types_seen.add(t)
-        if t in ("password","pass",""):
-            add_password(row)
-        elif t in ("note","notes"):
-            add_note(row)
-        elif t in ("passphrase","phrase","secret"):
-            add_passphrase(row)
-        elif t in ("backup_code","backup","codes","backupcode"):
-            add_backup(row)
-        elif t in ("authenticator","auth"):
-            add_auth(row)
+    writer = {"password": add_password, "note": add_note,
+              "passphrase": add_passphrase, "backup_code": add_backup,
+              "authenticator": add_auth}
+    for kind, row in classified:
+        writer[kind](row)
 
     total_added = sum(stats.values())
     if total_added == 0:
@@ -6896,6 +7086,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             content_type = (self.headers.get("Content-Type", "") or "")
 
+            # A confirmation carries no file: it names an import already
+            # reviewed in this session. Handled before the body checks below,
+            # which exist for uploads and would reject it for being small.
+            confirm_token = ""
+            if "multipart/form-data" not in content_type.lower():
+                confirm_token = (data.get("confirm") or [""])[0]
+            if confirm_token:
+                try:
+                    classified = take_pending_import(self._session_rec, confirm_token)
+                    plaintext = load_vault(master, self._session_rec)
+                    new_plain, stats = apply_import_rows(classified, plaintext)
+                    save_vault(master, new_plain, self._session_rec)
+                    sys.stderr.write(f"[import] Vault successfully updated ({stats}).\n")
+                    summary = ", ".join(f"{v} {k}" for k, v in stats.items() if v)
+                    respond_success(f"Import complete: {summary}.")
+                except Exception as exc:
+                    sys.stderr.write(f"[import] Confirmation failed: {exc}\n")
+                    respond_error(str(exc) or "Import failed.")
+                return
+
             body_bytes = raw_body_bytes or b""
             body_len = len(body_bytes)
 
@@ -6951,13 +7161,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             try:
-                sys.stderr.write('[import] Applying import data...\n')
-                plaintext = load_vault(master, self._session_rec)
-                new_plain, stats = _apply_import(fmt, content, plaintext, export_password)
-                save_vault(master, new_plain, self._session_rec)
-                sys.stderr.write(f"[import] Vault successfully updated ({stats}).\n")
-                summary = ", ".join(f"{v} {k}" for k,v in stats.items() if v)
-                respond_success(f"Import complete: {summary}.")
+                classified, stats, skipped = preview_import(fmt, content, export_password)
+                token = stash_pending_import(self._session_rec, classified, stats, skipped)
+                sys.stderr.write(f"[import] Parsed for review ({stats}, "
+                                 f"{len(skipped)} unsupported).\n")
+                if is_async:
+                    # A caller that asked for JSON gets the same verdict as the
+                    # page: what would be added, and the token to commit it.
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(jsonlib.dumps({
+                        "ok": True, "preview": True, "stats": stats,
+                        "skipped": len(skipped), "confirm": token,
+                    }).encode("utf-8"))
+                else:
+                    self._send_html(200, import_preview_page(
+                        classified, stats, skipped, token, self._session_csrf()))
             except Exception as e:
                 sys.stderr.write(f"[import] Import process failed: {e}\n")
                 __import__("traceback").print_exc(file=sys.stderr)
