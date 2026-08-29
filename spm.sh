@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.4.2"
+VERSION="3.4.3"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -809,6 +809,7 @@ world-readable through `ps` and /proc/<pid>/cmdline.
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import shutil
@@ -818,6 +819,7 @@ import sys
 import tempfile
 import time
 import unicodedata
+import urllib.parse
 
 # ----- format and policy -----------------------------------------------------
 
@@ -1353,6 +1355,246 @@ def recover(vault_path, secret, out_path):
 # How the shell half reaches the core. Secrets arrive on stdin, one per line,
 # never in argv. A master password cannot contain a newline: every prompt that
 # collects one reads a single line.
+
+# ----- foreign export formats ------------------------------------------------
+# Bitwarden's export is the one people arrive with, and its shape has nothing
+# in common with SPM's. Normalising it here rather than in either surface means
+# the CLI and the dashboard cannot disagree about what a Bitwarden file means.
+
+# Bitwarden item types. 3 and 4 carry structured data with no SPM equivalent,
+# so they become notes rather than being dropped -- an import that silently
+# loses a card is worse than one that stores it as text the user can read.
+BITWARDEN_LOGIN = 1
+BITWARDEN_SECURE_NOTE = 2
+BITWARDEN_CARD = 3
+BITWARDEN_IDENTITY = 4
+
+
+def looks_like_bitwarden_json(payload):
+    return isinstance(payload, dict) and isinstance(payload.get("items"), list)
+
+
+def looks_like_bitwarden_csv_header(fieldnames):
+    names = {(name or "").strip().lower() for name in (fieldnames or ())}
+    return "login_password" in names or "login_username" in names
+
+
+def _bitwarden_uri(item):
+    login = item.get("login") or {}
+    for entry in login.get("uris") or []:
+        if isinstance(entry, dict) and entry.get("uri"):
+            return entry["uri"]
+        if isinstance(entry, str) and entry:
+            return entry
+    return ""
+
+
+def _bitwarden_structured(item):
+    """Card and identity fields rendered as readable lines."""
+    for key in ("card", "identity"):
+        section = item.get(key)
+        if isinstance(section, dict):
+            pairs = [(k, v) for k, v in section.items() if v not in (None, "")]
+            if pairs:
+                return "\n".join("%s: %s" % (k, v) for k, v in sorted(pairs))
+    return ""
+
+
+def _hkdf_expand_sha256(prk, info, length=32):
+    """HKDF-Expand, the half Bitwarden uses to split one key into enc and mac."""
+    okm, block, counter = b"", b"", 1
+    while len(okm) < length:
+        block = hmac.new(prk, block + info + bytes([counter]), hashlib.sha256).digest()
+        okm += block
+        counter += 1
+    return okm[:length]
+
+
+def _split_cipher_string(value):
+    """(type, iv, ciphertext, mac) from Bitwarden's "2.iv|ct|mac" encoding."""
+    text = (value or "").strip()
+    if "." not in text:
+        raise VaultError("malformed encrypted field in the export")
+    kind, _, rest = text.partition(".")
+    parts = rest.split("|")
+    if kind != "2" or len(parts) != 3:
+        raise VaultError(
+            "unsupported encryption type %r in the export; SPM reads "
+            "AesCbc256_HmacSha256_B64 exports" % kind)
+    try:
+        return (kind, base64.b64decode(parts[0]),
+                base64.b64decode(parts[1]), base64.b64decode(parts[2]))
+    except Exception:
+        raise VaultError("the encrypted field is not valid base64")
+
+
+def decrypt_bitwarden_export(payload, password):
+    """The plaintext JSON inside a Bitwarden password-protected export.
+
+    Two deliberate refusals rather than approximations:
+
+    Argon2id (kdfType 1) is not derivable here for the same reason SPM does not
+    use it for its own vaults -- no stdlib implementation, and no dependency
+    this project is willing to take. Such an export is refused by name.
+
+    AES-256-CBC needs a real implementation. `cryptography` is used when it is
+    importable and the import is refused when it is not. The alternatives were
+    to shell out to `openssl enc -K`, which puts the key in argv where any
+    local user can read it and which this module forbids by design, or to
+    hand-write AES, which is not something that belongs in a password
+    manager's trusted core for the sake of a one-off conversion.
+    """
+    if not isinstance(payload, dict) or not payload.get("encrypted"):
+        raise VaultError("this file is not an encrypted Bitwarden export")
+
+    kdf_type = payload.get("kdfType", 0)
+    if kdf_type not in (0, None):
+        raise VaultError(
+            "this export was protected with Argon2id, which SPM cannot derive. "
+            "Re-export from Bitwarden without a password, or export as CSV.")
+
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    except ImportError:
+        raise VaultError(
+            "reading a password-protected export needs the python3 "
+            "'cryptography' package, which is not installed. Re-export from "
+            "Bitwarden without a password, or install it and try again.")
+
+    salt = (payload.get("salt") or "").encode("utf-8")
+    iterations = int(payload.get("kdfIterations") or 600000)
+    if not salt:
+        raise VaultError("the export carries no salt")
+
+    master = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt,
+                                 iterations, dklen=32)
+    enc_key = _hkdf_expand_sha256(master, b"enc", 32)
+    mac_key = _hkdf_expand_sha256(master, b"mac", 32)
+
+    _, iv, ciphertext, mac = _split_cipher_string(payload.get("data"))
+
+    # Authenticate before decrypting, and compare in constant time. A wrong
+    # password fails here, which is why it is reported as a wrong password
+    # rather than as corrupt data.
+    expected = hmac.new(mac_key, iv + ciphertext, hashlib.sha256).digest()
+    if not hmac.compare_digest(expected, mac):
+        raise VaultError("wrong export password, or the file has been altered")
+
+    decryptor = Cipher(algorithms.AES(enc_key), modes.CBC(iv)).decryptor()
+    padded = decryptor.update(ciphertext) + decryptor.finalize()
+    if not padded:
+        raise VaultError("the export decrypted to nothing")
+    pad = padded[-1]
+    if pad < 1 or pad > 16 or padded[-pad:] != bytes([pad]) * pad:
+        raise VaultError("the export did not decrypt cleanly")
+    return padded[:-pad].decode("utf-8")
+
+
+def parse_otpauth(value):
+    """(secret, period, algorithm) from a TOTP value Bitwarden might store.
+
+    Bitwarden's `totp` field is either a bare base32 secret or a whole
+    otpauth:// URI. SPM's authenticator row holds the secret, the period and
+    the algorithm in separate fields, so a URI stored verbatim produces an
+    authenticator that cannot generate a code -- it would try to base32-decode
+    the URI itself.
+    """
+    text = (value or "").strip()
+    if not text:
+        return "", "30", "sha1"
+    if not text.lower().startswith("otpauth://"):
+        return text, "30", "sha1"
+    query = urllib.parse.urlparse(text).query
+    params = urllib.parse.parse_qs(query)
+    secret = (params.get("secret") or [""])[0].strip()
+    period = (params.get("period") or ["30"])[0].strip() or "30"
+    algorithm = (params.get("algorithm") or ["sha1"])[0].strip().lower() or "sha1"
+    if not period.isdigit():
+        period = "30"
+    if algorithm not in ("sha1", "sha256", "sha512"):
+        algorithm = "sha1"
+    return secret, period, algorithm
+
+
+def bitwarden_rows(payload):
+    """Bitwarden's JSON export as rows in SPM's import schema.
+
+    Custom fields, folder names and TOTP secrets are carried across rather than
+    dropped. A TOTP becomes an authenticator row; everything else Bitwarden
+    kept as structure is appended to the notes, because silently losing it
+    during a migration is the kind of failure people notice months later.
+    """
+    rows = []
+    folders = {}
+    for folder in payload.get("folders") or []:
+        if isinstance(folder, dict) and folder.get("id"):
+            folders[folder["id"]] = folder.get("name") or ""
+
+    for item in payload.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name") or ""
+        created = item.get("creationDate") or ""
+        extras = []
+        for field in item.get("fields") or []:
+            if isinstance(field, dict) and field.get("name"):
+                extras.append("%s: %s" % (field["name"], field.get("value") or ""))
+        structured = _bitwarden_structured(item)
+        if structured:
+            extras.append(structured)
+        folder = folders.get(item.get("folderId") or "", "")
+        if folder:
+            extras.append("folder: %s" % folder)
+        notes = "\n".join([n for n in [item.get("notes") or ""] + extras if n])
+
+        login = item.get("login") or {}
+        if item.get("type") == BITWARDEN_LOGIN or login:
+            rows.append({"type": "password", "label": name,
+                         "username": login.get("username") or "",
+                         "secret": login.get("password") or "",
+                         "notes": notes, "created": created,
+                         "url": _bitwarden_uri(item)})
+            secret, period, algorithm = parse_otpauth(login.get("totp"))
+            if secret:
+                rows.append({"type": "authenticator", "label": name,
+                             "secret": secret, "period": period,
+                             "algorithm": algorithm, "notes": "",
+                             "created": created})
+        else:
+            rows.append({"type": "note", "label": name, "secret": notes,
+                         "notes": "", "created": created})
+    return rows
+
+
+def bitwarden_csv_rows(records):
+    """Bitwarden's CSV export as rows in SPM's import schema."""
+    rows = []
+    for record in records:
+        def field(key):
+            return (record.get(key) or "").strip()
+        name = field("name")
+        extras = [v for v in (field("fields"),) if v]
+        if field("folder"):
+            extras.append("folder: %s" % field("folder"))
+        notes = "\n".join([n for n in [record.get("notes") or ""] + extras if n])
+
+        if field("type").lower() == "login" or field("login_password") or field("login_username"):
+            rows.append({"type": "password", "label": name,
+                         "username": field("login_username"),
+                         "secret": record.get("login_password") or "",
+                         "notes": notes, "created": "",
+                         "url": field("login_uri")})
+            secret, period, algorithm = parse_otpauth(field("login_totp"))
+            if secret:
+                rows.append({"type": "authenticator", "label": name,
+                             "secret": secret, "period": period,
+                             "algorithm": algorithm, "notes": "",
+                             "created": ""})
+        else:
+            rows.append({"type": "note", "label": name, "secret": notes,
+                         "notes": "", "created": ""})
+    return rows
+
 
 # ----- diagnostics -----------------------------------------------------------
 
@@ -11040,6 +11282,17 @@ def transfer_page():
         f'<option value="{f}">{f}{" (default)" if f == "csv" else ""}</option>'
         for f in EXPORT_FORMATS
     )
+    # The import picker carries the Bitwarden entries as well, labelled so it
+    # is obvious which file each one wants.
+    bitwarden_labels = {
+        "bitwarden-json": "Bitwarden — JSON export",
+        "bitwarden-csv": "Bitwarden — CSV export",
+        "bitwarden-protected": "Bitwarden — password-protected JSON",
+    }
+    import_opts = opts + "".join(
+        f'<option value="{f}">{bitwarden_labels[f]}</option>'
+        for f in BITWARDEN_FORMATS
+    )
     content = f"""
 <div class="page-head">
   <div>
@@ -11054,7 +11307,7 @@ def transfer_page():
       <form method="get" action="/export">
         <div class="field">
           <label data-i18n="import.format_label">Format</label>
-          <select class="input" name="fmt">{opts}</select>
+          <select class="input" name="fmt" id="import-fmt">{import_opts}</select>
         </div>
         <button class="btn btn-primary btn-block" type="submit" data-i18n="import.download">Download</button>
       </form>
@@ -11080,6 +11333,13 @@ def transfer_page():
           <label data-i18n="import.upload_label">Upload export file</label>
           <input class="input" type="file" name="file">
         </div>
+        <div class="field hidden" id="import-pw-field">
+          <label data-i18n="import.export_password">Export password</label>
+          <input class="input" type="password" name="export_password" autocomplete="off"
+                 data-i18n-placeholder="import.export_password_hint"
+                 placeholder="The password you set when exporting from Bitwarden">
+          <div class="hint" data-i18n="import.export_password_note">Only needed for a password-protected Bitwarden export. It is used to read the file and is never stored.</div>
+        </div>
         <div class="field">
           <label data-i18n="import.paste_label">Or paste file contents</label>
           <textarea class="input" name="data" rows="6"
@@ -11094,6 +11354,16 @@ def transfer_page():
 (function () {{
   var form = document.getElementById("import-form");
   if (!form) return;
+  // The export password applies to exactly one format, so asking for it the
+  // rest of the time would be a field nobody can answer.
+  var fmt = document.getElementById("import-fmt");
+  var pwField = document.getElementById("import-pw-field");
+  function syncPasswordField() {{
+    if (!fmt || !pwField) return;
+    pwField.classList.toggle("hidden", fmt.value !== "bitwarden-protected");
+  }}
+  if (fmt) fmt.addEventListener("change", syncPasswordField);
+  syncPasswordField();
   form.addEventListener("submit", function () {{
     var ov = document.getElementById("import-overlay");
     if (ov) ov.classList.add("on");
@@ -11328,7 +11598,12 @@ def totp_code(secret_b32: str, period: int = 30, algo: str = "sha1") -> str:
     code_int = struct.unpack(">I", h[offset:offset+4])[0] & 0x7fffffff
     return str(code_int % 10**6).zfill(6)
 
-SUPPORTED_FORMATS = ("csv","json","tsv","ndjson","jsonl","md","markdown","html","txt","yaml","yml","xml","sql","ini","psv","rst","toml","org","scsv","csv-noheader","jsonc")
+SUPPORTED_FORMATS = ("csv","json","tsv","ndjson","jsonl","md","markdown","html","txt","yaml","yml","xml","sql","ini","psv","rst","toml","org","scsv","csv-noheader","jsonc",
+                     "bitwarden-json","bitwarden-csv","bitwarden-protected")
+
+# Import-only. There is no exporting *to* Bitwarden, so these belong in the
+# import picker and nowhere else.
+BITWARDEN_FORMATS = ("bitwarden-json", "bitwarden-csv", "bitwarden-protected")
 
 def _export_rows(plaintext: str):
     import base64, html as htmlmod
@@ -11591,7 +11866,51 @@ def _parse_import_rows(fmt: str, content: str):
     reader = csv.DictReader(io.StringIO(content), delimiter=delim)
     return list(reader)
 
-def _apply_import(fmt: str, content: str, plaintext: str):
+def _detect_bitwarden(fmt: str, content: str):
+    """The bitwarden-* format this content really is, or "" if it is not one."""
+    import csv as csvlib
+    if fmt in ("json", "jsonc"):
+        try:
+            payload = jsonlib.loads(content)
+        except Exception:
+            return ""
+        if isinstance(payload, dict) and payload.get("encrypted"):
+            return "bitwarden-protected"
+        if core.looks_like_bitwarden_json(payload):
+            return "bitwarden-json"
+        return ""
+    if fmt == "csv":
+        try:
+            reader = csvlib.DictReader(io.StringIO(content))
+            if core.looks_like_bitwarden_csv_header(reader.fieldnames):
+                return "bitwarden-csv"
+        except Exception:
+            return ""
+    return ""
+
+
+def _bitwarden_import_rows(fmt: str, content: str, export_password: str = ""):
+    """Rows in SPM's import schema from any of Bitwarden's three export files.
+
+    The mapping itself lives in the core, so the CLI and the dashboard cannot
+    come to different conclusions about what a Bitwarden file contains.
+    """
+    import csv as csvlib
+    if fmt == "bitwarden-csv":
+        reader = csvlib.DictReader(io.StringIO(content))
+        return core.bitwarden_csv_rows(list(reader))
+
+    payload = jsonlib.loads(content)
+    if fmt == "bitwarden-protected" or (isinstance(payload, dict) and payload.get("encrypted")):
+        if not export_password:
+            raise ValueError("This export is password-protected. Enter the export password.")
+        payload = jsonlib.loads(core.decrypt_bitwarden_export(payload, export_password))
+    if not core.looks_like_bitwarden_json(payload):
+        raise ValueError("This does not look like a Bitwarden JSON export.")
+    return core.bitwarden_rows(payload)
+
+
+def _apply_import(fmt: str, content: str, plaintext: str, export_password: str = ""):
     import base64
     tab = "\t"
     fmt = fmt.lower()
@@ -11737,8 +12056,16 @@ def _apply_import(fmt: str, content: str, plaintext: str):
                 })
         return rows
 
-    if fmt in ("json","jsonc","ndjson","jsonl","csv","csv-noheader","tsv","scsv","psv","txt","html","yaml","yml","xml","sql","ini","toml"):
-        rows = _parse_import_rows(fmt, content)
+    if fmt in BITWARDEN_FORMATS:
+        rows = _bitwarden_import_rows(fmt, content, export_password)
+    elif fmt in ("json","jsonc","ndjson","jsonl","csv","csv-noheader","tsv","scsv","psv","txt","html","yaml","yml","xml","sql","ini","toml"):
+        # A Bitwarden file picked as plain json or csv is still a Bitwarden
+        # file. Detecting it rather than failing means choosing the wrong entry
+        # in the dropdown is not a silent, partial import -- which is what a
+        # Bitwarden CSV used to produce: one empty note and every login lost.
+        detected = _detect_bitwarden(fmt, content)
+        rows = (_bitwarden_import_rows(detected, content, export_password)
+                if detected else _parse_import_rows(fmt, content))
     else:
         rows = parse_plain_table(content)
 
@@ -14076,12 +14403,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             fmt = "csv"
             content = ""
+            export_password = ""
 
             if "multipart/form-data" in content_type.lower():
                 try:
                     fields = parse_multipart(body_bytes, content_type)
                     fmt_raw = fields.get("fmt") or b"csv"
                     fmt = fmt_raw.decode("utf-8", "ignore").lower()
+                    export_password = fields.get("export_password", b"").decode("utf-8", "ignore")
                     file_bytes = fields.get("file", b"")
                     if file_bytes:
                         content = file_bytes.decode("utf-8", "ignore")
@@ -14100,6 +14429,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body_str = body_bytes.decode("utf-8", "ignore")
                 data = urllib.parse.parse_qs(body_str)
                 fmt = (data.get("fmt") or ["csv"])[0].lower()
+                export_password = (data.get("export_password") or [""])[0]
                 content = (data.get("data") or [""])[0]
                 if not content and body_str:
                     content = body_str
@@ -14115,7 +14445,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 sys.stderr.write('[import] Applying import data...\n')
                 plaintext = load_vault(master, self._session_rec)
-                new_plain, stats = _apply_import(fmt, content, plaintext)
+                new_plain, stats = _apply_import(fmt, content, plaintext, export_password)
                 save_vault(master, new_plain, self._session_rec)
                 sys.stderr.write(f"[import] Vault successfully updated ({stats}).\n")
                 summary = ", ".join(f"{v} {k}" for k,v in stats.items() if v)

@@ -7,6 +7,41 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.4.3] - 2026-08-29
+
+### Added
+- **Bitwarden vault imports in web mode**, for all three of its export files:
+  unencrypted JSON, CSV, and password-protected JSON. Each has its own entry in
+  the import format list, and the password-protected one asks for the export
+  password, which is used to read the file and never stored.
+
+  Logins become password entries with username, URI and notes. A login's TOTP
+  becomes an authenticator, with an `otpauth://` URI unpacked into its secret,
+  period and algorithm — stored whole it would not generate codes. Secure notes
+  become notes; cards and identities, which have no SPM equivalent, are kept as
+  readable notes rather than dropped. Folder names and custom fields are
+  appended to each entry's notes.
+
+  Choosing plain `json` or `csv` for a Bitwarden file also works: the format is
+  detected.
+
+### Fixed
+- **A Bitwarden CSV imported as one empty note and silently lost every login**,
+  while the dashboard reported success. A Bitwarden JSON export raised
+  `AttributeError` and imported nothing. Both are now read correctly.
+
+### Known limitations
+- An export protected with **Argon2id** cannot be read — there is no Argon2
+  implementation SPM can reach without a third-party dependency, the same wall
+  described in `ROADMAP.md`. Such a file is refused by name, with the advice to
+  re-export without a password or as CSV, rather than failing obscurely.
+- A password-protected export needs the `cryptography` package for
+  AES-256-CBC. Where it is missing the import says so. The alternatives were
+  `openssl enc -K`, which puts the key in argv where any local user can read
+  it and which the trusted core forbids by design, or hand-writing AES, which
+  does not belong in a password manager for a one-off conversion. Unencrypted
+  JSON and CSV need nothing beyond the standard library.
+
 ## [3.4.2] - 2026-08-29
 
 ### Fixed

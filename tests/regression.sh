@@ -1337,6 +1337,163 @@ printf '  source is inert; execution and a real pipe still dispatch\n'
 # and vault mutation are exercised against the module directly, without a
 # shell or a web server in the way. That this file can exist at all is the
 # point of extracting it.
+printf 'Import regression: Bitwarden JSON, CSV and password-protected exports\n'
+# People arrive from Bitwarden, and its export shares no field names with SPM's.
+# Before this, a Bitwarden CSV imported as one empty note and every login was
+# silently dropped -- the dashboard still reported success. The JSON export
+# raised AttributeError. Both are asserted here, along with the encrypted
+# export, which is built independently rather than by the code under test.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$web_script" "$PASSWORD_VAULT" <<'BWPY'
+import base64
+import hashlib
+import hmac
+import importlib.util
+import io
+import json
+import os
+import sys
+
+spec = importlib.util.spec_from_file_location("spmweb", sys.argv[1])
+web = importlib.util.module_from_spec(spec)
+# The module refuses to finish loading without a vault it can see, so it is
+# pointed at the suite's own disposable one. Nothing here reads or writes it.
+os.environ["SPM_VAULT_PATH"] = sys.argv[2]
+try:
+    spec.loader.exec_module(web)
+except SystemExit:
+    pass
+
+BASE = "META_RECOVERY_PUBKEY\tX\t-\t-\t-\t-\n"
+PLAIN = {
+    "encrypted": False,
+    "folders": [{"id": "f1", "name": "Work"}],
+    "items": [
+        {"id": "a", "type": 1, "name": "GitHub", "notes": "work account",
+         "folderId": "f1", "creationDate": "2025-03-04T08:00:00.000Z",
+         "login": {"uris": [{"uri": "https://github.com"}],
+                   "username": "dev@example.invalid", "password": "s3cr3t-pw",
+                   "totp": "otpauth://totp/GitHub?secret=JBSWY3DPEHPK3PXP&period=60"}},
+        {"id": "b", "type": 2, "name": "Recovery notes",
+         "notes": "line one\nline two"},
+    ],
+}
+CSV = (
+    "folder,favorite,type,name,notes,fields,reprompt,"
+    "login_uri,login_username,login_password,login_totp\n"
+    "Work,1,login,GitHub,work account,,0,https://github.com,"
+    "dev@example.invalid,s3cr3t-pw,JBSWY3DPEHPK3PXP\n"
+    ',0,note,Recovery notes,"line one\nline two",,0,,,,\n'
+)
+
+
+def rows_of(text):
+    return [line for line in text.splitlines() if not line.startswith("META_")]
+
+
+def check(name, fmt, content, password="", expect_auth_period=None):
+    plain, stats = web._apply_import(fmt, content, BASE, password)
+    body = rows_of(plain)
+    if stats["passwords"] != 1:
+        sys.exit("%s: expected 1 password, got %s" % (name, stats))
+    if stats["notes"] != 1:
+        sys.exit("%s: expected 1 note, got %s" % (name, stats))
+    if stats["authenticators"] != 1:
+        sys.exit("%s: expected 1 authenticator, got %s" % (name, stats))
+    joined = "\n".join(body)
+    if "s3cr3t-pw" not in joined:
+        sys.exit("%s: the login password was not imported" % name)
+    if "dev@example.invalid" not in joined:
+        sys.exit("%s: the username was not imported" % name)
+    if "https://github.com" not in joined:
+        sys.exit("%s: the URI was not imported" % name)
+    # The TOTP must arrive as a base32 secret, not as the otpauth URI: SPM's
+    # authenticator row holds the secret alone and would try to decode a URI.
+    auth = [line for line in body if line.startswith("AUTH\t")][0].split("\t")
+    if auth[3] != "JBSWY3DPEHPK3PXP":
+        sys.exit("%s: authenticator secret is %r, not the base32 secret"
+                 % (name, auth[3]))
+    if expect_auth_period and auth[4] != expect_auth_period:
+        sys.exit("%s: authenticator period is %r, wanted %r"
+                 % (name, auth[4], expect_auth_period))
+    # The note body is stored base64; it must round-trip with its newline.
+    note = [line for line in body if line.startswith("NOTE\t")][0].split("\t")
+    if base64.b64decode(note[3]).decode("utf-8") != "line one\nline two":
+        sys.exit("%s: the note body did not survive" % name)
+
+
+check("bitwarden-json", "bitwarden-json", json.dumps(PLAIN), expect_auth_period="60")
+check("bitwarden-csv", "bitwarden-csv", CSV)
+# Choosing plain json or csv must still work: a wrong pick used to mean a
+# silent partial import rather than an error.
+check("json autodetect", "json", json.dumps(PLAIN), expect_auth_period="60")
+check("csv autodetect", "csv", CSV)
+
+# A password-protected export, constructed here the way Bitwarden constructs
+# one, so the decryptor is tested against a file it did not produce.
+password, salt, iters = "export-pw-123", "bw-salt", 50000
+master = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), iters, dklen=32)
+
+
+def hkdf(prk, info, n=32):
+    okm, block, counter = b"", b"", 1
+    while len(okm) < n:
+        block = hmac.new(prk, block + info + bytes([counter]), hashlib.sha256).digest()
+        okm += block
+        counter += 1
+    return okm[:n]
+
+
+try:
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+except ImportError:
+    print("  bitwarden: json and csv verified; protected export skipped "
+          "(no python3 cryptography here, which SPM reports rather than guesses)")
+    raise SystemExit(0)
+
+enc_key, mac_key = hkdf(master, b"enc"), hkdf(master, b"mac")
+payload = json.dumps(PLAIN).encode("utf-8")
+pad = 16 - (len(payload) % 16)
+iv = os.urandom(16)
+encryptor = Cipher(algorithms.AES(enc_key), modes.CBC(iv)).encryptor()
+ciphertext = encryptor.update(payload + bytes([pad]) * pad) + encryptor.finalize()
+mac = hmac.new(mac_key, iv + ciphertext, hashlib.sha256).digest()
+blob = "2.%s|%s|%s" % (base64.b64encode(iv).decode(),
+                       base64.b64encode(ciphertext).decode(),
+                       base64.b64encode(mac).decode())
+protected = json.dumps({"encrypted": True, "passwordProtected": True,
+                        "salt": salt, "kdfType": 0, "kdfIterations": iters,
+                        "data": blob})
+
+check("bitwarden-protected", "bitwarden-protected", protected, password,
+      expect_auth_period="60")
+
+for name, fmt, content, pw, expected in (
+        ("no password", "bitwarden-protected", protected, "", "password-protected"),
+        ("wrong password", "bitwarden-protected", protected, "wrong", "wrong export password"),
+):
+    try:
+        web._apply_import(fmt, content, BASE, pw)
+    except Exception as exc:
+        if expected not in str(exc):
+            sys.exit("%s: unhelpful error %r" % (name, exc))
+    else:
+        sys.exit("%s: a protected export was imported without the right password" % name)
+
+# Argon2id is not derivable here, and must be refused by name rather than
+# producing an empty or partial import.
+argon = json.loads(protected)
+argon["kdfType"] = 1
+try:
+    web._apply_import("bitwarden-protected", json.dumps(argon), BASE, password)
+except Exception as exc:
+    if "Argon2id" not in str(exc):
+        sys.exit("an Argon2id export was refused without saying why: %r" % exc)
+else:
+    sys.exit("an Argon2id export was accepted")
+
+print("  bitwarden: json, csv, protected, autodetect, and four refusals verified")
+BWPY
+
 printf 'Portability regression: platform-specific command behaviour\n'
 # This suite runs on Linux, macOS and Termux, and the failures that only show
 # up on one of them are the ones nobody sees until a user reports them. Each

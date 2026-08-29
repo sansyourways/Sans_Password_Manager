@@ -3679,6 +3679,17 @@ def transfer_page():
         f'<option value="{f}">{f}{" (default)" if f == "csv" else ""}</option>'
         for f in EXPORT_FORMATS
     )
+    # The import picker carries the Bitwarden entries as well, labelled so it
+    # is obvious which file each one wants.
+    bitwarden_labels = {
+        "bitwarden-json": "Bitwarden — JSON export",
+        "bitwarden-csv": "Bitwarden — CSV export",
+        "bitwarden-protected": "Bitwarden — password-protected JSON",
+    }
+    import_opts = opts + "".join(
+        f'<option value="{f}">{bitwarden_labels[f]}</option>'
+        for f in BITWARDEN_FORMATS
+    )
     content = f"""
 <div class="page-head">
   <div>
@@ -3693,7 +3704,7 @@ def transfer_page():
       <form method="get" action="/export">
         <div class="field">
           <label data-i18n="import.format_label">Format</label>
-          <select class="input" name="fmt">{opts}</select>
+          <select class="input" name="fmt" id="import-fmt">{import_opts}</select>
         </div>
         <button class="btn btn-primary btn-block" type="submit" data-i18n="import.download">Download</button>
       </form>
@@ -3719,6 +3730,13 @@ def transfer_page():
           <label data-i18n="import.upload_label">Upload export file</label>
           <input class="input" type="file" name="file">
         </div>
+        <div class="field hidden" id="import-pw-field">
+          <label data-i18n="import.export_password">Export password</label>
+          <input class="input" type="password" name="export_password" autocomplete="off"
+                 data-i18n-placeholder="import.export_password_hint"
+                 placeholder="The password you set when exporting from Bitwarden">
+          <div class="hint" data-i18n="import.export_password_note">Only needed for a password-protected Bitwarden export. It is used to read the file and is never stored.</div>
+        </div>
         <div class="field">
           <label data-i18n="import.paste_label">Or paste file contents</label>
           <textarea class="input" name="data" rows="6"
@@ -3733,6 +3751,16 @@ def transfer_page():
 (function () {{
   var form = document.getElementById("import-form");
   if (!form) return;
+  // The export password applies to exactly one format, so asking for it the
+  // rest of the time would be a field nobody can answer.
+  var fmt = document.getElementById("import-fmt");
+  var pwField = document.getElementById("import-pw-field");
+  function syncPasswordField() {{
+    if (!fmt || !pwField) return;
+    pwField.classList.toggle("hidden", fmt.value !== "bitwarden-protected");
+  }}
+  if (fmt) fmt.addEventListener("change", syncPasswordField);
+  syncPasswordField();
   form.addEventListener("submit", function () {{
     var ov = document.getElementById("import-overlay");
     if (ov) ov.classList.add("on");
@@ -3967,7 +3995,12 @@ def totp_code(secret_b32: str, period: int = 30, algo: str = "sha1") -> str:
     code_int = struct.unpack(">I", h[offset:offset+4])[0] & 0x7fffffff
     return str(code_int % 10**6).zfill(6)
 
-SUPPORTED_FORMATS = ("csv","json","tsv","ndjson","jsonl","md","markdown","html","txt","yaml","yml","xml","sql","ini","psv","rst","toml","org","scsv","csv-noheader","jsonc")
+SUPPORTED_FORMATS = ("csv","json","tsv","ndjson","jsonl","md","markdown","html","txt","yaml","yml","xml","sql","ini","psv","rst","toml","org","scsv","csv-noheader","jsonc",
+                     "bitwarden-json","bitwarden-csv","bitwarden-protected")
+
+# Import-only. There is no exporting *to* Bitwarden, so these belong in the
+# import picker and nowhere else.
+BITWARDEN_FORMATS = ("bitwarden-json", "bitwarden-csv", "bitwarden-protected")
 
 def _export_rows(plaintext: str):
     import base64, html as htmlmod
@@ -4230,7 +4263,51 @@ def _parse_import_rows(fmt: str, content: str):
     reader = csv.DictReader(io.StringIO(content), delimiter=delim)
     return list(reader)
 
-def _apply_import(fmt: str, content: str, plaintext: str):
+def _detect_bitwarden(fmt: str, content: str):
+    """The bitwarden-* format this content really is, or "" if it is not one."""
+    import csv as csvlib
+    if fmt in ("json", "jsonc"):
+        try:
+            payload = jsonlib.loads(content)
+        except Exception:
+            return ""
+        if isinstance(payload, dict) and payload.get("encrypted"):
+            return "bitwarden-protected"
+        if core.looks_like_bitwarden_json(payload):
+            return "bitwarden-json"
+        return ""
+    if fmt == "csv":
+        try:
+            reader = csvlib.DictReader(io.StringIO(content))
+            if core.looks_like_bitwarden_csv_header(reader.fieldnames):
+                return "bitwarden-csv"
+        except Exception:
+            return ""
+    return ""
+
+
+def _bitwarden_import_rows(fmt: str, content: str, export_password: str = ""):
+    """Rows in SPM's import schema from any of Bitwarden's three export files.
+
+    The mapping itself lives in the core, so the CLI and the dashboard cannot
+    come to different conclusions about what a Bitwarden file contains.
+    """
+    import csv as csvlib
+    if fmt == "bitwarden-csv":
+        reader = csvlib.DictReader(io.StringIO(content))
+        return core.bitwarden_csv_rows(list(reader))
+
+    payload = jsonlib.loads(content)
+    if fmt == "bitwarden-protected" or (isinstance(payload, dict) and payload.get("encrypted")):
+        if not export_password:
+            raise ValueError("This export is password-protected. Enter the export password.")
+        payload = jsonlib.loads(core.decrypt_bitwarden_export(payload, export_password))
+    if not core.looks_like_bitwarden_json(payload):
+        raise ValueError("This does not look like a Bitwarden JSON export.")
+    return core.bitwarden_rows(payload)
+
+
+def _apply_import(fmt: str, content: str, plaintext: str, export_password: str = ""):
     import base64
     tab = "\t"
     fmt = fmt.lower()
@@ -4376,8 +4453,16 @@ def _apply_import(fmt: str, content: str, plaintext: str):
                 })
         return rows
 
-    if fmt in ("json","jsonc","ndjson","jsonl","csv","csv-noheader","tsv","scsv","psv","txt","html","yaml","yml","xml","sql","ini","toml"):
-        rows = _parse_import_rows(fmt, content)
+    if fmt in BITWARDEN_FORMATS:
+        rows = _bitwarden_import_rows(fmt, content, export_password)
+    elif fmt in ("json","jsonc","ndjson","jsonl","csv","csv-noheader","tsv","scsv","psv","txt","html","yaml","yml","xml","sql","ini","toml"):
+        # A Bitwarden file picked as plain json or csv is still a Bitwarden
+        # file. Detecting it rather than failing means choosing the wrong entry
+        # in the dropdown is not a silent, partial import -- which is what a
+        # Bitwarden CSV used to produce: one empty note and every login lost.
+        detected = _detect_bitwarden(fmt, content)
+        rows = (_bitwarden_import_rows(detected, content, export_password)
+                if detected else _parse_import_rows(fmt, content))
     else:
         rows = parse_plain_table(content)
 
@@ -6715,12 +6800,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             fmt = "csv"
             content = ""
+            export_password = ""
 
             if "multipart/form-data" in content_type.lower():
                 try:
                     fields = parse_multipart(body_bytes, content_type)
                     fmt_raw = fields.get("fmt") or b"csv"
                     fmt = fmt_raw.decode("utf-8", "ignore").lower()
+                    export_password = fields.get("export_password", b"").decode("utf-8", "ignore")
                     file_bytes = fields.get("file", b"")
                     if file_bytes:
                         content = file_bytes.decode("utf-8", "ignore")
@@ -6739,6 +6826,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body_str = body_bytes.decode("utf-8", "ignore")
                 data = urllib.parse.parse_qs(body_str)
                 fmt = (data.get("fmt") or ["csv"])[0].lower()
+                export_password = (data.get("export_password") or [""])[0]
                 content = (data.get("data") or [""])[0]
                 if not content and body_str:
                     content = body_str
@@ -6754,7 +6842,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 sys.stderr.write('[import] Applying import data...\n')
                 plaintext = load_vault(master, self._session_rec)
-                new_plain, stats = _apply_import(fmt, content, plaintext)
+                new_plain, stats = _apply_import(fmt, content, plaintext, export_password)
                 save_vault(master, new_plain, self._session_rec)
                 sys.stderr.write(f"[import] Vault successfully updated ({stats}).\n")
                 summary = ", ".join(f"{v} {k}" for k,v in stats.items() if v)
