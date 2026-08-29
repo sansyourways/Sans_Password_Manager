@@ -38,6 +38,9 @@ co-owners of it. That review is a design concept, not a formal security audit.
   against the field it surrounded, where WCAG 1.4.11 asks 3.0:1. Now 9.7:1,
   with the suite failing if it drops again.
 - Keep import/export fixtures synchronized across every documented format.
+  Twenty of them round-trip against their own exports; the Bitwarden readers
+  added in 3.4.3 have fixtures but no round trip, because SPM does not export
+  to Bitwarden and never will.
 
 ## Shipped integrations
 
@@ -83,6 +86,8 @@ co-owners of it. That review is a design concept, not a formal security audit.
 ## Next — safer integrations
 
 - Continue the browser-extension work with an origin-isolated in-field picker.
+  Written but not shipped, and not for want of effort — see *What is left, and
+  what decides when* below.
 - Design pluggable, encrypted synchronization transports without introducing a
   maintainer-operated cloud service.
 - **Machine-readable doctor output — shipped in 3.4.0**, corrected in 3.4.2.
@@ -217,7 +222,11 @@ as such below rather than quietly dropped.
   secret to any third party.
 - Folders and custom fields for records that do not fit the current shape.
 - Import preview, so a Bitwarden, 1Password, KeePass or browser export can be
-  inspected and corrected before it is committed to the vault.
+  inspected and corrected before it is committed to the vault. 3.4.3 made this
+  sharper rather than answering it: a Bitwarden export now imports correctly
+  and goes straight in, and the failure it replaced — a CSV that produced one
+  empty note and dropped every login while reporting success — is exactly the
+  kind a preview would have shown the user before it happened.
 
 ### What is left, and what decides when
 
