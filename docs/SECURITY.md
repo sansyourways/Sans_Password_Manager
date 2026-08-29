@@ -16,12 +16,12 @@ SPM is designed around the following core principles:
 - **User-controlled keys** — the user is the sole owner of all keys and passwords.
 - **User-controlled recovery** — recovery requires the locally generated RSA private key and recovery blob; the developer cannot recover either.
 - **Crash-safe writes** — ciphertext is staged and atomically installed, with a last-known-good encrypted backup.
-- **Concurrent-write protection** — CLI and web mutations share an advisory
-  file lock where `flock(1)` exists. **macOS does not ship `flock`, so on
-  macOS there is no lock and concurrent CLI and dashboard writes can lose
-  records.** SPM prints a warning when it starts without one. A portable
-  lock is planned; until then, on macOS do not write from the CLI and the
-  dashboard at the same time.
+- **Concurrent-write protection** — CLI and web mutations share one advisory
+  lock on every supported platform. `flock(1)` is used where it exists; macOS
+  does not ship it, so the CLI takes the same lock through python3's `fcntl`,
+  which is the primitive the dashboard has always used, so the two exclude
+  each other. The kernel releases the lock when the last holder exits, so a
+  killed process leaves nothing to clean up.
 - **Local-first extensions** — history, backups, attachments, and sync contain encrypted vault material; browser autofill is explicit and hostname-bound.
 - **Platform-owned passkeys** — SPM stores passkey metadata, never private passkey key material.
 

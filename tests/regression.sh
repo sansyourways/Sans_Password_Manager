@@ -1465,23 +1465,6 @@ race_writer() {
 
 SPM_CORE_DIR="$XDG_DATA_HOME/spm" ensure_core_script "$XDG_DATA_HOME/spm" >/dev/null
 
-# macOS ships no flock(1). SPM already knows this -- acquire_cli_vault_lock
-# warns and continues -- so the honest thing here is to assert that warning
-# rather than to fake a lock the platform does not have and call it a pass.
-# The race itself only means something where the lock is real.
-if ! command -v flock >/dev/null 2>&1; then
-	lock_warning="$TEST_ROOT/lock-warning.txt"
-	( export VAULT_FILE="$race_vault"
-	  acquire_cli_vault_lock ) > "$lock_warning" 2>&1 || true
-	grep -q "flock' is unavailable" "$lock_warning" || {
-		printf 'flock is missing and SPM did not warn about it\n' >&2
-		cat "$lock_warning" >&2
-		exit 1
-	}
-	printf '  no flock(1) on this platform: SPM warns, and the race is not asserted\n'
-	printf '  (concurrent CLI and web writes are unprotected here -- see ROADMAP)\n'
-else
-
 race_pids=""
 for racer in 1 2 3 4 5; do
 	race_writer "$racer" &
@@ -1507,7 +1490,68 @@ race_stage_files="$(find "$race_dir" -name '*.stage.*' -print -quit)"
 	exit 1
 }
 printf '  5 concurrent writers, all 5 records survived, no staging files left\n'
+
+# The same race again, this time through the lock SPM itself takes, and with
+# flock(1) forced out of reach so the Python path is the one under test.
+#
+# That forcing is the point. macOS has no flock(1), so before 3.4.1 the CLI
+# took no lock there at all while the dashboard did -- one side believing it
+# was protected. Testing the fallback only on macOS would mean testing it
+# nowhere most of the time, so it is exercised here on every platform.
+lock_fallback_dir="$TEST_ROOT/lock-fallback"
+mkdir -p "$lock_fallback_dir/bin"
+# A PATH containing only the tools these writers need, and deliberately not
+# flock(1), so `command -v flock` genuinely fails inside them. Stripping
+# flock's directory out of the real PATH does not work -- it lives in the same
+# directory as everything else.
+for lock_tool in bash python3 cat sleep; do
+	lock_tool_path="$(command -v "$lock_tool")" || {
+		printf 'the lock fallback test needs %s\n' "$lock_tool" >&2; exit 1; }
+	ln -sf "$lock_tool_path" "$lock_fallback_dir/bin/$lock_tool"
+done
+lock_counter="$lock_fallback_dir/counter"
+printf '0\n' > "$lock_counter"
+cat > "$lock_fallback_dir/writer.sh" <<'LOCKW'
+set -u
+VAULT_FILE="$1"
+COUNTER="$2"
+CLI_VAULT_LOCKED=0
+vault_lock_hold_fd9() {
+	if command -v flock >/dev/null 2>&1; then
+		flock -x 9
+		return $?
+	fi
+	python3 -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX)' 2>/dev/null
+}
+exec 9>"${VAULT_FILE}.lock" || exit 1
+vault_lock_hold_fd9 || exit 1
+# A read-modify-write wide enough that unlocked writers reliably overlap.
+n="$(cat "$COUNTER")"
+sleep 0.2
+printf '%s\n' "$((n + 1))" > "$COUNTER"
+exec 9>&-
+LOCKW
+
+lock_path_without_flock="$lock_fallback_dir/bin"
+if PATH="$lock_path_without_flock" command -v flock >/dev/null 2>&1; then
+	printf 'could not hide flock(1); the fallback path was not exercised\n' >&2
+	exit 1
 fi
+lock_pids=""
+for _lock_racer in 1 2 3 4 5 6 7 8; do
+	PATH="$lock_path_without_flock" bash "$lock_fallback_dir/writer.sh" \
+		"$race_vault" "$lock_counter" &
+	lock_pids="$lock_pids $!"
+done
+for pid in $lock_pids; do wait "$pid" || {
+	printf 'a writer using the python lock fallback failed\n' >&2; exit 1; }
+done
+lock_total="$(cat "$lock_counter")"
+[ "$lock_total" -eq 8 ] || {
+	printf 'the python lock fallback lost updates: %s of 8\n' "$lock_total" >&2
+	exit 1
+}
+printf '  python lock fallback (flock hidden): 8 racing writers, 8 survived\n'
 
 printf 'Web regression: session vault-key cache\n'
 # The dashboard holds a session's unwrapped vault key so every read after the

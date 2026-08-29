@@ -7,6 +7,26 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.4.1] - 2026-08-29
+
+### Fixed
+- **The CLI now takes a vault lock on macOS.** The advisory lock required
+  `flock(1)`, which is util-linux and which macOS does not ship, so on macOS
+  the CLI silently took no lock while the SPM Dashboard took one through
+  Python's `fcntl` — the worst arrangement available, because one side
+  believed it was protected. The CLI now falls back to the same `fcntl` lock
+  on the same file, so the two exclude each other. Where `flock(1)` exists
+  nothing changes.
+
+  There is no stale-lock problem to solve: the kernel releases the lock when
+  the last descriptor for it closes, which includes the holder being killed.
+  A `mkdir`-based lock — the obvious portable answer — would have had to
+  reimplement that badly.
+
+  The regression suite now exercises the fallback on **every** platform by
+  hiding `flock(1)` behind a minimal PATH, rather than only on the one
+  platform that lacks it.
+
 ## [3.4.0] - 2026-08-29
 
 ### Added

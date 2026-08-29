@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.4.0**
+Current release: **3.4.1**
 
 ---
 
@@ -305,7 +305,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.4.0
+bash install.sh --version 3.4.1
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -317,7 +317,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.4.0 at /home/you/.local/bin/spm
+Installed SPM 3.4.1 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -918,7 +918,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.4.0**
+Version: **3.4.1**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
@@ -957,11 +957,11 @@ explicitly if your proxy publishes a non-default port.
 Authenticated web mutations also require an exact same-origin request and are serialized across threads/processes to prevent CSRF and lost vault writes. Decrypted web responses use `Cache-Control: no-store`.
 All listed import formats are round-trip compatible with their matching CLI and web exports.
 Vault writes are staged and atomically installed. CLI and web processes share
-an advisory vault lock where `flock(1)` exists. **macOS does not ship `flock`**,
-so on macOS there is no lock: a CLI write and a dashboard write at the same
-moment can lose one of them. SPM warns when it runs without a lock. A portable
-lock is planned; until then avoid concurrent access there. `save` verifies the
-archived vault before removing the local copy.
+an advisory vault lock on every supported platform. Where `flock(1)` exists it
+is used; macOS does not ship it, so there SPM takes the same lock through
+python3's `fcntl`, which is what the dashboard has always used. The kernel
+releases the lock when the holder exits, so there is no stale lock to clear.
+`save` verifies the archived vault before removing the local copy.
 
 ### Local-first 2.10 commands
 
@@ -997,7 +997,7 @@ SPM stores only discovery and recovery metadata.
 
 The universal extension is in `browser-extension-universal/` and supports
 Chrome, Chromium, Edge, Brave, Opera, Vivaldi, and Firefox desktop from one
-source tree. First install SPM 3.4.0 or later, then unpack the release archive.
+source tree. First install SPM 3.4.1 or later, then unpack the release archive.
 
 ### One-command guided setup
 
