@@ -7,6 +7,43 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-08-29
+
+### Fixed
+- **The Bitwarden import options were on the export dropdown.** 3.4.3 put them
+  on the Download form instead of the Import form, so the feature could not be
+  selected from the picker at all — it worked only because the format is also
+  auto-detected. The tests exercised the import function directly and never
+  rendered the page, which is the same gap that let 3.4.2's banner ship.
+- **Every form field was unlabelled to a screen reader.** Forms rendered
+  `<label>` elements with no `for` and inputs with no `id`, so the labels were
+  loose text and each field announced as "edit text, blank". Fixed in the one
+  helper every form goes through.
+- **The focus ring was invisible.** `.input:focus` removed the outline and
+  replaced it with a `box-shadow` in `--accent-soft`, measured at **1.15:1**
+  against the field it surrounds. WCAG 1.4.11 wants 3.0:1 for a non-text
+  indicator. It is now `--accent`, at 9.7:1.
+- Four translation keys were referenced in the markup but present in no
+  dictionary, so they rendered as English in every language. Three were added
+  with the Bitwarden import UI.
+
+### Changed
+- The sidebar is a `<nav>` landmark with a label, so a screen-reader user can
+  jump to navigation instead of walking the page.
+- The overview's recent-entries table has real header cells.
+- The search box, the generator's length slider and its four character-class
+  checkboxes, and every control on the Export/Import page now have accessible
+  names.
+
+### Added
+- Regression coverage for all of the above, asserted against **rendered
+  markup** rather than source: no unnamed control on any form, the sidebar
+  landmark, the focus ring's measured contrast, the Bitwarden entries being on
+  the import form, and every `data-i18n` key in the markup existing in the
+  dictionary. That last check closes a real blind spot — the existing parity
+  test compares the three dictionaries to each other, so a key missing from all
+  three is consistent and invisible to it.
+
 ## [3.5.0] - 2026-08-29
 
 ### Added

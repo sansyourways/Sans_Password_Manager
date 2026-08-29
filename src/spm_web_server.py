@@ -223,6 +223,11 @@ I18N_SCRIPT = """
       "chip.online": "Online · read / write",
       "btn.add_entry": "+ Add Entry",
       "table.id": "ID",
+      "import.export_password": "Export password",
+      "import.export_password_hint": "The password you set when exporting from Bitwarden",
+      "import.export_password_note": "Only needed for a password-protected Bitwarden export. It is used to read the file and is never stored.",
+      "overview.security_score": "Security score",
+      "table.service": "Service",
       "table.name": "Name",
       "table.username": "Username",
       "table.actions": "Actions",
@@ -386,6 +391,7 @@ I18N_SCRIPT = """
       "nav.backup_codes": "Backup Codes",
       "nav.generator": "Generator",
       "nav.transfer": "Export / Import",
+      "search.label": "Search this vault",
       "search.placeholder": "Search this vault...",
       "search.no_results": "Nothing matches your search",
       "lock.in": "Locks in",
@@ -484,6 +490,11 @@ I18N_SCRIPT = """
       "chip.online": "Online · baca / tulis",
       "btn.add_entry": "+ Tambah Entri",
       "table.id": "ID",
+      "import.export_password": "Kata sandi ekspor",
+      "import.export_password_hint": "Kata sandi yang Anda atur saat mengekspor dari Bitwarden",
+      "import.export_password_note": "Hanya diperlukan untuk ekspor Bitwarden yang dilindungi kata sandi. Dipakai untuk membaca berkas dan tidak pernah disimpan.",
+      "overview.security_score": "Skor keamanan",
+      "table.service": "Layanan",
       "table.name": "Nama",
       "table.username": "Pengguna",
       "table.actions": "Aksi",
@@ -647,6 +658,7 @@ I18N_SCRIPT = """
       "nav.backup_codes": "Kode Cadangan",
       "nav.generator": "Generator",
       "nav.transfer": "Ekspor / Impor",
+      "search.label": "Cari di brankas ini",
       "search.placeholder": "Cari di brankas ini...",
       "search.no_results": "Tidak ada yang cocok dengan pencarian",
       "lock.in": "Terkunci dalam",
@@ -745,6 +757,11 @@ I18N_SCRIPT = """
       "chip.online": "オンライン · 読み/書き",
       "btn.add_entry": "+ エントリ追加",
       "table.id": "ID",
+      "import.export_password": "\u30a8\u30af\u30b9\u30dd\u30fc\u30c8\u30d1\u30b9\u30ef\u30fc\u30c9",
+      "import.export_password_hint": "Bitwarden \u304b\u3089\u30a8\u30af\u30b9\u30dd\u30fc\u30c8\u3059\u308b\u3068\u304d\u306b\u8a2d\u5b9a\u3057\u305f\u30d1\u30b9\u30ef\u30fc\u30c9",
+      "import.export_password_note": "\u30d1\u30b9\u30ef\u30fc\u30c9\u4fdd\u8b77\u3055\u308c\u305f Bitwarden \u30a8\u30af\u30b9\u30dd\u30fc\u30c8\u306b\u306e\u307f\u5fc5\u8981\u3067\u3059\u3002\u30d5\u30a1\u30a4\u30eb\u306e\u8aad\u307f\u53d6\u308a\u306b\u4f7f\u308f\u308c\u3001\u4fdd\u5b58\u3055\u308c\u307e\u305b\u3093\u3002",
+      "overview.security_score": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30b9\u30b3\u30a2",
+      "table.service": "\u30b5\u30fc\u30d3\u30b9",
       "table.name": "名前",
       "table.username": "ユーザー名",
       "table.actions": "操作",
@@ -908,6 +925,7 @@ I18N_SCRIPT = """
       "nav.backup_codes": "\u30d0\u30c3\u30af\u30a2\u30c3\u30d7\u30b3\u30fc\u30c9",
       "nav.generator": "\u30b8\u30a7\u30cd\u30ec\u30fc\u30bf\u30fc",
       "nav.transfer": "\u30a8\u30af\u30b9\u30dd\u30fc\u30c8 / \u30a4\u30f3\u30dd\u30fc\u30c8",
+      "search.label": "\u3053\u306e\u4fdd\u7ba1\u5eab\u3092\u691c\u7d22",
       "search.placeholder": "\u3053\u306e\u4fdd\u7ba1\u5eab\u3092\u691c\u7d22...",
       "search.no_results": "\u691c\u7d22\u6761\u4ef6\u306b\u4e00\u81f4\u3059\u308b\u9805\u76ee\u306f\u3042\u308a\u307e\u305b\u3093",
       "lock.in": "\u30ed\u30c3\u30af\u307e\u3067",
@@ -1329,7 +1347,7 @@ p  { margin: 0; }
   transition: border-color .16s var(--ease), box-shadow .16s var(--ease);
 }
 .search input::placeholder { color: var(--text-faint); }
-.search input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.search input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .search-ico { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-faint); font-size: 14px; pointer-events: none; }
 .search kbd {
   position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
@@ -1353,7 +1371,7 @@ p  { margin: 0; }
   transition: border-color .16s var(--ease);
 }
 .select:hover { border-color: var(--border-hi); }
-.select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 
 .content { padding: var(--sp-5); max-width: 1280px; width: 100%; margin: 0 auto; flex: 1; }
 
@@ -1472,7 +1490,12 @@ table.t td.strong { font-weight: 550; }
   transition: border-color .16s var(--ease), box-shadow .16s var(--ease), background .16s var(--ease);
 }
 .input::placeholder { color: var(--text-faint); }
-.input:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
+/* The ring is --accent, not --accent-soft. Measured on the Console palette,
+   an --accent-soft ring is 1.15:1 against the field it surrounds -- invisible,
+   on every form in the dashboard, for anyone navigating by keyboard. WCAG
+   1.4.11 wants 3.0:1 for a non-text indicator; --accent gives 9.4:1.
+   outline:none is only acceptable because this replaces it in the same rule. */
+.input:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
 textarea.input { min-height: 120px; resize: vertical; font-family: var(--mono); font-size: var(--fs-md); }
 .hint { font-size: var(--fs-xs); color: var(--text-faint); margin-top: 5px; }
 .form-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-5); flex-wrap: wrap; }
@@ -2321,7 +2344,9 @@ def _nav_html(active, counts):
         label = {"nav.group.vault": "Vault", "nav.group.tools": "Tools",
                  "nav.group.settings": "Settings"}[group_key]
         out.append(f'<div class="nav-label" data-i18n="{group_key}">{label}</div>')
-        out.append('<div class="nav">')
+        # A nav landmark, not a div: this is how a screen-reader user jumps
+        # straight to the navigation instead of walking the page.
+        out.append('<nav class="nav" aria-label="%s">' % label)
         for key, href, ico, i18n, fallback, counter in items:
             cls = "nav-item active" if key == active else "nav-item"
             badge = ""
@@ -2335,7 +2360,7 @@ def _nav_html(active, counts):
                 f'<span class="nav-ico" aria-hidden="true">{_icon(ico)}</span>'
                 f'<span class="nav-text" data-i18n="{i18n}">{fallback}</span>{badge}</a>'
             )
-        out.append("</div>")
+        out.append("</nav>")
     return "".join(out)
 
 
@@ -2384,6 +2409,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
         search_html = (
             '<form class="search" method="get" action="/search" role="search">'
             f'<span class="search-ico" aria-hidden="true">{_icon("search", "icon icon-sm")}</span>'
+            '<label class="sr-only" for="q" data-i18n="search.label">Search this vault</label>'
             '<input id="q" name="q" type="search" autocomplete="off" spellcheck="false" '
             'data-i18n-placeholder="search.placeholder" placeholder="Search this vault...">'
             '<kbd>/</kbd></form>'
@@ -2407,7 +2433,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
 <a class="skip-link" href="#main-content">Skip to vault content</a>
 <div class="scrim" aria-hidden="true"></div>
 <div class="app">
-  <aside class="sidebar" id="mobile-navigation">
+  <aside class="sidebar" id="mobile-navigation" aria-label="Main">
     <div class="brand">
       <div class="brand-mark" aria-hidden="true">{_icon("brand")}</div>
       <div class="brand-text">
@@ -2811,7 +2837,14 @@ def overview_page(counts, recent):
     <span class="spacer"></span>
     <a class="btn btn-ghost btn-sm" href="/passwords" data-i18n="overview.view_all">View all</a>
   </div>
-  <div class="table-wrap"><table class="t"><tbody>{items}</tbody></table></div>
+  <div class="table-wrap"><table class="t">
+    <thead><tr>
+      <th scope="col" data-i18n="table.id">ID</th>
+      <th scope="col" data-i18n="table.service">Service</th>
+      <th scope="col" data-i18n="table.username">Username</th>
+      <th scope="col"><span class="sr-only" data-i18n="table.actions">Actions</span></th>
+    </tr></thead>
+    <tbody>{items}</tbody></table></div>
 </div>"""
     else:
         recent_html = f"""
@@ -2881,14 +2914,31 @@ def _form_page(title, action, fields_html, message="", back="/", active="overvie
 
 
 def _field(name, label_key, label, value="", ftype="text", placeholder_key=None, hint=None, required=False, rows=0):
+    """One labelled form control.
+
+    The label is tied to the control with for/id. Without that pairing a
+    screen reader announces "edit text, blank" for every field on the add and
+    edit forms -- the label is on screen but not attached to anything, so it is
+    read as loose text somewhere before the control. A hint is tied on with
+    aria-describedby for the same reason.
+
+    Every form is one per page and field names are unique within a form, so
+    "field-<name>" is a stable unique id.
+    """
+    field_id = "field-%s" % name
     req = " required" if required else ""
     ph = f' data-i18n-placeholder="{placeholder_key}"' if placeholder_key else ""
+    hint_id = f"{field_id}-hint"
+    described = f' aria-describedby="{hint_id}"' if hint else ""
     if rows:
-        ctrl = f'<textarea class="input" name="{name}" rows="{rows}"{ph}{req}>{html.escape(value)}</textarea>'
+        ctrl = (f'<textarea class="input" id="{field_id}" name="{name}" rows="{rows}"'
+                f'{ph}{req}{described}>{html.escape(value)}</textarea>')
     else:
-        ctrl = f'<input class="input" type="{ftype}" name="{name}" value="{html.escape(value)}"{ph}{req} autocomplete="off">'
-    hint_html = f'<div class="hint">{hint}</div>' if hint else ""
-    return f'<div class="field"><label data-i18n="{label_key}">{label}</label>{ctrl}{hint_html}</div>'
+        ctrl = (f'<input class="input" id="{field_id}" type="{ftype}" name="{name}" '
+                f'value="{html.escape(value)}"{ph}{req}{described} autocomplete="off">')
+    hint_html = f'<div class="hint" id="{hint_id}">{hint}</div>' if hint else ""
+    return (f'<div class="field"><label for="{field_id}" data-i18n="{label_key}">{label}</label>'
+            f'{ctrl}{hint_html}</div>')
 
 
 def build_entry_form(title, vault_path, action, values=None, message=""):
@@ -3684,7 +3734,8 @@ def generator_page():
   <div class="card"><div class="card-body">
     <div class="field">
       <label><span data-i18n="generator.length">Length</span> &middot; <b id="len-label">16</b></label>
-      <input id="len" type="range" min="4" max="64" value="16">
+      <input id="len" type="range" min="4" max="64" value="16"
+             aria-label="Password length" data-i18n-label="generator.length">
     </div>
     <div class="field">
       <label data-i18n="generator.mode">Mode</label>
@@ -3697,10 +3748,10 @@ def generator_page():
           <span data-i18n="generator.mode_easy">Memorable</span></label>
       </div>
     </div>
-    <div class="switch-row"><span data-i18n="generator.opt.upper">Uppercase</span><input id="upper" type="checkbox" checked></div>
-    <div class="switch-row"><span data-i18n="generator.opt.lower">Lowercase</span><input id="lower" type="checkbox" checked></div>
-    <div class="switch-row"><span data-i18n="generator.opt.digits">Digits</span><input id="digits" type="checkbox" checked></div>
-    <div class="switch-row"><span data-i18n="generator.opt.symbols">Symbols</span><input id="symbols" type="checkbox" checked></div>
+    <div class="switch-row"><label for="upper" data-i18n="generator.opt.upper">Uppercase</label><input id="upper" type="checkbox" checked></div>
+    <div class="switch-row"><label for="lower" data-i18n="generator.opt.lower">Lowercase</label><input id="lower" type="checkbox" checked></div>
+    <div class="switch-row"><label for="digits" data-i18n="generator.opt.digits">Digits</label><input id="digits" type="checkbox" checked></div>
+    <div class="switch-row"><label for="symbols" data-i18n="generator.opt.symbols">Symbols</label><input id="symbols" type="checkbox" checked></div>
   </div></div>
 </div>
 {GENERATOR_SCRIPT}"""
@@ -3740,8 +3791,8 @@ def transfer_page():
     <div class="card-body">
       <form method="get" action="/export">
         <div class="field">
-          <label data-i18n="import.format_label">Format</label>
-          <select class="input" name="fmt" id="import-fmt">{import_opts}</select>
+          <label for="export-fmt" data-i18n="import.format_label">Format</label>
+          <select class="input" name="fmt" id="export-fmt">{opts}</select>
         </div>
         <button class="btn btn-primary btn-block" type="submit" data-i18n="import.download">Download</button>
       </form>
@@ -3760,23 +3811,23 @@ def transfer_page():
     <div class="card-body">
       <form method="post" action="/import" enctype="multipart/form-data" id="import-form">
         <div class="field">
-          <label data-i18n="import.import_label">Import format</label>
-          <select class="input" name="fmt">{opts}</select>
+          <label for="import-fmt" data-i18n="import.import_label">Import format</label>
+          <select class="input" name="fmt" id="import-fmt">{import_opts}</select>
         </div>
         <div class="field">
-          <label data-i18n="import.upload_label">Upload export file</label>
-          <input class="input" type="file" name="file">
+          <label for="import-file" data-i18n="import.upload_label">Upload export file</label>
+          <input class="input" id="import-file" type="file" name="file">
         </div>
         <div class="field hidden" id="import-pw-field">
-          <label data-i18n="import.export_password">Export password</label>
-          <input class="input" type="password" name="export_password" autocomplete="off"
+          <label for="import-export-password" data-i18n="import.export_password">Export password</label>
+          <input class="input" id="import-export-password" type="password" name="export_password" autocomplete="off"
                  data-i18n-placeholder="import.export_password_hint"
                  placeholder="The password you set when exporting from Bitwarden">
           <div class="hint" data-i18n="import.export_password_note">Only needed for a password-protected Bitwarden export. It is used to read the file and is never stored.</div>
         </div>
         <div class="field">
-          <label data-i18n="import.paste_label">Or paste file contents</label>
-          <textarea class="input" name="data" rows="6"
+          <label for="import-data" data-i18n="import.paste_label">Or paste file contents</label>
+          <textarea class="input" id="import-data" name="data" rows="6"
                     data-i18n-placeholder="import.placeholder" placeholder="Paste exported data here"></textarea>
         </div>
         <button class="btn btn-primary btn-block" type="submit" data-i18n="import.submit">Import</button>
