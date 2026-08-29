@@ -14,9 +14,18 @@ co-owners of it. That review is a design concept, not a formal security audit.
 
 - Expand Linux, macOS, and Termux regression coverage for platform-specific
   command behavior.
-- Add focused tests around restore failures, interrupted writes, and concurrent
-  CLI/Web mutations. The next step beyond this is deliberate fault injection —
-  disk-full, process killed mid-write, corrupted vault, competing writers.
+- **A portable vault lock.** The advisory lock is `flock(1)`, which macOS does
+  not ship, so on macOS SPM runs with no lock at all and concurrent CLI and
+  dashboard writes can lose records. Measured on Linux by removing the lock:
+  one of five concurrent writers' records survived. SPM warns rather than
+  failing, which is the right default — a password manager that refuses to
+  start is worse — but the warning is not protection. `mkdir` is atomic on
+  every POSIX filesystem and is the usual answer; the work is in staleness
+  detection, not in taking the lock.
+- Fault injection around restore failures, interrupted writes and concurrent
+  mutations — disk-full, process killed mid-write, corrupted vault, competing
+  writers — **shipped in 3.4.0** for the write path and the lock. What remains
+  is restore and import.
 - Improve accessibility and keyboard-only verification for every SPM Dashboard page.
 - Keep import/export fixtures synchronized across every documented format.
 

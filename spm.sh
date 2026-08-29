@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.3.0"
+VERSION="3.4.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -801,6 +801,7 @@ world-readable through `ps` and /proc/<pid>/cmdline.
 
 import base64
 import hashlib
+import json
 import os
 import shutil
 import stat
@@ -808,6 +809,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 
 # ----- format and policy -----------------------------------------------------
 
@@ -1151,6 +1153,27 @@ def read_vault(vault_path, master):
     return gpg_decrypt(key, parts[1]).decode("utf-8", errors="ignore"), key
 
 
+def read_vault_with_key(vault_path, vault_key):
+    """Plaintext from a format-3 vault using a key that is already unwrapped.
+
+    Returns None when the file is not a container -- formats 1 and 2 are sealed
+    under the master password directly and have no separate key -- so a caller
+    holding a stale key falls back to the master rather than failing.
+
+    A format-3 read is two gpg invocations: one to unwrap the key envelope
+    under the master password, one to decrypt the data under that key. The
+    envelope is the expensive half and its answer does not change between
+    reads, so a caller that can hold the key skips it. Nothing here weakens the
+    format: the key is exactly what the master password would have produced.
+    """
+    with open(vault_path, "rb") as handle:
+        raw = handle.read()
+    parts = parse_container(raw)
+    if parts is None:
+        return None
+    return gpg_decrypt(vault_key, parts[1]).decode("utf-8", errors="ignore")
+
+
 # ----- writing ---------------------------------------------------------------
 
 def write_vault(vault_path, master, plaintext, vault_key=None):
@@ -1323,6 +1346,206 @@ def recover(vault_path, secret, out_path):
 # never in argv. A master password cannot contain a newline: every prompt that
 # collects one reads a single line.
 
+# ----- diagnostics -----------------------------------------------------------
+
+# Characters that splitlines() honours but a TAB-delimited, line-based record
+# format does not survive. A value carrying one of these was written as a
+# single record and reads back as two, so the tail becomes an orphan fragment
+# that no surface displays. See the 2.10.12 sanitiser, which stops new ones.
+RECORD_BREAKS = {
+    "\v": "U+000B VERTICAL TAB",
+    "\f": "U+000C FORM FEED",
+    "\x1c": "U+001C FILE SEPARATOR",
+    "\x1d": "U+001D GROUP SEPARATOR",
+    "\x1e": "U+001E RECORD SEPARATOR",
+    "\x85": "U+0085 NEXT LINE",
+    "\u2028": "U+2028 LINE SEPARATOR",
+    "\u2029": "U+2029 PARAGRAPH SEPARATOR",
+}
+
+# Field 3 holds the secret in every record shape SPM writes, so nothing here
+# ever reads it. Only type, id and label are reported.
+_RECORD_TAGS = {"NOTE": "NOTE", "PASSPHRASE": "PASSPHRASE",
+                "BACKUP_CODE": "BACKUP_CODE", "AUTH": "AUTHENTICATOR"}
+
+
+def _describe_record(line):
+    parts = line.split("\t")
+    tag = parts[0] if parts else ""
+    if tag in _RECORD_TAGS:
+        return (_RECORD_TAGS[tag],
+                parts[1] if len(parts) > 1 else "?",
+                parts[2] if len(parts) > 2 else "")
+    if tag.isdigit():
+        return "PASSWORD", tag, (parts[1] if len(parts) > 1 else "")
+    return tag or "(unknown)", "?", ""
+
+
+def _safe_text(text, limit=32):
+    """A label rendered for a terminal: no raw control characters, ever."""
+    out = []
+    for ch in text:
+        if ch in RECORD_BREAKS or ch == "\t":
+            out.append("\u2423")
+        elif unicodedata.category(ch).startswith("C"):
+            out.append("?")
+        else:
+            out.append(ch)
+    shown = "".join(out)
+    return shown[:limit] + ("..." if len(shown) > limit else "")
+
+
+def scan_broken_records(plaintext):
+    """(broken, orphans) for records split by an embedded line break.
+
+    Split on "\n" only, because that is how the record was physically written.
+    """
+    broken, orphans = [], []
+    for number, line in enumerate(plaintext.split("\n"), start=1):
+        if not line or line.startswith("#"):
+            continue
+        hits = [name for ch, name in RECORD_BREAKS.items() if ch in line]
+        if hits:
+            kind, rid, label = _describe_record(line)
+            broken.append((number, kind, rid, _safe_text(label), hits))
+            continue
+        if line.startswith("META_"):
+            continue
+        if len(line.split("\t")) < 5:
+            orphans.append((number, _safe_text(line, 48)))
+    return broken, orphans
+
+
+def vault_counts(plaintext):
+    """Record counts, duplicate password ids and empty password fields."""
+    counts = {"passwords": 0, "notes": 0, "passphrases": 0,
+              "backup_codes": 0, "authenticators": 0}
+    by_tag = {"NOTE": "notes", "PASSPHRASE": "passphrases",
+              "BACKUP_CODE": "backup_codes", "AUTH": "authenticators"}
+    seen, duplicates, empty = {}, [], 0
+    for line in plaintext.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        tag = parts[0]
+        if tag in by_tag:
+            counts[by_tag[tag]] += 1
+        elif tag.isdigit():
+            counts["passwords"] += 1
+            seen[tag] = seen.get(tag, 0) + 1
+            if len(parts) > 3 and not parts[3]:
+                empty += 1
+    duplicates = sorted((rid for rid, n in seen.items() if n > 1), key=int)
+    return counts, duplicates, empty
+
+
+def _check(identifier, status, summary, **extra):
+    entry = {"id": identifier, "status": status, "summary": summary}
+    entry.update(extra)
+    return entry
+
+
+def doctor_report(plaintext, vault_path, recovery_status="unchecked",
+                  sensitive_files=()):
+    """A machine-readable health report. Never contains a secret.
+
+    Structured as a list of checks with stable ids rather than a bag of
+    booleans, so a caller can act on one without parsing prose, and so a check
+    added later does not change the shape of the ones already there.
+    """
+    checks = []
+    counts, duplicates, empty = vault_counts(plaintext)
+
+    if duplicates:
+        checks.append(_check("duplicate_ids", "fail",
+                             "%d password id(s) appear more than once" % len(duplicates),
+                             ids=duplicates))
+    else:
+        checks.append(_check("duplicate_ids", "ok", "no duplicate password ids"))
+
+    if empty:
+        checks.append(_check("empty_passwords", "warn",
+                             "%d entr(y/ies) have an empty password field" % empty,
+                             count=empty))
+    else:
+        checks.append(_check("empty_passwords", "ok", "no empty password fields"))
+
+    broken, orphans = scan_broken_records(plaintext)
+    if broken or orphans:
+        checks.append(_check(
+            "split_records", "fail",
+            "%d record(s) contain a line-break character; %d orphan fragment(s)"
+            % (len(broken), len(orphans)),
+            broken=[{"line": n, "kind": k, "id": i, "label": l, "characters": h}
+                    for n, k, i, l, h in broken],
+            orphans=[{"line": n, "text": t} for n, t in orphans]))
+    else:
+        checks.append(_check("split_records", "ok",
+                             "no records split by a line-break character"))
+
+    found = format_version(plaintext)
+    if found >= VAULT_FORMAT_VERSION:
+        checks.append(_check("vault_format", "ok",
+                             "format version %d is current" % found,
+                             found=found, current=VAULT_FORMAT_VERSION))
+    else:
+        checks.append(_check(
+            "vault_format", "warn",
+            "format version %d; %d is available and the next write upgrades in place"
+            % (found, VAULT_FORMAT_VERSION),
+            found=found, current=VAULT_FORMAT_VERSION))
+
+    try:
+        recovery_pubkey_pem(plaintext)
+        checks.append(_check("recovery_pubkey", "ok",
+                             "recovery public key present and decodable"))
+    except VaultError as exc:
+        checks.append(_check("recovery_pubkey", "fail", str(exc)))
+
+    pairing = {
+        "match-current": ("ok", "recovery file holds this vault's current key"),
+        "match-legacy": ("ok", "recovery file decrypts; this format predates vault keys"),
+        "match-stale": ("fail", "recovery file does not hold this vault's key; "
+                                "run change-master to refresh it"),
+        "mismatch": ("fail", "private key does not match the recovery file"),
+        "no-private-key": ("fail", "no default private key found"),
+        "no-recovery-file": ("fail", "no recovery file found"),
+        "unchecked": ("warn", "recovery pairing was not checked"),
+    }
+    status, summary = pairing.get(recovery_status,
+                                  ("warn", "unrecognised recovery state"))
+    checks.append(_check("recovery_pairing", status, summary, state=recovery_status))
+
+    exposed = []
+    for path in sensitive_files:
+        try:
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+        except OSError:
+            continue
+        if mode & (stat.S_IRWXG | stat.S_IRWXO):
+            exposed.append({"path": path, "mode": "%03o" % mode})
+    if exposed:
+        checks.append(_check("file_permissions", "fail",
+                             "%d sensitive file(s) readable by other users" % len(exposed),
+                             files=exposed))
+    else:
+        checks.append(_check("file_permissions", "ok",
+                             "sensitive files are not group- or world-accessible"))
+
+    failed = sum(1 for c in checks if c["status"] == "fail")
+    warned = sum(1 for c in checks if c["status"] == "warn")
+    return {
+        "schema": 1,
+        "vault": {"path": vault_path,
+                  "format_version": found,
+                  "current_format_version": VAULT_FORMAT_VERSION},
+        "counts": counts,
+        "checks": checks,
+        "summary": {"failed": failed, "warned": warned,
+                    "status": "fail" if failed else ("warn" if warned else "ok")},
+    }
+
+
 def _secrets(count):
     data = sys.stdin.buffer.read().decode("utf-8")
     fields = data.split("\n")
@@ -1398,6 +1621,25 @@ def main(argv):
             sys.stdout.write(history_dir(argv[2]) + "\n")
         elif command == "archive":
             archive_generation(argv[2])
+        elif command == "scan-records":
+            # scan-records <plainfile> ; stdout: the TSV the CLI's doctor renders
+            with open(argv[2], "r", encoding="utf-8", errors="surrogateescape") as handle:
+                broken, orphans = scan_broken_records(handle.read())
+            for number, kind, rid, label, hits in broken:
+                sys.stdout.write("BROKEN\t%d\t%s\t%s\t%s\t%s\n"
+                                 % (number, kind, rid, label, "; ".join(hits)))
+            for number, text in orphans:
+                sys.stdout.write("ORPHAN\t%d\t%s\n" % (number, text))
+            sys.stdout.write("SUMMARY\t%d\t%d\n" % (len(broken), len(orphans)))
+        elif command == "doctor-report":
+            # doctor-report <plainfile> <vault> <recovery state> [sensitive file ...]
+            # stdout: JSON. Exit 1 when any check failed, so a script can gate
+            # on the status without parsing the document.
+            with open(argv[2], "r", encoding="utf-8", errors="surrogateescape") as handle:
+                plaintext = handle.read()
+            report = doctor_report(plaintext, argv[3], argv[4], argv[5:])
+            sys.stdout.write(json.dumps(report, indent=2) + "\n")
+            return 1 if report["summary"]["failed"] else 0
         elif command == "self-test":
             return 0
         else:
@@ -3809,12 +4051,34 @@ autoupdate_mode() {
 	esac
 }
 
+# -1, 0 or 1 for $1 against $2, comparing dotted numeric components.
+#
+# This used to be `sort -V`, which is a GNU extension: BSD sort, and so macOS,
+# has no -V. Where it is missing the option is not ignored -- sort fails and
+# the comparison reads an empty string -- and where a lexical sort is
+# substituted instead it orders 2.10.10 before 2.10.9, which is precisely
+# backwards and precisely what these callers exist to get right. awk is POSIX
+# and this script already depends on it everywhere else.
+version_compare() {
+	awk -v a="$1" -v b="$2" '
+	BEGIN {
+		na = split(a, x, "."); nb = split(b, y, ".")
+		n = (na > nb) ? na : nb
+		for (i = 1; i <= n; i++) {
+			p = (i <= na) ? x[i] + 0 : 0
+			q = (i <= nb) ? y[i] + 0 : 0
+			if (p > q) { print 1; exit }
+			if (p < q) { print -1; exit }
+		}
+		print 0
+	}'
+}
+
 # True when $1 is strictly newer than $2. Plain string equality was enough for
-# "is this the same release", but not for "is there a newer one": 2.10.10 sorts
-# before 2.10.9 lexically.
+# "is this the same release", but not for "is there a newer one".
 version_is_newer() {
 	[ "$1" != "$2" ] || return 1
-	[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
+	[ "$(version_compare "$1" "$2")" = "1" ]
 }
 
 autoupdate_latest_tag() {
@@ -4245,74 +4509,59 @@ cmd_forgot() {
 # 2.10.12 stopped new ones being created; this finds any that already exist.
 # Strictly read-only: it reports and never edits the vault.
 doctor_scan_broken_records() {
-	local plain="$1"
-	python3 - "$plain" <<'PY'
-import sys, unicodedata
-
-BREAKS = {
-    "\v": "U+000B VERTICAL TAB",
-    "\f": "U+000C FORM FEED",
-    "\x1c": "U+001C FILE SEPARATOR",
-    "\x1d": "U+001D GROUP SEPARATOR",
-    "\x1e": "U+001E RECORD SEPARATOR",
-    "\x85": "U+0085 NEXT LINE",
-    "\u2028": "U+2028 LINE SEPARATOR",
-    "\u2029": "U+2029 PARAGRAPH SEPARATOR",
+	# One implementation, in the core. This used to carry its own copy of the
+	# break table and the record describer, which is exactly the arrangement
+	# the trusted-core split exists to prevent -- the JSON report needs the
+	# same scan, and two copies of it would drift the way the old dashboard
+	# and CLI copies did.
+	core scan-records "$1"
 }
-# Field 3 holds the secret for every record shape SPM writes, so it is never
-# printed. Only type, id and label are shown.
-SECRET_FIELD = 3
-TAGS = {"NOTE": "NOTE", "PASSPHRASE": "PASSPHRASE",
-        "BACKUP_CODE": "BACKUP_CODE", "AUTH": "AUTHENTICATOR"}
+# Which of the recovery states this vault is in, as a single token. The human
+# doctor prints these as sentences further down; the JSON report needs the same
+# determination without the prose, and neither should decide it twice.
+doctor_recovery_state() {
+	[ -f "$RECOVERY_FILE" ] || { printf 'no-recovery-file'; return 0; }
+	[ -f "$RECOVERY_PRIV_DEFAULT" ] || { printf 'no-private-key'; return 0; }
+	local secret
+	if secret="$(openssl rsautl -decrypt -inkey "$RECOVERY_PRIV_DEFAULT" \
+			-in "$RECOVERY_FILE" 2>/dev/null)"; then
+		if is_vault_container "$VAULT_FILE"; then
+			if [ -n "${VAULT_KEY:-}" ] && [ "$secret" = "$VAULT_KEY" ]; then
+				printf 'match-current'
+			else
+				printf 'match-stale'
+			fi
+		else
+			printf 'match-legacy'
+		fi
+	else
+		printf 'mismatch'
+	fi
+	secret=""
+}
 
-def describe(line):
-    parts = line.split("\t")
-    tag = parts[0] if parts else ""
-    if tag in TAGS:
-        return TAGS[tag], (parts[1] if len(parts) > 1 else "?"), (parts[2] if len(parts) > 2 else "")
-    if tag.isdigit():
-        return "PASSWORD", tag, (parts[1] if len(parts) > 1 else "")
-    return tag or "(unknown)", "?", ""
-
-def safe(text, limit=32):
-    out = []
-    for ch in text:
-        if ch in BREAKS or ch == "\t":
-            out.append("\u2423")           # visible blank, never the raw char
-        elif unicodedata.category(ch).startswith("C"):
-            out.append("?")
-        else:
-            out.append(ch)
-    shown = "".join(out)
-    return shown[:limit] + ("..." if len(shown) > limit else "")
-
-# Split on newline only: this is how the record was physically written.
-with open(sys.argv[1], "r", encoding="utf-8", errors="surrogateescape") as fh:
-    lines = fh.read().split("\n")
-
-broken, orphans = [], []
-for number, line in enumerate(lines, start=1):
-    if not line or line.startswith("#"):
-        continue
-    hits = [name for ch, name in BREAKS.items() if ch in line]
-    if hits:
-        kind, rid, label = describe(line)
-        broken.append((number, kind, rid, safe(label), hits))
-        continue
-    if line.startswith("META_"):
-        continue
-    if len(line.split("\t")) < 5:
-        orphans.append((number, safe(line, 48)))
-
-for number, kind, rid, label, hits in broken:
-    print("BROKEN\t%d\t%s\t%s\t%s\t%s" % (number, kind, rid, label, "; ".join(hits)))
-for number, text in orphans:
-    print("ORPHAN\t%d\t%s" % (number, text))
-print("SUMMARY\t%d\t%d" % (len(broken), len(orphans)))
-PY
+# `doctor --json`. Everything a script needs, nothing a human needs: no
+# progress lines, no banner, and stdout carries the document and nothing else
+# so it can be piped straight into jq. Exit status mirrors the report, so a
+# caller can gate on it without parsing.
+cmd_doctor_json() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp state status
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+	state="$(doctor_recovery_state)"
+	status=0
+	# shellcheck disable=SC2046
+	core doctor-report "$tmp" "$VAULT_FILE" "$state" $(sensitive_files) || status=$?
+	secure_wipe "$tmp"
+	return "$status"
 }
 
 cmd_doctor() {
+	if [ "${1:-}" = "--json" ]; then
+		cmd_doctor_json
+		return $?
+	fi
 	if [ "$SPM_LANG" = "id" ]; then
 		printf ">>> HEALTH / DOCTOR CHECK <<<\n\n"
 	else
@@ -5692,6 +5941,7 @@ Perintah utama (CLI):
                            → Aktifkan cek rilis harian saat mulai
   ./spm.sh forgot          → Reset kata sandi utama dengan private key
   ./spm.sh doctor          → Health / integrity check vault
+  ./spm.sh doctor --json   → the same checks as JSON, for scripts
   ./spm.sh generate        → Generator kata sandi (panjang, mode mudah/aman/angka, simbol opsional)
   ./spm.sh web|dashboard   → SPM Dashboard (sementara / background via pm2)
   ./spm.sh help            → Tampilkan bantuan ini
@@ -5802,6 +6052,7 @@ Main commands (CLI):
   ./spm.sh update          → Check & auto-install latest GitHub release
   ./spm.sh forgot          → Reset master password using the private key
   ./spm.sh doctor          → Vault health / integrity check
+  ./spm.sh doctor --json   → the same checks as JSON, for scripts
   ./spm.sh generate        → Password generator (length, easy/secure/numeric, optional symbols/upper/lower/digits)
   ./spm.sh web|dashboard   → SPM Dashboard (foreground or pm2 background)
   ./spm.sh help            → Show this help
@@ -6209,7 +6460,7 @@ domain_nginx_at_least() {
 	exe="$(nginx_bin)" || return 1
 	have="$("$exe" -v 2>&1 | sed -n 's|.*nginx/\([0-9][0-9.]*\).*|\1|p')"
 	[ -n "$have" ] || return 1
-	[ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -n1)" = "$want" ]
+	[ "$(version_compare "$have" "$want")" != "-1" ]
 }
 
 # Two phases are unavoidable: nginx must already answer on port 80 to serve the
@@ -10946,12 +11197,61 @@ def decrypt_vault(master: str) -> str:
     return core.read_vault(VAULT_PATH, master)[0]
 
 
+def load_vault(master: str, session=None) -> str:
+    """Vault plaintext, reusing this session's unwrapped vault key when it can.
+
+    A format-3 read costs two gpg invocations: the key envelope under the
+    master password, then the data under that key. The envelope's answer is
+    the same for every request of a session, so holding the key removes that
+    half from every read after the first -- measured at roughly half the time
+    of a full read.
+
+    The key lives in the session record and nowhere else, so it dies with the
+    session, at the same moment the master password does. It is not a new
+    class of exposure: the session already holds the password it derives from.
+
+    A cached key that no longer opens the vault is not an error. A restore or
+    a sync can replace the file under a live session, so the fallback
+    re-derives from the master and re-caches, and the session keeps working.
+
+    This is an adapter, not vault crypto -- every byte operation below it is
+    still the core's.
+    """
+    if session is not None:
+        cached = session.get("vault_key")
+        if cached:
+            try:
+                plaintext = core.read_vault_with_key(VAULT_PATH, cached)
+                if plaintext is not None:
+                    return plaintext
+            except Exception:
+                pass
+        plaintext, key = core.read_vault(VAULT_PATH, master)
+        session["vault_key"] = key or ""
+        return plaintext
+    return decrypt_vault(master)
+
+
 def unwrap_vault_key(master: str, path=None):
     return core.unwrap_key(path or VAULT_PATH, master)
 
 
-def encrypt_vault(master: str, plaintext: str, vault_key=None) -> None:
-    core.write_vault(VAULT_PATH, master, plaintext, vault_key)
+def encrypt_vault(master: str, plaintext: str, vault_key=None) -> str:
+    return core.write_vault(VAULT_PATH, master, plaintext, vault_key)
+
+
+def save_vault(master: str, plaintext: str, session=None) -> None:
+    """Write the vault, handing the core the session's key when it has one.
+
+    Given no key, write_vault unwraps one from the master password first --
+    the same expensive invocation the read path avoids, paid again on every
+    save. The write returns the key it used, which is also how a session that
+    has just migrated a legacy vault picks one up.
+    """
+    key = session.get("vault_key") or None if session is not None else None
+    written = encrypt_vault(master, plaintext, key)
+    if session is not None:
+        session["vault_key"] = written or ""
 
 
 def rewrap_vault_key(old_master: str, new_master: str) -> None:
@@ -11845,7 +12145,7 @@ class SPMServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.sessions = {}  # token -> {"master", "created", "last_seen", "state", ...}
+        self.sessions = {}  # token -> {"master", "vault_key", "created", "last_seen", "state", ...}
         self.login_failures = {}  # client ip -> {"count": int, "until": float}
         self.webauthn_counters = {}  # credential id -> highest signature counter seen
         self.auth_lock = threading.RLock()
@@ -11895,6 +12195,10 @@ MAX_IMPORT_BYTES = 1024 * 1024
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    # Set per request by _get_cookie_session(). None on every unauthenticated
+    # path, which is what makes the vault helpers fall back to the master.
+    _session_rec = None
+
     def log_message(self, fmt, *args):
         sys.stderr.write("[SPM Dashboard] " + fmt % args + "\n")
 
@@ -12124,6 +12428,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if session.get("state") == "suspended":
             return None
         session["last_seen"] = now
+        # Held for this request only, so the read and write helpers can reach
+        # the session's cached vault key without every call site threading the
+        # record through. The handler instance is per-request, so this cannot
+        # leak between connections.
+        self._session_rec = session
         return session.get("master", "")
 
     def _session_record(self):
@@ -12299,7 +12608,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # was deleted (or when SPM_WEB_RP_ID changed) still believes one
             # exists. Ask the vault, which is the only authority.
             try:
-                plaintext = decrypt_vault(session.get("master", ""))
+                plaintext = load_vault(session.get("master", ""), session)
             except Exception:
                 self._send_json(403, {"error": "vault unavailable"})
                 return True
@@ -12340,7 +12649,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if path == "/unlock/challenge":
             try:
-                plaintext = decrypt_vault(session.get("master", ""))
+                plaintext = load_vault(session.get("master", ""), session)
             except Exception:
                 self._send_json(403, {"error": "vault unavailable"})
                 return True
@@ -12398,7 +12707,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         label = re.sub(r"[\t\r\n]", " ", label)[:64]
         master = session.get("master", "")
         try:
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
         except Exception:
             self._send_json(403, {"error": "vault unavailable"})
             return
@@ -12420,7 +12729,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ])
         lines.append(row)
         try:
-            encrypt_vault(master, "\n".join(lines) + "\n")
+            save_vault(master, "\n".join(lines) + "\n", self._session_rec)
         except Exception:
             self._send_json(500, {"error": "could not save credential"})
             return
@@ -12461,7 +12770,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         try:
-            plaintext = decrypt_vault(session.get("master", ""))
+            plaintext = load_vault(session.get("master", ""), session)
         except Exception:
             self._send_json(403, {"error": "vault unavailable"})
             return
@@ -12667,7 +12976,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif err:
                 flash = f"<div class='flash error'>{html.escape(err)}</div>"
             try:
-                plaintext = decrypt_vault(master)
+                plaintext = load_vault(master, self._session_rec)
             except Exception:
                 self.send_response(302)
                 self.send_header("Set-Cookie", f"spm_session=deleted; Max-Age=0; {self._session_cookie_attrs()}")
@@ -12703,7 +13012,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if path == "/security":
             try:
-                plaintext = decrypt_vault(master)
+                plaintext = load_vault(master, self._session_rec)
             except Exception:
                 return self._expire_session()
             _, entries = parse_entries(plaintext)
@@ -12718,7 +13027,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Not found")
                 return
             try:
-                plaintext = decrypt_vault(master)
+                plaintext = load_vault(master, self._session_rec)
             except Exception:
                 return self._expire_session()
             _, creds = parse_webauthn(plaintext)
@@ -12736,7 +13045,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if path == "/settings":
             try:
-                plaintext = decrypt_vault(master)
+                plaintext = load_vault(master, self._session_rec)
             except Exception:
                 return self._expire_session()
             params = urllib.parse.parse_qs(parsed.query)
@@ -12769,7 +13078,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/search":
             term = (urllib.parse.parse_qs(parsed.query).get("q") or [""])[0].strip()
             try:
-                plaintext = decrypt_vault(master)
+                plaintext = load_vault(master, self._session_rec)
             except Exception:
                 return self._expire_session()
             results = search_vault(plaintext, term) if term else []
@@ -12788,7 +13097,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if path in ("/passwords", "/notes", "/passphrases", "/authenticators", "/backup-codes"):
             try:
-                plaintext = decrypt_vault(master)
+                plaintext = load_vault(master, self._session_rec)
             except Exception:
                 self.send_response(302)
                 self.send_header("Set-Cookie", f"spm_session=deleted; Max-Age=0; {self._session_cookie_attrs()}")
@@ -12868,7 +13177,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not entry_id:
                 self.send_error(400, "Missing id")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines, entries = parse_entries(plaintext)
             found = None
             for idx, parts in entries:
@@ -12901,7 +13210,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not entry_id:
                 self.send_error(400, "Missing id")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             _, entries = parse_entries(plaintext)
             found = None
             for _, parts in entries:
@@ -12932,7 +13241,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not note_id:
                 self.send_error(400, "Missing id")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             _, notes = parse_notes(plaintext)
             found = None
             for _, parts in notes:
@@ -12970,7 +13279,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not pid:
                 self.send_error(400, "Missing id")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             _, passphrases = parse_passphrases(plaintext)
             found = None
             for _, parts in passphrases:
@@ -13000,7 +13309,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not pid:
                 self.send_error(400, "Missing id")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             _, passphrases = parse_passphrases(plaintext)
             found = None
             for _, parts in passphrases:
@@ -13037,7 +13346,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not aid:
                 self.send_error(400, "Missing id")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             _, auths = parse_authenticators(plaintext)
             found = None
             for _, parts in auths:
@@ -13063,7 +13372,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not aid:
                 self.send_error(400, "Missing id")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             _, auths = parse_authenticators(plaintext)
             found = None
             for _, parts in auths:
@@ -13095,7 +13404,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not bid:
                 self.send_error(400, "Missing id")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             _, backups = parse_backup_codes(plaintext)
             found = None
             for _, parts in backups:
@@ -13125,7 +13434,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not bid:
                 self.send_error(400, "Missing id")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             _, backups = parse_backup_codes(plaintext)
             found = None
             for _, parts in backups:
@@ -13151,7 +13460,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not aid:
                 self.send_error(400, "Missing id")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             _, auths = parse_authenticators(plaintext)
             found = None
             for _, parts in auths:
@@ -13186,7 +13495,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if fmt not in SUPPORTED_FORMATS:
                 self.send_error(400, "Unsupported format")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             content = export_content(fmt, plaintext)
             filename = f"spm_export_{time.strftime('%Y%m%d_%H%M%S')}.{fmt if fmt!='csv-noheader' else 'csv'}"
             self.send_response(200)
@@ -13253,7 +13562,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             try:
-                opened = decrypt_vault(password)
+                # This read unwraps the key envelope anyway, so keep what it
+                # produced; discarding it would make the first page render pay
+                # for the same unwrap a second time.
+                opened, opened_key = core.read_vault(VAULT_PATH, password)
             except subprocess.CalledProcessError:
                 self._record_login_failure()
                 page = login_page(VERSION, "<div class='msg'>Invalid master password.</div>")
@@ -13270,6 +13582,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             token = secrets.token_hex(32)
             self.server.sessions[token] = {
                 "master": password,
+                "vault_key": opened_key or "",
                 "csrf": secrets.token_hex(32),
                 "created": time.time(),
                 "last_seen": time.time(),
@@ -13338,7 +13651,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             try:
-                plaintext = decrypt_vault(master)
+                plaintext = load_vault(master, self._session_rec)
             except Exception:
                 return self._expire_session()
 
@@ -13351,7 +13664,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # that is the one state `spm forgot` cannot get out of.
             try:
                 if unwrap_vault_key(master) is None:
-                    encrypt_vault(master, plaintext)
+                    save_vault(master, plaintext, self._session_rec)
             except Exception as exc:
                 self.log_message("vault migration aborted before write: %s", exc)
                 _reject("The vault could not be migrated to the current format, "
@@ -13380,6 +13693,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             session = self.server.sessions.get(token)
             if session is not None:
                 session["master"] = new_pw
+                # rewrap re-seals the same key under the new password, so the
+                # cached value stays correct -- but proving that here on every
+                # future change is not worth one extra unwrap now.
+                session["vault_key"] = ""
             self.log_message("master password changed; other sessions cleared")
 
             self.send_response(302)
@@ -13409,7 +13726,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_html(200, page)
                 return
 
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines, entries = parse_entries(plaintext)
             max_id = 0
             for _, parts in entries:
@@ -13430,7 +13747,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ])
             lines.append(new_line)
             new_plain = "\n".join(lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")
@@ -13451,7 +13768,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             url_raw = (data.get("url") or [""])[0]
             url = _vurl(url_raw)
 
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines, entries = parse_entries(plaintext)
 
             idx_to_update = None
@@ -13498,7 +13815,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ])
             lines[idx_to_update] = new_line
             new_plain = "\n".join(lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")
@@ -13511,7 +13828,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(400, "Missing id")
                 return
 
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines, _ = parse_entries(plaintext)
 
             ids_to_remove = {entry_id}
@@ -13526,7 +13843,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 new_lines.append(line)
 
             new_plain = "\n".join(new_lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")
@@ -13542,7 +13859,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(400, "Invalid credential id")
                 return
             try:
-                plaintext = decrypt_vault(master)
+                plaintext = load_vault(master, self._session_rec)
             except Exception:
                 return self._expire_session()
             lines, creds = parse_webauthn(plaintext)
@@ -13551,7 +13868,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Credential not found")
                 return
             kept = [line for idx, line in enumerate(lines) if idx not in drop]
-            encrypt_vault(master, "\n".join(kept) + "\n")
+            save_vault(master, "\n".join(kept) + "\n", self._session_rec)
             _, remaining = parse_webauthn("\n".join(kept))
             _, current = self._session_record()
             if current is not None:
@@ -13623,7 +13940,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_html(200, page)
                 return
 
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines, notes = parse_notes(plaintext)
             lines = plaintext.splitlines()
 
@@ -13646,7 +13963,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ])
             lines.append(new_line)
             new_plain = "\n".join(lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")
@@ -13659,7 +13976,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(400, "Missing id")
                 return
 
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines = plaintext.splitlines()
             new_lines = []
             for line in lines:
@@ -13669,7 +13986,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         continue
                 new_lines.append(line)
             new_plain = "\n".join(new_lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")
@@ -13760,9 +14077,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             try:
                 sys.stderr.write('[import] Applying import data...\n')
-                plaintext = decrypt_vault(master)
+                plaintext = load_vault(master, self._session_rec)
                 new_plain, stats = _apply_import(fmt, content, plaintext)
-                encrypt_vault(master, new_plain)
+                save_vault(master, new_plain, self._session_rec)
                 sys.stderr.write(f"[import] Vault successfully updated ({stats}).\n")
                 summary = ", ".join(f"{v} {k}" for k,v in stats.items() if v)
                 respond_success(f"Import complete: {summary}.")
@@ -13787,7 +14104,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_html(200, page)
                 return
 
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines, passphrases = parse_passphrases(plaintext)
             lines = plaintext.splitlines()
 
@@ -13812,7 +14129,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ])
             lines.append(new_line)
             new_plain = "\n".join(lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")
@@ -13828,7 +14145,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             label = (data.get("label") or [""])[0].strip()
             secret = (data.get("secret") or [""])[0]
 
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines, passphrases = parse_passphrases(plaintext)
             idx_to_update = None
             created = ""
@@ -13871,7 +14188,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "-",
             ])
             new_plain = "\n".join(lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")
@@ -13883,7 +14200,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not pid:
                 self.send_error(400, "Missing id")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines = plaintext.splitlines()
             new_lines = []
             for line in lines:
@@ -13893,7 +14210,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         continue
                 new_lines.append(line)
             new_plain = "\n".join(new_lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")
@@ -13940,7 +14257,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_html(200, page)
                 return
 
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines, auths = parse_authenticators(plaintext)
             lines = plaintext.splitlines()
 
@@ -13963,7 +14280,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ])
             lines.append(new_line)
             new_plain = "\n".join(lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")
@@ -13981,7 +14298,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             period = (data.get("period") or ["30"])[0]
             algo_in = (data.get("algo") or [""])[0].lower()
 
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines, auths = parse_authenticators(plaintext)
             idx_to_update = None
             created = ""
@@ -14041,7 +14358,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 algo,
             ])
             new_plain = "\n".join(lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")
@@ -14053,7 +14370,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not aid:
                 self.send_error(400, "Missing id")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines = plaintext.splitlines()
             new_lines = []
             found = False
@@ -14068,7 +14385,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Authenticator not found")
                 return
             new_plain = "\n".join(new_lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")
@@ -14089,7 +14406,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_html(200, page)
                 return
 
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines, backups = parse_backup_codes(plaintext)
             lines = plaintext.splitlines()
 
@@ -14112,7 +14429,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ])
             lines.append(new_line)
             new_plain = "\n".join(lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")
@@ -14128,7 +14445,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             label = (data.get("label") or [""])[0].strip()
             codes = (data.get("codes") or [""])[0]
 
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines, backups = parse_backup_codes(plaintext)
             idx_to_update = None
             created = ""
@@ -14174,7 +14491,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "-",
             ])
             new_plain = "\n".join(lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")
@@ -14186,7 +14503,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not bid:
                 self.send_error(400, "Missing id")
                 return
-            plaintext = decrypt_vault(master)
+            plaintext = load_vault(master, self._session_rec)
             lines = plaintext.splitlines()
             new_lines = []
             for line in lines:
@@ -14196,7 +14513,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         continue
                 new_lines.append(line)
             new_plain = "\n".join(new_lines) + "\n"
-            encrypt_vault(master, new_plain)
+            save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
             self.send_header("Location", "/")

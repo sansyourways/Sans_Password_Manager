@@ -7,6 +7,53 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-08-29
+
+### Added
+- `spm doctor --json` runs the same checks as `spm doctor` and emits them as a
+  document instead of a page. stdout carries the JSON and nothing else, so it
+  pipes straight into `jq`, and the exit status mirrors the verdict so a script
+  can gate on it without parsing. Each check has a stable id, so a check added
+  later does not reshape the ones already there. No secret appears in the
+  output, which the regression suite asserts against both a password and a
+  note body.
+- Fault-injection coverage for the atomic-write path: a full disk while
+  staging, gpg refusing, a crash at the rename, a truncated container, a
+  corrupted payload and a read-only directory. Each asserts that the previous
+  vault still opens and that no staging file is left behind.
+- A concurrency test that races five writers against one vault through the
+  CLI's own lock and requires all five records to survive. Checking only that
+  the vault still opens would pass while updates were being lost.
+
+### Changed
+- The SPM Dashboard holds a session's unwrapped vault key, so a format-3 read
+  costs one gpg invocation per request instead of two — measured at 10 calls
+  for 5 page loads before, 5 after. The key lives in the session record and
+  dies with it, at the same moment the master password does. A key that no
+  longer opens the vault falls back to the master and re-caches, so a restore
+  or a sync under a live session does not break it.
+- The record-integrity scan moved into the trusted core. The CLI's doctor and
+  the JSON report now read one implementation rather than two that agree.
+
+### Known limitations
+- **macOS has no vault lock.** The advisory lock is `flock(1)`, which macOS
+  does not ship, so concurrent CLI and dashboard writes there can lose
+  records. SPM warns at startup when it runs without a lock. This predates
+  this release and is not fixed by it; the README and `docs/SECURITY.md` now
+  name macOS rather than saying only "when `flock` is available". A portable
+  lock is planned.
+
+### Fixed
+- **Version ordering no longer depends on `sort -V`, a GNU extension.** BSD
+  sort has no `-V`, so on macOS the command fails and the comparison reads an
+  empty string; a lexical substitute orders `2.10.10` before `2.10.9`, which is
+  backwards. Both callers matter: `version_is_newer` is what the auto-updater
+  uses to decide whether a newer release exists. Replaced with a POSIX awk
+  comparison of dotted numeric components.
+- The suite now fails the build if `sort -V`, `date -d`, `base64 -w`,
+  `grep -P`, `sed -i` or `mktemp -p` appears in shipped code without a BSD
+  fallback beside it.
+
 ## [3.3.0] - 2026-08-29
 
 ### Fixed
