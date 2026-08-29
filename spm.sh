@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.4.1"
+VERSION="3.4.2"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -709,15 +709,23 @@ prompt_master_password() {
 }
 
 read_master_password_once() {
+	# The prompt goes to stderr, not stdout. A command whose stdout is a
+	# document -- `doctor --json`, and anything machine-readable added after it
+	# -- would otherwise hand its caller a prompt in the middle of the payload,
+	# which is the bug 3.4.1 shipped. An interactive user sees no difference:
+	# stderr is the same terminal.
 	if [ "$SPM_LANG" = "id" ]; then
-		printf 'Kata sandi utama: '
+		printf 'Kata sandi utama: ' >&2
 	else
-		printf 'Master password: '
+		printf 'Master password: ' >&2
 	fi
-	stty -echo
+	# stty fails when stdin is not a terminal, which is the normal case for a
+	# piped password. The read still works, so that failure is not fatal and
+	# its complaint does not belong on the user's screen.
+	stty -echo 2>/dev/null || true
 	IFS= read -r MASTER_PW
-	stty echo
-	printf '\n'
+	stty echo 2>/dev/null || true
+	printf '\n' >&2
 }
 
 ensure_master_password_loaded() {
@@ -15332,6 +15340,16 @@ main() {
 			bridge-get) cmd_bridge_get "$@" ;;
 			bridge-list) cmd_bridge_list "$@" ;;
 		esac
+		return
+	fi
+	# `doctor --json` makes the same promise bridge-* does: one JSON document on
+	# stdout and nothing else. ensure_requirements prints a banner, and
+	# choose_language and ensure_policy_consent both prompt -- all to stdout --
+	# so a caller piping this into jq got a banner instead of a document. The
+	# lock is still taken, because the report reads the vault.
+	if [ "${1:-}" = "doctor" ] && [ "${2:-}" = "--json" ]; then
+		acquire_cli_vault_lock
+		cmd_doctor_json
 		return
 	fi
 	# Help must remain available before dependency installation, language, or

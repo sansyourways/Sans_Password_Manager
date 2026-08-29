@@ -1679,6 +1679,58 @@ print("  doctor --json: %d checks, exit %d, no secret in the document"
       % (len(report["checks"]), exit_code))
 DOCPY
 
+# The tests above call cmd_doctor_json after sourcing the library, which skips
+# main() entirely -- and main() is where the banner, the language prompt and
+# the consent gate live. 3.4.1 shipped `doctor --json` emitting a banner and a
+# password prompt on stdout for exactly that reason: the function was tested,
+# the command was not. This runs the real command, as a user would.
+doctor_cli_json="$TEST_ROOT/doctor-cli.json"
+doctor_cli_err="$TEST_ROOT/doctor-cli.err"
+doctor_cli_rc=0
+printf '%s\n' "$AUDIT_PASSWORD" | \
+	env HOME="$TEST_ROOT/doctor-home" XDG_DATA_HOME="$TEST_ROOT/doctor-home/data" \
+		PASSWORD_VAULT="$doctor_vault" \
+		bash "$ROOT_DIR/spm.sh" doctor --json \
+	> "$doctor_cli_json" 2> "$doctor_cli_err" || doctor_cli_rc=$?
+
+# The very first byte has to be the document. Parsing alone is not enough --
+# a JSON parser that skips leading whitespace would accept a banner that ends
+# in a newline, and a caller piping to jq would not.
+[ "$(head -c 1 "$doctor_cli_json")" = "{" ] || {
+	printf 'doctor --json did not start with the document:\n' >&2
+	head -c 200 "$doctor_cli_json" | cat -v >&2
+	exit 1
+}
+grep -q 'Sans Password Manager' "$doctor_cli_json" && {
+	printf 'the banner is on stdout, where the JSON document belongs\n' >&2
+	exit 1
+}
+grep -qi 'master password' "$doctor_cli_json" && {
+	printf 'the password prompt is on stdout, where the JSON document belongs\n' >&2
+	exit 1
+}
+python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$doctor_cli_json" || {
+	printf 'doctor --json emitted something that is not one JSON document\n' >&2
+	exit 1
+}
+# The prompt still has to reach a human, just not through stdout.
+grep -qi 'master password' "$doctor_cli_err" || {
+	printf 'the password prompt vanished entirely; it belongs on stderr\n' >&2
+	exit 1
+}
+# The exit status has to follow the verdict here too, not just when the
+# function is called directly.
+doctor_cli_failed="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["summary"]["failed"])' "$doctor_cli_json")"
+if [ "$doctor_cli_failed" -gt 0 ] && [ "$doctor_cli_rc" -eq 0 ]; then
+	printf 'doctor --json reported %s failed check(s) but exited 0\n' "$doctor_cli_failed" >&2
+	exit 1
+fi
+if [ "$doctor_cli_failed" -eq 0 ] && [ "$doctor_cli_rc" -ne 0 ]; then
+	printf 'doctor --json reported no failures but exited %s\n' "$doctor_cli_rc" >&2
+	exit 1
+fi
+printf '  doctor --json as a real command: stdout is the document, prompt on stderr\n'
+
 # A vault with a duplicate id and a split record has to be reported as failed,
 # and the exit status has to follow. Proving the clean case alone would pass
 # for a report that never says "fail".
