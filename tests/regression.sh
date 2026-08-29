@@ -1452,7 +1452,11 @@ race_writer() {
 	plain="$race_dir/plain.$index"
 	(
 		exec 9>"$race_vault.lock"
-		flock -x 9
+		# The same lock the CLI takes, rather than flock(1) directly: this
+		# test ran on macOS, where there is no flock, and every writer sailed
+		# through unlocked while the assertion below still expected the lock
+		# to have held.
+		vault_lock_hold_fd9 || exit 1
 		# shellcheck disable=SC2317
 		printf '%s' "$AUDIT_PASSWORD" | \
 			python3 "$SPM_CORE_PATH" read "$race_vault" "$plain" >/dev/null
