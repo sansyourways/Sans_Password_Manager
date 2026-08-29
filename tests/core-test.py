@@ -500,6 +500,72 @@ def t_read_with_key_survives_a_password_change():
        "the vault key must outlive a password change")
 
 
+# ----- per-record password history -------------------------------------------
+
+
+def _pw(secret, notes="n", rid="1"):
+    return "%s\tSite\tuser\t%s\t%s\t2025-01-01T00:00:00Z\n" % (rid, secret, notes)
+
+
+def t_history_records_a_changed_secret():
+    before = _pw("old-secret")
+    after = _pw("new-secret")
+    out = core.record_password_history(before, after, when="2025-06-01T00:00:00Z")
+    eq(core.password_history(out, "1"), [("2025-06-01T00:00:00Z", "old-secret")],
+       "a rotated password must keep its predecessor")
+
+
+def t_history_ignores_an_unchanged_secret():
+    """Saving an unrelated field must not manufacture a history entry."""
+    before = _pw("same", notes="first")
+    after = _pw("same", notes="second")
+    out = core.record_password_history(before, after, when="2025-06-01T00:00:00Z")
+    eq(core.password_history(out, "1"), [], "editing notes recorded a password change")
+
+
+def t_history_ignores_an_empty_predecessor():
+    """A record created empty and then filled in has no predecessor."""
+    out = core.record_password_history(_pw(""), _pw("filled-in"),
+                                       when="2025-06-01T00:00:00Z")
+    eq(core.password_history(out, "1"), [], "an empty secret was recorded as history")
+
+
+def t_history_dies_with_its_record():
+    """Deleting an entry must take its old passwords with it."""
+    one = core.record_password_history(_pw("a"), _pw("b"), when="2025-01-01T00:00:00Z")
+    two = core.record_password_history(one, one.replace("\tb\t", "\tc\t"),
+                                       when="2025-02-01T00:00:00Z")
+    eq(len(core.password_history(two, "1")), 2, "two rotations should leave two entries")
+    without = "".join(line + "\n" for line in two.splitlines()
+                      if not line.startswith("1\t"))
+    after = core.record_password_history(two, without, when="2025-03-01T00:00:00Z")
+    eq(core.password_history(after, "1"), [],
+       "history outlived the record it belonged to")
+
+
+def t_history_is_capped_per_record():
+    """A credential rotated on a schedule must not grow the vault forever."""
+    current = _pw("secret-start")
+    for index in range(15):
+        rows = {p.split("\t")[0]: p for p in current.splitlines() if p[:1].isdigit()}
+        old = rows["1"].split("\t")[3]
+        current = core.record_password_history(
+            current, current.replace("\t%s\t" % old, "\tsecret-%d\t" % index),
+            when="2025-01-%02dT00:00:00Z" % (index + 1), keep=10)
+    entries = core.password_history(current, "1")
+    eq(len(entries), 10, "the per-record cap did not hold")
+    eq(entries[0][1], "secret-4", "the cap dropped the wrong end of the list")
+
+
+def t_history_keeps_records_apart():
+    """One record rotating must not write history against another."""
+    before = _pw("one") + _pw("two", rid="2")
+    after = _pw("one-changed") + _pw("two", rid="2")
+    out = core.record_password_history(before, after, when="2025-06-01T00:00:00Z")
+    eq(len(core.password_history(out, "1")), 1, "the rotated record lost its history")
+    eq(core.password_history(out, "2"), [], "an untouched record gained history")
+
+
 # ----- fault injection -------------------------------------------------------
 # The write path stages into a temporary file beside the vault, fsyncs it,
 # renames it over the original and fsyncs the directory. That design is only

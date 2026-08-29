@@ -7,6 +7,38 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-08-29
+
+### Added
+- **Per-record password history.** A rotated credential keeps its predecessors,
+  so a bad rotation is recoverable without restoring a whole vault generation.
+  This is distinct from `history-list`, which captures the entire vault at a
+  point in time; this captures one field's past.
+
+  `spm password-history <id>` lists them oldest first. The dashboard shows them
+  on the entry page under **Previous passwords**, masked, with the same reveal
+  and copy controls as the current password — and deliberately not called
+  "History", because the sidebar already has a History item meaning vault
+  snapshots.
+
+  Four rules, each of which a caller would otherwise get wrong:
+  - a secret that did not change writes nothing, so saving an unrelated field
+    does not manufacture an entry
+  - an empty previous secret is not history, so a record created empty and then
+    filled in has no predecessor
+  - **deleting a record deletes its history with it**, because leaving old
+    passwords behind is the opposite of what deleting means
+  - history is capped per record, so a credential rotated on a schedule cannot
+    grow the vault without bound
+
+  Recording happens at the write boundary — one function in the CLI, one in the
+  dashboard — rather than at the twenty-one and nineteen places respectively
+  that edit a record, so a new edit path cannot forget it.
+
+  History rows never reach an export: a plaintext CSV of the vault does not
+  spill passwords already replaced. They are also not counted by the security
+  score.
+
 ## [3.4.3] - 2026-08-29
 
 ### Added

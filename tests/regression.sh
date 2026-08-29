@@ -1584,6 +1584,55 @@ for gnuism in 'sort -V' 'date -d ' 'base64 -w' 'grep -P' 'sed -i ' 'mktemp -p ';
 done
 printf '  version ordering, stat, and path resolution verified without GNU-only flags\n'
 
+printf 'CLI regression: per-record password history\n'
+# History is captured at the write boundary rather than at each of the twenty-one
+# CLI edit paths, so what has to be proven is that the boundary fires -- not that
+# one particular command remembered to call it.
+hist_plain="$TEST_ROOT/hist-plain"
+hist_vault="$TEST_ROOT/hist-vault.gpg"
+printf 'META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n1\tGitHub\tuser\tfirst-pw\tnotes\t2025-01-01T00:00:00Z\n2\tUntouched\tu2\tkeep-me\tn\t2025-01-01T00:00:00Z\n' \
+	"$TEST_RECOVERY_B64" > "$hist_plain"
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback \
+	--passphrase-fd 0 --symmetric --cipher-algo AES256 -o "$hist_vault" "$hist_plain"
+chmod 600 "$hist_vault"
+
+(
+	export VAULT_FILE="$hist_vault" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY=""
+	for secret in second-pw third-pw; do
+		hist_tmp="$(make_tmp)"
+		decrypt_vault_to_file "$hist_tmp"
+		sed -i.bak "s/\t[a-z-]*pw\t/\t$secret\t/" "$hist_tmp" && rm -f "$hist_tmp.bak"
+		encrypt_file_to_vault "$hist_tmp"
+	done
+	# An edit that changes something other than the password must record nothing.
+	hist_tmp="$(make_tmp)"
+	decrypt_vault_to_file "$hist_tmp"
+	sed -i.bak "s/\tnotes\t/\tdifferent notes\t/" "$hist_tmp" && rm -f "$hist_tmp.bak"
+	encrypt_file_to_vault "$hist_tmp"
+
+	final="$(make_tmp)"
+	decrypt_vault_to_file "$final"
+	rows="$(core password-history "$final" 1)"
+	[ "$(printf '%s\n' "$rows" | wc -l | tr -d ' ')" = "2" ] || {
+		printf 'expected two previous passwords, got:\n%s\n' "$rows" >&2; exit 1; }
+	printf '%s\n' "$rows" | grep -q 'first-pw' || {
+		printf 'the original password was not recorded\n' >&2; exit 1; }
+	printf '%s\n' "$rows" | grep -q 'second-pw' || {
+		printf 'the second password was not recorded\n' >&2; exit 1; }
+	printf '%s\n' "$rows" | grep -q 'third-pw' && {
+		printf 'the CURRENT password was recorded as history\n' >&2; exit 1; }
+	[ -z "$(core password-history "$final" 2)" ] || {
+		printf 'an untouched record gained history\n' >&2; exit 1; }
+	# History must not reach an export: a plaintext CSV of the vault should not
+	# spill passwords the user has already replaced.
+	export_out="$TEST_ROOT/hist-export.csv"
+	cmd_export csv "$export_out" >/dev/null 2>&1 || true
+	if [ -f "$export_out" ] && grep -q 'first-pw' "$export_out"; then
+		printf 'an old password leaked into a CSV export\n' >&2; exit 1
+	fi
+) || exit 1
+printf '  two rotations recorded, current excluded, untouched record clean, export clean\n'
+
 printf 'Durability regression: competing writers\n'
 # Two writers racing on one vault is the failure the advisory lock exists to
 # prevent, and it is the one nobody notices until a record disappears. This
