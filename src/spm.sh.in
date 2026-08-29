@@ -823,6 +823,11 @@ decrypt_vault_to_file() {
 			die "Failed to decrypt vault. Wrong master password?"
 		fi
 	fi
+
+	# A copy of what was just decrypted, before any caller edits it. This is
+	# what the write boundary compares against to find changed passwords.
+	SPM_VAULT_PRISTINE="$(make_tmp)"
+	cat "$out_file" > "$SPM_VAULT_PRISTINE" 2>/dev/null || SPM_VAULT_PRISTINE=""
 }
 
 # Decrypt any SPM vault file -- a .bak, a history snapshot, a synced copy --
@@ -835,9 +840,28 @@ decrypt_vault_container() {
 	printf '%s' "$3" | core read "$1" "$2" >/dev/null 2>&1
 }
 
+# The plaintext as it was when this process decrypted it, so a write can tell
+# which passwords changed. Set by decrypt_vault_to_file and consumed here.
+SPM_VAULT_PRISTINE=""
+
 encrypt_file_to_vault() {
 	local in_file="$1"
 	[ "${MASTER_PW:-}" ] || die "MASTER_PW is empty in encrypt_file_to_vault"
+
+	# Per-record password history is recorded at the write boundary rather
+	# than at each of the twenty-one places that edit a record, so a new edit
+	# path cannot forget to record it. A write with no pristine copy -- an
+	# import that never read the old vault, a first init -- simply records
+	# nothing, which is correct rather than merely convenient.
+	if [ -n "${SPM_VAULT_PRISTINE:-}" ] && [ -f "$SPM_VAULT_PRISTINE" ]; then
+		local with_history
+		with_history="$(make_tmp)"
+		if core record-history "$SPM_VAULT_PRISTINE" "$in_file" "$with_history"; then
+			in_file="$with_history"
+		else
+			printf 'Warning: password history was not recorded for this change.\n' >&2
+		fi
+	fi
 
 	# The key is passed back in so an ordinary write does not pay to unwrap
 	# the envelope it already holds. Passing none makes the core recover it
