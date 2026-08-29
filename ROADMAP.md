@@ -12,8 +12,13 @@ co-owners of it. That review is a design concept, not a formal security audit.
 
 ## Now — reliability and contributor foundations
 
-- Expand Linux, macOS, and Termux regression coverage for platform-specific
-  command behavior.
+- **Cross-platform coverage — shipped in 3.4.0.** Version ordering used
+  `sort -V`, a GNU extension BSD sort does not have, so on macOS the comparison
+  failed and a lexical fallback ordered 2.10.10 before 2.10.9 — in the function
+  the auto-updater uses to decide whether a newer release exists. Replaced with
+  a POSIX awk comparison, and a guard now fails the build on `sort -V`,
+  `date -d`, `base64 -w`, `grep -P`, `sed -i` or `mktemp -p` reaching shipped
+  code without a BSD fallback beside it.
 - **A portable vault lock — shipped in 3.4.1.** The lock was `flock(1)`, which
   macOS does not ship, so the CLI took no lock there while the dashboard did:
   one side believed it was protected. The CLI now takes the same lock through
@@ -25,7 +30,13 @@ co-owners of it. That review is a design concept, not a formal security audit.
   mutations — disk-full, process killed mid-write, corrupted vault, competing
   writers — **shipped in 3.4.0** for the write path and the lock. What remains
   is restore and import.
-- Improve accessibility and keyboard-only verification for every SPM Dashboard page.
+- **Dashboard accessibility — shipped in 3.6.0.** Fifty-two issues across the
+  eleven pages, found through the browser's real accessibility tree rather than
+  by reading source: 22 inputs whose labels were attached to nothing, 19
+  unnamed controls, no navigation landmark anywhere, a table with no header
+  cells. The focus ring was the worst of them — present in the DOM at 1.15:1
+  against the field it surrounded, where WCAG 1.4.11 asks 3.0:1. Now 9.7:1,
+  with the suite failing if it drops again.
 - Keep import/export fixtures synchronized across every documented format.
 
 ## Shipped integrations
@@ -45,22 +56,45 @@ co-owners of it. That review is a design concept, not a formal security audit.
   command. Existing installs must remove the previously loaded extension, since
   its ID changes.
 
+- **A stable extension boundary — shipped in 3.7.0.** The native-messaging
+  host checked what came in and forwarded whatever the CLI printed on the way
+  out, which meant the extension's view of the vault was not a contract but
+  whatever `bridge-get` happened to emit that release. Responses are now
+  projected onto the fields each action declares, and errors come from a fixed
+  set rather than being echoed — an unexpected message like
+  `gpg: /home/you/.spm_vault.gpg: decryption failed` carried a filesystem path
+  across a boundary whose purpose is that nothing crosses unnamed.
+
+  What the boundary does not do is written down rather than implicit: the
+  original one-shot extension sends the master password with every request and
+  holds no session, so Lock and both timeouts do not constrain it.
+
+- **Bitwarden vault imports — shipped in 3.4.3.** All three of its export files
+  are read: JSON, CSV, and password-protected JSON. Before this a Bitwarden CSV
+  imported as one empty note and silently dropped every login while the
+  dashboard reported success. Argon2id-protected exports are refused by name,
+  the same wall described below for SPM's own vaults.
+
   The in-field picker and optional WebAuthn unlock remain phased in
-  [`docs/BROWSER-EXTENSION-ROADMAP.md`](docs/BROWSER-EXTENSION-ROADMAP.md),
-  retargeted to 3.3.0 and 3.4.0.
+  [`docs/BROWSER-EXTENSION-ROADMAP.md`](docs/BROWSER-EXTENSION-ROADMAP.md).
+  Both need a browser's extension UI driven for real to be worth trusting,
+  which is the gap that decides when they ship rather than the code.
 
 ## Next — safer integrations
 
 - Continue the browser-extension work with an origin-isolated in-field picker.
 - Design pluggable, encrypted synchronization transports without introducing a
   maintainer-operated cloud service.
-- Add machine-readable doctor output for support and automation.
+- **Machine-readable doctor output — shipped in 3.4.0**, corrected in 3.4.2.
+  `spm doctor --json` emits the same checks as a document with stable ids and
+  an exit status that follows the verdict. It shipped emitting a banner and a
+  password prompt on stdout, because the tests called the function after
+  sourcing the library and never ran the command.
 - Improve reproducible release provenance and artifact attestations.
 
 ## Later — ecosystem growth
 
 - Evaluate package-manager distribution for Homebrew and Termux.
-- Define a stable extension boundary that cannot bypass vault authorization.
 - Explore hardware-backed signing for release provenance. Hardware-backed
   protection of the vault itself is covered under Architecture below.
 - Add optional localization contributions beyond English, Indonesian, and
@@ -165,19 +199,45 @@ as such below rather than quietly dropped.
   turns Argon2id from another format change into a value the reader already
   knows how to dispatch on. It must also keep reading format-3 vaults, which is
   what the version row exists for.
-- **Cache the dashboard session key.** Two gpg invocations per request become
-  one. Roughly half the latency, for a change confined to the core's callers.
+- **Cache the dashboard session key — shipped in 3.4.0.** Two gpg invocations
+  per request became one, counted through a shim in front of the real binary:
+  10 calls for 5 page loads before, 5 after. The key lives in the session
+  record and dies with it, which is deliberately not a process-wide cache — one
+  would survive logout, and a test now fails the build if one appears.
 
 ### User power — daily capability
 
-- Per-record password history, so a rotated credential keeps its predecessors.
-  This is distinct from the existing vault-level snapshots, which capture whole
-  generations rather than the history of one entry.
+- **Per-record password history — shipped in 3.5.0.** A rotated credential
+  keeps its predecessors, so the common accident is recoverable without
+  restoring a whole vault generation and taking every other record with it.
+  Recorded at the write boundary rather than at the twenty-one CLI and nineteen
+  dashboard edit paths, so a new one cannot forget. History never reaches an
+  export and is never counted as a password.
 - Duplicate and breach review that performs its analysis without disclosing a
   secret to any third party.
 - Folders and custom fields for records that do not fit the current shape.
 - Import preview, so a Bitwarden, 1Password, KeePass or browser export can be
   inspected and corrected before it is committed to the vault.
+
+### What is left, and what decides when
+
+Two items on this board are written but not shipped, and in both cases the
+blocker is verification rather than code.
+
+- **The in-field picker** needs a browser's extension UI driven for real.
+- **Hardware-backed key wrapping** needs a FIDO2 key or a TPM to test against.
+
+That distinction is worth stating because of what the 3.2.0–3.7.0 run showed.
+Five defects reached a release and were then found only when something was
+rendered or executed rather than unit-tested: a language picker whose whole
+dictionary failed to parse, `doctor --json` emitting a banner before its
+document, the Bitwarden formats attached to the export form instead of the
+import one, a focus ring at 1.15:1, and an error path that stringified a
+filesystem path instead of refusing it. Each passed a test that exercised the
+function underneath it.
+
+Crypto and extension UI are the two worst places to accept that gap, so these
+two wait for a way to run them rather than for someone to write them.
 
 ### Trust expansion — hardware and recovery
 
