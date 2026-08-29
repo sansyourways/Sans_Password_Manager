@@ -7,6 +7,30 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.7.1] - 2026-08-29
+
+Documentation only. No code changed: `spm.sh` is byte-identical to 3.7.0 apart
+from its version string, so there is nothing here that needs installing.
+
+### Documented
+- `ROADMAP.md` records what shipped across 3.3.0 to 3.7.0 and, for the two P1
+  items still open, says that neither is waiting on effort: the in-field picker
+  needs a browser's extension UI driven for real, and hardware-backed key
+  wrapping needs a key or a TPM to test against.
+
+  That distinction has a section of its own because five defects reached a
+  release across those versions and were found only when something was
+  rendered or executed — a translation dictionary that failed to parse, a
+  banner emitted ahead of a JSON document, import formats attached to the
+  export form, a focus ring at 1.15:1, and an error path that stringified a
+  filesystem path instead of refusing it. Each had passed a test of the
+  function underneath it.
+- `docs/BROWSER-EXTENSION-ROADMAP.md` no longer names target versions for
+  phases that have not started. It named one four times and was wrong within a
+  day each time — 3.3.0 went to the dashboard's dead controls, 3.4.0 to
+  diagnostics, 3.5.0 to per-record history, none of them that plan. The order
+  is the part worth trusting.
+
 ## [3.7.0] - 2026-08-29
 
 ### Changed
