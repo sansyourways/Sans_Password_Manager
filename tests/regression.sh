@@ -1337,6 +1337,158 @@ printf '  source is inert; execution and a real pipe still dispatch\n'
 # and vault mutation are exercised against the module directly, without a
 # shell or a web server in the way. That this file can exist at all is the
 # point of extracting it.
+printf 'Portability regression: platform-specific command behaviour\n'
+# This suite runs on Linux, macOS and Termux, and the failures that only show
+# up on one of them are the ones nobody sees until a user reports them. Each
+# helper below wraps a command whose flags differ between GNU and BSD, so each
+# is asserted on its behaviour rather than on which branch it took.
+
+# Version ordering was `sort -V` until 3.4.0. That is a GNU extension: BSD
+# sort has no -V, so on macOS the command fails and the comparison reads an
+# empty string, and a lexical substitute orders 2.10.10 before 2.10.9 --
+# backwards, in the function the auto-updater uses to decide whether a newer
+# release exists. The truth table is asserted directly.
+version_case() {
+	local newer="$1" older="$2" expect="$3" got="ok"
+	if version_is_newer "$newer" "$older"; then got="newer"; else got="not-newer"; fi
+	[ "$got" = "$expect" ] || {
+		printf 'version_is_newer %s %s said %s, wanted %s\n' \
+			"$newer" "$older" "$got" "$expect" >&2
+		exit 1
+	}
+}
+version_case 2.10.10 2.10.9  newer
+version_case 2.10.9  2.10.10 not-newer
+version_case 3.10.0  3.9.0   newer
+version_case 3.9.0   3.10.0  not-newer
+version_case 10.0.0  9.9.9   newer
+version_case 3.0.1   3.0.0   newer
+version_case 3.0.0   3.0.0   not-newer
+version_case 3.1.0   3.0.9   newer
+# Unequal component counts must compare as if the shorter were zero-padded.
+version_case 3.1     3.0.9   newer
+version_case 3.0.0   3.0     not-newer
+# A shorter version on the LEFT, where the missing component decides the
+# answer, is the only shape that catches a wrong zero-pad. Every other
+# unequal-length pair is settled before the padding is reached.
+[ "$(version_compare 3.0 3.0.1)" = "-1" ] || {
+	printf 'version_compare 3.0 3.0.1 did not zero-pad the shorter side\n' >&2; exit 1; }
+[ "$(version_compare 3.0.1 3.0)" = "1" ] || {
+	printf 'version_compare 3.0.1 3.0 got the padded case backwards\n' >&2; exit 1; }
+[ "$(version_compare 1.2.3 1.2.3)" = "0" ] || {
+	printf 'version_compare says two equal versions differ\n' >&2; exit 1; }
+[ "$(version_compare 1.2.4 1.2.3)" = "1" ] || {
+	printf 'version_compare got the greater case wrong\n' >&2; exit 1; }
+[ "$(version_compare 1.2.3 1.2.4)" = "-1" ] || {
+	printf 'version_compare got the lesser case wrong\n' >&2; exit 1; }
+
+# file_mode: GNU stat wants -c, BSD stat wants -f. Whichever is present, the
+# answer has to be octal permission bits that mode_is_exposed can read.
+portable_probe="$TEST_ROOT/portable-probe"
+: > "$portable_probe"
+chmod 600 "$portable_probe"
+probe_mode="$(file_mode "$portable_probe")"
+case "$probe_mode" in
+	600|0600) ;;
+	*) printf 'file_mode returned %s for a 0600 file\n' "$probe_mode" >&2; exit 1 ;;
+esac
+mode_is_exposed "$probe_mode" && {
+	printf 'mode_is_exposed called 0600 exposed\n' >&2; exit 1; }
+chmod 644 "$portable_probe"
+mode_is_exposed "$(file_mode "$portable_probe")" || {
+	printf 'mode_is_exposed did not flag a world-readable file\n' >&2; exit 1; }
+chmod 600 "$portable_probe"
+
+# canon_path: realpath, readlink -f, then a cd fallback. Older macOS has
+# neither of the first two, so the contract is only that the result is
+# absolute and names the same file.
+canon_out="$(canon_path "$portable_probe")"
+case "$canon_out" in
+	/*) ;;
+	*) printf 'canon_path returned a relative path: %s\n' "$canon_out" >&2; exit 1 ;;
+esac
+[ -f "$canon_out" ] || {
+	printf 'canon_path returned a path that does not exist: %s\n' "$canon_out" >&2
+	exit 1
+}
+
+# Nothing may reintroduce a GNU-only flag without a fallback beside it. These
+# are the ones this codebase has actually tripped over.
+# Comment lines are stripped first: the commentary explaining why sort -V was
+# removed names it, and a guard that cannot survive its own rationale is not a
+# guard anyone will keep.
+grep -v '^[[:space:]]*#' "$ROOT_DIR/spm.sh" > "$TEST_ROOT/spm-code-only.sh"
+for gnuism in 'sort -V' 'date -d ' 'base64 -w' 'grep -P' 'sed -i ' 'mktemp -p '; do
+	if grep -qF -- "$gnuism" "$TEST_ROOT/spm-code-only.sh"; then
+		printf 'spm.sh uses the GNU-only construct "%s" with no BSD fallback\n' \
+			"$gnuism" >&2
+		exit 1
+	fi
+done
+printf '  version ordering, stat, and path resolution verified without GNU-only flags\n'
+
+printf 'Durability regression: competing writers\n'
+# Two writers racing on one vault is the failure the advisory lock exists to
+# prevent, and it is the one nobody notices until a record disappears. This
+# runs concurrent writers against a real vault and asserts what has to hold
+# afterwards: the vault still opens, and every writer that reported success
+# left its record behind. A lost update passes a "does it still open" check
+# on its own, which is why the record count is asserted too.
+race_dir="$TEST_ROOT/race"
+mkdir -p "$race_dir"
+race_vault="$race_dir/vault.gpg"
+printf 'META_RECOVERY_PUBKEY	%s	-	-	-	-
+' "$TEST_RECOVERY_B64" > "$race_dir/seed"
+printf '%s' "$AUDIT_PASSWORD" | gpg --batch --yes --pinentry-mode loopback \
+	--passphrase-fd 0 --symmetric --cipher-algo AES256 \
+	-o "$race_vault" "$race_dir/seed"
+chmod 600 "$race_vault"
+
+# Serialise on the same lock file the CLI uses, then read-modify-write. Without
+# the lock these interleave and the last writer wins with a vault missing the
+# others' rows.
+race_writer() {
+	local index="$1" plain
+	plain="$race_dir/plain.$index"
+	(
+		exec 9>"$race_vault.lock"
+		flock -x 9
+		printf '%s' "$AUDIT_PASSWORD" | \
+			python3 "$SPM_CORE_PATH" read "$race_vault" "$plain" >/dev/null
+		printf '%s\tRacer%s\tu%s\ts%s\thttps://r%s.invalid\t2025-01-01T00:00:00Z\n' \
+			"$index" "$index" "$index" "$index" "$index" >> "$plain"
+		printf '%s' "$AUDIT_PASSWORD" | \
+			python3 "$SPM_CORE_PATH" write "$race_vault" "$plain" >/dev/null
+	)
+}
+
+SPM_CORE_DIR="$XDG_DATA_HOME/spm" ensure_core_script "$XDG_DATA_HOME/spm" >/dev/null
+race_pids=""
+for racer in 1 2 3 4 5; do
+	race_writer "$racer" &
+	race_pids="$race_pids $!"
+done
+race_failed=0
+for pid in $race_pids; do wait "$pid" || race_failed=1; done
+[ "$race_failed" -eq 0 ] || { printf 'a locked concurrent writer failed\n' >&2; exit 1; }
+
+printf '%s' "$AUDIT_PASSWORD" | \
+	python3 "$SPM_CORE_PATH" read "$race_vault" "$TEST_ROOT/race-final" >/dev/null \
+	|| { printf 'the vault does not open after concurrent writes\n' >&2; exit 1; }
+race_rows="$(awk -F '\t' '$2 ~ /^Racer/ {n++} END{print n+0}' "$TEST_ROOT/race-final")"
+[ "$race_rows" -eq 5 ] || {
+	printf 'concurrent writers lost updates: %s of 5 rows survived\n' "$race_rows" >&2
+	exit 1
+}
+# A staging file left behind by a racing writer would be collected by the next
+# backup sweep and is a real leak, so the directory has to come back clean.
+race_stage_files="$(find "$race_dir" -name '*.stage.*' -print -quit)"
+[ -z "$race_stage_files" ] || {
+	printf 'concurrent writers left staging files behind: %s\n' "$race_stage_files" >&2
+	exit 1
+}
+printf '  5 concurrent writers, all 5 records survived, no staging files left\n'
+
 printf 'Web regression: session vault-key cache\n'
 # The dashboard holds a session's unwrapped vault key so every read after the
 # first skips the key envelope. Three things have to hold, and only the first

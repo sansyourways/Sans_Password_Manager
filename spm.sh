@@ -4051,12 +4051,34 @@ autoupdate_mode() {
 	esac
 }
 
+# -1, 0 or 1 for $1 against $2, comparing dotted numeric components.
+#
+# This used to be `sort -V`, which is a GNU extension: BSD sort, and so macOS,
+# has no -V. Where it is missing the option is not ignored -- sort fails and
+# the comparison reads an empty string -- and where a lexical sort is
+# substituted instead it orders 2.10.10 before 2.10.9, which is precisely
+# backwards and precisely what these callers exist to get right. awk is POSIX
+# and this script already depends on it everywhere else.
+version_compare() {
+	awk -v a="$1" -v b="$2" '
+	BEGIN {
+		na = split(a, x, "."); nb = split(b, y, ".")
+		n = (na > nb) ? na : nb
+		for (i = 1; i <= n; i++) {
+			p = (i <= na) ? x[i] + 0 : 0
+			q = (i <= nb) ? y[i] + 0 : 0
+			if (p > q) { print 1; exit }
+			if (p < q) { print -1; exit }
+		}
+		print 0
+	}'
+}
+
 # True when $1 is strictly newer than $2. Plain string equality was enough for
-# "is this the same release", but not for "is there a newer one": 2.10.10 sorts
-# before 2.10.9 lexically.
+# "is this the same release", but not for "is there a newer one".
 version_is_newer() {
 	[ "$1" != "$2" ] || return 1
-	[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
+	[ "$(version_compare "$1" "$2")" = "1" ]
 }
 
 autoupdate_latest_tag() {
@@ -6438,7 +6460,7 @@ domain_nginx_at_least() {
 	exe="$(nginx_bin)" || return 1
 	have="$("$exe" -v 2>&1 | sed -n 's|.*nginx/\([0-9][0-9.]*\).*|\1|p')"
 	[ -n "$have" ] || return 1
-	[ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -n1)" = "$want" ]
+	[ "$(version_compare "$have" "$want")" != "-1" ]
 }
 
 # Two phases are unavoidable: nginx must already answer on port 80 to serve the

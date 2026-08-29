@@ -7,8 +7,11 @@ shell, a web server, or a fixture vault built by another implementation.
 """
 
 import base64
+import builtins
+import errno
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -495,6 +498,147 @@ def t_read_with_key_survives_a_password_change():
     core.rewrap(path, MASTER, "a-different-master-9137")
     eq(core.read_vault_with_key(path, key), core.read_vault(path, "a-different-master-9137")[0],
        "the vault key must outlive a password change")
+
+
+# ----- fault injection -------------------------------------------------------
+# The write path stages into a temporary file beside the vault, fsyncs it,
+# renames it over the original and fsyncs the directory. That design is only
+# worth anything if it holds when a step fails, so each of these breaks one
+# step and asserts the two properties that matter: the previous vault is still
+# openable, and nothing is left behind in the directory.
+
+
+def _vault_dir_entries(path):
+    return sorted(os.listdir(os.path.dirname(path)))
+
+
+def _no_stage_files(path, when):
+    leftovers = [n for n in _vault_dir_entries(path) if ".stage." in n]
+    if leftovers:
+        raise AssertionError("%s left staging files behind: %r" % (when, leftovers))
+
+
+def t_fault_disk_full_while_staging():
+    """ENOSPC writing the staged container must not touch the live vault."""
+    path = fresh("fault-enospc")
+    legacy_vault(path, MASTER)
+    key = core.write_vault(path, MASTER, sample())
+    before = open(path, "rb").read()
+
+    real_open = builtins.open
+
+    def full_disk(name, mode="r", *args, **kwargs):
+        if isinstance(name, str) and ".stage." in name and "w" in mode:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_open(name, mode, *args, **kwargs)
+
+    builtins.open = full_disk
+    try:
+        raises(OSError, lambda: core.write_vault(path, MASTER, sample() + "2\tB\tc\td\te\tf\n"),
+               "a full disk must not be swallowed")
+    finally:
+        builtins.open = real_open
+
+    eq(open(path, "rb").read(), before, "the vault changed despite a failed write")
+    eq(core.read_vault(path, MASTER)[1], key, "the vault no longer opens with its key")
+    _no_stage_files(path, "a failed staged write")
+
+
+def t_fault_encryption_failure_leaves_nothing_behind():
+    """A refusal from gpg must leave neither a changed vault nor a stage file."""
+    path = fresh("fault-gpg")
+    legacy_vault(path, MASTER)
+    core.write_vault(path, MASTER, sample())
+    before = open(path, "rb").read()
+
+    real_encrypt = core.gpg_encrypt
+
+    def refuse(secret, payload, timeout=60):
+        raise core.VaultError("gpg refused")
+
+    core.gpg_encrypt = refuse
+    try:
+        raises(core.VaultError, lambda: core.write_vault(path, MASTER, sample()),
+               "an encryption failure must propagate")
+    finally:
+        core.gpg_encrypt = real_encrypt
+
+    eq(open(path, "rb").read(), before, "the vault changed despite a failed encrypt")
+    _no_stage_files(path, "a failed encrypt")
+
+
+def t_fault_killed_between_stage_and_rename():
+    """Dying at the rename is the crash the staging design exists for."""
+    path = fresh("fault-rename")
+    legacy_vault(path, MASTER)
+    core.write_vault(path, MASTER, sample())
+    before = open(path, "rb").read()
+
+    real_replace = os.replace
+
+    def die(src, dst, *args, **kwargs):
+        raise OSError(errno.EIO, "simulated crash during rename")
+
+    os.replace = die
+    try:
+        raises(OSError, lambda: core.write_vault(path, MASTER, sample()),
+               "a failed rename must propagate")
+    finally:
+        os.replace = real_replace
+
+    eq(open(path, "rb").read(), before, "a failed rename modified the vault")
+    eq(core.read_vault(path, MASTER)[0], core.stamp_version(sample()),
+       "the surviving vault does not open to its previous contents")
+    _no_stage_files(path, "a failed rename")
+
+
+def t_fault_read_refuses_a_truncated_container():
+    """Half a container must fail, never decode to half a vault."""
+    path = fresh("fault-truncated")
+    legacy_vault(path, MASTER)
+    core.write_vault(path, MASTER, sample())
+    raw = open(path, "rb").read()
+    with open(path, "wb") as handle:
+        handle.write(raw[:len(raw) // 2])
+    raises(Exception, lambda: core.read_vault(path, MASTER),
+           "a truncated container was accepted")
+
+
+def t_fault_read_refuses_a_corrupted_payload():
+    """A flipped byte in the ciphertext must fail, not return partial text."""
+    path = fresh("fault-corrupt")
+    legacy_vault(path, MASTER)
+    core.write_vault(path, MASTER, sample())
+    raw = bytearray(open(path, "rb").read())
+    # Damage the tail, which is the data section rather than the envelope.
+    raw[-24] ^= 0xFF
+    raw[-23] ^= 0xFF
+    with open(path, "wb") as handle:
+        handle.write(bytes(raw))
+    try:
+        plaintext = core.read_vault(path, MASTER)[0]
+    except Exception:
+        return
+    if "CoreSecret42" in plaintext:
+        raise AssertionError("a corrupted vault decoded to its original contents")
+    raise AssertionError("a corrupted vault returned plaintext instead of failing")
+
+
+def t_fault_write_refuses_a_read_only_directory():
+    """No write permission must refuse cleanly, leaving the vault openable."""
+    path = fresh("fault-readonly")
+    legacy_vault(path, MASTER)
+    core.write_vault(path, MASTER, sample())
+    before = open(path, "rb").read()
+    directory = os.path.dirname(path)
+    mode = stat.S_IMODE(os.stat(directory).st_mode)
+    os.chmod(directory, 0o500)
+    try:
+        raises(OSError, lambda: core.write_vault(path, MASTER, sample()),
+               "a read-only directory must refuse the write")
+    finally:
+        os.chmod(directory, mode)
+    eq(open(path, "rb").read(), before, "the vault changed in a read-only directory")
 
 
 def _write_temp(text):
