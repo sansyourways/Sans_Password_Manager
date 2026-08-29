@@ -1,8 +1,8 @@
 # Browser extension roadmap — URL auto-bind and the account picker
 
 Status: **3.1.0 protocol and popup picker shipped; 3.2.0 guided setup and
-stable extension identity shipped**. The origin-isolated in-field picker is
-next, for 3.4.0.
+stable extension identity shipped; 3.7.0 declared the boundary the host
+enforces.** The origin-isolated in-field picker is next.
 
 Phases were rebased onto 3.1.0 after 3.0.0 took the major version for the
 vault-format change, and shifted one release again when 3.2.0 went to the
@@ -11,9 +11,15 @@ master-password change ahead of this work, 3.0.0 shipped the trusted core ahead
 of it again, and 3.2.0 fixed the installation loop that 3.1.0 left behind. The
 sequence is unchanged every time; only the version each phase targets moved.
 
-That has now happened four times, which is enough to say plainly: **the version
-numbers below are the next free minor at the time of writing, not a
-reservation.** The order is the part worth trusting.
+That happened four times, and each time the number was wrong within a day, so
+the unstarted phases below no longer name one. 3.3.0 went to the dashboard's
+dead controls, 3.4.0 to diagnostics, 3.5.0 to per-record history — none of them
+this plan. **The order is the part worth trusting; the version each phase lands
+in is decided when it is ready, not here.**
+
+For these two that is not a scheduling question. Both need a browser's
+extension UI driven for real before they are worth trusting, and that is what
+decides when they ship.
 
 This is an implementation plan with target versions, so it lives here rather
 than in [`ROADMAP.md`](../ROADMAP.md), which deliberately communicates direction
@@ -190,14 +196,14 @@ Not a picker phase. It removes the installation friction that 3.1.0 shipped
 with, and it is separated from the in-field work so that the identity change,
 which requires existing users to reload the extension, lands on its own.
 
-### 3.4.0 — in-field dropdown
+### Next — in-field dropdown
 
 - Content script, field detection, extension-origin iframe menu
 - Keyboard navigation (arrows, Enter, Escape), focus handling
 - The fill-path rules above, each with a test
 - Firefox for Android verification pass
 
-### 3.5.0 — cheap unlock and scoping
+### After that — cheap unlock and scoping
 
 - WebAuthn unlock in the popup, reusing the Dashboard's ceremony
 - Opt-in `*.` subdomain scoping
@@ -214,7 +220,7 @@ CLI-level and needs no browser:
 - native-host `lock` makes a previously working session fail
 - unlock, list, get, and lock work over native-messaging framing
 
-Wildcard scope and HTTPS downgrade refusal belong to the 3.5.0 scoping phase
+Wildcard scope and HTTPS downgrade refusal belong to the scoping phase
 and receive their regression assertions with that implementation.
 
 **Manual matrix** — the browser UI. Driving an extension under headless Chromium
