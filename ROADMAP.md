@@ -257,6 +257,17 @@ function underneath it.
 Crypto and extension UI are the two worst places to accept that gap, so these
 two wait for a way to run them rather than for someone to write them.
 
+3.8.0 is the first item on this board built the other way round, and the
+result argues for the rule. Its review page passed the suite — ten mutants
+across the token, the expiry, the classification and the masking were all
+killed — and was then opened in a browser, where four defects were visible
+immediately: "1 passwords · 1 notes", "1 row(s)", a five-column table header
+over no rows in the empty state, and the secret column headed "Password" for
+note bodies and backup codes. None of them could have failed a test of the
+function underneath; all four were fixed before the release rather than after
+it. The tally above stays at five because rendering happened first this time,
+which is the whole point.
+
 ### Trust expansion — hardware and recovery
 
 - Hardware-backed key wrapping via FIDO2, TPM or a platform secure enclave.
