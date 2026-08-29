@@ -1000,6 +1000,9 @@ curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/import-preview.html" \
 grep -q 'Review this import' "$TEST_ROOT/import-preview.html"
 grep -q 'Preview Site' "$TEST_ROOT/import-preview.html"
 grep -q 'name="confirm"' "$TEST_ROOT/import-preview.html"
+# "1 passwords" is the sort of thing only a rendered page shows you, and the
+# heading is the first line a reader checks the file against.
+grep -q '1 password &middot; 1 note<' "$TEST_ROOT/import-preview.html"
 # The whole point: reviewing wrote nothing.
 [ "$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)" = "$vault_before_import" ] || {
 	printf 'the import preview modified the vault\n' >&2; exit 1
@@ -1106,6 +1109,11 @@ grep -q 'Passport' "$TEST_ROOT/import-nothing.html"
 if grep -q 'name="confirm"' "$TEST_ROOT/import-nothing.html"; then
 	printf 'an unimportable file was still offered a confirm button\n' >&2; exit 1
 fi
+# Nor a five-column header over no rows, which reads as a table that failed.
+if grep -q '<table' "$TEST_ROOT/import-nothing.html"; then
+	printf 'the empty review still rendered a table with no rows\n' >&2; exit 1
+fi
+grep -q '1 row will not be imported' "$TEST_ROOT/import-nothing.html"
 
 # Expiry, which no HTTP test can reach without waiting five minutes. The held
 # review is a plain record, so the clock is moved instead: a review left open

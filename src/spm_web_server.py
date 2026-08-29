@@ -265,6 +265,7 @@ I18N_SCRIPT = """
       "import.preview.confirm": "Import these records",
       "import.preview.cancel": "Cancel",
       "import.preview.back": "Back to Export / Import",
+      "import.preview.secret": "Secret",
       "section.passphrases": "Passphrases",
       "section.passphrases_desc": "Store API tokens or recovery phrases. View prompts master re-check.",
       "btn.add_passphrase": "+ Add Passphrase",
@@ -538,6 +539,7 @@ I18N_SCRIPT = """
       "import.preview.confirm": "Impor catatan ini",
       "import.preview.cancel": "Batal",
       "import.preview.back": "Kembali ke Ekspor / Impor",
+      "import.preview.secret": "Rahasia",
       "section.passphrases": "Frasa Sandi",
       "section.passphrases_desc": "Simpan token API atau frasa pemulihan. Tampilan meminta master lagi.",
       "btn.add_passphrase": "+ Tambah Frasa Sandi",
@@ -811,6 +813,7 @@ I18N_SCRIPT = """
       "import.preview.confirm": "これらのレコードをインポート",
       "import.preview.cancel": "キャンセル",
       "import.preview.back": "エクスポート / インポートに戻る",
+      "import.preview.secret": "シークレット",
       "section.passphrases": "パスフレーズ",
       "section.passphrases_desc": "APIトークンや復旧フレーズを保存。閲覧時に再確認します。",
       "btn.add_passphrase": "+ パスフレーズ追加",
@@ -3904,7 +3907,14 @@ def import_preview_page(classified, stats, skipped, token, csrf):
             f'data-target="{elem}" aria-label="Show">{_icon("view", "icon icon-sm")}</button></td>'
             "</tr>")
 
-    counts = (" &middot; ".join(f"{v} {k}" for k, v in stats.items() if v)
+    # "1 passwords" is the kind of thing only a rendered page shows you.
+    names = {"passwords": ("password", "passwords"),
+             "notes": ("note", "notes"),
+             "passphrases": ("passphrase", "passphrases"),
+             "backups": ("backup-code record", "backup-code records"),
+             "authenticators": ("authenticator", "authenticators")}
+    counts = (" &middot; ".join(f"{v} {names[k][0 if v == 1 else 1]}"
+                                for k, v in stats.items() if v)
               or "Nothing in this file can be imported")
     skipped_html = ""
     if skipped:
@@ -3912,10 +3922,12 @@ def import_preview_page(classified, stats, skipped, token, csrf):
             f'<li>{_esc(str(r.get("label") or r.get("type") or "(unnamed)"))}</li>'
             for r in skipped[:20])
         more = (f"<li>and {len(skipped) - 20} more</li>" if len(skipped) > 20 else "")
+        count = ("1 row will not be imported" if len(skipped) == 1
+                 else f"{len(skipped)} rows will not be imported")
         skipped_html = f"""
 <div class="flash error" style="display:block">
-  <div><strong>{len(skipped)} row(s) will not be imported</strong>, because SPM has no
-  matching record type for them. They are listed so nothing disappears without being named.</div>
+  <div><strong>{count}</strong>, because SPM has no matching record type for
+  them. They are listed so nothing disappears without being named.</div>
   <ul style="margin:var(--sp-2) 0 0 var(--sp-4)">{rows}{more}</ul>
 </div>"""
 
@@ -3929,8 +3941,22 @@ def import_preview_page(classified, stats, skipped, token, csrf):
       <button class="btn btn-primary" type="submit" data-i18n="import.preview.confirm">Import these records</button>
       <a class="btn btn-ghost" href="/transfer" data-i18n="import.preview.cancel">Cancel</a>
     </form>"""
+        table = f"""
+  <div class="table-wrap"><table class="t">
+    <thead><tr>
+      <th scope="col" data-i18n="table.id">ID</th>
+      <th scope="col" data-i18n="import.preview.kind">Type</th>
+      <th scope="col" data-i18n="table.service">Service</th>
+      <th scope="col" data-i18n="table.username">Username</th>
+      <th scope="col" data-i18n="import.preview.secret">Secret</th>
+    </tr></thead>
+    <tbody>{"".join(body)}</tbody>
+  </table></div>"""
     else:
-        actions = ('<a class="btn btn-ghost" href="/transfer" '
+        # A header row over no rows says nothing the panel above has not
+        # already said, and reads as a table that failed to load.
+        table = ""
+        actions = ('<a class="btn" href="/transfer" '
                    'data-i18n="import.preview.back">Back to Export / Import</a>')
 
     content = f"""
@@ -3942,17 +3968,7 @@ def import_preview_page(classified, stats, skipped, token, csrf):
 </div>
 {skipped_html}
 <div class="card">
-  <div class="card-head"><h2>{counts}</h2></div>
-  <div class="table-wrap"><table class="t">
-    <thead><tr>
-      <th scope="col" data-i18n="table.id">ID</th>
-      <th scope="col" data-i18n="import.preview.kind">Type</th>
-      <th scope="col" data-i18n="table.service">Service</th>
-      <th scope="col" data-i18n="table.username">Username</th>
-      <th scope="col" data-i18n="view.label.password">Password</th>
-    </tr></thead>
-    <tbody>{"".join(body)}</tbody>
-  </table></div>
+  <div class="card-head"><h2>{counts}</h2></div>{table}
   <div class="card-foot">{actions}</div>
 </div>
 {REVEAL_SCRIPT}"""
