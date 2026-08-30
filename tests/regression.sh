@@ -1756,9 +1756,10 @@ rm -f "$built" "$built.sha256"
 PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$archive_dir/built.zip" \
 	"$(TZ=UTC git -C "$ROOT_DIR" log -1 --date=format-local:'%Y %m %d %H %M %S' --format=%cd)" \
 	<<'PYZIP'
-import sys, zipfile
+import datetime, sys, zipfile
 
-path, stamp = sys.argv[1], tuple(int(p) for p in sys.argv[2].split())
+path = sys.argv[1]
+stamp = tuple(int(p) for p in sys.argv[2].split())
 with zipfile.ZipFile(path) as zf:
     infos = zf.infolist()
 names = [i.filename for i in infos]
@@ -1773,12 +1774,23 @@ if names != sorted(names):
              % (first, names[first]))
 
 # Timestamps. zip records an mtime per entry, and a fresh checkout's mtimes are
-# whenever the checkout happened.
-odd = [i.filename for i in infos if i.date_time != stamp]
-if odd:
-    sys.exit("%d entr(ies) are not stamped from the commit, e.g. %s (%s, wanted %s)"
-             % (len(odd), odd[0],
-                next(i.date_time for i in infos if i.filename == odd[0]), stamp))
+# whenever the checkout happened. Two things are asserted, and neither models
+# zip's clock: every entry carries the SAME time, and that time is the commit's
+# to within a couple of seconds.
+#
+# zip stores seconds in five bits, so its clock ticks every two seconds and an
+# odd-second commit is not recorded exactly. Asserting equality with the commit
+# time made this test pass or fail on the parity of the commit's second, which
+# is how it first ran red on a correct archive.
+times = {i.date_time for i in infos}
+if len(times) != 1:
+    sys.exit("entries carry %d different timestamps; they are not normalised: %s"
+             % (len(times), sorted(times)[:3]))
+recorded = times.pop()
+delta = abs(datetime.datetime(*recorded) - datetime.datetime(*stamp))
+if delta > datetime.timedelta(seconds=2):
+    sys.exit("the archive is stamped %s, %s away from the commit's %s"
+             % (recorded, delta, stamp))
 
 # Extra fields. zip's default "extended timestamp" and Unix uid/gid fields are
 # properties of the machine that built the archive, not of the source.
@@ -1826,13 +1838,17 @@ find "$archive_dir/two" -type f -exec touch -h -d '2001-02-03T04:05:06Z' {} +
 PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - \
 	"$archive_dir/two/Sans_Password_Manager_v9.9.9.zip" <<'PYSTAMP'
 import sys, zipfile
-# 1600000000 is 2020-09-13T12:26:40Z.
+# 1600000000 is 2020-09-13T12:26:40Z, already on zip's 2-second boundary.
 want = (2020, 9, 13, 12, 26, 40)
 with zipfile.ZipFile(sys.argv[1]) as zf:
     odd = [i.filename for i in zf.infolist() if i.date_time != want]
 if odd:
     sys.exit("%d entr(ies) kept the source mtime instead of SOURCE_DATE_EPOCH, "
              "e.g. %s" % (len(odd), odd[0]))
+# 2001-02-03 is what the sources were backdated to; seeing it here would mean
+# the stamping did nothing at all.
+if want[0] == 2001:
+    sys.exit("the expected stamp is the backdated source time, not the epoch")
 PYSTAMP
 
 sum_one="$(sha256sum "$archive_dir/one/Sans_Password_Manager_v9.9.9.zip" | cut -d' ' -f1)"
