@@ -127,4 +127,13 @@ jobs:
               bash install.sh --version "$version" \
                 --prefix "$HOME/.local" --dry-run > "$PREFIX/tmp/spm-install.txt"
               grep -q "Dry run complete" "$PREFIX/tmp/spm-install.txt"
+              # The Termux package is checked by installing it, not by
+              # inspecting it. A .deb that unpacks and a .deb that apt accepts
+              # are different claims, and only the second one matters here.
+              bash packaging/termux/build-deb.sh "$version" "$PREFIX/tmp"
+              dpkg -i "$PREFIX/tmp/spm_${version}_all.deb"
+              command -v spm
+              [ "$(spm --version)" = "$version" ]
+              spm help | grep -q "Sans Password Manager"
+              dpkg -r spm
             '

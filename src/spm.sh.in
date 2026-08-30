@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.11.0"
+VERSION="3.12.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -7398,9 +7398,18 @@ main() {
 	fi
 	# Help must remain available before dependency installation, language, or
 	# policy prompts so users can inspect the CLI on a fresh platform.
+	#
+	# --version answers here for the same reason and one more: a package
+	# manager asks for it during `brew test` and in scripts, and without it the
+	# flag fell through to the interactive banner -- so the question "which
+	# version is this?" opened a menu and waited.
 	case "${1:-}" in
 		help|-h|--help)
 			cmd_help
+			return
+			;;
+		--version|-V|version)
+			printf '%s\n' "$VERSION"
 			return
 			;;
 	esac

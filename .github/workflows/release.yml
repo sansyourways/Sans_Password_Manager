@@ -53,7 +53,8 @@ jobs:
             browser-extension-universal/build.sh browser-extension-universal/install-host.sh \
             browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh \
             browser-extension-universal/native_host.py tests/native_host_protocol.py \
-            release-archive.sh
+            release-archive.sh packaging/termux/build-deb.sh \
+            packaging/homebrew/generate.sh
           # The tagged spm.sh must be what src/ produces. A tag whose shipped
           # script does not match its own sources is unauditable, and this is
           # the last point at which that can still be caught.
@@ -63,6 +64,7 @@ jobs:
             browser-extension-universal/build.sh browser-extension-universal/install-host.sh \
             browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh
           shellcheck -x -S warning spm.sh install.sh build.sh release-archive.sh \
+            packaging/termux/build-deb.sh packaging/homebrew/generate.sh \
             tests/regression.sh tests/dco-check.sh \
             browser-extension-universal/build.sh browser-extension-universal/install-host.sh \
             browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh
@@ -94,6 +96,20 @@ jobs:
           unzip -t "$archive"
           sha256sum -c "$archive.sha256"
 
+      - name: Build the distributable packages
+        run: |
+          version="${RELEASE_TAG#v}"
+          # Attached to the release rather than published to a package index:
+          # see docs/releases and README for what publishing would additionally
+          # require. These are installable today without waiting for that.
+          ./packaging/termux/build-deb.sh "$version" .
+          ./packaging/homebrew/generate.sh "$version" \
+            "$(sha256sum "Sans_Password_Manager_v${version}.zip" | cut -d" " -f1)" \
+            > spm.rb
+          sha256sum "spm_${version}_all.deb" > "spm_${version}_all.deb.sha256"
+          grep -q "^class Spm < Formula$" spm.rb
+          grep -q "$version" spm.rb
+
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v4
         with:
@@ -103,6 +119,7 @@ jobs:
           subject-path: |
             Sans_Password_Manager_v*.zip
             spm.sh
+            spm_*_all.deb
 
       - name: Publish immutable GitHub release
         run: |
@@ -115,10 +132,12 @@ jobs:
           notes="docs/releases/${version}.md"
           if test -f "$notes"; then
             gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" \
+              "spm_${version}_all.deb" "spm_${version}_all.deb.sha256" spm.rb \
               --verify-tag --title "Sans Password Manager $version" \
               --notes-file "$notes"
           else
             gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" \
+              "spm_${version}_all.deb" "spm_${version}_all.deb.sha256" spm.rb \
               --verify-tag --title "Sans Password Manager $version" \
               --generate-notes
           fi

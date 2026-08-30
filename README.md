@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.11.0**
+Current release: **3.12.0**
 
 ---
 
@@ -305,7 +305,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.11.0
+bash install.sh --version 3.12.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -340,7 +340,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v3.11.0.zip \
+gh attestation verify Sans_Password_Manager_v3.12.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -356,12 +356,48 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v3.11.0
+git checkout v3.12.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v3.11.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v3.12.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
+
+### Installing from a package
+
+Every release since 3.12.0 carries two packages besides the archive.
+
+**Termux** — a real `.deb`, installed with the package manager rather than a
+script:
+
+```bash
+version=3.12.0
+curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
+curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
+sha256sum -c "spm_${version}_all.deb.sha256"
+dpkg -i "spm_${version}_all.deb"
+```
+
+It installs `spm` into the Termux prefix and depends on `bash`, `gnupg` and
+`python`, so a package that installs is a package that runs. Like the archive,
+it is reproducible: the same commit rebuilt anywhere gives the same bytes.
+
+**Homebrew** — a formula is attached to each release as `spm.rb`:
+
+```bash
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.12.0/spm.rb"
+```
+
+The formula pins the sha256 of that one archive, which is why it is generated
+per release rather than checked in: a committed formula is either stale or
+carries a checksum for an archive that no longer matches, and a wrong checksum
+fails for everyone at once.
+
+**What this is not.** Neither package is published to a package index.
+Homebrew core has notability requirements a single-maintainer project does not
+meet, and Termux's repository has its own submission process; both are
+decisions to make deliberately rather than side effects of a build. What is
+here is installable today without either.
 
 ### Running `spm` from anywhere
 
@@ -371,7 +407,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.11.0 at /home/you/.local/bin/spm
+Installed SPM 3.12.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -1121,7 +1157,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.11.0**
+Version: **3.12.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
@@ -1200,7 +1236,7 @@ SPM stores only discovery and recovery metadata.
 
 The universal extension is in `browser-extension-universal/` and supports
 Chrome, Chromium, Edge, Brave, Opera, Vivaldi, and Firefox desktop from one
-source tree. First install SPM 3.11.0 or later, then unpack the release archive.
+source tree. First install SPM 3.12.0 or later, then unpack the release archive.
 
 ### One-command guided setup
 
