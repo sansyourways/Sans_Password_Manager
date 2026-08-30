@@ -95,7 +95,21 @@ co-owners of it. That review is a design concept, not a formal security audit.
   an exit status that follows the verdict. It shipped emitting a banner and a
   password prompt on stdout, because the tests called the function after
   sourcing the library and never ran the command.
-- Improve reproducible release provenance and artifact attestations.
+- **Reproducible release provenance and artifact attestations — shipped in
+  3.9.0.** Every release archive carries a signed statement, in Sigstore's
+  public transparency log, that it came from this repository's release
+  workflow, and the installer checks it. Before this the installer compared an
+  archive against a checksum fetched from the same host, which proves the
+  transfer was intact and nothing about its origin.
+
+  The archive is also reproducible now — sorted entry order, timestamps from
+  the commit rather than the clock, machine-specific fields stripped — so the
+  published checksum is one a third party can arrive at independently instead
+  of one they have to accept.
+
+  Hardware-backed signing, listed under *Later*, is a separate question and
+  still open: this ties a release to a workflow in a repository, not to a key
+  a person holds.
 
 ## Later — ecosystem growth
 

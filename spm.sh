@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.8.0"
+VERSION="3.9.0"
 
 # ----- Repo info for update check --------------------------------------------
 

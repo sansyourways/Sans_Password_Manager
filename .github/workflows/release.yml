@@ -12,6 +12,12 @@ on:
 
 permissions:
   contents: write
+  # Build provenance: id-token mints the OIDC token that identifies this
+  # workflow to Sigstore, attestations writes the signed statement back to the
+  # repository. Without both, the attest step fails at tag time rather than at
+  # review time, which is the worst place to find out.
+  id-token: write
+  attestations: write
 
 concurrency:
   group: release-${{ github.event.inputs.tag || github.ref_name }}
@@ -46,15 +52,17 @@ jobs:
           chmod +x spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh \
             browser-extension-universal/build.sh browser-extension-universal/install-host.sh \
             browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh \
-            browser-extension-universal/native_host.py tests/native_host_protocol.py
+            browser-extension-universal/native_host.py tests/native_host_protocol.py \
+            release-archive.sh
           # The tagged spm.sh must be what src/ produces. A tag whose shipped
           # script does not match its own sources is unauditable, and this is
           # the last point at which that can still be caught.
           ./build.sh --check
-          bash -n spm.sh install.sh build.sh tests/regression.sh tests/dco-check.sh \
+          bash -n spm.sh install.sh build.sh release-archive.sh \
+            tests/regression.sh tests/dco-check.sh \
             browser-extension-universal/build.sh browser-extension-universal/install-host.sh \
             browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh
-          shellcheck -x -S warning spm.sh install.sh build.sh \
+          shellcheck -x -S warning spm.sh install.sh build.sh release-archive.sh \
             tests/regression.sh tests/dco-check.sh \
             browser-extension-universal/build.sh browser-extension-universal/install-host.sh \
             browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh
@@ -72,19 +80,29 @@ jobs:
       - name: Build and verify release archive
         run: |
           version="${RELEASE_TAG#v}"
-          archive="Sans_Password_Manager_v${version}.zip"
-          rm -f -- "$archive" "$archive.sha256"
-          # src/ and build.sh ship with the archive so anyone holding a
-          # release can run `./build.sh --check` and confirm the spm.sh they
-          # were given is exactly what these sources produce.
-          zip -9 -r "$archive" \
-            spm.sh install.sh build.sh README.md ROADMAP.md CHANGELOG.md CONTRIBUTING.md LICENSE NOTICE DCO \
-            src docs browser-extension browser-extension-universal tests \
-            .github/PULL_REQUEST_TEMPLATE.md .github/ISSUE_TEMPLATE \
-            -x '*.bak' '*/dist/*'
-          sha256sum "$archive" > "$archive.sha256"
+          # The archive is built by a script the suite also runs, so the thing
+          # that produces a release is the thing that was tested, and it is
+          # deterministic: the same tag rebuilt anywhere gives the same bytes.
+          archive="$(./release-archive.sh "$version")"
+          first="$(sha256sum "$archive" | cut -d" " -f1)"
+          ./release-archive.sh "$version" > /dev/null
+          second="$(sha256sum "$archive" | cut -d" " -f1)"
+          if [ "$first" != "$second" ]; then
+            echo "The release archive is not reproducible: $first vs $second" >&2
+            exit 1
+          fi
           unzip -t "$archive"
           sha256sum -c "$archive.sha256"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          # spm.sh is attested alongside the archive because that is the file
+          # people actually run; someone who copied it out of a release can
+          # verify it without keeping the zip.
+          subject-path: |
+            Sans_Password_Manager_v*.zip
+            spm.sh
 
       - name: Publish immutable GitHub release
         run: |
@@ -113,3 +131,8 @@ jobs:
           gh release download "$RELEASE_TAG" --dir "$verify_dir" \
             --pattern "$archive*"
           (cd "$verify_dir" && sha256sum -c "$archive.sha256" && unzip -t "$archive")
+          # The checksum beside a download proves only that the transfer was
+          # intact; anyone who can write to the release can write both files.
+          # This asks Sigstore whether the archive really came from this
+          # workflow in this repository, against the asset as published.
+          gh attestation verify "$verify_dir/$archive" --repo "$GITHUB_REPOSITORY"
