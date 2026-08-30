@@ -289,8 +289,18 @@ which is the whole point.
   suspended dashboard session and never holds the vault key.
 - Split recovery — Shamir-style shares — so recovery does not depend on one
   file and one private key remaining simultaneously available and secret.
-- A security-event log that records sensitive operations without recording the
-  secrets involved.
+- **A security-event log — shipped in 3.10.0.** Unlocks, writes and
+  master-password changes are recorded so a user can notice what they did not
+  do. `spm events` reads it and the dashboard shows it under Tools.
+
+  Two decisions carry it. It lives *outside* the vault, in plaintext, because a
+  failed unlock is the event most worth recording and the one that cannot be
+  written into a vault nobody could open — which is only safe because it holds
+  no record names, usernames, URLs, passwords or paths, and its details are
+  validated against a closed vocabulary rather than being free text. And
+  repeated successes coalesce while failures never do, because the dashboard
+  reads the vault on nearly every page view and one line per read buried the
+  handful of lines anyone came to see.
 
 ## Choosing work
 

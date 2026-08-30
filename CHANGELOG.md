@@ -7,6 +7,50 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.10.0] - 2026-08-30
+
+### Added
+- **A security-event log.** SPM records what was done to a vault — unlocks,
+  writes, master-password changes — so you can notice what you did not do.
+  `spm events` reads it, and the dashboard shows the same log under
+  **Tools → Security Events** with failed attempts called out above the table.
+
+  Recorded at the core's own boundary rather than at each of the CLI and
+  dashboard call sites, the same way per-record history was, so a path added
+  later cannot forget to log.
+
+  **It lives outside the vault, in plaintext**, because a failed unlock is
+  exactly the event most worth recording and exactly the one that cannot be
+  written into a vault nobody could open. That is only safe because it carries
+  nothing worth reading: no record names, no usernames, no URLs, no passwords,
+  not even the vault's own path — a time, a kind, an outcome, and a detail
+  drawn from a fixed vocabulary. Details are validated against that vocabulary
+  rather than being free text, so a later change cannot quietly start logging a
+  label. Mode `0600`, bounded to `SPM_EVENT_RETENTION` lines.
+
+  Repeated identical *successes* inside `SPM_EVENT_COALESCE` seconds collapse
+  into one line. Failures never do: a burst of failed unlocks is the signal the
+  log exists for.
+
+  `spm events` opens no vault and asks for no master password, so it still
+  answers when the vault will not open — the moment the log matters most.
+
+### Fixed
+- The CLI half of SPM recorded no events at all. The core writes them against
+  `SPM_VAULT_PATH`, which the dashboard sets and the CLI never did, so the log
+  described only half the product. Exported at the single point the shell
+  invokes the core.
+
+### Tested
+- Ten mutants across the boundary, the vocabulary, the coalescing and the
+  fail-soft guarantee. Among them: coalescing applied to failures, which would
+  make five attempts read as one.
+- The log is asserted to contain no secret, username, label or path after a
+  full suite run that writes real records through both the CLI and the
+  dashboard, and every line is parsed against the closed format.
+- Logging is proven unable to break the operation it describes, with the log
+  directory and the log file each made unwritable.
+
 ## [3.9.0] - 2026-08-30
 
 ### Added

@@ -707,6 +707,196 @@ def t_fault_write_refuses_a_read_only_directory():
     eq(open(path, "rb").read(), before, "the vault changed in a read-only directory")
 
 
+# ----- security events -------------------------------------------------------
+
+def _events_env(vault):
+    """Point the log at `vault` the way a real session does, and start clean."""
+    os.environ["SPM_VAULT_PATH"] = vault
+    path = core.events_path(vault)
+    if os.path.exists(path):
+        os.remove(path)
+    return path
+
+
+def t_events_record_the_unlock_boundary():
+    vault = fresh("evt-unlock")
+    _events_env(vault)
+    core.write_vault(vault, MASTER, sample())
+    core.read_vault(vault, MASTER)
+    raises(Exception, lambda: core.read_vault(vault, "not-the-master"))
+    kinds = [(e["kind"], e["outcome"]) for e in core.read_events(vault)]
+    eq(kinds, [("write", "ok"), ("unlock", "ok"), ("unlock", "fail")],
+       "the unlock boundary did not record what happened")
+
+
+def t_events_never_carry_a_secret():
+    """The one property the whole design exists to hold.
+
+    The log sits outside the vault in the clear, so a label, a username, a
+    password or the vault's own path appearing in it would be a leak that the
+    vault's encryption cannot take back.
+    """
+    vault = fresh("evt-secret")
+    path = _events_env(vault)
+    core.write_vault(vault, MASTER, sample())
+    core.read_vault(vault, MASTER)
+    raises(Exception, lambda: core.read_vault(vault, "not-the-master"))
+    core.rewrap(vault, MASTER, OTHER)
+    raw = open(path, encoding="utf-8").read()
+    for forbidden in ("CoreSecret42", MASTER, OTHER, "Example",
+                      "user@example.invalid", vault, PUB_B64[:24]):
+        if forbidden in raw:
+            raise AssertionError("the event log leaked %r" % forbidden)
+
+
+def t_events_file_is_private():
+    vault = fresh("evt-mode")
+    path = _events_env(vault)
+    core.write_vault(vault, MASTER, sample())
+    eq(stat.S_IMODE(os.stat(path).st_mode), 0o600,
+       "the event log is readable by other users")
+
+
+def t_events_detail_vocabulary_is_closed():
+    """Free text is how a label reaches a log: someone adds a helpful "which
+    record" to an error path one day. A closed vocabulary makes that a test
+    failure rather than a leak."""
+    for bad in ("label=Example", "note=hello", "reason=whatever",
+                "records=many", "scope=elsewhere", "bare", "format=three"):
+        raises(ValueError,
+               lambda bad=bad: core.event_line("2026-01-01T00:00:00Z",
+                                               "unlock", "ok", bad),
+               "event_line accepted %r" % bad)
+    for kind in ("login", "delete", ""):
+        raises(ValueError,
+               lambda kind=kind: core.event_line("2026-01-01T00:00:00Z",
+                                                 kind, "ok", ""),
+               "event_line accepted the kind %r" % kind)
+    raises(ValueError,
+           lambda: core.event_line("2026-01-01T00:00:00Z", "unlock", "maybe", ""),
+           "event_line accepted an unknown outcome")
+    for good in ("", "scope=live", "records=12", "format=3",
+                 "scope=live,reason=bad-master"):
+        core.event_line("2026-01-01T00:00:00Z", "write", "ok", good)
+
+
+def t_events_never_fail_the_operation_they_describe():
+    """Losing a log line is a nuisance; losing the write it describes is data
+    loss. Asserted with the log directory made unwritable, which is the way it
+    actually happens."""
+    vault = fresh("evt-soft")
+    path = _events_env(vault)
+    core.write_vault(vault, MASTER, sample())
+    directory = os.path.dirname(path)
+    mode = stat.S_IMODE(os.stat(directory).st_mode)
+    os.chmod(directory, 0o500)
+    try:
+        os.chmod(path, 0o400)
+        core.write_vault(vault, MASTER, sample())
+        text, _ = core.read_vault(vault, MASTER)
+        eq("CoreSecret42" in text, True,
+           "a vault operation failed because its log could not be written")
+    finally:
+        os.chmod(path, 0o600)
+        os.chmod(directory, mode)
+
+
+def t_events_are_bounded():
+    """Coalescing has to be off here, or this proves nothing.
+
+    It was written before coalescing existed and kept passing afterwards: 24
+    identical events collapsed to a single line, the log never reached the
+    pruning threshold, and the assertion held whether pruning worked or not.
+    """
+    vault = fresh("evt-prune")
+    path = _events_env(vault)
+    os.environ["SPM_EVENT_RETENTION"] = "5"
+    os.environ["SPM_EVENT_COALESCE"] = "0"
+    try:
+        for _ in range(24):
+            core.record_event("unlock", "ok", "scope=live", vault_path=vault)
+        lines = open(path, encoding="utf-8").read().splitlines()
+    finally:
+        os.environ.pop("SPM_EVENT_RETENTION", None)
+        os.environ.pop("SPM_EVENT_COALESCE", None)
+    # Written unpruned first, so a mutant that never prunes is visibly wrong
+    # rather than indistinguishable from one that prunes early.
+    if len(lines) >= 24:
+        raise AssertionError("the log kept all %d lines with retention 5"
+                             % len(lines))
+    if len(lines) > 10:
+        raise AssertionError("the log grew to %d lines with retention 5"
+                             % len(lines))
+    eq(stat.S_IMODE(os.stat(path).st_mode), 0o600,
+       "pruning left the log readable by other users")
+
+
+def t_events_reading_a_snapshot_is_marked_as_such():
+    """A .bak or a history snapshot opens through the same function as the
+    live vault. Recording those as ordinary unlocks would make a restore look
+    like someone opening the vault."""
+    vault = fresh("evt-scope")
+    _events_env(vault)
+    core.write_vault(vault, MASTER, sample())
+    other = vault + ".bak"
+    shutil.copy(vault, other)
+    core.read_vault(other, MASTER)
+    scopes = [e["detail"].get("scope") for e in core.read_events(vault)]
+    eq(scopes[-1], "other", "reading a copy was recorded as the live vault")
+
+
+def t_events_coalesce_repeats_but_never_failures():
+    """The dashboard reads the vault on nearly every page view. Without this,
+    the five lines someone came to read sit under fifty they did not."""
+    vault = fresh("evt-coalesce")
+    _events_env(vault)
+    for _ in range(8):
+        core.record_event("unlock", "ok", "scope=live", vault_path=vault)
+    eq(len(core.read_events(vault)), 1,
+       "repeated successful unlocks were not coalesced")
+
+    # A different detail is a different event and must not be swallowed.
+    core.record_event("unlock", "ok", "scope=other", vault_path=vault)
+    eq(len(core.read_events(vault)), 2,
+       "an event with a different detail was coalesced into the previous one")
+
+    # The signal this log exists for. Five failed attempts must read as five.
+    for _ in range(5):
+        core.record_event("unlock", "fail", "scope=live,reason=bad-master",
+                          vault_path=vault)
+    failures = [e for e in core.read_events(vault) if e["outcome"] == "fail"]
+    eq(len(failures), 5, "failed attempts were collapsed; the log understated them")
+
+    # And a success after failures is its own line, not folded backwards.
+    core.record_event("unlock", "ok", "scope=live", vault_path=vault)
+    eq(core.read_events(vault)[-1]["outcome"], "ok",
+       "a success after failures was not recorded")
+
+
+def t_events_coalescing_can_be_turned_off():
+    vault = fresh("evt-nocoalesce")
+    _events_env(vault)
+    os.environ["SPM_EVENT_COALESCE"] = "0"
+    try:
+        for _ in range(4):
+            core.record_event("write", "ok", "scope=live,records=1",
+                              vault_path=vault)
+    finally:
+        os.environ.pop("SPM_EVENT_COALESCE", None)
+    eq(len(core.read_events(vault)), 4,
+       "coalescing stayed on with SPM_EVENT_COALESCE=0")
+
+
+def t_events_survive_a_damaged_line():
+    vault = fresh("evt-damaged")
+    path = _events_env(vault)
+    core.write_vault(vault, MASTER, sample())
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write("this is not an event\n\t\t\n")
+    events = core.read_events(vault)
+    eq(len(events), 1, "a damaged line took the whole log with it")
+
+
 def _write_temp(text):
     fd, path = tempfile.mkstemp(dir=ROOT)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
