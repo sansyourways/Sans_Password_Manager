@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.8.0**
+Current release: **3.9.0**
 
 ---
 
@@ -305,9 +305,63 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.8.0
+bash install.sh --version 3.9.0
 bash install.sh --prefix "$HOME/.local"
 ```
+
+### Verifying where a release came from
+
+The installer downloads the archive and its `.sha256` from the same host and
+compares them. That proves the transfer was intact. It proves nothing about
+where the archive came from: whoever can write one file can write the other.
+
+From 3.9.0 each release also carries a **build attestation** — a signed
+statement, recorded in Sigstore's public transparency log, that this exact
+archive was produced by this repository's release workflow. The installer
+checks it when it can:
+
+```text
+Provenance  : attestation verified against sansyourways/Sans_Password_Manager
+```
+
+It needs the [GitHub CLI](https://cli.github.com/) 2.49 or newer, signed in.
+Without it the install continues and says why, so "installed" is never read as
+"verified" when nothing was verified:
+
+```text
+Provenance  : not checked (the GitHub CLI is not installed)
+Provenance  : not checked (this GitHub CLI is too old; needs 2.49+)
+Provenance  : not checked (the GitHub CLI is not signed in)
+Provenance  : 3.8.0 predates build attestations; checksum only
+```
+
+A release at or after 3.9.0 that *fails* the check aborts the install.
+
+To check by hand, at any time:
+
+```bash
+gh attestation verify Sans_Password_Manager_v3.9.0.zip \
+  --repo sansyourways/Sans_Password_Manager
+```
+
+`spm.sh` is attested alongside the archive, so a copy lifted out of a release
+can be verified on its own without keeping the zip.
+
+### Rebuilding a release to check it
+
+The archive is built by [`release-archive.sh`](release-archive.sh) and is
+reproducible: entry order is sorted, every timestamp comes from the commit
+rather than the clock, and machine-specific fields are stripped. The same
+commit rebuilt anywhere gives the same bytes, so the published checksum is
+something you can independently arrive at:
+
+```bash
+git checkout v3.9.0
+./release-archive.sh
+sha256sum -c Sans_Password_Manager_v3.9.0.zip.sha256
+```
+
+Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
 
 ### Running `spm` from anywhere
 
@@ -317,7 +371,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.8.0 at /home/you/.local/bin/spm
+Installed SPM 3.9.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -970,7 +1024,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.8.0**
+Version: **3.9.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
@@ -1049,7 +1103,7 @@ SPM stores only discovery and recovery metadata.
 
 The universal extension is in `browser-extension-universal/` and supports
 Chrome, Chromium, Edge, Brave, Opera, Vivaldi, and Firefox desktop from one
-source tree. First install SPM 3.8.0 or later, then unpack the release archive.
+source tree. First install SPM 3.9.0 or later, then unpack the release archive.
 
 ### One-command guided setup
 

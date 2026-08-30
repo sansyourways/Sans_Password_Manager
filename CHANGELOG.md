@@ -7,6 +7,58 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.9.0] - 2026-08-30
+
+### Added
+- **Build attestations on every release.** Each archive now carries a signed
+  statement, recorded in Sigstore's public transparency log, that it was
+  produced by this repository's release workflow. `spm.sh` is attested
+  alongside it, so a copy lifted out of a release can be verified without
+  keeping the zip.
+
+  The gap this closes: `install.sh` fetched the archive and its checksum from
+  the same host and compared them, which proves the transfer was intact and
+  nothing about where the file came from — whoever can write one file can
+  write the other.
+
+- **The installer checks it, and says so when it cannot.** With the GitHub CLI
+  2.49+ signed in, the attestation is verified before anything is installed; a
+  release at or after 3.9.0 that fails aborts. Without it the install continues
+  and names the reason, because a silent skip reads as a successful check. A
+  gh too old to have `attestation` is reported as unverifiable rather than
+  treated as a forged archive.
+
+- **`release-archive.sh`, and the archive is reproducible.** Entry order is
+  sorted, every timestamp comes from the commit rather than the clock, and
+  machine-specific fields are stripped, so the same commit rebuilt anywhere
+  gives the same bytes and the published checksum is one you can arrive at
+  independently. `SOURCE_DATE_EPOCH` is honoured for rebuilds outside a git
+  checkout.
+
+### Changed
+- The release workflow builds through that script rather than an inline `zip`,
+  so the thing that produces a release is the thing the suite tests. It also
+  rebuilds and compares before publishing, and verifies the attestation against
+  the asset as published rather than as staged.
+
+### Fixed
+- The suite extracted `install.sh` by the line range `1,111p`. Adding a
+  function above that point sliced the next one in half and produced a library
+  that would not parse. It is cut at a marker now, with an assertion that the
+  functions survived the cut.
+
+### Tested
+- The archive's invariants are asserted against the zip itself — sorted entry
+  order, every timestamp from the commit, no extra fields, no `.bak` or
+  `__pycache__`, and the files needed for `./build.sh --check` to run from an
+  unpacked release. Comparing two same-machine builds could not see any of
+  that: they are identical whether or not any of it is done.
+- Seven installer decisions, including the two that must not fail: an old gh,
+  and a gh that is absent rather than merely shadowed by the real one on PATH.
+- Ten version comparisons, among them 3.10.0 against 3.9.0 — a string compare
+  gets that backwards and would silently skip verification on every release
+  after this one.
+
 ## [3.8.0] - 2026-08-30
 
 ### Added

@@ -3,6 +3,10 @@ set -euo pipefail
 
 REPO="sansyourways/Sans_Password_Manager"
 VERSION="latest"
+# The first release whose archive carries a build attestation. Anything older
+# genuinely has nothing to verify, and treating that as a failure would make
+# the installer refuse releases that were fine when they were made.
+FIRST_ATTESTED_VERSION="3.9.0"
 PREFIX="${SPM_INSTALL_PREFIX:-/usr/local}"
 DRY_RUN=0
 MODIFY_PATH=1
@@ -15,6 +19,10 @@ Usage: ./install.sh [--version X.Y.Z] [--prefix DIRECTORY] [--dry-run]
 
 Downloads an official SPM release ZIP and its matching SHA-256 file, verifies
 the archive, validates spm.sh syntax, and installs the CLI as PREFIX/bin/spm.
+
+Where the GitHub CLI is installed and signed in, the archive's build
+attestation is also checked, which is what proves the file came from this
+repository's release workflow rather than only that it arrived intact.
 
 If PREFIX/bin is not on your PATH, the installer appends it to your shell
 profile so `spm` works from any directory. Pass --no-modify-path (or set
@@ -108,6 +116,63 @@ ensure_on_path() {
 	}
 	printf 'PATH        : added %s to %s\n' "$dir" "$profile"
 	printf '                run "exec %s" or open a new terminal to pick it up\n' "${SHELL:-sh}"
+}
+
+# Numeric, component-by-component. sort -V is not portable and a string
+# compare puts 3.10.0 before 3.9.0, which would silently skip verification on
+# every release after this one.
+version_at_least() {
+	awk -v a="$1" -v b="$2" '
+	BEGIN {
+		na = split(a, x, "."); nb = split(b, y, ".")
+		n = (na > nb) ? na : nb
+		for (i = 1; i <= n; i++) {
+			p = (i <= na) ? x[i] + 0 : 0
+			q = (i <= nb) ? y[i] + 0 : 0
+			if (p > q) { print 1; exit }
+			if (p < q) { print 0; exit }
+		}
+		print 1
+	}'
+}
+
+# A checksum published next to a download proves the transfer was intact and
+# nothing more: whoever can write one file can write the other. The
+# attestation is a signed statement from GitHub that this exact archive was
+# built by this repository's release workflow.
+#
+# It is checked when it can be, and the reason is stated when it cannot, so
+# nobody reads "installed" as "verified" when no verification happened. A
+# release that should carry an attestation and fails the check aborts.
+verify_provenance() {
+	local archive_path="$1" version="$2"
+	if [ "$(version_at_least "$version" "$FIRST_ATTESTED_VERSION")" != "1" ]; then
+		printf 'Provenance  : %s predates build attestations; checksum only\n' "$version"
+		return 0
+	fi
+	if ! command -v gh >/dev/null 2>&1; then
+		printf 'Provenance  : not checked (the GitHub CLI is not installed)\n'
+		return 0
+	fi
+	# `gh attestation` arrived in gh 2.49. Older builds are still perfectly
+	# good GitHub CLIs -- Debian stable ships 2.23 -- and treating "this
+	# command does not exist" as "this archive is forged" would refuse an
+	# install for a reason that has nothing to do with the archive.
+	if ! gh attestation verify --help >/dev/null 2>&1; then
+		printf 'Provenance  : not checked (this GitHub CLI is too old; needs 2.49+)\n'
+		return 0
+	fi
+	if ! gh auth status >/dev/null 2>&1; then
+		printf 'Provenance  : not checked (the GitHub CLI is not signed in)\n'
+		return 0
+	fi
+	if gh attestation verify "$archive_path" --repo "$REPO" >/dev/null 2>&1; then
+		printf 'Provenance  : attestation verified against %s\n' "$REPO"
+		return 0
+	fi
+	printf 'Provenance verification failed: %s does not carry a valid build\n' "$archive" >&2
+	printf 'attestation from %s. Installation aborted.\n' "$REPO" >&2
+	return 1
 }
 
 for command_name in curl sha256sum unzip bash mktemp; do
@@ -204,6 +269,8 @@ actual="$(sha256sum "$workdir/$archive" | awk '{print $1}')"
 	printf 'SHA-256 verification failed. Installation aborted.\n' >&2
 	exit 1
 }
+
+verify_provenance "$workdir/$archive" "$VERSION" || exit 1
 
 mkdir -p "$workdir/extract"
 unzip -q "$workdir/$archive" -d "$workdir/extract"

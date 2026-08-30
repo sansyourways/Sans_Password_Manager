@@ -144,7 +144,18 @@ autoupdate_put MODE off
 # Installer PATH mutation must be path-specific and macOS Bash must use the
 # login-shell profile even when it does not exist yet.
 INSTALL_LIBRARY="$TEST_ROOT/install-library.sh"
-sed -n '1,111p' "$ROOT_DIR/install.sh" > "$INSTALL_LIBRARY"
+# Everything above the dependency check is definitions; below it the installer
+# starts doing things. Cut at that marker rather than at a line number: the
+# number was 111, and adding a function above it sliced the next one in half
+# and left a file that failed to parse.
+awk '/^for command_name in /{exit} {print}' "$ROOT_DIR/install.sh" > "$INSTALL_LIBRARY"
+grep -q '^ensure_on_path() {' "$INSTALL_LIBRARY" || {
+	printf 'the installer library extraction lost ensure_on_path\n' >&2; exit 1
+}
+grep -q '^verify_provenance() {' "$INSTALL_LIBRARY" || {
+	printf 'the installer library extraction lost verify_provenance\n' >&2; exit 1
+}
+bash -n "$INSTALL_LIBRARY"
 # shellcheck source=/dev/null
 source "$INSTALL_LIBRARY"
 SHELL=/bin/bash
@@ -1717,6 +1728,251 @@ print("  a11y: form controls named, sidebar is a landmark, focus ring "
       "%.1f:1, Bitwarden is on the import form" % measured)
 A11YPY
 
+
+
+printf 'Release regression: the archive is reproducible\n'
+# A checksum published beside a download proves the transfer was intact and
+# nothing else: whoever can write one file can write the other. What makes the
+# checksum worth anything is being able to rebuild the archive and get the same
+# number -- which requires the build to be a function of the commit, not of the
+# clock or of whichever machine ran it.
+#
+# This runs the same script release.yml runs, in the real checkout, so what is
+# tested is what produces a release -- including the untracked __pycache__ and
+# real-world mtimes that a clean extraction would not have.
+archive_dir="$TEST_ROOT/archive"
+mkdir -p "$archive_dir"
+(cd "$ROOT_DIR" && ./release-archive.sh 9.9.9 >/dev/null)
+built="$ROOT_DIR/Sans_Password_Manager_v9.9.9.zip"
+cp "$built" "$archive_dir/built.zip"
+cp "$built.sha256" "$archive_dir/built.zip.sha256"
+rm -f "$built" "$built.sha256"
+
+# The three properties that make it reproducible are asserted against the zip
+# directly rather than by building twice and hoping the difference shows. Two
+# builds a second apart on one machine are identical whether or not any of this
+# is done, so a same-machine comparison cannot see a missing sort, a missing
+# mtime normalisation, or the extra fields that differ only across machines.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$archive_dir/built.zip" \
+	"$(TZ=UTC git -C "$ROOT_DIR" log -1 --date=format-local:'%Y %m %d %H %M %S' --format=%cd)" \
+	<<'PYZIP'
+import sys, zipfile
+
+path, stamp = sys.argv[1], tuple(int(p) for p in sys.argv[2].split())
+with zipfile.ZipFile(path) as zf:
+    infos = zf.infolist()
+names = [i.filename for i in infos]
+assert names, "the archive is empty"
+
+# Entry order. readdir order differs between filesystems -- ext4 hashes by
+# name, HFS+ does not -- so an unsorted listing gives one archive on Linux and
+# a different one on macOS from identical sources.
+if names != sorted(names):
+    first = next(i for i in range(len(names)) if names[i] != sorted(names)[i])
+    sys.exit("archive entries are not in sorted order, first at %d: %r"
+             % (first, names[first]))
+
+# Timestamps. zip records an mtime per entry, and a fresh checkout's mtimes are
+# whenever the checkout happened.
+odd = [i.filename for i in infos if i.date_time != stamp]
+if odd:
+    sys.exit("%d entr(ies) are not stamped from the commit, e.g. %s (%s, wanted %s)"
+             % (len(odd), odd[0],
+                next(i.date_time for i in infos if i.filename == odd[0]), stamp))
+
+# Extra fields. zip's default "extended timestamp" and Unix uid/gid fields are
+# properties of the machine that built the archive, not of the source.
+carrying = [i.filename for i in infos if i.extra]
+if carrying:
+    sys.exit("%d entr(ies) carry machine-specific extra fields, e.g. %s"
+             % (len(carrying), carrying[0]))
+
+# Nothing that exists only on a developer's machine may travel with a release.
+leftovers = [n for n in names
+             if n.endswith(".bak") or "__pycache__" in n or "/dist/" in n]
+if leftovers:
+    sys.exit("the archive carries %d leftover(s), e.g. %s"
+             % (len(leftovers), leftovers[0]))
+
+# A release has to carry what is needed to audit it.
+for needed in ("spm.sh", "build.sh", "install.sh", "src/spm.sh.in",
+               "src/spm_core.py", "src/spm_web_server.py",
+               "README.md", "CHANGELOG.md", "LICENSE"):
+    if needed not in names:
+        sys.exit("the release archive is missing %s" % needed)
+
+print("  archive: %d entries, sorted, stamped from the commit, no extra fields"
+      % len(names))
+PYZIP
+
+# And the end-to-end claim, from two independent extractions of the same
+# commit: whatever the mechanism, the same source must give the same bytes.
+# SOURCE_DATE_EPOCH stands in for the commit date an extraction has no .git to
+# read, which is also the path a third party rebuilding from a tarball takes.
+for checkout in one two; do
+	mkdir -p "$archive_dir/$checkout"
+	git -C "$ROOT_DIR" archive --format=tar HEAD | tar -x -C "$archive_dir/$checkout"
+	cp "$ROOT_DIR/release-archive.sh" "$archive_dir/$checkout/release-archive.sh"
+	chmod +x "$archive_dir/$checkout/release-archive.sh"
+	(cd "$archive_dir/$checkout" \
+		&& SOURCE_DATE_EPOCH=1600000000 ./release-archive.sh 9.9.9 >/dev/null)
+done
+# The timestamp normalisation needs sources whose mtimes are visibly wrong,
+# or dropping it changes nothing and the test cannot see it. Extraction "two"
+# is backdated to a date no commit has.
+find "$archive_dir/two" -type f -exec touch -h -d '2001-02-03T04:05:06Z' {} +
+(cd "$archive_dir/two" \
+	&& SOURCE_DATE_EPOCH=1600000000 ./release-archive.sh 9.9.9 >/dev/null)
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - \
+	"$archive_dir/two/Sans_Password_Manager_v9.9.9.zip" <<'PYSTAMP'
+import sys, zipfile
+# 1600000000 is 2020-09-13T12:26:40Z.
+want = (2020, 9, 13, 12, 26, 40)
+with zipfile.ZipFile(sys.argv[1]) as zf:
+    odd = [i.filename for i in zf.infolist() if i.date_time != want]
+if odd:
+    sys.exit("%d entr(ies) kept the source mtime instead of SOURCE_DATE_EPOCH, "
+             "e.g. %s" % (len(odd), odd[0]))
+PYSTAMP
+
+sum_one="$(sha256sum "$archive_dir/one/Sans_Password_Manager_v9.9.9.zip" | cut -d' ' -f1)"
+sum_two="$(sha256sum "$archive_dir/two/Sans_Password_Manager_v9.9.9.zip" | cut -d' ' -f1)"
+[ "$sum_one" = "$sum_two" ] || {
+	printf 'the release archive is not reproducible across extractions:\n  %s\n  %s\n' \
+		"$sum_one" "$sum_two" >&2
+	exit 1
+}
+
+# src/ and build.sh are in the archive precisely so `./build.sh --check` works
+# from an unpacked release. If that stopped being true the archive would still
+# pass every checksum and still be unauditable.
+unzip -q "$archive_dir/built.zip" -d "$archive_dir/unpacked"
+(cd "$archive_dir/unpacked" && chmod +x build.sh && ./build.sh --check >/dev/null) || {
+	printf 'an unpacked release does not rebuild its own spm.sh\n' >&2
+	exit 1
+}
+# The checksum file names the archive it belongs to, or `sha256sum -c` in the
+# installer checks nothing at all.
+grep -q 'Sans_Password_Manager_v9.9.9.zip' "$archive_dir/built.zip.sha256"
+printf '  archive: identical across two extractions, and rebuilds its own spm.sh\n'
+
+
+printf 'Install regression: build attestation verification\n'
+# The installer compares a checksum it fetched from the same host as the
+# archive. That proves the transfer was intact and nothing about where the file
+# came from. The attestation check is what closes that, so its decision table
+# is asserted rather than assumed -- including the cases where it deliberately
+# does nothing, because "not checked" must never print as "verified".
+# The same extraction the PATH tests above use, rather than a second one with
+# its own way of going stale.
+prov="$INSTALL_LIBRARY"
+grep -q '^version_at_least() {' "$prov" || {
+	printf 'version_at_least is missing from the installer library\n' >&2; exit 1
+}
+
+prov_bin="$TEST_ROOT/prov-bin"
+prov_min="$TEST_ROOT/prov-min"
+mkdir -p "$prov_bin" "$prov_min"
+# Only what the function genuinely reaches outside the shell for: bash to run
+# it, and awk for the version comparison. Everything else it uses is a builtin.
+# Linking just these means an absent gh is genuinely absent rather than merely
+# shadowed by the real one in /usr/bin.
+ln -sf "$(command -v bash)" "$prov_min/bash"
+ln -sf "$(command -v awk)" "$prov_min/awk"
+
+run_prov() {
+	# $1 gh behaviour: absent | unauthed | pass | fail
+	# $2 version
+	# One stub, three switches: whether `gh attestation` exists at all, whether
+	# `gh auth status` succeeds, and whether a real verify passes. Written from
+	# a heredoc rather than printf -- an earlier printf version escaped its && as
+	# \&\&, which made every stub a syntax error, so every case looked like an
+	# unsupported gh and the one that should have failed quietly passed.
+	rm -f "$prov_bin/gh"
+	case "$1" in
+		absent)   supports=x  authed=x  verifies=x ;;
+		ancient)  supports=1  authed=0  verifies=1 ;;
+		unauthed) supports=0  authed=1  verifies=0 ;;
+		pass)     supports=0  authed=0  verifies=0 ;;
+		fail)     supports=0  authed=0  verifies=1 ;;
+		*) printf 'unknown gh behaviour %s\n' "$1" >&2; exit 1 ;;
+	esac
+	if [ "$supports" != x ]; then
+		cat > "$prov_bin/gh" <<GHSTUB
+#!/bin/sh
+case "\$1" in
+	auth) exit $authed ;;
+	attestation)
+		case "\$*" in *--help*) exit $supports ;; esac
+		exit $verifies ;;
+esac
+exit 1
+GHSTUB
+	fi
+	[ -f "$prov_bin/gh" ] && chmod +x "$prov_bin/gh"
+	# A PATH holding the stub and nothing else that could answer to "gh". The
+	# system bin directories are deliberately absent: this machine has a real gh
+	# in /usr/bin, and with it on PATH the "no gh at all" case silently tested
+	# the signed-out branch instead -- which is how a mutant that printed
+	# "verified" when gh was missing survived.
+	# The positional arguments are cleared before sourcing: the library carries
+	# the installer's own option parser, which would read the file path it was
+	# handed as an unknown flag and exit 2.
+	PATH="$prov_bin:$prov_min" bash -c '
+		lib="$1"; want="$2"; shift $#
+		REPO="sansyourways/Sans_Password_Manager"
+		FIRST_ATTESTED_VERSION="3.9.0"
+		archive="test.zip"
+		. "$lib"
+		verify_provenance /dev/null "$want"
+	' _ "$prov" "$2" 2>&1
+}
+
+expect_prov() {
+	local label="$1" behaviour="$2" version="$3" want_status="$4" want_text="$5"
+	local out status
+	out="$(run_prov "$behaviour" "$version")" && status=0 || status=$?
+	[ "$status" = "$want_status" ] || {
+		printf 'provenance/%s: exit %s, wanted %s\n  %s\n' \
+			"$label" "$status" "$want_status" "$out" >&2
+		exit 1
+	}
+	case "$out" in
+		*"$want_text"*) ;;
+		*) printf 'provenance/%s said %s\n  wanted text: %s\n' \
+			"$label" "$out" "$want_text" >&2; exit 1 ;;
+	esac
+}
+
+# An old release has nothing to verify, and refusing it would break installs
+# that were fine when they were made.
+expect_prov "old release"  pass     3.8.0 0 "predates build attestations"
+# 3.10.0 must not be read as older than 3.9.0. A string compare gets this
+# wrong and would silently skip verification for every release after this one.
+expect_prov "double digit" pass     3.10.0 0 "attestation verified"
+expect_prov "current"      pass     3.9.0 0 "attestation verified"
+# Absent or unauthenticated gh is not a failure, but it must say so: a silent
+# skip reads as a successful check.
+expect_prov "no gh"        absent   3.9.0 0 "GitHub CLI is not installed"
+expect_prov "gh signed out" unauthed 3.9.0 0 "not signed in"
+# Debian stable's gh has no attestation command. Reading that as a forged
+# archive would refuse an install for a reason that is not about the archive.
+expect_prov "gh too old"   ancient  3.9.0 0 "too old"
+# A release that should carry an attestation and does not is the whole point.
+expect_prov "bad attestation" fail   3.9.0 1 "Installation aborted"
+
+# The truth table for the comparison itself, including the two cases a string
+# compare and a bare `sort -V` respectively get wrong.
+prov_versions="3.9.0 3.9.0 1|3.10.0 3.9.0 1|3.9.1 3.9.0 1|4.0.0 3.9.0 1|3.8.0 3.9.0 0|3.8.9 3.9.0 0|2.13.0 3.9.0 0|3.9 3.9.0 1|3.8 3.9.0 0|10.0.0 9.0.0 1"
+printf '%s' "$prov_versions" | tr '|' '\n' | while read -r a b want; do
+	got="$(bash -c 'lib="$1"; l="$2"; r="$3"; shift $#; . "$lib"; version_at_least "$l" "$r"' \
+		_ "$prov" "$a" "$b")"
+	[ "$got" = "$want" ] || {
+		printf 'version_at_least %s %s = %s, wanted %s\n' "$a" "$b" "$got" "$want" >&2
+		exit 1
+	}
+done
+printf '  provenance: 7 installer decisions and 10 version comparisons verified\n'
 
 printf 'Import regression: Bitwarden JSON, CSV and password-protected exports\n'
 # People arrive from Bitwarden, and its export shares no field names with SPM's.
