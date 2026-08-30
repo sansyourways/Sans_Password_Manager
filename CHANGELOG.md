@@ -7,6 +7,48 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-08-30
+
+### Added
+- **Folders and custom fields on password records.** A folder, and any number
+  of named fields for the things that have no box of their own — an account
+  number, a PIN, a security answer. On the Add and Edit forms, masked on the
+  view page behind the same reveal control as the password, and carried through
+  export and import as readable `folder` and `fields` columns rather than the
+  encoded form the vault stores.
+
+  Folders are free text with existing ones suggested, not a fixed list: a
+  folder is created by naming one, and a dropdown of only what exists would
+  make the first folder impossible to make.
+
+- **Vault format 4**, one optional column appended to a password row. A record
+  using neither a folder nor custom fields is written exactly as format 3 wrote
+  it, so upgrading rewrites nothing it does not have to.
+
+- **A downgrade guard.** SPM refuses to write a vault stamped newer than it
+  understands. Without it an older build opens a newer vault, keeps only the
+  columns it knows, and writes it back stamped with its own version — and the
+  result reads fine, which is what makes it dangerous. The guard helps from
+  3.11.0 onward; earlier builds have no such check.
+
+### Fixed
+- **Custom fields could have attached values to the wrong names.** The form
+  posts a name and a value per row, and `parse_qs` drops blank values, so
+  pairing two parallel lists by position shifted every later value up by one as
+  soon as any name was left empty — "Account" would have been saved holding the
+  value typed on the blank row above it, silently, with the last value lost.
+  Rows are matched by an index in their input names now.
+- A tab or newline arriving in a custom field from a script or an import is
+  folded to spaces. Single-line inputs cannot hold one, so storing it left a
+  value the form could never show or edit back.
+
+### Tested
+- Twelve mutants across the guard, the encoding, the form pairing and the
+  export round trip.
+- The exact shape that used to misalign — a blank name above a filled row — is
+  asserted directly, as is a record whose custom field contains a tab and a
+  newline still occupying exactly one row of eight columns.
+
 ## [3.10.0] - 2026-08-30
 
 ### Added

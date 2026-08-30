@@ -162,7 +162,8 @@ def t_container_rejects_corrupt():
 
 def t_stamp_version():
     out = core.stamp_version("A\tb\nC\td\n")
-    eq(out.splitlines()[0], "META_VAULT_VERSION\t3\t-\t-\t-\t-")
+    eq(out.splitlines()[0],
+       "META_VAULT_VERSION\t%d\t-\t-\t-\t-" % core.VAULT_FORMAT_VERSION)
     eq(len([l for l in out.splitlines() if l.startswith("META_VAULT_VERSION")]), 1)
     eq(core.stamp_version(out), out, "stamping must be idempotent")
     old = "META_VAULT_VERSION\t1\t-\t-\t-\t-\nA\tb\n"
@@ -174,7 +175,8 @@ def t_stamp_version():
 
 def t_format_version():
     eq(core.format_version("A\tb\n"), 1, "no row means format 1")
-    eq(core.format_version(core.stamp_version("A\tb\n")), 3)
+    eq(core.format_version(core.stamp_version("A\tb\n")),
+       core.VAULT_FORMAT_VERSION, "a stamped vault carries the current format")
     eq(core.format_version("META_VAULT_VERSION\tzz\t-\n"), 1, "garbage means format 1")
 
 
@@ -193,7 +195,7 @@ def t_write_read_roundtrip():
     plaintext, got = core.read_vault(path, MASTER)
     eq(got, key)
     assert "CoreSecret42" in plaintext
-    eq(core.format_version(plaintext), 3)
+    eq(core.format_version(plaintext), core.VAULT_FORMAT_VERSION)
 
 
 def t_reads_legacy_format():
@@ -705,6 +707,103 @@ def t_fault_write_refuses_a_read_only_directory():
     finally:
         os.chmod(directory, mode)
     eq(open(path, "rb").read(), before, "the vault changed in a read-only directory")
+
+
+# ----- folders and custom fields ---------------------------------------------
+
+def t_attrs_roundtrip():
+    blob = core.encode_attrs("Work", [("API Key", "abc123"), ("PIN", "0000")])
+    folder, fields = core.decode_attrs(blob)
+    eq(folder, "Work")
+    eq(fields, [("API Key", "abc123"), ("PIN", "0000")])
+
+
+def t_attrs_empty_is_empty():
+    """A record using none of this must be byte-identical to how format 3
+    wrote it, or upgrading rewrites every row for nothing."""
+    eq(core.encode_attrs("", []), "")
+    eq(core.encode_attrs(None, None), "")
+    eq(core.encode_attrs("   ", [("", "value")]), "")
+    eq(core.decode_attrs(""), ("", []))
+
+
+def t_attrs_survive_hostile_values():
+    """The column shares a line with everything else, so a tab or a newline in
+    a user-supplied name or value would split one record into two."""
+    nasty = "tab\there\nnewline\ttoo"
+    blob = core.encode_attrs("Fold\ter", [("na\nme", nasty)])
+    assert "\t" not in blob and "\n" not in blob, "the encoded column is not one line"
+    folder, fields = core.decode_attrs(blob)
+    eq(folder, "Fold\ter")
+    eq(fields, [("na\nme", nasty)])
+
+
+def t_attrs_carry_unicode():
+    blob = core.encode_attrs("仕事", [("キー", "値 — ok")])
+    eq(core.decode_attrs(blob), ("仕事", [("キー", "値 — ok")]))
+
+
+def t_attrs_refuse_nonsense():
+    raises(core.VaultError, lambda: core.encode_attrs("x" * 200, []))
+    raises(core.VaultError,
+           lambda: core.encode_attrs("", [("n", "v" * 5000)]))
+    raises(core.VaultError,
+           lambda: core.encode_attrs("", [("n" * 200, "v")]))
+    raises(core.VaultError,
+           lambda: core.encode_attrs("", [("Same", "1"), ("same", "2")]),
+           "two fields differing only in case were accepted")
+    raises(core.VaultError,
+           lambda: core.encode_attrs("", [("n%d" % i, "v") for i in range(80)]))
+
+
+def t_attrs_never_raise_on_read():
+    """One unreadable column must not hide a whole vault."""
+    for junk in ("not-base64!!", "", "   ", base64.b64encode(b"[]").decode(),
+                 base64.b64encode(b"not json").decode(),
+                 base64.b64encode('{"folder": 7}'.encode()).decode(),
+                 base64.b64encode('{"fields": "nope"}'.encode()).decode(),
+                 base64.b64encode('{"fields": [1, 2, {"name": "ok"}]}'.encode()).decode()):
+        folder, fields = core.decode_attrs(junk)
+        assert isinstance(folder, str) and isinstance(fields, list), junk
+
+
+def t_folders_are_listed_without_case_duplicates():
+    plaintext = (
+        "META_VAULT_VERSION\t4\t-\t-\t-\t-\n"
+        "1\tA\tu\ts\tn\t2026-01-01T00:00:00Z\t\t%s\n"
+        "2\tB\tu\ts\tn\t2026-01-01T00:00:00Z\t\t%s\n"
+        "3\tC\tu\ts\tn\t2026-01-01T00:00:00Z\t\t%s\n"
+        "4\tD\tu\ts\tn\t2026-01-01T00:00:00Z\t\t\n"
+        % (core.encode_attrs("Work", []),
+           core.encode_attrs("work", []),
+           core.encode_attrs("Personal", [])))
+    eq(core.record_folders(plaintext), ["Personal", "Work"])
+
+
+def t_a_newer_vault_is_not_silently_downgraded():
+    """The reason this guard exists: without it an older SPM opens a newer
+    vault, keeps only the columns it knows, and writes it back stamped with its
+    own version. The result reads fine, which is what makes it dangerous."""
+    newer = ("META_VAULT_VERSION\t%d\t-\t-\t-\t-\n1\tA\tu\ts\tn\td\t\tattrs\n"
+             % (core.VAULT_FORMAT_VERSION + 1))
+    raises(core.VaultError, lambda: core.stamp_version(newer),
+           "a newer vault was restamped with this build's version")
+    # The current version and older ones are still written normally.
+    core.stamp_version("META_VAULT_VERSION\t%d\t-\t-\t-\t-\nA\tb\n"
+                       % core.VAULT_FORMAT_VERSION)
+    core.stamp_version("META_VAULT_VERSION\t1\t-\t-\t-\t-\nA\tb\n")
+
+
+def t_a_newer_vault_cannot_be_written_at_all():
+    path = fresh("newer")
+    legacy_vault(path, MASTER)
+    core.write_vault(path, MASTER, sample())
+    newer = ("META_VAULT_VERSION\t%d\t-\t-\t-\t-\n" % (core.VAULT_FORMAT_VERSION + 1)
+             + sample())
+    before = open(path, "rb").read()
+    raises(core.VaultError, lambda: core.write_vault(path, MASTER, newer))
+    eq(open(path, "rb").read(), before,
+       "a refused downgrade still changed the vault on disk")
 
 
 # ----- security events -------------------------------------------------------

@@ -1049,6 +1049,7 @@ vault_after_import="$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)"
 curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/after-import.html" \
 	"http://127.0.0.1:$WEB_PORT/"
 
+
 # The security log has a page, and it must show the thing it exists for without
 # putting back what the log is careful to leave out.
 curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/events.html" \
@@ -1184,6 +1185,144 @@ assert session.get("pending_import") is None, "an expired review was left in pla
 print("  import: expiry refuses and consumes a stale review")
 PYTTL
 printf '  import: previewed without writing, masked, committed once, replay refused\n'
+
+printf 'Web regression: folders and custom fields\n'
+# Format 4 appends a column to a password row. It has to survive a round trip
+# through the real form, and a value containing a tab or a newline must not
+# split one record into two -- which is the failure that would corrupt a vault
+# rather than merely losing a field.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/add-folder.html" \
+	"http://127.0.0.1:$WEB_PORT/add"
+grep -q 'name="folder"' "$TEST_ROOT/add-folder.html"
+grep -q 'name="cf_name_0"' "$TEST_ROOT/add-folder.html"
+grep -q 'name="cf_value_0"' "$TEST_ROOT/add-folder.html"
+fold_csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' \
+	"$TEST_ROOT/add-folder.html" | head -n1)"
+[ "${#fold_csrf}" -eq 64 ]
+
+curl -fsS -b "$TEST_ROOT/cookies" -o /dev/null -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$fold_csrf" --data-urlencode 'name=Foldered Site' \
+	--data-urlencode 'user=fu' --data-urlencode 'password=Fd9!qqqqqqqqqq' \
+	--data-urlencode 'notes=' --data-urlencode 'url=' \
+	--data-urlencode 'folder=Work' \
+	--data-urlencode 'cf_name_0=Account' --data-urlencode 'cf_value_0=123-456' \
+	--data-urlencode 'cf_name_1=Odd	Value' \
+	--data-urlencode 'cf_value_1=has	a tab
+and a newline' \
+	"http://127.0.0.1:$WEB_PORT/add"
+
+# The vault must still parse: one record, not three.
+vault_plain > "$TEST_ROOT/folder-plain"
+[ "$(grep -c 'Foldered Site' "$TEST_ROOT/folder-plain")" -eq 1 ] || {
+	printf 'a tab or newline in a custom field split the record\n' >&2; exit 1
+}
+folder_row="$(grep 'Foldered Site' "$TEST_ROOT/folder-plain")"
+[ "$(printf '%s' "$folder_row" | awk -F '\t' '{print NF}')" -eq 8 ] || {
+	printf 'the record does not carry exactly 8 columns\n' >&2; exit 1
+}
+# The raw values must not appear in the row: they are inside the encoded column.
+case "$folder_row" in
+	*"has	a tab"*) printf 'the custom field value reached the row unencoded\n' >&2; exit 1 ;;
+esac
+# A custom field is a single-line input, so a tab or newline arriving from a
+# script is folded to spaces rather than stored as something the form could
+# never show or edit back. Asserted through the view page, which is where a
+# user would notice.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/view-oddfield.html" \
+	"http://127.0.0.1:$WEB_PORT/view?id=$(printf '%s' "$folder_row" | cut -f1)"
+grep -q 'has a tab and a newline' "$TEST_ROOT/view-oddfield.html" || {
+	printf 'a tab/newline value was not folded to one line\n' >&2; exit 1
+}
+grep -q 'Odd Value' "$TEST_ROOT/view-oddfield.html" || {
+	printf 'a tab in a custom field name was not folded\n' >&2; exit 1
+}
+
+fold_id="$(printf '%s' "$folder_row" | cut -f1)"
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/view-folder.html" \
+	"http://127.0.0.1:$WEB_PORT/view?id=$fold_id"
+grep -q 'Work' "$TEST_ROOT/view-folder.html"
+grep -q 'Account' "$TEST_ROOT/view-folder.html"
+# Custom-field values are masked like the password, not printed beside it.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$TEST_ROOT/view-folder.html" <<'PYCF'
+import re, sys
+page = open(sys.argv[1], encoding="utf-8").read()
+for at in (m.start() for m in re.finditer(re.escape("123-456"), page)):
+    before = page.rfind("<", 0, at)
+    assert 'data-val="' in page[before:at], (
+        "a custom field value is printed outside data-val: %r"
+        % page[max(0, at - 90):at + 20])
+PYCF
+
+# And the edit form comes back with them filled in, or an edit silently drops
+# every custom field the record had.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/edit-folder.html" \
+	"http://127.0.0.1:$WEB_PORT/edit?id=$fold_id"
+grep -q 'value="Work"' "$TEST_ROOT/edit-folder.html"
+grep -q 'value="Account"' "$TEST_ROOT/edit-folder.html"
+grep -q 'value="123-456"' "$TEST_ROOT/edit-folder.html"
+
+# Editing something unrelated must not lose them.
+edit_csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' \
+	"$TEST_ROOT/edit-folder.html" | head -n1)"
+curl -fsS -b "$TEST_ROOT/cookies" -o /dev/null -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$edit_csrf" --data-urlencode 'name=Foldered Site' \
+	--data-urlencode 'user=changed' --data-urlencode 'password=Fd9!qqqqqqqqqq' \
+	--data-urlencode 'notes=' --data-urlencode 'url=' \
+	--data-urlencode 'folder=Work' \
+	--data-urlencode 'cf_name_0=Account' --data-urlencode 'cf_value_0=123-456' \
+	"http://127.0.0.1:$WEB_PORT/edit?id=$fold_id"
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/view-folder2.html" \
+	"http://127.0.0.1:$WEB_PORT/view?id=$fold_id"
+grep -q 'Account' "$TEST_ROOT/view-folder2.html" || {
+	printf 'editing the record dropped its custom fields\n' >&2; exit 1
+}
+
+# A value with no name is a half-filled row, not a field. This is also the
+# shape that used to corrupt the record rather than merely lose it: parse_qs
+# drops blank values, so pairing two parallel lists by position shifted every
+# later value onto the wrong name -- "Account" would have been saved holding
+# the value from the blank row above it, silently.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/add-halffield.html" -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$fold_csrf" --data-urlencode 'name=Half Field' \
+	--data-urlencode 'user=' --data-urlencode 'password=x' \
+	--data-urlencode 'notes=' --data-urlencode 'url=' \
+	--data-urlencode 'cf_name_0=' --data-urlencode 'cf_value_0=orphaned' \
+	--data-urlencode 'cf_name_1=Account' --data-urlencode 'cf_value_1=123-456' \
+	"http://127.0.0.1:$WEB_PORT/add"
+grep -q 'value but no name' "$TEST_ROOT/add-halffield.html" || {
+	printf 'a custom field with a value and no name was accepted silently\n' >&2
+	exit 1
+}
+vault_plain | grep -q 'Half Field' && {
+	printf 'the refused record was written anyway\n' >&2; exit 1
+}
+# README promises records "survive export and import untouched". A column added
+# to the row is exactly the thing that quietly stops being true.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/folder-export.json" \
+	"http://127.0.0.1:$WEB_PORT/export?fmt=json"
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$TEST_ROOT/folder-export.json" <<'PYEXPORT'
+import json, sys
+rows = json.load(open(sys.argv[1], encoding="utf-8"))
+if isinstance(rows, dict):
+    rows = rows.get("records") or rows.get("entries") or []
+match = [r for r in rows if r.get("label") == "Foldered Site"]
+assert match, "the foldered record is missing from the export"
+row = match[0]
+assert row.get("folder") == "Work", "the export dropped the folder: %r" % row.get("folder")
+fields = json.loads(row.get("fields") or "[]")
+names = [f["name"] for f in fields]
+assert "Account" in names, "the export dropped the custom fields: %r" % names
+value = [f["value"] for f in fields if f["name"] == "Account"][0]
+assert value == "123-456", "the export mangled a custom field value: %r" % value
+# The stored form is base64; an export full of opaque blobs is not an export.
+assert "eyJ" not in json.dumps(row), "the export carries the raw encoded column"
+print("  folders: export carries folder and custom fields as readable columns")
+PYEXPORT
+
+printf '  folders: round trip through the form, tabs and newlines contained, edit preserves\n'
 
 # Tags are a convention inside existing plaintext fields. "C#" and a URL
 # fragment must not become tags, or every note with a link would sprout one.
@@ -2884,7 +3023,9 @@ if ! grep -q 'Vault format version' "$TEST_ROOT/doctor-fmt.txt"; then
 	sed 's/^/    /' "$TEST_ROOT/doctor-fmt.txt" >&2
 	exit 1
 fi
-grep -q 'Vault format version 3 (current)' "$TEST_ROOT/doctor-fmt.txt" \
+# The number comes from the core, not from this line: hard-coding it means a
+# format bump fails a test that was never about the number.
+grep -q "Vault format version $VAULT_FORMAT_VERSION (current)" "$TEST_ROOT/doctor-fmt.txt" \
 	|| { printf 'doctor did not see the upgraded format:\n' >&2
 	     grep -i 'format' "$TEST_ROOT/doctor-fmt.txt" >&2; exit 1; }
 

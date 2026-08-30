@@ -33,7 +33,7 @@ import urllib.parse
 # The vault records the format it was written in, so a later change can migrate
 # instead of guessing. A vault with no META_VAULT_VERSION row predates this and
 # is format 1; every write stamps the current version.
-VAULT_FORMAT_VERSION = 3
+VAULT_FORMAT_VERSION = 4
 
 CONTAINER_MAGIC = b"SPM-VAULT-3"
 
@@ -130,7 +130,23 @@ def new_vault_key():
 # ----- version stamping ------------------------------------------------------
 
 def stamp_version(plaintext):
-    """Exactly one current META_VAULT_VERSION row, first, on every write."""
+    """Exactly one current META_VAULT_VERSION row, first, on every write.
+
+    Refuses to restamp a vault written by a newer SPM. Without this an older
+    build opens a newer vault, keeps only the columns it knows, and writes it
+    back stamped with its own version -- a silent downgrade that discards
+    whatever the newer format added. The vault reads fine afterwards, which is
+    what makes it dangerous: nothing announces the loss.
+
+    Reading stays permitted. This guards the write, which is where the loss
+    would happen.
+    """
+    found = format_version(plaintext)
+    if found > VAULT_FORMAT_VERSION:
+        raise VaultError(
+            "this vault is format %d and this SPM understands %d; upgrade SPM "
+            "rather than writing it back and losing what it holds"
+            % (found, VAULT_FORMAT_VERSION))
     lines = plaintext.split("\n")
     if lines and lines[-1] == "":
         lines.pop()
@@ -260,6 +276,107 @@ EVENT_OUTCOMES = ("ok", "fail")
 EVENT_DETAIL_KEYS = ("records", "format", "scope", "reason")
 EVENT_REASONS = ("bad-master", "corrupt", "missing", "unreadable")
 EVENT_SCOPES = ("live", "other")
+
+
+# ----- record attributes: folders and custom fields --------------------------
+#
+# Format 4 appends one optional column to a password row, after the URL. It
+# holds a folder name and any number of user-named fields, base64-encoded JSON
+# so that a tab, a newline or a non-ASCII name in a value cannot break the
+# row-per-line format that everything else depends on.
+#
+# A column rather than new row types: a folder and a custom field belong to the
+# record they describe, and keeping them on the row means every existing path
+# that moves, exports or deletes a record carries them along without being
+# taught to. The cost is that an older SPM writing this vault back would drop
+# them, which is what the guard in stamp_version exists to prevent.
+
+ATTRS_FOLDER_MAX = 128
+ATTRS_FIELD_NAME_MAX = 128
+ATTRS_FIELD_VALUE_MAX = 4096
+ATTRS_FIELD_MAX = 64
+
+
+def encode_attrs(folder="", fields=None):
+    """The attributes column for a record, or "" when there is nothing to say.
+
+    Empty is empty rather than an encoded empty object, so a record that uses
+    none of this is byte-identical to how format 3 wrote it.
+    """
+    folder = (folder or "").strip()
+    fields = [(str(n).strip(), str(v)) for n, v in (fields or []) if str(n).strip()]
+    if not folder and not fields:
+        return ""
+    if len(folder) > ATTRS_FOLDER_MAX:
+        raise VaultError("folder name is longer than %d characters"
+                         % ATTRS_FOLDER_MAX)
+    if len(fields) > ATTRS_FIELD_MAX:
+        raise VaultError("a record may carry at most %d custom fields"
+                         % ATTRS_FIELD_MAX)
+    seen = set()
+    for name, value in fields:
+        if len(name) > ATTRS_FIELD_NAME_MAX:
+            raise VaultError("custom field name is longer than %d characters"
+                             % ATTRS_FIELD_NAME_MAX)
+        if len(value) > ATTRS_FIELD_VALUE_MAX:
+            raise VaultError("custom field value is longer than %d characters"
+                             % ATTRS_FIELD_VALUE_MAX)
+        key = name.casefold()
+        if key in seen:
+            raise VaultError("duplicate custom field name %r" % (name,))
+        seen.add(key)
+    payload = {}
+    if folder:
+        payload["folder"] = folder
+    if fields:
+        payload["fields"] = [{"name": n, "value": v} for n, v in fields]
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    return base64.b64encode(raw.encode("utf-8")).decode("ascii")
+
+
+def decode_attrs(column):
+    """(folder, [(name, value)]) for an attributes column.
+
+    Never raises. A column this build cannot read is a record it should still
+    show, minus the part it did not understand -- refusing would make one bad
+    row hide a whole vault.
+    """
+    column = (column or "").strip()
+    if not column:
+        return "", []
+    try:
+        payload = json.loads(base64.b64decode(column, validate=True)
+                             .decode("utf-8"))
+    except Exception:
+        return "", []
+    if not isinstance(payload, dict):
+        return "", []
+    folder = payload.get("folder") or ""
+    if not isinstance(folder, str):
+        folder = ""
+    fields = []
+    raw = payload.get("fields")
+    if isinstance(raw, list):
+        for item in raw[:ATTRS_FIELD_MAX]:
+            if not isinstance(item, dict):
+                continue
+            name, value = item.get("name"), item.get("value")
+            if isinstance(name, str) and name.strip() and isinstance(value, str):
+                fields.append((name, value))
+    return folder[:ATTRS_FOLDER_MAX], fields
+
+
+def record_folders(plaintext):
+    """Every folder in use, sorted, without duplicates differing only in case."""
+    seen = {}
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if not parts or parts[0].startswith("META_") or not parts[0].isdigit():
+            continue
+        folder, _ = decode_attrs(parts[7] if len(parts) > 7 else "")
+        if folder:
+            seen.setdefault(folder.casefold(), folder)
+    return [seen[k] for k in sorted(seen)]
 
 
 def _record_count(plaintext):
@@ -1420,6 +1537,27 @@ def main(argv):
             with open(argv[3], "r", encoding="utf-8") as handle:
                 plaintext = handle.read()
             install_recovery(argv[2], stage_recovery(argv[2], plaintext, key))
+        elif command == "attrs-encode":
+            # attrs-encode <folder> ; stdin: name\tvalue per line
+            # stdout: the attributes column
+            rows = []
+            for line in sys.stdin.read().splitlines():
+                if not line.strip():
+                    continue
+                name, _, value = line.partition("\t")
+                rows.append((name, value))
+            sys.stdout.write(encode_attrs(argv[2] if len(argv) > 2 else "", rows))
+        elif command == "attrs-decode":
+            # attrs-decode <column> ; stdout: one JSON document
+            folder, fields = decode_attrs(argv[2] if len(argv) > 2 else "")
+            sys.stdout.write(json.dumps(
+                {"folder": folder,
+                 "fields": [{"name": n, "value": v} for n, v in fields]}) + "\n")
+        elif command == "folders":
+            # folders <plainfile> ; stdout: one folder per line
+            with open(argv[2], "r", encoding="utf-8", errors="ignore") as handle:
+                for name in record_folders(handle.read()):
+                    sys.stdout.write(name + "\n")
         elif command == "events":
             # events <vault> [limit] ; stdout: one JSON document
             limit = int(argv[3]) if len(argv) > 3 and argv[3] else 0
