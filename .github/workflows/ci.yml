@@ -142,9 +142,19 @@ jobs:
               # The package is checked by installing it, not by inspecting
               # it. A .deb that unpacks and a .deb the package manager accepts
               # are different claims, and only the second one matters here.
-              dpkg -i "/workspace/dist/spm_${version}_all.deb"
+              #
+              # Through apt rather than `dpkg -i`, because the declared
+              # dependencies are the point: the bare image has neither gnupg
+              # nor python, dpkg refuses to configure without them, and that
+              # refusal is correct. apt resolves them the way `pkg install`
+              # would on a device.
+              apt-get update -qq
+              apt-get install -y -qq "/workspace/dist/spm_${version}_all.deb"
               command -v spm
               [ "$(spm --version)" = "$version" ]
               spm help | grep -q "Sans Password Manager"
-              dpkg -r spm
+              # Configured, not merely unpacked: an unconfigured package is
+              # exactly what the previous run produced and it looked installed.
+              [ "$(dpkg-query -W -f='"'"'${Status}'"'"' spm)" = "install ok installed" ]
+              apt-get remove -y -qq spm
             '
