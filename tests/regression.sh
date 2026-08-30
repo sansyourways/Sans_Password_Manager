@@ -1048,6 +1048,27 @@ vault_after_import="$(sha256sum "$PASSWORD_VAULT" | cut -d' ' -f1)"
 }
 curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/after-import.html" \
 	"http://127.0.0.1:$WEB_PORT/"
+
+# The security log has a page, and it must show the thing it exists for without
+# putting back what the log is careful to leave out.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/events.html" \
+	"http://127.0.0.1:$WEB_PORT/events"
+grep -q 'Security Events' "$TEST_ROOT/events.html"
+grep -q 'failed attempt(s) recorded' "$TEST_ROOT/events.html" || {
+	printf 'the events page did not surface the failed unlocks\n' >&2; exit 1
+}
+grep -q 'wrong master password or damaged file' "$TEST_ROOT/events.html"
+# Record names, usernames and secrets must not reach this page: the log has
+# none to show, and a page that fetched them would put back exactly what the
+# log is careful to leave out. The vault path is deliberately not on this list
+# -- the app shell prints it in the sidebar of every page, for a reader who is
+# already signed in and looking at their own vault.
+for leaked in "$AUDIT_PASSWORD" 'DemoSecret42' 'Preview Site' 'previewer' \
+	'bound.example.invalid'; do
+	if grep -qF -- "$leaked" "$TEST_ROOT/events.html"; then
+		printf 'the events page leaked %s\n' "$leaked" >&2; exit 1
+	fi
+done
 grep -q 'Preview Site' "$TEST_ROOT/after-import.html"
 # The note does not appear on the password list, so it is checked where it
 # actually landed: a confirmed import must commit every kind it previewed,
@@ -2638,6 +2659,103 @@ grep -q '^BROKEN	4	BACKUP_CODE	9	' "$scan_out" || {
 grep -q 'Bro' "$scan_out" && ! grep -q 'Y29kZQ==' "$scan_out" || {
 	printf 'core scan-records printed the secret field\n' >&2; exit 1
 }
+
+
+printf 'Security regression: the event log\n'
+# The log lives outside the vault, in the clear, because the events worth
+# reading most -- failed unlocks -- cannot be written into a vault nobody could
+# open. That choice is only safe if the file carries nothing worth reading, so
+# that is what is asserted here, against the real CLI and the real dashboard
+# rather than against the function underneath them.
+events_log="$(core events-path "$PASSWORD_VAULT")"
+[ -n "$events_log" ] || { printf 'the core did not report an events path\n' >&2; exit 1; }
+[ -f "$events_log" ] || {
+	printf 'no event log after a suite that has opened this vault many times\n' >&2
+	exit 1
+}
+# 600 or 0600 depending on whose stat answered; the suite's own probe above
+# accepts both for exactly this reason.
+case "$(file_mode "$events_log")" in
+	600|0600) ;;
+	*) printf 'the event log is mode %s, not 600\n' "$(file_mode "$events_log")" >&2
+	   exit 1 ;;
+esac
+
+# Nothing from the vault may appear in it. The suite has by now written real
+# records through the CLI and the dashboard, so these are live values.
+for forbidden in "$AUDIT_PASSWORD" 'DemoSecret42' 'WebSecret42' 'Pv9!wwwwwwwwww' \
+	'bound.example.invalid' 'Preview Site' "$PASSWORD_VAULT"; do
+	if grep -qF -- "$forbidden" "$events_log"; then
+		printf 'the event log leaked %s\n' "$forbidden" >&2
+		exit 1
+	fi
+done
+
+# Every line must parse as the closed format. A line that does not is either a
+# leak or a bug, and both matter.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$events_log" <<'PYEVENTS'
+import re, sys
+KINDS = {"unlock", "write", "rewrap", "recover", "restore", "archive"}
+OUTCOMES = {"ok", "fail"}
+KEYS = {"records", "format", "scope", "reason"}
+seen = set()
+for number, line in enumerate(open(sys.argv[1], encoding="utf-8"), start=1):
+    fields = line.rstrip("\n").split("\t")
+    if len(fields) != 4:
+        sys.exit("line %d has %d fields, not 4: %r" % (number, len(fields), line))
+    when, kind, outcome, detail = fields
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", when):
+        sys.exit("line %d has a malformed timestamp: %r" % (number, when))
+    if kind not in KINDS:
+        sys.exit("line %d has an unknown kind %r" % (number, kind))
+    if outcome not in OUTCOMES:
+        sys.exit("line %d has an unknown outcome %r" % (number, outcome))
+    for item in detail.split(","):
+        if not item:
+            continue
+        if "=" not in item:
+            sys.exit("line %d detail %r is not key=value" % (number, item))
+        key, value = item.split("=", 1)
+        if key not in KEYS:
+            sys.exit("line %d carries the detail key %r" % (number, key))
+        # The only values permitted are numbers and a fixed vocabulary. Free
+        # text here is how a record label would arrive.
+        if not re.fullmatch(r"[a-z0-9-]+", value):
+            sys.exit("line %d detail %s=%r is not a plain token" % (number, key, value))
+    seen.add((kind, outcome))
+if ("unlock", "ok") not in seen:
+    sys.exit("no successful unlock was recorded across the whole suite")
+if ("write", "ok") not in seen:
+    sys.exit("no write was recorded across the whole suite")
+print("  events: every line parses, %d kind/outcome pairs seen" % len(seen))
+PYEVENTS
+
+# A failed unlock must be recorded -- it is the reason the log is outside the
+# vault at all.
+before_fail="$(grep -c 'unlock	fail' "$events_log" || true)"
+printf 'definitely-not-the-master\n' \
+	| core read "$PASSWORD_VAULT" "$TEST_ROOT/events-probe" >/dev/null 2>&1 || true
+rm -f "$TEST_ROOT/events-probe"
+after_fail="$(grep -c 'unlock	fail' "$events_log" || true)"
+[ "$after_fail" -gt "$before_fail" ] || {
+	printf 'a failed unlock was not recorded (%s -> %s)\n' "$before_fail" "$after_fail" >&2
+	exit 1
+}
+
+# The CLI reports it without opening the vault: no master password is read, so
+# it still answers when the vault will not open, which is the moment it matters.
+cmd_events --json > "$TEST_ROOT/events.json"
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$TEST_ROOT/events.json" <<'PYCLI'
+import json, sys
+doc = json.load(open(sys.argv[1], encoding="utf-8"))
+events = doc["events"]
+assert events, "spm events --json reported nothing"
+assert any(e["kind"] == "unlock" and e["outcome"] == "fail" for e in events), \
+    "the failed unlock is missing from the CLI document"
+for event in events:
+    assert set(event) == {"when", "kind", "outcome", "detail"}, event
+PYCLI
+printf '  events: a failed unlock is recorded and reported without opening the vault\n'
 
 printf 'Core regression: trusted core\n'
 SPM_CORE_DIR="$XDG_DATA_HOME/spm" ensure_core_script "$XDG_DATA_HOME/spm"

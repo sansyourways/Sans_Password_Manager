@@ -14,6 +14,7 @@ world-readable through `ps` and /proc/<pid>/cmdline.
 """
 
 import base64
+import calendar
 import hashlib
 import hmac
 import json
@@ -224,6 +225,240 @@ def _retention():
     return keep if keep > 0 else HISTORY_RETENTION_DEFAULT
 
 
+# ----- security events -------------------------------------------------------
+#
+# What this is for: noticing that someone else opened, or tried to open, your
+# vault. That is the whole reason it exists, and it decides both of the awkward
+# choices below.
+#
+# It lives outside the vault, in plaintext. Inside would be tidier and would be
+# encrypted, but a failed unlock is exactly the event you most want recorded
+# and exactly the one that cannot be written into a vault nobody could open.
+#
+# So it must carry nothing worth reading. No labels, no usernames, no URLs, no
+# paths, no secrets -- only a time, what kind of operation it was, whether it
+# succeeded, and a detail drawn from a fixed vocabulary. Someone who can read
+# this file can already see the vault file beside it and its modification time,
+# so "this vault was opened at these times" is not new information to them.
+# Anything beyond that would be.
+
+EVENT_RETENTION_DEFAULT = 500
+# The dashboard reads the vault on nearly every page view, so an event per read
+# buries the handful of lines anyone actually came to see. Identical successful
+# events inside this window are recorded once.
+#
+# Failures are never coalesced, whatever the window says. A burst of failed
+# unlocks is precisely the signal this log exists to show, and collapsing five
+# attempts into one would be the log lying about the thing it is for.
+EVENT_COALESCE_DEFAULT = 60
+EVENT_KINDS = ("unlock", "write", "rewrap", "recover", "restore", "archive")
+EVENT_OUTCOMES = ("ok", "fail")
+# Details are key=value with both sides constrained, rather than free text.
+# Free text is how a label ends up in a log one day: someone adds a helpful
+# "which record" to an error path and nobody notices it is now on disk in the
+# clear. A closed vocabulary makes that a test failure instead of a leak.
+EVENT_DETAIL_KEYS = ("records", "format", "scope", "reason")
+EVENT_REASONS = ("bad-master", "corrupt", "missing", "unreadable")
+EVENT_SCOPES = ("live", "other")
+
+
+def _record_count(plaintext):
+    """Rows that are records rather than META_ headers. A count, and nothing
+    that says what any of them are."""
+    return sum(1 for line in (plaintext or "").splitlines()
+               if line.strip() and not line.startswith("META_"))
+
+
+def events_path(vault_path):
+    return os.path.join(data_dir(), "events",
+                        vault_scope_id(vault_path) + ".log")
+
+
+def _event_retention():
+    try:
+        keep = int(os.environ.get("SPM_EVENT_RETENTION", ""))
+    except ValueError:
+        return EVENT_RETENTION_DEFAULT
+    return keep if keep > 0 else EVENT_RETENTION_DEFAULT
+
+
+def _event_coalesce_window():
+    try:
+        seconds = int(os.environ.get("SPM_EVENT_COALESCE", ""))
+    except ValueError:
+        return EVENT_COALESCE_DEFAULT
+    return seconds if seconds >= 0 else EVENT_COALESCE_DEFAULT
+
+
+def _last_event(path):
+    """The final line of the log, without reading the whole file."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as handle:
+            handle.seek(max(0, size - 4096))
+            tail = handle.read().decode("utf-8", "ignore").splitlines()
+    except OSError:
+        return None
+    return tail[-1] if tail else None
+
+
+def _coalesces(path, kind, outcome, detail, now):
+    """True when this event repeats the last one inside the window."""
+    if outcome != "ok":
+        return False
+    window = _event_coalesce_window()
+    if window <= 0:
+        return False
+    previous = _last_event(path)
+    if not previous:
+        return False
+    fields = previous.split("\t")
+    if len(fields) != 4:
+        return False
+    if (fields[1], fields[2], fields[3]) != (kind, outcome, detail):
+        return False
+    try:
+        before = calendar.timegm(time.strptime(fields[0], "%Y-%m-%dT%H:%M:%SZ"))
+    except ValueError:
+        return False
+    return 0 <= now - before < window
+
+
+def event_line(when, kind, outcome, detail=""):
+    """One log line, or ValueError if it would carry something it should not.
+
+    Deliberately strict and deliberately raising: misuse here is a programming
+    error and should fail a test. Callers wrap it so that a rejected line can
+    never take a vault operation down with it.
+    """
+    if kind not in EVENT_KINDS:
+        raise ValueError("unknown event kind %r" % (kind,))
+    if outcome not in EVENT_OUTCOMES:
+        raise ValueError("unknown event outcome %r" % (outcome,))
+    parts = []
+    for item in (detail or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise ValueError("event detail %r is not key=value" % (item,))
+        key, value = item.split("=", 1)
+        if key not in EVENT_DETAIL_KEYS:
+            raise ValueError("event detail key %r is not permitted" % (key,))
+        if key == "reason" and value not in EVENT_REASONS:
+            raise ValueError("event reason %r is not permitted" % (value,))
+        if key == "scope" and value not in EVENT_SCOPES:
+            raise ValueError("event scope %r is not permitted" % (value,))
+        if key in ("records", "format") and not value.isdigit():
+            raise ValueError("event %s must be a number, got %r" % (key, value))
+        parts.append("%s=%s" % (key, value))
+    return "\t".join((when, kind, outcome, ",".join(parts)))
+
+
+def _audit_target():
+    """The vault whose log receives events, or "" when there is none.
+
+    Taken from the environment rather than from the path being operated on, so
+    that reading a snapshot or a .bak records against the vault the session is
+    actually about instead of scattering a log file per file touched.
+    """
+    return os.environ.get("SPM_VAULT_PATH", "") or ""
+
+
+def record_event(kind, outcome="ok", detail="", vault_path=None):
+    """Append one event. Never raises, and never fails the caller.
+
+    Same rule as archive_generation below: losing a log line is a nuisance,
+    losing the operation it describes is data loss.
+    """
+    try:
+        target = vault_path or _audit_target()
+        if not target:
+            return False
+        now = time.time()
+        when = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+        line = event_line(when, kind, outcome, detail)
+        path = events_path(target)
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        # Computed from the formatted line so the comparison is against exactly
+        # what was written, not against a detail string that might normalise
+        # differently on the way in.
+        written = line.split("\t")
+        if _coalesces(path, written[1], written[2], written[3], now):
+            return False
+        handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.write(handle, (line + "\n").encode("utf-8"))
+        finally:
+            os.close(handle)
+        _prune_events(path)
+        return True
+    except Exception:
+        return False
+
+
+def _prune_events(path):
+    """Keep the log bounded, rewritten atomically so a reader sees one or the
+    other. Trimmed only when it has drifted well past the limit, so an append
+    is an append almost every time rather than a whole-file rewrite."""
+    keep = _event_retention()
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return
+    if len(lines) <= keep * 2:
+        return
+    staged = path + ".tmp"
+    with open(staged, "w", encoding="utf-8") as handle:
+        handle.writelines(lines[-keep:])
+    os.chmod(staged, 0o600)
+    os.replace(staged, path)
+
+
+def read_events(vault_path=None, limit=None):
+    """Recorded events, oldest first. Malformed lines are skipped, not raised:
+    a log is a record of what happened, not a thing that gets to fail."""
+    target = vault_path or _audit_target()
+    if not target:
+        return []
+    try:
+        with open(events_path(target), "r", encoding="utf-8") as handle:
+            raw = handle.read().splitlines()
+    except OSError:
+        return []
+    out = []
+    for line in raw:
+        fields = line.split("\t")
+        if len(fields) < 3:
+            continue
+        when, kind, outcome = fields[0], fields[1], fields[2]
+        if kind not in EVENT_KINDS or outcome not in EVENT_OUTCOMES:
+            continue
+        detail = {}
+        for item in (fields[3] if len(fields) > 3 else "").split(","):
+            if "=" in item:
+                key, value = item.split("=", 1)
+                if key in EVENT_DETAIL_KEYS:
+                    detail[key] = value
+        out.append({"when": when, "kind": kind,
+                    "outcome": outcome, "detail": detail})
+    if limit and limit > 0:
+        return out[-limit:]
+    return out
+
+
+def _scope_of(vault_path):
+    try:
+        target = _audit_target()
+        if not target:
+            return "other"
+        same = os.path.abspath(vault_path) == os.path.abspath(target)
+        return "live" if same else "other"
+    except Exception:
+        return "other"
+
+
 def archive_generation(vault_path):
     """Snapshot the current ciphertext before it is replaced.
 
@@ -358,15 +593,31 @@ def read_vault(vault_path, master):
     vault_key is None for formats 1 and 2, which were sealed under the master
     password directly.
     """
-    with open(vault_path, "rb") as handle:
-        raw = handle.read()
-    parts = parse_container(raw)
-    if parts is None:
-        return gpg_decrypt(master, raw).decode("utf-8", errors="ignore"), None
-    key = gpg_decrypt(master, parts[0]).decode("utf-8")
-    if not key:
-        raise VaultError("vault key envelope decrypted to nothing")
-    return gpg_decrypt(key, parts[1]).decode("utf-8", errors="ignore"), key
+    scope = "scope=%s" % _scope_of(vault_path)
+    try:
+        with open(vault_path, "rb") as handle:
+            raw = handle.read()
+    except OSError:
+        record_event("unlock", "fail", scope + ",reason=missing")
+        raise
+    try:
+        parts = parse_container(raw)
+        if parts is None:
+            plaintext = gpg_decrypt(master, raw).decode("utf-8", errors="ignore")
+            record_event("unlock", "ok", scope)
+            return plaintext, None
+        key = gpg_decrypt(master, parts[0]).decode("utf-8")
+        if not key:
+            raise VaultError("vault key envelope decrypted to nothing")
+        plaintext = gpg_decrypt(key, parts[1]).decode("utf-8", errors="ignore")
+    except Exception:
+        # A wrong master password and a damaged file are indistinguishable from
+        # here -- gpg refuses both the same way -- so the log says the honest
+        # thing rather than guessing which it was.
+        record_event("unlock", "fail", scope + ",reason=bad-master")
+        raise
+    record_event("unlock", "ok", scope)
+    return plaintext, key
 
 
 def read_vault_with_key(vault_path, vault_key):
@@ -455,6 +706,10 @@ def write_vault(vault_path, master, plaintext, vault_key=None):
                 sys.stderr.write(
                     "warning: the vault was migrated but its recovery file "
                     "still holds the master password (%s)\n" % exc)
+        # After os.replace and the fsync, so a recorded write is one that
+        # actually reached the disk rather than one that was attempted.
+        record_event("write", "ok", "scope=%s,records=%d" % (
+            _scope_of(vault_path), _record_count(plaintext)))
         return vault_key
     finally:
         if tmp_path and os.path.exists(tmp_path):
@@ -515,6 +770,7 @@ def rewrap_with_key(vault_path, vault_key, new_master):
             os.close(fd)
         if staged and os.path.exists(staged):
             os.remove(staged)
+    record_event("rewrap", "ok", "scope=%s" % _scope_of(vault_path))
     return key
 
 
@@ -1164,6 +1420,13 @@ def main(argv):
             with open(argv[3], "r", encoding="utf-8") as handle:
                 plaintext = handle.read()
             install_recovery(argv[2], stage_recovery(argv[2], plaintext, key))
+        elif command == "events":
+            # events <vault> [limit] ; stdout: one JSON document
+            limit = int(argv[3]) if len(argv) > 3 and argv[3] else 0
+            sys.stdout.write(json.dumps(
+                {"events": read_events(argv[2], limit)}, indent=2) + "\n")
+        elif command == "events-path":
+            sys.stdout.write(events_path(argv[2]) + "\n")
         elif command == "scope-id":
             sys.stdout.write(vault_scope_id(argv[2]))
         elif command == "current-version":

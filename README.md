@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.9.0**
+Current release: **3.10.0**
 
 ---
 
@@ -305,7 +305,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.9.0
+bash install.sh --version 3.10.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -340,7 +340,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v3.9.0.zip \
+gh attestation verify Sans_Password_Manager_v3.10.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -356,9 +356,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v3.9.0
+git checkout v3.10.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v3.9.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v3.10.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -371,7 +371,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.9.0 at /home/you/.local/bin/spm
+Installed SPM 3.10.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -843,6 +843,63 @@ The CLI `spm import` is unchanged and still writes in one step.
 
 ---
 
+## Security events
+
+SPM records what was done to your vault, so you can notice what you did not do.
+
+```bash
+spm events              # the last 50, newest last
+spm events --all        # everything kept
+spm events --json       # the same thing as a document
+```
+
+```text
+WHEN (UTC)             EVENT    OUTCOME  DETAIL
+2026-08-30T02:28:05Z   unlock   fail     reason=bad-master, scope=live
+2026-08-30T02:28:06Z   unlock   fail     reason=bad-master, scope=live
+2026-08-30T02:28:33Z   write    ok       records=11, scope=live
+```
+
+The dashboard shows the same log under **Tools → Security Events**, with failed
+attempts called out above the table.
+
+### Two decisions worth knowing about
+
+**The log lives outside the vault, in plaintext.** Inside would be encrypted
+and tidier, but a failed unlock is exactly the event you most want recorded and
+exactly the one that cannot be written into a vault nobody could open. So it
+sits beside the vault at
+`~/.local/share/spm/events/<id>.log`, mode `0600`.
+
+That is only safe because **it carries nothing worth reading**: no record
+names, no usernames, no URLs, no passwords, not even the vault's own path. Each
+line is a time, what kind of operation it was, whether it succeeded, and a
+detail drawn from a fixed vocabulary — a record count, or a reason such as
+`bad-master`. Details are validated against that vocabulary rather than being
+free text, so a future change cannot quietly start logging a label.
+
+Someone who can read this file can already see the vault file next to it and
+its modification time, so *"this vault was opened at these times"* tells them
+nothing new. Anything more would.
+
+**Repeated successes are recorded once; failures never are.** The dashboard
+reads the vault on nearly every page view, and one line per read buries the
+handful anyone came to see. Identical successful events within 60 seconds
+collapse into one. Failures are always recorded individually — a burst of
+failed unlocks is the signal the log exists for, and collapsing five attempts
+into one would be the log understating the thing it is for.
+
+`spm events` never opens the vault and never asks for your master password, so
+it still answers when the vault will not open — which is the moment you most
+want to know how many attempts preceded that.
+
+| Setting | Default | |
+|---|---|---|
+| `SPM_EVENT_RETENTION` | 500 | lines kept |
+| `SPM_EVENT_COALESCE` | 60 | seconds; `0` records every event |
+
+---
+
 ## Passphrases
 
 ```bash
@@ -1024,7 +1081,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.9.0**
+Version: **3.10.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
@@ -1103,7 +1160,7 @@ SPM stores only discovery and recovery metadata.
 
 The universal extension is in `browser-extension-universal/` and supports
 Chrome, Chromium, Edge, Brave, Opera, Vivaldi, and Firefox desktop from one
-source tree. First install SPM 3.9.0 or later, then unpack the release archive.
+source tree. First install SPM 3.10.0 or later, then unpack the release archive.
 
 ### One-command guided setup
 

@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.9.0"
+VERSION="3.10.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -800,7 +800,16 @@ SPMCORE
 
 core() {
 	[ -n "${SPM_CORE_PATH:-}" ] && [ -f "$SPM_CORE_PATH" ] || ensure_core_script
-	python3 "$SPM_CORE_PATH" "$@"
+	# The core writes security events against SPM_VAULT_PATH. The dashboard
+	# already sets it; the CLI never did, so every CLI unlock and write went
+	# unrecorded and the log described only half the product. Exported here,
+	# at the one place the core is invoked, rather than at the callers -- the
+	# same reason history is recorded at the write boundary.
+	if [ -n "${VAULT_FILE:-}" ]; then
+		SPM_VAULT_PATH="$VAULT_FILE" python3 "$SPM_CORE_PATH" "$@"
+	else
+		python3 "$SPM_CORE_PATH" "$@"
+	fi
 }
 
 is_vault_container() {
@@ -3742,6 +3751,41 @@ cmd_doctor_json() {
 	core doctor-report "$tmp" "$VAULT_FILE" "$state" $(sensitive_files) || status=$?
 	secure_wipe "$tmp"
 	return "$status"
+}
+
+cmd_events() {
+	local as_json=0 limit=50
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--json) as_json=1; shift ;;
+			--all) limit=0; shift ;;
+			--limit)
+				[ "$#" -ge 2 ] || die "Missing value for --limit."
+				limit="$2"; shift 2 ;;
+			*) die "Unknown option for events: $1" ;;
+		esac
+	done
+	printf '%s' "$limit" | grep -Eq '^[0-9]+$' || die "--limit takes a number."
+	if [ "$as_json" -eq 1 ]; then
+		core events "$VAULT_FILE" "$limit"
+		return
+	fi
+	local path
+	path="$(core events-path "$VAULT_FILE")"
+	if [ ! -f "$path" ]; then
+		printf 'No security events recorded yet.\n'
+		printf 'They will appear at %s\n' "$path"
+		return
+	fi
+	printf '%-22s %-8s %-8s %s\n' 'WHEN (UTC)' 'EVENT' 'OUTCOME' 'DETAIL'
+	core events "$VAULT_FILE" "$limit" | python3 -c '
+import json, sys
+for event in json.load(sys.stdin)["events"]:
+    detail = ", ".join("%s=%s" % pair for pair in sorted(event["detail"].items()))
+    print("%-22s %-8s %-8s %s" % (event["when"], event["kind"],
+                                  event["outcome"], detail))
+'
+	printf '\nLog: %s\n' "$path"
 }
 
 cmd_doctor() {
@@ -7341,6 +7385,15 @@ main() {
 	if [ "${1:-}" = "doctor" ] && [ "${2:-}" = "--json" ]; then
 		acquire_cli_vault_lock
 		cmd_doctor_json
+		return
+	fi
+	# `events` reads a log beside the vault, never the vault itself, so it
+	# takes no lock, needs no master password, and is answerable when the vault
+	# will not open at all -- which is exactly the moment someone wants to know
+	# how many failed unlocks preceded that.
+	if [ "${1:-}" = "events" ]; then
+		shift
+		cmd_events "$@"
 		return
 	fi
 	# Help must remain available before dependency installation, language, or

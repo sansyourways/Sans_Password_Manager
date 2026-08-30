@@ -164,6 +164,14 @@ I18N_SCRIPT = """
     "en": {
       "nav.security": "Security",
       "nav.history": "History",
+      "nav.events": "Security Events",
+      "page.events.desc": "Operations on this vault. Recorded outside the vault and holding no record names, usernames or secrets.",
+      "events.when": "When (UTC)",
+      "events.kind": "Event",
+      "events.outcome": "Outcome",
+      "events.detail": "Detail",
+      "events.empty": "Nothing recorded yet.",
+      "events.empty_sub": "Unlocks, writes and master-password changes will appear here as they happen.",
       "nav.unlock": "Biometric Unlock",
       "page.unlock.desc": "Resume the idle lock with this device instead of your master password.",
       "unlock.registered": "Registered",
@@ -438,6 +446,14 @@ I18N_SCRIPT = """
     "id": {
       "nav.security": "Keamanan",
       "nav.history": "Riwayat",
+      "nav.events": "Peristiwa Keamanan",
+      "page.events.desc": "Operasi pada brankas ini. Dicatat di luar brankas dan tidak memuat nama catatan, nama pengguna, atau rahasia.",
+      "events.when": "Waktu (UTC)",
+      "events.kind": "Peristiwa",
+      "events.outcome": "Hasil",
+      "events.detail": "Rincian",
+      "events.empty": "Belum ada yang tercatat.",
+      "events.empty_sub": "Pembukaan, penulisan, dan perubahan kata sandi utama akan muncul di sini.",
       "nav.unlock": "Buka Biometrik",
       "page.unlock.desc": "Lanjutkan sesi terkunci dengan perangkat ini, bukan kata sandi master.",
       "unlock.registered": "Terdaftar",
@@ -712,6 +728,14 @@ I18N_SCRIPT = """
     "ja": {
       "nav.security": "セキュリティ",
       "nav.history": "履歴",
+      "nav.events": "セキュリティイベント",
+      "page.events.desc": "この保管庫での操作。保管庫の外に記録され、レコード名・ユーザー名・秘密情報は含みません。",
+      "events.when": "日時 (UTC)",
+      "events.kind": "イベント",
+      "events.outcome": "結果",
+      "events.detail": "詳細",
+      "events.empty": "まだ記録はありません。",
+      "events.empty_sub": "アンロック、書き込み、マスターパスワードの変更がここに表示されます。",
       "nav.unlock": "生体認証ロック解除",
       "page.unlock.desc": "マスターパスワードの代わりに、この端末でロックを解除します。",
       "unlock.registered": "登録日時",
@@ -2340,6 +2364,7 @@ NAV_SECTIONS = [
     ("nav.group.tools", [
         ("security",  "/security",  "shield", "nav.security",  "Security",        None),
         ("history",   "/history",   "history", "nav.history",   "History",         None),
+        ("events",    "/events",    "shield", "nav.events",    "Security Events", None),
         ("generator", "/generator", "generator", "nav.generator", "Generator",       None),
         ("transfer",  "/transfer",  "transfer", "nav.transfer",  "Export / Import", None),
     ]),
@@ -3878,6 +3903,85 @@ def transfer_page():
 }})();
 </script>"""
     return render_shell(content, "transfer", VERSION, VAULT_PATH, title="Export / Import")
+
+
+def events_page(events):
+    """The security log: what was done to this vault, and when.
+
+    Deliberately carries no record identity. The log has none to show -- that
+    is its whole design -- and a page that invented one by cross-referencing
+    the vault would put back exactly what the log is careful to leave out.
+    """
+    label_for = {"unlock": "Unlock", "write": "Write", "rewrap": "Master change",
+                 "recover": "Recovery", "restore": "Restore", "archive": "Snapshot"}
+    failures = sum(1 for e in events if e["outcome"] == "fail")
+    rows = []
+    for index, event in enumerate(events, start=1):
+        detail = event.get("detail", {})
+        bits = []
+        if detail.get("records"):
+            bits.append("%s record(s)" % _esc(detail["records"]))
+        if detail.get("reason"):
+            bits.append({"bad-master": "wrong master password or damaged file",
+                         "missing": "file not found",
+                         "corrupt": "unreadable container",
+                         "unreadable": "could not be read"}.get(
+                             detail["reason"], _esc(detail["reason"])))
+        if detail.get("scope") == "other":
+            bits.append("not the live vault")
+        failed = event["outcome"] == "fail"
+        rows.append(
+            "<tr>"
+            f'<td class="num">{index}</td>'
+            f'<td class="mono">{_esc(event["when"])}</td>'
+            f'<td><span class="chip">{_esc(label_for.get(event["kind"], event["kind"]))}</span></td>'
+            f'<td>{"<strong>Failed</strong>" if failed else "OK"}</td>'
+            f'<td class="muted">{" &middot; ".join(bits) or "&mdash;"}</td>'
+            "</tr>")
+
+    if not events:
+        body = ('<div class="card"><div class="card-body">'
+                '<p data-i18n="events.empty">Nothing recorded yet.</p>'
+                '<p class="hint" data-i18n="events.empty_sub">Unlocks, writes and '
+                'master-password changes will appear here as they happen.</p>'
+                '</div></div>')
+    else:
+        body = f"""
+<div class="card">
+  <div class="card-head"><h2>{len(events)} event(s), newest first</h2></div>
+  <div class="table-wrap"><table class="t">
+    <thead><tr>
+      <th scope="col" data-i18n="table.id">ID</th>
+      <th scope="col" data-i18n="events.when">When (UTC)</th>
+      <th scope="col" data-i18n="events.kind">Event</th>
+      <th scope="col" data-i18n="events.outcome">Outcome</th>
+      <th scope="col" data-i18n="events.detail">Detail</th>
+    </tr></thead>
+    <tbody>{"".join(rows)}</tbody>
+  </table></div>
+</div>"""
+
+    warning = ""
+    if failures:
+        warning = (f'<div class="flash error" style="display:block">'
+                   f'<strong>{failures} failed attempt(s) recorded.</strong> '
+                   f'A failed unlock is a wrong master password or a damaged '
+                   f'file; SPM cannot tell which apart, so it says so rather '
+                   f'than guessing.</div>')
+
+    content = f"""
+<div class="page-head">
+  <div>
+    <h1 class="page-title" data-i18n="nav.events">Security Events</h1>
+    <div class="page-sub" data-i18n="page.events.desc">Operations on this vault.
+      Recorded outside the vault and holding no record names, usernames or
+      secrets.</div>
+  </div>
+</div>
+{warning}
+{body}"""
+    return render_shell(content, "events", VERSION, VAULT_PATH,
+                        title="Security Events")
 
 
 def import_preview_page(classified, stats, skipped, token, csrf):
@@ -6135,6 +6239,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_html(200, render_shell(
                 settings_page(flash), "settings", VERSION, VAULT_PATH,
                 title="Master Password", counts=self._counts(plaintext)))
+            return
+
+        if path == "/events":
+            # No master password is read here and the vault is never opened:
+            # the log lives beside it. That is deliberate -- the events worth
+            # reading most are the failed unlocks, and a page that needed the
+            # vault open could not show them to someone who is locked out.
+            events = list(reversed(core.read_events(VAULT_PATH, 500)))
+            self._send_html(200, events_page(events))
             return
 
         if path == "/history":
