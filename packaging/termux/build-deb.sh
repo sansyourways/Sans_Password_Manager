@@ -51,8 +51,21 @@ if ! tar --version 2>/dev/null | head -1 | grep -q 'GNU tar'; then
 		exit 3
 	fi
 fi
-command -v ar >/dev/null 2>&1 || {
-	printf 'build-deb: ar is required (it is in binutils).\n' >&2
+# GNU ar, for the same reason as GNU tar. The `D` in `ar rD` is a GNU flag
+# that zeroes the member timestamps, uid and gid; BSD ar -- which is what macOS
+# ships -- rejects it outright and prints its usage. Presence was not enough to
+# check: the macOS runner has both `gtar` and an `ar`, so a check for "is there
+# an ar" passed and the build then failed on the flag.
+ar_cmd=""
+for candidate in ar gar; do
+	if command -v "$candidate" >/dev/null 2>&1 \
+		&& "$candidate" --version 2>/dev/null | head -1 | grep -q 'GNU ar'; then
+		ar_cmd="$candidate"
+		break
+	fi
+done
+[ -n "$ar_cmd" ] || {
+	printf 'build-deb: GNU ar is required (it is in binutils; build on Linux).\n' >&2
 	exit 3
 }
 
@@ -105,5 +118,5 @@ printf '2.0\n' > "$stage/debian-binary"
 
 deb="$out_dir/spm_${version}_all.deb"
 rm -f "$deb"
-( cd "$stage" && ar rD "$deb" debian-binary control.tar.gz data.tar.gz )
+( cd "$stage" && "$ar_cmd" rD "$deb" debian-binary control.tar.gz data.tar.gz )
 printf '%s\n' "$deb"

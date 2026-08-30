@@ -2046,11 +2046,16 @@ pkg_version="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' "$ROOT_DIR/spm.sh")"
 # Where GNU tar and ar are not both present -- the macOS runner -- the build is
 # skipped rather than loosened, and says so: a silent skip is indistinguishable
 # from a test that ran.
+# Both must be the GNU ones, not merely present. The macOS runner has gtar and
+# an ar, so a presence check passed there and the build failed on `ar rD` --
+# the D is a GNU flag and BSD ar answers it with its usage text.
 pkg_can_build=1
-if ! tar --version 2>/dev/null | head -1 | grep -q 'GNU tar'; then
-	command -v gtar >/dev/null 2>&1 || pkg_can_build=0
-fi
-command -v ar >/dev/null 2>&1 || pkg_can_build=0
+tar --version 2>/dev/null | head -1 | grep -q 'GNU tar' \
+	|| gtar --version 2>/dev/null | head -1 | grep -q 'GNU tar' \
+	|| pkg_can_build=0
+ar --version 2>/dev/null | head -1 | grep -q 'GNU ar' \
+	|| gar --version 2>/dev/null | head -1 | grep -q 'GNU ar' \
+	|| pkg_can_build=0
 if [ "$pkg_can_build" -eq 0 ]; then
 	printf '  packaging: .deb build skipped (needs GNU tar and ar; covered on Linux)\n'
 	# The refusal itself is asserted here, because a build that quietly
@@ -2144,7 +2149,13 @@ if "$ROOT_DIR/packaging/homebrew/generate.sh" "$pkg_version" "not-a-sha" >/dev/n
 	printf 'the formula generator accepted a bad sha256\n' >&2
 	exit 1
 fi
-printf '  packaging: reproducible .deb into the Termux prefix, formula pinned to one archive\n'
+# The closing line reports what actually ran. Printing the .deb claim after
+# skipping the .deb build is the same overclaim this suite exists to prevent.
+if [ "$pkg_can_build" -eq 1 ]; then
+	printf '  packaging: reproducible .deb into the Termux prefix, formula pinned to one archive\n'
+else
+	printf '  packaging: formula pinned to one archive (.deb build not verified here)\n'
+fi
 
 printf 'Install regression: build attestation verification\n'
 # The installer compares a checksum it fetched from the same host as the
