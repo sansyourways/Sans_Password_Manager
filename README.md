@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.10.0**
+Current release: **3.11.0**
 
 ---
 
@@ -305,7 +305,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.10.0
+bash install.sh --version 3.11.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -340,7 +340,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v3.10.0.zip \
+gh attestation verify Sans_Password_Manager_v3.11.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -356,9 +356,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v3.10.0
+git checkout v3.11.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v3.10.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v3.11.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -371,7 +371,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.10.0 at /home/you/.local/bin/spm
+Installed SPM 3.11.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -843,6 +843,46 @@ The CLI `spm import` is unchanged and still writes in one step.
 
 ---
 
+## Folders and custom fields
+
+A password record can carry a **folder** and any number of **custom fields** —
+an account number, a PIN, a security answer, anything that has no box of its
+own. Both are on the Add and Edit forms in web mode.
+
+Folders are free text with the ones you already use offered as suggestions, not
+a fixed list: a folder is created by naming one, and a dropdown of only what
+exists would make the first folder impossible to make.
+
+Custom-field values are masked on the view page behind the same reveal control
+as the password. People put account numbers and security answers in these, and
+a page that printed them in clear while masking the password beside them would
+be protecting the wrong half.
+
+Both travel with the record through export and import, as their own readable
+`folder` and `fields` columns rather than as the encoded form the vault stores.
+
+### What this changed in the vault
+
+Format **4** appends one optional column to a password row. A record that uses
+neither is written exactly as format 3 wrote it, so upgrading rewrites nothing
+it does not have to.
+
+An older SPM can still *read* a format-4 vault. It must not *write* one, so
+from 3.11.0 SPM refuses to write a vault stamped newer than it understands:
+
+```text
+this vault is format 5 and this SPM understands 4; upgrade SPM rather than
+writing it back and losing what it holds
+```
+
+Without that, an older build would open a newer vault, keep only the columns it
+knows, and write it back stamped with its own version — the vault reads fine
+afterwards, which is what makes it dangerous. **Note the guard only helps from
+3.11.0 onward**: a 3.10.0 or earlier build has no such check, so do not open a
+format-4 vault with one and save.
+
+---
+
 ## Security events
 
 SPM records what was done to your vault, so you can notice what you did not do.
@@ -1081,7 +1121,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.10.0**
+Version: **3.11.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
@@ -1160,7 +1200,7 @@ SPM stores only discovery and recovery metadata.
 
 The universal extension is in `browser-extension-universal/` and supports
 Chrome, Chromium, Edge, Brave, Opera, Vivaldi, and Firefox desktop from one
-source tree. First install SPM 3.10.0 or later, then unpack the release archive.
+source tree. First install SPM 3.11.0 or later, then unpack the release archive.
 
 ### One-command guided setup
 

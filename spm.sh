@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.10.0"
+VERSION="3.11.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -827,7 +827,7 @@ import urllib.parse
 # The vault records the format it was written in, so a later change can migrate
 # instead of guessing. A vault with no META_VAULT_VERSION row predates this and
 # is format 1; every write stamps the current version.
-VAULT_FORMAT_VERSION = 3
+VAULT_FORMAT_VERSION = 4
 
 CONTAINER_MAGIC = b"SPM-VAULT-3"
 
@@ -924,7 +924,23 @@ def new_vault_key():
 # ----- version stamping ------------------------------------------------------
 
 def stamp_version(plaintext):
-    """Exactly one current META_VAULT_VERSION row, first, on every write."""
+    """Exactly one current META_VAULT_VERSION row, first, on every write.
+
+    Refuses to restamp a vault written by a newer SPM. Without this an older
+    build opens a newer vault, keeps only the columns it knows, and writes it
+    back stamped with its own version -- a silent downgrade that discards
+    whatever the newer format added. The vault reads fine afterwards, which is
+    what makes it dangerous: nothing announces the loss.
+
+    Reading stays permitted. This guards the write, which is where the loss
+    would happen.
+    """
+    found = format_version(plaintext)
+    if found > VAULT_FORMAT_VERSION:
+        raise VaultError(
+            "this vault is format %d and this SPM understands %d; upgrade SPM "
+            "rather than writing it back and losing what it holds"
+            % (found, VAULT_FORMAT_VERSION))
     lines = plaintext.split("\n")
     if lines and lines[-1] == "":
         lines.pop()
@@ -1054,6 +1070,107 @@ EVENT_OUTCOMES = ("ok", "fail")
 EVENT_DETAIL_KEYS = ("records", "format", "scope", "reason")
 EVENT_REASONS = ("bad-master", "corrupt", "missing", "unreadable")
 EVENT_SCOPES = ("live", "other")
+
+
+# ----- record attributes: folders and custom fields --------------------------
+#
+# Format 4 appends one optional column to a password row, after the URL. It
+# holds a folder name and any number of user-named fields, base64-encoded JSON
+# so that a tab, a newline or a non-ASCII name in a value cannot break the
+# row-per-line format that everything else depends on.
+#
+# A column rather than new row types: a folder and a custom field belong to the
+# record they describe, and keeping them on the row means every existing path
+# that moves, exports or deletes a record carries them along without being
+# taught to. The cost is that an older SPM writing this vault back would drop
+# them, which is what the guard in stamp_version exists to prevent.
+
+ATTRS_FOLDER_MAX = 128
+ATTRS_FIELD_NAME_MAX = 128
+ATTRS_FIELD_VALUE_MAX = 4096
+ATTRS_FIELD_MAX = 64
+
+
+def encode_attrs(folder="", fields=None):
+    """The attributes column for a record, or "" when there is nothing to say.
+
+    Empty is empty rather than an encoded empty object, so a record that uses
+    none of this is byte-identical to how format 3 wrote it.
+    """
+    folder = (folder or "").strip()
+    fields = [(str(n).strip(), str(v)) for n, v in (fields or []) if str(n).strip()]
+    if not folder and not fields:
+        return ""
+    if len(folder) > ATTRS_FOLDER_MAX:
+        raise VaultError("folder name is longer than %d characters"
+                         % ATTRS_FOLDER_MAX)
+    if len(fields) > ATTRS_FIELD_MAX:
+        raise VaultError("a record may carry at most %d custom fields"
+                         % ATTRS_FIELD_MAX)
+    seen = set()
+    for name, value in fields:
+        if len(name) > ATTRS_FIELD_NAME_MAX:
+            raise VaultError("custom field name is longer than %d characters"
+                             % ATTRS_FIELD_NAME_MAX)
+        if len(value) > ATTRS_FIELD_VALUE_MAX:
+            raise VaultError("custom field value is longer than %d characters"
+                             % ATTRS_FIELD_VALUE_MAX)
+        key = name.casefold()
+        if key in seen:
+            raise VaultError("duplicate custom field name %r" % (name,))
+        seen.add(key)
+    payload = {}
+    if folder:
+        payload["folder"] = folder
+    if fields:
+        payload["fields"] = [{"name": n, "value": v} for n, v in fields]
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    return base64.b64encode(raw.encode("utf-8")).decode("ascii")
+
+
+def decode_attrs(column):
+    """(folder, [(name, value)]) for an attributes column.
+
+    Never raises. A column this build cannot read is a record it should still
+    show, minus the part it did not understand -- refusing would make one bad
+    row hide a whole vault.
+    """
+    column = (column or "").strip()
+    if not column:
+        return "", []
+    try:
+        payload = json.loads(base64.b64decode(column, validate=True)
+                             .decode("utf-8"))
+    except Exception:
+        return "", []
+    if not isinstance(payload, dict):
+        return "", []
+    folder = payload.get("folder") or ""
+    if not isinstance(folder, str):
+        folder = ""
+    fields = []
+    raw = payload.get("fields")
+    if isinstance(raw, list):
+        for item in raw[:ATTRS_FIELD_MAX]:
+            if not isinstance(item, dict):
+                continue
+            name, value = item.get("name"), item.get("value")
+            if isinstance(name, str) and name.strip() and isinstance(value, str):
+                fields.append((name, value))
+    return folder[:ATTRS_FOLDER_MAX], fields
+
+
+def record_folders(plaintext):
+    """Every folder in use, sorted, without duplicates differing only in case."""
+    seen = {}
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if not parts or parts[0].startswith("META_") or not parts[0].isdigit():
+            continue
+        folder, _ = decode_attrs(parts[7] if len(parts) > 7 else "")
+        if folder:
+            seen.setdefault(folder.casefold(), folder)
+    return [seen[k] for k in sorted(seen)]
 
 
 def _record_count(plaintext):
@@ -2214,6 +2331,27 @@ def main(argv):
             with open(argv[3], "r", encoding="utf-8") as handle:
                 plaintext = handle.read()
             install_recovery(argv[2], stage_recovery(argv[2], plaintext, key))
+        elif command == "attrs-encode":
+            # attrs-encode <folder> ; stdin: name\tvalue per line
+            # stdout: the attributes column
+            rows = []
+            for line in sys.stdin.read().splitlines():
+                if not line.strip():
+                    continue
+                name, _, value = line.partition("\t")
+                rows.append((name, value))
+            sys.stdout.write(encode_attrs(argv[2] if len(argv) > 2 else "", rows))
+        elif command == "attrs-decode":
+            # attrs-decode <column> ; stdout: one JSON document
+            folder, fields = decode_attrs(argv[2] if len(argv) > 2 else "")
+            sys.stdout.write(json.dumps(
+                {"folder": folder,
+                 "fields": [{"name": n, "value": v} for n, v in fields]}) + "\n")
+        elif command == "folders":
+            # folders <plainfile> ; stdout: one folder per line
+            with open(argv[2], "r", encoding="utf-8", errors="ignore") as handle:
+                for name in record_folders(handle.read()):
+                    sys.stdout.write(name + "\n")
         elif command == "events":
             # events <vault> [limit] ; stdout: one JSON document
             limit = int(argv[3]) if len(argv) > 3 and argv[3] else 0
@@ -8259,6 +8397,15 @@ I18N_SCRIPT = """
       "nav.security": "Security",
       "nav.history": "History",
       "nav.events": "Security Events",
+      "entry.field.folder": "Folder",
+      "entry.hint.folder": "Optional. Type a new name to create one.",
+      "entry.field.custom": "Custom fields",
+      "entry.field.custom_name": "Field name",
+      "entry.field.custom_value": "Value",
+      "entry.field.custom_add": "Add another field",
+      "entry.hint.custom": "Anything this record needs that has no box of its own. Stored in the vault, encrypted like the password.",
+      "view.label.folder": "Folder",
+      "search.folder": "Folder",
       "page.events.desc": "Operations on this vault. Recorded outside the vault and holding no record names, usernames or secrets.",
       "events.when": "When (UTC)",
       "events.kind": "Event",
@@ -8541,6 +8688,15 @@ I18N_SCRIPT = """
       "nav.security": "Keamanan",
       "nav.history": "Riwayat",
       "nav.events": "Peristiwa Keamanan",
+      "entry.field.folder": "Folder",
+      "entry.hint.folder": "Opsional. Ketik nama baru untuk membuatnya.",
+      "entry.field.custom": "Bidang khusus",
+      "entry.field.custom_name": "Nama bidang",
+      "entry.field.custom_value": "Nilai",
+      "entry.field.custom_add": "Tambah bidang lain",
+      "entry.hint.custom": "Apa pun yang dibutuhkan catatan ini dan belum punya kolom sendiri. Disimpan terenkripsi seperti kata sandi.",
+      "view.label.folder": "Folder",
+      "search.folder": "Folder",
       "page.events.desc": "Operasi pada brankas ini. Dicatat di luar brankas dan tidak memuat nama catatan, nama pengguna, atau rahasia.",
       "events.when": "Waktu (UTC)",
       "events.kind": "Peristiwa",
@@ -8823,6 +8979,15 @@ I18N_SCRIPT = """
       "nav.security": "セキュリティ",
       "nav.history": "履歴",
       "nav.events": "セキュリティイベント",
+      "entry.field.folder": "フォルダ",
+      "entry.hint.folder": "任意。新しい名前を入力すると作成されます。",
+      "entry.field.custom": "カスタムフィールド",
+      "entry.field.custom_name": "フィールド名",
+      "entry.field.custom_value": "値",
+      "entry.field.custom_add": "フィールドを追加",
+      "entry.hint.custom": "専用の入力欄がない情報のためのフィールド。パスワードと同様に暗号化して保存されます。",
+      "view.label.folder": "フォルダ",
+      "search.folder": "フォルダ",
       "page.events.desc": "この保管庫での操作。保管庫の外に記録され、レコード名・ユーザー名・秘密情報は含みません。",
       "events.when": "日時 (UTC)",
       "events.kind": "イベント",
@@ -11081,6 +11246,152 @@ def _field(name, label_key, label, value="", ftype="text", placeholder_key=None,
             f'{ctrl}{hint_html}</div>')
 
 
+def _folder_field(current, known):
+    """A free-text folder with the vault's existing ones offered as a datalist.
+
+    Not a <select>: a folder is created by naming one, and a dropdown of only
+    what exists would make the first folder impossible to make. The datalist
+    keeps people from inventing "Work" a second time by accident.
+    """
+    options = "".join('<option value="%s"></option>' % html.escape(name)
+                      for name in known)
+    return f"""
+  <div class="field">
+    <label for="entry-folder" data-i18n="entry.field.folder">Folder</label>
+    <input class="input" id="entry-folder" name="folder" list="entry-folders"
+           value="{html.escape(current or "")}" autocomplete="off">
+    <datalist id="entry-folders">{options}</datalist>
+    <div class="hint" data-i18n="entry.hint.folder">Optional. Type a new name to
+      create one.</div>
+  </div>"""
+
+
+def _custom_fields_block(fields):
+    """Repeatable name/value pairs.
+
+    Values are ordinary text inputs, not password inputs: these hold things
+    like an account number or a security answer, and a field the user cannot
+    read back is a field they cannot check. The vault encrypts them either way.
+    """
+    rows = list(fields or []) + [("", "")]
+    body = []
+    for index, (name, value) in enumerate(rows):
+        body.append(f"""
+    <div class="cf-row" style="display:grid;grid-template-columns:1fr 2fr auto;gap:var(--sp-2);margin-bottom:var(--sp-2)">
+      <input class="input" name="cf_name_{index}" value="{html.escape(name)}"
+             data-i18n-placeholder="entry.field.custom_name" placeholder="Field name"
+             aria-label="Custom field name {index + 1}" autocomplete="off">
+      <input class="input" name="cf_value_{index}" value="{html.escape(value)}"
+             data-i18n-placeholder="entry.field.custom_value" placeholder="Value"
+             aria-label="Custom field value {index + 1}" autocomplete="off">
+      <button class="btn btn-ghost" type="button" data-act="cf-remove"
+              aria-label="Remove this field">&times;</button>
+    </div>""")
+    return f"""
+  <div class="field">
+    <label data-i18n="entry.field.custom">Custom fields</label>
+    <div id="cf-rows">{"".join(body)}</div>
+    <button class="btn btn-ghost" type="button" id="cf-add"
+            data-i18n="entry.field.custom_add">Add another field</button>
+    <div class="hint" data-i18n="entry.hint.custom">Anything this record needs
+      that has no box of its own. Stored in the vault, encrypted like the
+      password.</div>
+  </div>
+<script>
+(function () {{
+  var host = document.getElementById("cf-rows");
+  var add = document.getElementById("cf-add");
+  if (!host || !add) return;
+  add.addEventListener("click", function () {{
+    var last = host.lastElementChild;
+    if (!last) return;
+    var copy = last.cloneNode(true);
+    // Renumber, or the clone submits under the index it was copied from and
+    // the two rows collapse into one on the server.
+    var next = host.children.length;
+    copy.querySelectorAll("input").forEach(function (input) {{
+      input.value = "";
+      input.name = input.name.replace(/_\d+$/, "_" + next);
+      var label = input.getAttribute("aria-label");
+      if (label) input.setAttribute("aria-label", label.replace(/\d+$/, next + 1));
+    }});
+    host.appendChild(copy);
+    var first = copy.querySelector("input");
+    if (first) first.focus();
+  }});
+  host.addEventListener("click", function (event) {{
+    var target = event.target;
+    if (!target || target.getAttribute("data-act") !== "cf-remove") return;
+    // Always leave one row, so the control cannot be emptied into a state
+    // with nothing to clone from.
+    if (host.children.length > 1) {{
+      target.closest(".cf-row").remove();
+      Array.prototype.forEach.call(host.children, function (row, position) {{
+        row.querySelectorAll("input").forEach(function (input) {{
+          input.name = input.name.replace(/_\d+$/, "_" + position);
+          var label = input.getAttribute("aria-label");
+          if (label) input.setAttribute("aria-label", label.replace(/\d+$/, position + 1));
+        }});
+      }});
+    }} else {{
+      target.closest(".cf-row").querySelectorAll("input").forEach(
+        function (input) {{ input.value = ""; }});
+    }}
+  }});
+}})();
+</script>"""
+
+
+def posted_attrs(data):
+    """(folder, [(name, value)], error) from a submitted entry form.
+
+    One reader for add and edit both. Two would drift, and the failure would be
+    a record whose custom fields survive an edit but not a create, or the
+    reverse -- silent either way.
+    """
+    folder = (data.get("folder") or [""])[0].strip()
+    # Rows are matched by the index in their input names, never by position in
+    # two parallel lists. parse_qs drops blank values, so a row whose name was
+    # left empty does not merely go missing -- the remaining names and values
+    # shift out of step and every later value lands on the wrong field. A user
+    # who typed a blank name above "Account = 123-456" would have got
+    # "Account = <the value from the blank row>", silently.
+    rows = {}
+    for key, supplied in data.items():
+        for prefix, slot in (("cf_name_", 0), ("cf_value_", 1)):
+            if not key.startswith(prefix):
+                continue
+            suffix = key[len(prefix):]
+            if not suffix.isdigit():
+                continue
+            rows.setdefault(int(suffix), ["", ""])[slot] = (supplied or [""])[0]
+    # Custom fields are single-line inputs. A browser cannot put a newline in
+    # one, so anything arriving with a tab or a newline came from a script or
+    # an import -- and storing it would leave a value the form can never show
+    # or edit back correctly. Folded to spaces here rather than at the encoder,
+    # which stays able to carry them so a hand-edited vault still round-trips.
+    def _one_line(text):
+        return " ".join((text or "").split())
+
+    pairs = []
+    for index in sorted(rows):
+        name, value = rows[index]
+        name = _one_line(name)
+        value = _one_line(value) if ("\n" in value or "\t" in value) else value
+        # A row with a value but no name is a half-filled row, not a field.
+        # Dropping it silently would lose what someone typed, so it is an error.
+        if not name:
+            if value.strip():
+                return folder, [], "A custom field has a value but no name."
+            continue
+        pairs.append((name, value))
+    try:
+        core.encode_attrs(_one_line(folder), pairs)
+    except Exception as exc:
+        return folder, pairs, str(exc)
+    return _one_line(folder), pairs, ""
+
+
 def build_entry_form(title, vault_path, action, values=None, message=""):
     v = values or {}
     f = (
@@ -11092,7 +11403,9 @@ def build_entry_form(title, vault_path, action, values=None, message=""):
         _field("url", "entry.field.url", "URL", v.get("url", ""), ftype="url",
                hint='<span data-i18n="entry.hint.url">Used to match this entry to a site. '
                     'http:// or https:// only.</span>') +
-        _field("notes", "entry.field.notes", "Notes", v.get("notes", ""), rows=4)
+        _field("notes", "entry.field.notes", "Notes", v.get("notes", ""), rows=4) +
+        _folder_field(v.get("folder", ""), v.get("folders", [])) +
+        _custom_fields_block(v.get("fields", []))
     )
     extra = f'<input type="hidden" name="id" value="{html.escape(v.get("id",""))}">' if v.get("id") else ""
     return _form_page(title, action, extra + f, message, "/passwords", "passwords")
@@ -11189,6 +11502,40 @@ window.SPM_reveal = function (id, btn) {
 """
 
 
+def _attrs_block(column):
+    """Folder and custom fields on the view page.
+
+    Custom-field values are masked behind the same reveal control the password
+    uses. People put account numbers and security answers in these, and a page
+    that printed them in clear while masking the password beside them would be
+    protecting the wrong half.
+    """
+    folder, fields = core.decode_attrs(column)
+    if not folder and not fields:
+        return ""
+    out = []
+    if folder:
+        out.append(f"""
+  <div class="field"><label data-i18n="view.label.folder">Folder</label>
+    <div class="secret"><span class="chip">{_esc(folder)}</span></div>
+  </div>""")
+    for index, (name, value) in enumerate(fields, start=1):
+        elem = "cf-%d" % index
+        dots = "&bull;" * min(len(value), 24) if value else "&mdash;"
+        out.append(f"""
+  <div class="field"><label>{_esc(name)}</label>
+    <div class="secret">
+      <span class="secret-val masked" id="{elem}"
+            data-val="{html.escape(value)}">{dots}</span>
+      <button class="icon-btn" type="button" data-act="reveal" data-target="{elem}"
+              aria-label="Show">{_icon("view", "icon icon-sm")}</button>
+      <button class="icon-btn" type="button" data-act="copy-val" data-target="{elem}"
+              aria-label="Copy">{_icon("copy", "icon icon-sm")}</button>
+    </div>
+  </div>""")
+    return "".join(out)
+
+
 def _history_block(history):
     """Previous passwords for an entry, masked like the current one.
 
@@ -11257,6 +11604,7 @@ def view_entry_page(parts, history=()):
   <div class="field"><label data-i18n="view.label.notes">Notes</label>
     <div class="secret"><span class="secret-val" style="white-space:pre-wrap">{_esc(notes) or "&mdash;"}</span></div>
   </div>
+  {_attrs_block(parts[7] if len(parts) > 7 else "")}
   <div class="field"><label data-i18n="view.label.created">Created</label>
     <div class="faint mono">{created or "&mdash;"}</div>
   </div>
@@ -12446,7 +12794,8 @@ def _export_rows(plaintext: str):
                 "notes": parts[4] if len(parts) > 4 else "",
                 "created": parts[5] if len(parts) > 5 else "",
                 "extra": "",
-                "url": parts[6] if len(parts) > 6 else ""
+                "url": parts[6] if len(parts) > 6 else "",
+                **_row_attrs_columns(parts[7] if len(parts) > 7 else ""),
             })
         elif tag == "NOTE":
             rows.append({
@@ -12501,7 +12850,8 @@ def _export_rows(plaintext: str):
 def export_content(fmt: str, plaintext: str):
     import csv, json, html as htmlmod, io
     rows = _export_rows(plaintext)
-    fieldnames = ["type","id","label","username","secret","notes","created","extra","url"]
+    fieldnames = ["type","id","label","username","secret","notes","created","extra","url",
+                  "folder","fields"]
     fmt = fmt.lower()
     if fmt == "json":
         return json.dumps(rows, ensure_ascii=False, indent=2)
@@ -12877,6 +13227,54 @@ def _apply_import(fmt: str, content: str, plaintext: str, export_password: str =
     return apply_import_rows(classified, plaintext)
 
 
+def _row_attrs_columns(column):
+    """The folder and fields columns an export carries for one record.
+
+    Exported as their own columns rather than as the stored base64 blob: an
+    export is meant to be readable, and a column of opaque base64 is neither
+    readable nor editable by whatever the user opens it with.
+    """
+    folder, fields = core.decode_attrs(column)
+    return {
+        "folder": folder,
+        "fields": jsonlib.dumps(
+            [{"name": n, "value": v} for n, v in fields],
+            separators=(",", ":"), ensure_ascii=False) if fields else "",
+    }
+
+
+def _attrs_from_row(row):
+    """The attributes column for an imported row.
+
+    Tolerant on purpose: an import is the one place rows arrive from software
+    that never heard of this format. A folder or a fields list that does not
+    parse is dropped rather than failing the import, because losing one
+    optional column is better than refusing a file of real passwords.
+    """
+    folder = str(row.get("folder", "") or "")
+    fields = []
+    raw = row.get("fields", "")
+    if isinstance(raw, list):
+        candidates = raw
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            candidates = jsonlib.loads(raw)
+        except Exception:
+            candidates = []
+    else:
+        candidates = []
+    if isinstance(candidates, list):
+        for item in candidates:
+            if isinstance(item, dict):
+                name, value = item.get("name"), item.get("value")
+                if isinstance(name, str) and name.strip():
+                    fields.append((name, str(value if value is not None else "")))
+    try:
+        return core.encode_attrs(folder, fields)
+    except Exception:
+        return ""
+
+
 def apply_import_rows(classified, plaintext: str):
     """Write already-classified rows into `plaintext`.
 
@@ -12923,7 +13321,8 @@ def apply_import_rows(classified, plaintext: str):
             _vf(r.get("secret","")),
             _vf(r.get("notes","")),
             _vf(r.get("created","")),
-            _vurl(r.get("url",""))
+            _vurl(r.get("url","")),
+            _attrs_from_row(r),
         ]))
         stats["passwords"] += 1
 
@@ -14451,7 +14850,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 title="Add Entry",
                 vault_path=VAULT_PATH,
                 action="/add",
-                values={},
+                values={"folders": core.record_folders(
+                    load_vault(master, self._session_rec))},
                 message=""
             )
             self._send_html(200, page)
@@ -14473,12 +14873,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Entry not found")
                 return
 
+            stored_folder, stored_fields = core.decode_attrs(
+                found[7] if len(found) > 7 else "")
             values = {
                 "name": found[1],
                 "user": found[2],
                 "password": found[3],
                 "notes": found[4],
                 "url": found[6] if len(found) > 6 else "",
+                "folder": stored_folder,
+                "fields": stored_fields,
+                "folders": core.record_folders(plaintext),
             }
             page = build_entry_form(
                 title=f"Edit Entry #{entry_id}",
@@ -14996,17 +15401,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             notes = (data.get("notes") or [""])[0]
             url_raw = (data.get("url") or [""])[0]
             url = _vurl(url_raw)
+            folder, custom, attrs_error = posted_attrs(data)
 
-            if not name or url is None:
+            if not name or url is None or attrs_error:
+                plaintext = load_vault(master, self._session_rec)
+                if not name:
+                    problem = "Name / service is required."
+                elif url is None:
+                    problem = "URL must start with http:// or https://."
+                else:
+                    problem = attrs_error
                 page = build_entry_form(
                     title="Add Entry",
                     vault_path=VAULT_PATH,
                     action="/add",
                     values={"name": name, "user": user, "password": password,
-                            "notes": notes, "url": url_raw},
-                    message=("<div class='msg'>Name / service is required.</div>"
-                             if not name else
-                             "<div class='msg'>URL must start with http:// or https://.</div>"),
+                            "notes": notes, "url": url_raw, "folder": folder,
+                            "fields": custom,
+                            "folders": core.record_folders(plaintext)},
+                    message="<div class='msg'>%s</div>" % html.escape(problem),
                 )
                 self._send_html(200, page)
                 return
@@ -15029,6 +15442,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _vf(notes),
                 now,
                 url,
+                core.encode_attrs(folder, custom),
             ])
             lines.append(new_line)
             new_plain = "\n".join(lines) + "\n"
@@ -15052,6 +15466,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             notes = (data.get("notes") or [""])[0]
             url_raw = (data.get("url") or [""])[0]
             url = _vurl(url_raw)
+            folder, custom, attrs_error = posted_attrs(data)
 
             plaintext = load_vault(master, self._session_rec)
             lines, entries = parse_entries(plaintext)
@@ -15069,22 +15484,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Entry not found")
                 return
 
-            if not name or url is None:
+            if not name or url is None or attrs_error:
+                if not name:
+                    problem = "Name / service is required."
+                elif url is None:
+                    problem = "URL must start with http:// or https://."
+                else:
+                    problem = attrs_error
                 values = {
                     "name": name,
                     "user": user,
                     "password": password,
                     "notes": notes,
                     "url": url_raw,
+                    "folder": folder,
+                    "fields": custom,
+                    "folders": core.record_folders(plaintext),
                 }
                 page = build_entry_form(
                     title=f"Edit Entry #{entry_id}",
                     vault_path=VAULT_PATH,
                     action="/edit?id=" + urllib.parse.quote(entry_id),
                     values=values,
-                    message=("<div class='msg'>Name / service is required.</div>"
-                             if not name else
-                             "<div class='msg'>URL must start with http:// or https://.</div>"),
+                    message="<div class='msg'>%s</div>" % html.escape(problem),
                 )
                 self._send_html(200, page)
                 return
@@ -15097,6 +15519,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _vf(notes),
                 old_created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 url,
+                core.encode_attrs(folder, custom),
             ])
             lines[idx_to_update] = new_line
             new_plain = "\n".join(lines) + "\n"

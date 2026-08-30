@@ -234,7 +234,17 @@ as such below rather than quietly dropped.
   export and is never counted as a password.
 - Duplicate and breach review that performs its analysis without disclosing a
   secret to any third party.
-- Folders and custom fields for records that do not fit the current shape.
+- **Folders and custom fields — shipped in 3.11.0.** A password record carries
+  a folder and any number of named fields, on the Add and Edit forms, masked on
+  the view page like the password itself, and travelling through export and
+  import as readable columns.
+
+  Format 4 appends one optional column; a record using neither is written
+  exactly as format 3 wrote it. The release also adds the guard that had to
+  come with it: SPM now refuses to *write* a vault stamped newer than it
+  understands. Without that an older build would open a format-4 vault, keep
+  only the columns it knew, and write it back stamped as format 3 -- readable
+  afterwards, which is what would have made it dangerous.
 - **Import preview — shipped in 3.8.0.** A web-mode upload is parsed and shown
   before anything is written: every record the file would add, with its type,
   service, username and a masked secret, plus a named list of rows SPM has no
