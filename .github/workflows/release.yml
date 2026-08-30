@@ -95,7 +95,7 @@ jobs:
           sha256sum -c "$archive.sha256"
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           # spm.sh is attested alongside the archive because that is the file
           # people actually run; someone who copied it out of a release can
