@@ -111,6 +111,18 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Build the Termux package on the runner
+        run: |
+          # Built here, installed in the container. That is the real shape of
+          # it -- a .deb is produced on a build machine and installed on the
+          # device -- and the Termux image has neither ar nor GNU tar, so
+          # building inside it was never going to work.
+          version="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' spm.sh)"
+          chmod +x packaging/termux/build-deb.sh
+          mkdir -p dist
+          ./packaging/termux/build-deb.sh "$version" dist
+          ls -l "dist/spm_${version}_all.deb"
+
       - name: Run compatibility checks in the official Termux container
         run: |
           docker run --rm \
@@ -127,11 +139,10 @@ jobs:
               bash install.sh --version "$version" \
                 --prefix "$HOME/.local" --dry-run > "$PREFIX/tmp/spm-install.txt"
               grep -q "Dry run complete" "$PREFIX/tmp/spm-install.txt"
-              # The Termux package is checked by installing it, not by
-              # inspecting it. A .deb that unpacks and a .deb that apt accepts
+              # The package is checked by installing it, not by inspecting
+              # it. A .deb that unpacks and a .deb the package manager accepts
               # are different claims, and only the second one matters here.
-              bash packaging/termux/build-deb.sh "$version" "$PREFIX/tmp"
-              dpkg -i "$PREFIX/tmp/spm_${version}_all.deb"
+              dpkg -i "/workspace/dist/spm_${version}_all.deb"
               command -v spm
               [ "$(spm --version)" = "$version" ]
               spm help | grep -q "Sans Password Manager"

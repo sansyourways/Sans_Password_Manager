@@ -2042,6 +2042,25 @@ mkdir -p "$pkg_dir"
 pkg_version="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' "$ROOT_DIR/spm.sh")"
 
 # --- Termux -----------------------------------------------------------------
+# A Termux package is built on the machine that cuts a release, which is Linux.
+# Where GNU tar and ar are not both present -- the macOS runner -- the build is
+# skipped rather than loosened, and says so: a silent skip is indistinguishable
+# from a test that ran.
+pkg_can_build=1
+if ! tar --version 2>/dev/null | head -1 | grep -q 'GNU tar'; then
+	command -v gtar >/dev/null 2>&1 || pkg_can_build=0
+fi
+command -v ar >/dev/null 2>&1 || pkg_can_build=0
+if [ "$pkg_can_build" -eq 0 ]; then
+	printf '  packaging: .deb build skipped (needs GNU tar and ar; covered on Linux)\n'
+	# The refusal itself is asserted here, because a build that quietly
+	# produced a differently-shaped package would be worse than none.
+	if "$ROOT_DIR/packaging/termux/build-deb.sh" "$pkg_version" "$pkg_dir" \
+		>/dev/null 2>&1; then
+		printf 'build-deb.sh produced a package without GNU tar\n' >&2
+		exit 1
+	fi
+else
 "$ROOT_DIR/packaging/termux/build-deb.sh" "$pkg_version" "$pkg_dir/one" >/dev/null
 "$ROOT_DIR/packaging/termux/build-deb.sh" "$pkg_version" "$pkg_dir/two" >/dev/null
 deb="$pkg_dir/one/spm_${pkg_version}_all.deb"
@@ -2086,6 +2105,7 @@ tar -xzOf "$pkg_dir/data.tar.gz" "./data/data/com.termux/files/usr/bin/spm" \
 cmp -s "$pkg_dir/packaged-spm" "$ROOT_DIR/spm.sh" || {
 	printf 'the packaged spm is not the spm.sh in this tree\n' >&2; exit 1
 }
+fi
 
 # --- Homebrew ---------------------------------------------------------------
 fake_sha="$(printf 'f%.0s' $(seq 1 64))"

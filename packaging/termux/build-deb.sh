@@ -27,6 +27,25 @@ mkdir -p "$out_dir"
 # environment when present and defaulted otherwise.
 prefix="${TERMUX_PREFIX:-/data/data/com.termux/files/usr}"
 
+# GNU tar, explicitly. The reproducibility here rests on --mtime, --owner,
+# --group, --numeric-owner and --no-recursion, and bsdtar -- which is what
+# macOS ships as `tar` -- either spells those differently or lacks them. It
+# would still produce a .deb, just not the same one twice, which is the whole
+# point. Refusing beats emitting a package that looks fine and is not.
+tar_cmd="tar"
+if ! tar --version 2>/dev/null | head -1 | grep -q 'GNU tar'; then
+	if command -v gtar >/dev/null 2>&1 && gtar --version 2>/dev/null | head -1 | grep -q 'GNU tar'; then
+		tar_cmd="gtar"
+	else
+		printf 'build-deb: GNU tar is required (install gnu-tar, or build on Linux).\n' >&2
+		exit 3
+	fi
+fi
+command -v ar >/dev/null 2>&1 || {
+	printf 'build-deb: ar is required (it is in binutils).\n' >&2
+	exit 3
+}
+
 stage="$(mktemp -d "${TMPDIR:-/tmp}/spm-deb.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT INT TERM
 
@@ -68,10 +87,10 @@ CONTROL
 # files under different names.
 
 ( cd "$stage/data" && find . -type f -o -type d | LC_ALL=C sort \
-	| tar --format=gnu --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
-	      --no-recursion -T - -czf "$stage/data.tar.gz" 2>/dev/null )
-( cd "$stage/control" && tar --format=gnu --mtime="@$epoch" --owner=0 --group=0 \
-	--numeric-owner -czf "$stage/control.tar.gz" . )
+	| "$tar_cmd" --format=gnu --mtime="@$epoch" --owner=0 --group=0 \
+	      --numeric-owner --no-recursion -T - -czf "$stage/data.tar.gz" 2>/dev/null )
+( cd "$stage/control" && "$tar_cmd" --format=gnu --mtime="@$epoch" \
+	--owner=0 --group=0 --numeric-owner -czf "$stage/control.tar.gz" . )
 printf '2.0\n' > "$stage/debian-binary"
 
 deb="$out_dir/spm_${version}_all.deb"
