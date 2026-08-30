@@ -2062,7 +2062,13 @@ if [ "$pkg_can_build" -eq 0 ]; then
 	fi
 else
 "$ROOT_DIR/packaging/termux/build-deb.sh" "$pkg_version" "$pkg_dir/one" >/dev/null
-"$ROOT_DIR/packaging/termux/build-deb.sh" "$pkg_version" "$pkg_dir/two" >/dev/null
+# A RELATIVE output directory, deliberately. The ar and tar calls run inside a
+# subshell that has cd'd into the staging directory, so a relative path
+# resolved against one directory when it was written and another when it was
+# used. Every local run passed an absolute path and every one of them worked;
+# CI passed "dist" and it did not.
+mkdir -p "$pkg_dir/two"
+( cd "$pkg_dir" && "$ROOT_DIR/packaging/termux/build-deb.sh" "$pkg_version" two ) >/dev/null
 deb="$pkg_dir/one/spm_${pkg_version}_all.deb"
 [ -f "$deb" ] || { printf 'the Termux package was not produced\n' >&2; exit 1; }
 # Same commit, same bytes -- the property that makes a published checksum worth

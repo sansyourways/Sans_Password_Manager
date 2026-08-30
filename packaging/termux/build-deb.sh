@@ -14,13 +14,23 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+
+# The output directory is resolved to an absolute path here, before anything
+# changes directory, so a relative one means what the caller meant: relative to
+# where they ran this. Two directory changes happen below -- into ROOT_DIR to
+# read the tree, and into the staging area to assemble the archives -- and a
+# relative path silently meant something different in each. That is why
+# `build-deb.sh 3.12.0 dist` failed in CI while every local run, which passed
+# an absolute path, worked.
+out_dir="${2:-$ROOT_DIR}"
+mkdir -p "$out_dir"
+out_dir="$(cd "$out_dir" && pwd -P)"
+
 cd "$ROOT_DIR"
 
 version="${1:-}"
 [ -n "$version" ] || version="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' spm.sh)"
 [ -n "$version" ] || { printf 'build-deb: no version\n' >&2; exit 1; }
-out_dir="${2:-$ROOT_DIR}"
-mkdir -p "$out_dir"
 
 # Termux installs under a prefix that is not /usr. Hard-coding /data/data/...
 # would break on a device with a different install root, so it is read from the
