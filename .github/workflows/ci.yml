@@ -92,7 +92,6 @@ jobs:
         run: |
           version="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' spm.sh)"
           test -n "$version"
-          grep -q "Current release: \*\*$version\*\*" README.md
           grep -q '"version": "'"$version"'"' browser-extension/manifest.json
           grep -q '"version": "'"$version"'"' browser-extension-universal/manifest.chromium.json
           grep -q '"version": "'"$version"'"' browser-extension-universal/manifest.firefox.json

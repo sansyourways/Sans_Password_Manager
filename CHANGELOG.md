@@ -7,6 +7,27 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.12.2] - 2026-08-31
+
+### Changed
+- Reworked the repository README into a concise onboarding guide with a
+  60-second quick start, an immediate recovery warning, a supported-platform
+  matrix, data locations, security-audit status, known limitations, and clear
+  fit guidance.
+- Routed detailed installation, usage, architecture, security, recovery,
+  backup, and contributor guidance to `spm-docs.silentprotocol.top`, the full
+  searchable SPM manual.
+- Added an owned full-manual source for the documentation site and refreshed
+  its desktop, mobile, browser-extension, and animated product media from the
+  exact 3.12.2 release-PR source using a disposable synthetic vault.
+- Removed the README's duplicated release number from CI metadata checks; the
+  latest-release badge and GitHub release page now remain current without a
+  documentation-only version edit.
+
+### Security
+- No vault, cryptography, recovery, import, export, or network behavior
+  changed in this release.
+
 ## [3.12.1] - 2026-08-31
 
 ### Added
