@@ -152,7 +152,11 @@ jobs:
               apt-get install -y -qq "/workspace/dist/spm_${version}_all.deb"
               command -v spm
               [ "$(spm --version)" = "$version" ]
-              spm help | grep -q "Sans Password Manager"
+              # Avoid grep -q on a live pipe under pipefail: after its first
+              # match grep closes the pipe, and the still-writing CLI exits
+              # on SIGPIPE (141) even though the package works correctly.
+              spm help > "$PREFIX/tmp/packaged-spm-help.txt"
+              grep -q "Sans Password Manager" "$PREFIX/tmp/packaged-spm-help.txt"
               # Configured, not merely unpacked: an unconfigured package is
               # exactly what the previous run produced and it looked installed.
               [ "$(dpkg-query -W -f='"'"'${Status}'"'"' spm)" = "install ok installed" ]

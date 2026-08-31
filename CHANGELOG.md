@@ -33,7 +33,8 @@ Keep-a-Changelog style format.
   a Termux-specific interpreter line; and to be reproducible across two builds.
 - The Termux CI job now installs the package through `apt` and runs it,
   rather than only inspecting it. A `.deb` that unpacks and a `.deb` that the
-  package manager accepts are different claims.
+  package manager accepts are different claims. Its help check captures output
+  before matching it, avoiding a false SIGPIPE failure under `pipefail`.
 - The formula generator is asserted to refuse a malformed version or checksum,
   and the formula's own `brew test` line is asserted against the real
   `spm --version` output — a formula whose test calls something that does not

@@ -382,7 +382,8 @@ It installs `spm` into the Termux prefix, points its launcher at Bash inside
 that prefix because Android has no `/usr/bin/env`, and depends on `bash`,
 `gnupg` and `python`, so a package that installs is a package that runs. Like
 the archive, it is reproducible: the same commit rebuilt anywhere gives the
-same bytes.
+same bytes. CI installs it with Termux's package manager and executes both its
+version and help commands.
 
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
