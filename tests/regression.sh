@@ -2033,6 +2033,138 @@ grep -q 'Sans_Password_Manager_v9.9.9.zip' "$archive_dir/built.zip.sha256"
 printf '  archive: identical across two extractions, and rebuilds its own spm.sh\n'
 
 
+
+printf 'Packaging regression: the distributable packages\n'
+# Built and inspected here rather than only in the release job, because a
+# packaging bug that only appears at tag time appears after the tag is public.
+pkg_dir="$TEST_ROOT/packaging"
+mkdir -p "$pkg_dir"
+pkg_version="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' "$ROOT_DIR/spm.sh")"
+
+# --- Termux -----------------------------------------------------------------
+# A Termux package is built on the machine that cuts a release, which is Linux.
+# Where GNU tar and ar are not both present -- the macOS runner -- the build is
+# skipped rather than loosened, and says so: a silent skip is indistinguishable
+# from a test that ran.
+# Both must be the GNU ones, not merely present. The macOS runner has gtar and
+# an ar, so a presence check passed there and the build failed on `ar rD` --
+# the D is a GNU flag and BSD ar answers it with its usage text.
+pkg_can_build=1
+tar --version 2>/dev/null | head -1 | grep -q 'GNU tar' \
+	|| gtar --version 2>/dev/null | head -1 | grep -q 'GNU tar' \
+	|| pkg_can_build=0
+ar --version 2>/dev/null | head -1 | grep -q 'GNU ar' \
+	|| gar --version 2>/dev/null | head -1 | grep -q 'GNU ar' \
+	|| pkg_can_build=0
+if [ "$pkg_can_build" -eq 0 ]; then
+	printf '  packaging: .deb build skipped (needs GNU tar and ar; covered on Linux)\n'
+	# The refusal itself is asserted here, because a build that quietly
+	# produced a differently-shaped package would be worse than none.
+	if "$ROOT_DIR/packaging/termux/build-deb.sh" "$pkg_version" "$pkg_dir" \
+		>/dev/null 2>&1; then
+		printf 'build-deb.sh produced a package without GNU tar\n' >&2
+		exit 1
+	fi
+else
+"$ROOT_DIR/packaging/termux/build-deb.sh" "$pkg_version" "$pkg_dir/one" >/dev/null
+# A RELATIVE output directory, deliberately. The ar and tar calls run inside a
+# subshell that has cd'd into the staging directory, so a relative path
+# resolved against one directory when it was written and another when it was
+# used. Every local run passed an absolute path and every one of them worked;
+# CI passed "dist" and it did not.
+mkdir -p "$pkg_dir/two"
+( cd "$pkg_dir" && "$ROOT_DIR/packaging/termux/build-deb.sh" "$pkg_version" two ) >/dev/null
+deb="$pkg_dir/one/spm_${pkg_version}_all.deb"
+[ -f "$deb" ] || { printf 'the Termux package was not produced\n' >&2; exit 1; }
+# Same commit, same bytes -- the property that makes a published checksum worth
+# anything, for this file as much as for the archive.
+[ "$(sha256sum "$deb" | cut -d' ' -f1)" \
+	= "$(sha256sum "$pkg_dir/two/spm_${pkg_version}_all.deb" | cut -d' ' -f1)" ] || {
+	printf 'the Termux package is not reproducible\n' >&2; exit 1
+}
+
+# A .deb is an ar archive of exactly three members, in order. Checked without
+# dpkg, which the runner is not guaranteed to have.
+ar t "$deb" > "$pkg_dir/members"
+printf 'debian-binary\ncontrol.tar.gz\ndata.tar.gz\n' > "$pkg_dir/members-wanted"
+diff -u "$pkg_dir/members-wanted" "$pkg_dir/members" || {
+	printf 'the .deb does not have the three members apt expects\n' >&2; exit 1
+}
+( cd "$pkg_dir" && ar x "$deb" control.tar.gz data.tar.gz )
+tar -tzf "$pkg_dir/data.tar.gz" > "$pkg_dir/data-listing"
+grep -q 'com.termux/files/usr/bin/spm$' "$pkg_dir/data-listing" || {
+	printf 'the package does not install spm into the Termux prefix\n' >&2
+	sed 's/^/    /' "$pkg_dir/data-listing" >&2
+	exit 1
+}
+tar -xzOf "$pkg_dir/control.tar.gz" ./control > "$pkg_dir/control"
+grep -q "^Version: $pkg_version$" "$pkg_dir/control" || {
+	printf 'the package version does not match spm.sh\n' >&2; exit 1
+}
+grep -q '^Package: spm$' "$pkg_dir/control"
+grep -q '^Architecture: all$' "$pkg_dir/control"
+# gnupg is not optional: without it the vault cannot be opened at all, and a
+# package that installs and then cannot work is worse than one that refuses.
+grep -qE '^Depends:.*gnupg' "$pkg_dir/control" || {
+	printf 'the package does not depend on gnupg\n' >&2; exit 1
+}
+# Android has no /usr/bin/env, so the package must use the bash inside its
+# Termux prefix. Apart from that package-specific launcher line, the shipped
+# binary must be the built one, not a stale copy.
+tar -xzOf "$pkg_dir/data.tar.gz" "./data/data/com.termux/files/usr/bin/spm" \
+	> "$pkg_dir/packaged-spm" 2>/dev/null \
+	|| tar -xzOf "$pkg_dir/data.tar.gz" \
+		"$(grep 'bin/spm$' "$pkg_dir/data-listing" | head -1)" > "$pkg_dir/packaged-spm"
+head -n 1 "$pkg_dir/packaged-spm" \
+	| grep -qx '#!/data/data/com.termux/files/usr/bin/bash' || {
+	printf 'the packaged spm does not use the Termux bash interpreter\n' >&2; exit 1
+}
+tail -n +2 "$pkg_dir/packaged-spm" > "$pkg_dir/packaged-spm.body"
+tail -n +2 "$ROOT_DIR/spm.sh" > "$pkg_dir/source-spm.body"
+cmp -s "$pkg_dir/packaged-spm.body" "$pkg_dir/source-spm.body" || {
+	printf 'the packaged spm body is not the spm.sh in this tree\n' >&2; exit 1
+}
+fi
+
+# --- Homebrew ---------------------------------------------------------------
+fake_sha="$(printf 'f%.0s' $(seq 1 64))"
+"$ROOT_DIR/packaging/homebrew/generate.sh" "$pkg_version" "$fake_sha" \
+	> "$pkg_dir/spm.rb"
+grep -q '^class Spm < Formula$' "$pkg_dir/spm.rb"
+grep -q "sha256 \"$fake_sha\"" "$pkg_dir/spm.rb"
+grep -q "version \"$pkg_version\"" "$pkg_dir/spm.rb"
+grep -q "releases/download/v${pkg_version}/Sans_Password_Manager_v${pkg_version}.zip" \
+	"$pkg_dir/spm.rb"
+grep -q 'depends_on "gnupg"' "$pkg_dir/spm.rb"
+# The formula's own test must exercise something that exists. `spm --version`
+# did not until this release: the flag fell through to the interactive banner,
+# so `brew test` would have opened a menu and waited.
+grep -q 'spm --version' "$pkg_dir/spm.rb"
+[ "$(bash "$ROOT_DIR/spm.sh" --version)" = "$pkg_version" ] || {
+	printf 'spm --version does not report the version the formula asserts\n' >&2
+	exit 1
+}
+[ "$(bash "$ROOT_DIR/spm.sh" -V)" = "$pkg_version" ]
+# A generator that accepts a non-version or a non-sha would produce a formula
+# that fails for every user at once.
+for bad in "3.11" "v3.11.0" "" "3.11.0; rm -rf /"; do
+	if "$ROOT_DIR/packaging/homebrew/generate.sh" "$bad" "$fake_sha" >/dev/null 2>&1; then
+		printf 'the formula generator accepted the version %s\n' "$bad" >&2
+		exit 1
+	fi
+done
+if "$ROOT_DIR/packaging/homebrew/generate.sh" "$pkg_version" "not-a-sha" >/dev/null 2>&1; then
+	printf 'the formula generator accepted a bad sha256\n' >&2
+	exit 1
+fi
+# The closing line reports what actually ran. Printing the .deb claim after
+# skipping the .deb build is the same overclaim this suite exists to prevent.
+if [ "$pkg_can_build" -eq 1 ]; then
+	printf '  packaging: reproducible .deb into the Termux prefix, formula pinned to one archive\n'
+else
+	printf '  packaging: formula pinned to one archive (.deb build not verified here)\n'
+fi
+
 printf 'Install regression: build attestation verification\n'
 # The installer compares a checksum it fetched from the same host as the
 # archive. That proves the transfer was intact and nothing about where the file

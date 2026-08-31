@@ -7,6 +7,45 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-08-30
+
+### Added
+- **`spm --version`** (also `-V` and `version`). It did not exist: the flag
+  fell through to the interactive banner, so asking a packaged CLI which
+  version it is opened a menu and waited. Answered before dependency
+  installation and language prompts, as `help` already was.
+- **A Termux package.** Each release carries a reproducible `spm_<version>_all.deb`
+  that installs into the Termux prefix and depends on `bash`, `gnupg` and
+  `python`, so a package that installs is a package that runs. Built with `ar`
+  and `tar` rather than `dpkg-deb`, because the machine cutting a release is
+  not a Debian machine. Its launcher uses Bash inside the Termux prefix because
+  Android does not provide `/usr/bin/env`.
+- **A Homebrew formula**, attached to each release as `spm.rb`. Generated per
+  release rather than checked in: it pins the sha256 of one archive, so a
+  committed formula is either stale or carries a checksum that no longer
+  matches — and a wrong checksum fails for every user at once.
+- Both packages are attested alongside the archive.
+
+### Tested
+- The `.deb` is asserted to be an `ar` archive of exactly the three members
+  `apt` expects, in order; to install `spm` at the Termux prefix; to depend on
+  gnupg; to carry the same generated body as the `spm.sh` in the tree with only
+  a Termux-specific interpreter line; and to be reproducible across two builds.
+- The Termux CI job now installs the package through `apt` and runs it,
+  rather than only inspecting it. A `.deb` that unpacks and a `.deb` that the
+  package manager accepts are different claims. Its help check captures output
+  before matching it, avoiding a false SIGPIPE failure under `pipefail`.
+- The formula generator is asserted to refuse a malformed version or checksum,
+  and the formula's own `brew test` line is asserted against the real
+  `spm --version` output — a formula whose test calls something that does not
+  exist fails only once it is published.
+
+### Note
+Neither package is published to a package index. Homebrew core has notability
+requirements a single-maintainer project does not meet, and Termux's repository
+has its own submission process; both are deliberate decisions rather than build
+steps. What ships here is installable without either.
+
 ## [3.11.0] - 2026-08-30
 
 ### Added

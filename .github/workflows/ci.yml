@@ -111,6 +111,18 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Build the Termux package on the runner
+        run: |
+          # Built here, installed in the container. That is the real shape of
+          # it -- a .deb is produced on a build machine and installed on the
+          # device -- and the Termux image has neither ar nor GNU tar, so
+          # building inside it was never going to work.
+          version="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' spm.sh)"
+          chmod +x packaging/termux/build-deb.sh
+          mkdir -p dist
+          ./packaging/termux/build-deb.sh "$version" dist
+          ls -l "dist/spm_${version}_all.deb"
+
       - name: Run compatibility checks in the official Termux container
         run: |
           docker run --rm \
@@ -127,4 +139,26 @@ jobs:
               bash install.sh --version "$version" \
                 --prefix "$HOME/.local" --dry-run > "$PREFIX/tmp/spm-install.txt"
               grep -q "Dry run complete" "$PREFIX/tmp/spm-install.txt"
+              # The package is checked by installing it, not by inspecting
+              # it. A .deb that unpacks and a .deb the package manager accepts
+              # are different claims, and only the second one matters here.
+              #
+              # Through apt rather than `dpkg -i`, because the declared
+              # dependencies are the point: the bare image has neither gnupg
+              # nor python, dpkg refuses to configure without them, and that
+              # refusal is correct. apt resolves them the way `pkg install`
+              # would on a device.
+              apt-get update -qq
+              apt-get install -y -qq "/workspace/dist/spm_${version}_all.deb"
+              command -v spm
+              [ "$(spm --version)" = "$version" ]
+              # Avoid grep -q on a live pipe under pipefail: after its first
+              # match grep closes the pipe, and the still-writing CLI exits
+              # on SIGPIPE (141) even though the package works correctly.
+              spm help > "$PREFIX/tmp/packaged-spm-help.txt"
+              grep -q "Sans Password Manager" "$PREFIX/tmp/packaged-spm-help.txt"
+              # Configured, not merely unpacked: an unconfigured package is
+              # exactly what the previous run produced and it looked installed.
+              [ "$(dpkg-query -W -f='"'"'${Status}'"'"' spm)" = "install ok installed" ]
+              apt-get remove -y -qq spm
             '

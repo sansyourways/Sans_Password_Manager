@@ -113,7 +113,23 @@ co-owners of it. That review is a design concept, not a formal security audit.
 
 ## Later — ecosystem growth
 
-- Evaluate package-manager distribution for Homebrew and Termux.
+- **Package-manager distribution for Homebrew and Termux — shipped in
+  3.12.0.** Each release carries a reproducible Termux `.deb` and a Homebrew
+  formula, both installable today.
+
+  The formula is generated per release rather than checked in: it pins the
+  sha256 of one archive, so a committed one is either stale or wrong, and a
+  wrong checksum fails for every user at once.
+
+  What the evaluation concluded, and the part worth stating: neither is
+  published to a package index. Homebrew core has notability requirements a
+  single-maintainer project does not meet, and Termux's repository has its own
+  submission process. Both are decisions to take deliberately rather than side
+  effects of a build.
+
+  It also found that `spm --version` did not exist — the flag fell through to
+  the interactive banner, so a packager asking which version this is got a menu
+  and a wait. Added in the same release.
 - Explore hardware-backed signing for release provenance. Hardware-backed
   protection of the vault itself is covered under Architecture below.
 - Add optional localization contributions beyond English, Indonesian, and
