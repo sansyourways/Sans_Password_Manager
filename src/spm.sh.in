@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.12.0"
+VERSION="3.12.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -4811,43 +4811,45 @@ PY
 
 cmd_security_dashboard() {
 	[ -f "$VAULT_FILE" ] || die "Vault not found."
-	local tmp
+	local tmp report breaches="" days="${SPM_ROTATION_DAYS:-365}" status=0
+	case "$days" in ''|*[!0-9]*) days=365 ;; esac
+	[ "$days" -gt 0 ] 2>/dev/null || days=365
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--breaches) breaches="--breaches" ;;
+			*) die "Unknown option for security: $1" ;;
+		esac
+		shift
+	done
 	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
-	python3 - "$tmp" <<'PY'
-import base64, collections, datetime, re, sys
-path=sys.argv[1]; today=datetime.datetime.now(datetime.timezone.utc)
-rows=[]; malformed=[]
-for raw in open(path,encoding="utf-8",errors="replace"):
-    line=raw.rstrip("\n")
-    if not line or line.startswith("#") or line.startswith("META_"): continue
-    p=line.split("\t"); tag=p[0]
-    if tag.isdigit() and len(p)>=6: rows.append((tag,p[1],p[2],p[3],p[5]))
-    elif tag=="AUTH" and (len(p)<7 or p[6] not in ("sha1","sha256","sha512") or not p[3]): malformed.append(("authenticator",p[1] if len(p)>1 else "?"))
-weak=[]; old=[]; incomplete=[]; groups=collections.defaultdict(list)
-for rid,label,user,secret,created in rows:
-    groups[secret].append(rid)
-    score=sum(bool(re.search(x,secret)) for x in (r"[a-z]",r"[A-Z]",r"\d",r"[^A-Za-z0-9]"))
-    if len(secret)<12 or score<3: weak.append(rid)
-    if not label or not user: incomplete.append(rid)
-    try:
-        stamp=datetime.datetime.fromisoformat(created.replace("Z","+00:00"))
-        if stamp.tzinfo is None: stamp=stamp.replace(tzinfo=datetime.timezone.utc)
-        if (today-stamp).days>365: old.append(rid)
-    except Exception: pass
-reused=[ids for secret,ids in groups.items() if secret and len(ids)>1]
-penalty=min(100,len(weak)*12+sum(len(x) for x in reused)*10+len(old)*4+len(incomplete)*3+len(malformed)*8)
+	report="$(make_tmp)"
+	# shellcheck disable=SC2086
+	core security-report "$tmp" "$days" $breaches > "$report" || status=$?
+	secure_wipe "$tmp"
+	[ "$status" -eq 0 ] || { secure_wipe "$report"; die "Security review failed."; }
+	python3 - "$report" <<'PY'
+import json, sys
+audit = json.load(open(sys.argv[1], encoding="utf-8"))
 print("Security dashboard")
 print("==================")
-print(f"Score: {100-penalty}/100")
-print(f"Passwords: {len(rows)}")
-print("Weak IDs:", ", ".join(weak) or "none")
-print("Reused groups:", "; ".join(",".join(x) for x in reused) or "none")
-print("Older than 365 days:", ", ".join(old) or "none")
-print("Incomplete IDs:", ", ".join(incomplete) or "none")
-print("Malformed protected records:", ", ".join(f"{t}:{i}" for t,i in malformed) or "none")
-print("Secrets and fingerprints are never printed or persisted.")
+print("Score: %d/100" % audit["score"])
+print("Passwords: %d" % audit["passwords"])
+print("Weak IDs:", ", ".join(audit["weak"]) or "none")
+print("Reused groups:", "; ".join(",".join(group) for group in audit["reused"]) or "none")
+print("Older than %d days:" % audit["rotation_days"], ", ".join(audit["old"]) or "none")
+print("Incomplete IDs:", ", ".join(audit["incomplete"]) or "none")
+print("Malformed protected records:", ", ".join("authenticator:" + rid for rid in audit["malformed"]) or "none")
+if audit["breach_status"] == "checked":
+    findings = ", ".join("%s (%s sightings)" % (item["id"], item["count"])
+                         for item in audit["breached"])
+    print("Known breach IDs:", findings or "none")
+elif audit["breach_status"] == "unavailable":
+    print("Known breach IDs: check unavailable; no clean result assumed")
+else:
+    print("Known breach IDs: not checked (use --breaches for the opt-in online check)")
+print("Passwords and full hashes are never sent, printed, or persisted.")
 PY
-	secure_wipe "$tmp"
+	secure_wipe "$report"
 }
 
 cmd_history_list() {
@@ -5340,7 +5342,7 @@ Main commands (CLI):
   ./spm.sh help            → Show this help
 
 Local-first 2.10 capabilities:
-  ./spm.sh security                     → Vault security dashboard
+  ./spm.sh security [--breaches]        → Local dashboard; optional k-anonymous breach check
   ./spm.sh history-list                 → List encrypted vault history
   ./spm.sh history-restore <snapshot>   → Restore after confirmation
   ./spm.sh backup-now [dir]             → Verified encrypted backup

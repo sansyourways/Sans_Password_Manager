@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.12.0"
+VERSION="3.12.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -809,10 +809,12 @@ world-readable through `ps` and /proc/<pid>/cmdline.
 
 import base64
 import calendar
+import concurrent.futures
 import hashlib
 import hmac
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -821,6 +823,7 @@ import tempfile
 import time
 import unicodedata
 import urllib.parse
+import urllib.request
 
 # ----- format and policy -----------------------------------------------------
 
@@ -2064,6 +2067,145 @@ def password_history(plaintext, record_id):
     return out
 
 
+# ----- local security and opt-in breach review ------------------------------
+
+PWNED_PASSWORDS_RANGE_URL = "https://api.pwnedpasswords.com/range/"
+
+
+def _password_security_rows(plaintext):
+    """Password rows and malformed authenticators, with no secret in output."""
+    rows, malformed = [], []
+    for line in plaintext.splitlines():
+        if not line or line.startswith("#") or line.startswith("META_"):
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 6 and parts[0].isdigit():
+            rows.append(parts)
+        elif parts[0] == "AUTH" and (
+                len(parts) < 7 or parts[6] not in ("sha1", "sha256", "sha512")
+                or not parts[3]):
+            malformed.append(parts[1] if len(parts) > 1 else "?")
+    return rows, malformed
+
+
+def _pwned_range(prefix, timeout=5, opener=None):
+    """Suffix -> breach count for one HIBP range response.
+
+    Only a five-character SHA-1 prefix reaches the service. Add-Padding asks
+    for dummy rows so response size does not reveal how many real suffixes the
+    range contains. The caller has already made an explicit opt-in decision.
+    """
+    if not re.fullmatch(r"[0-9A-F]{5}", prefix):
+        raise VaultError("invalid breach-check prefix")
+    request = urllib.request.Request(
+        PWNED_PASSWORDS_RANGE_URL + prefix,
+        headers={"Add-Padding": "true", "User-Agent": "Sans-Password-Manager"})
+    open_url = opener or urllib.request.urlopen
+    try:
+        response = open_url(request, timeout=timeout)
+        try:
+            payload = response.read().decode("ascii", errors="strict")
+        finally:
+            close = getattr(response, "close", None)
+            if close:
+                close()
+    except Exception as exc:
+        raise VaultError("breach service unavailable") from exc
+    found = {}
+    for line in payload.splitlines():
+        suffix, separator, raw_count = line.partition(":")
+        suffix = suffix.strip().upper()
+        raw_count = raw_count.strip()
+        if (separator and re.fullmatch(r"[0-9A-F]{35}", suffix)
+                and raw_count.isdigit()):
+            found[suffix] = int(raw_count)
+    if not found:
+        raise VaultError("invalid breach-service response")
+    return found
+
+
+def breached_password_ids(rows, timeout=5, opener=None):
+    """[{id, count}] for passwords present in Pwned Passwords.
+
+    Full hashes remain in memory on this device and are never returned. One
+    request is made per unique five-character prefix, not per record.
+    """
+    by_prefix = {}
+    for parts in rows:
+        secret = parts[3] if len(parts) > 3 else ""
+        if not secret:
+            continue
+        try:
+            digest = hashlib.sha1(secret.encode("utf-8")).hexdigest().upper()
+        except Exception as exc:
+            raise VaultError("breach hashing unavailable") from exc
+        by_prefix.setdefault(digest[:5], []).append((parts[0], digest[5:]))
+    breached = []
+    prefixes = sorted(by_prefix)
+    if not prefixes:
+        return breached
+    # A slow service must not cost one full timeout per password, but the
+    # client also must not turn a large vault into unbounded request fan-out.
+    workers = min(4, len(prefixes))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        ranges = pool.map(
+            lambda prefix: _pwned_range(prefix, timeout=timeout, opener=opener),
+            prefixes)
+        fetched = dict(zip(prefixes, ranges))
+    for prefix in prefixes:
+        suffixes = fetched[prefix]
+        for record_id, suffix in by_prefix[prefix]:
+            count = suffixes.get(suffix, 0)
+            if count:
+                breached.append({"id": record_id, "count": count})
+    return breached
+
+
+def security_report(plaintext, rotation_days=365, check_breaches=False,
+                    timeout=5, opener=None):
+    """One secret-free security report shared by CLI and Dashboard."""
+    rows, malformed = _password_security_rows(plaintext)
+    now = time.time()
+    seen = {}
+    weak, old, incomplete = [], [], []
+    for parts in rows:
+        record_id = parts[0]
+        secret = parts[3] if len(parts) > 3 else ""
+        seen.setdefault(secret, []).append(record_id)
+        classes = sum(bool(re.search(pattern, secret)) for pattern in
+                      (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]"))
+        if len(secret) < 12 or classes < 3:
+            weak.append(record_id)
+        if not parts[1] or not parts[2]:
+            incomplete.append(record_id)
+        try:
+            stamp = time.mktime(time.strptime(
+                parts[5].replace("Z", ""), "%Y-%m-%dT%H:%M:%S"))
+            if (now - stamp) / 86400.0 > rotation_days:
+                old.append(record_id)
+        except (IndexError, ValueError, OverflowError):
+            pass
+    reused = [ids for secret, ids in seen.items() if secret and len(ids) > 1]
+    reused_flat = [record_id for ids in reused for record_id in ids]
+    penalty = min(100, len(weak) * 12 + len(reused_flat) * 10
+                  + len(old) * 4 + len(incomplete) * 3 + len(malformed) * 8)
+    report = {
+        "score": max(0, 100 - penalty), "passwords": len(rows),
+        "weak": weak, "reused": reused, "reused_flat": reused_flat,
+        "old": old, "incomplete": incomplete, "malformed": malformed,
+        "rotation_days": rotation_days, "breach_status": "not_checked",
+        "breached": [],
+    }
+    if check_breaches:
+        try:
+            report["breached"] = breached_password_ids(
+                rows, timeout=timeout, opener=opener)
+            report["breach_status"] = "checked"
+        except VaultError:
+            report["breach_status"] = "unavailable"
+    return report
+
+
 # ----- diagnostics -----------------------------------------------------------
 
 # Characters that splitlines() honours but a TAB-delimited, line-based record
@@ -2352,6 +2494,14 @@ def main(argv):
             with open(argv[2], "r", encoding="utf-8", errors="ignore") as handle:
                 for name in record_folders(handle.read()):
                     sys.stdout.write(name + "\n")
+        elif command == "security-report":
+            # security-report <plainfile> [rotation-days] [--breaches]
+            # stdout is secret-free JSON; breach checking is explicit opt-in.
+            days = int(argv[3]) if len(argv) > 3 and argv[3] else 365
+            check_breaches = "--breaches" in argv[4:]
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                report = security_report(handle.read(), days, check_breaches)
+            sys.stdout.write(json.dumps(report, indent=2) + "\n")
         elif command == "events":
             # events <vault> [limit] ; stdout: one JSON document
             limit = int(argv[3]) if len(argv) > 3 and argv[3] else 0
@@ -6437,43 +6587,45 @@ PY
 
 cmd_security_dashboard() {
 	[ -f "$VAULT_FILE" ] || die "Vault not found."
-	local tmp
+	local tmp report breaches="" days="${SPM_ROTATION_DAYS:-365}" status=0
+	case "$days" in ''|*[!0-9]*) days=365 ;; esac
+	[ "$days" -gt 0 ] 2>/dev/null || days=365
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--breaches) breaches="--breaches" ;;
+			*) die "Unknown option for security: $1" ;;
+		esac
+		shift
+	done
 	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
-	python3 - "$tmp" <<'PY'
-import base64, collections, datetime, re, sys
-path=sys.argv[1]; today=datetime.datetime.now(datetime.timezone.utc)
-rows=[]; malformed=[]
-for raw in open(path,encoding="utf-8",errors="replace"):
-    line=raw.rstrip("\n")
-    if not line or line.startswith("#") or line.startswith("META_"): continue
-    p=line.split("\t"); tag=p[0]
-    if tag.isdigit() and len(p)>=6: rows.append((tag,p[1],p[2],p[3],p[5]))
-    elif tag=="AUTH" and (len(p)<7 or p[6] not in ("sha1","sha256","sha512") or not p[3]): malformed.append(("authenticator",p[1] if len(p)>1 else "?"))
-weak=[]; old=[]; incomplete=[]; groups=collections.defaultdict(list)
-for rid,label,user,secret,created in rows:
-    groups[secret].append(rid)
-    score=sum(bool(re.search(x,secret)) for x in (r"[a-z]",r"[A-Z]",r"\d",r"[^A-Za-z0-9]"))
-    if len(secret)<12 or score<3: weak.append(rid)
-    if not label or not user: incomplete.append(rid)
-    try:
-        stamp=datetime.datetime.fromisoformat(created.replace("Z","+00:00"))
-        if stamp.tzinfo is None: stamp=stamp.replace(tzinfo=datetime.timezone.utc)
-        if (today-stamp).days>365: old.append(rid)
-    except Exception: pass
-reused=[ids for secret,ids in groups.items() if secret and len(ids)>1]
-penalty=min(100,len(weak)*12+sum(len(x) for x in reused)*10+len(old)*4+len(incomplete)*3+len(malformed)*8)
+	report="$(make_tmp)"
+	# shellcheck disable=SC2086
+	core security-report "$tmp" "$days" $breaches > "$report" || status=$?
+	secure_wipe "$tmp"
+	[ "$status" -eq 0 ] || { secure_wipe "$report"; die "Security review failed."; }
+	python3 - "$report" <<'PY'
+import json, sys
+audit = json.load(open(sys.argv[1], encoding="utf-8"))
 print("Security dashboard")
 print("==================")
-print(f"Score: {100-penalty}/100")
-print(f"Passwords: {len(rows)}")
-print("Weak IDs:", ", ".join(weak) or "none")
-print("Reused groups:", "; ".join(",".join(x) for x in reused) or "none")
-print("Older than 365 days:", ", ".join(old) or "none")
-print("Incomplete IDs:", ", ".join(incomplete) or "none")
-print("Malformed protected records:", ", ".join(f"{t}:{i}" for t,i in malformed) or "none")
-print("Secrets and fingerprints are never printed or persisted.")
+print("Score: %d/100" % audit["score"])
+print("Passwords: %d" % audit["passwords"])
+print("Weak IDs:", ", ".join(audit["weak"]) or "none")
+print("Reused groups:", "; ".join(",".join(group) for group in audit["reused"]) or "none")
+print("Older than %d days:" % audit["rotation_days"], ", ".join(audit["old"]) or "none")
+print("Incomplete IDs:", ", ".join(audit["incomplete"]) or "none")
+print("Malformed protected records:", ", ".join("authenticator:" + rid for rid in audit["malformed"]) or "none")
+if audit["breach_status"] == "checked":
+    findings = ", ".join("%s (%s sightings)" % (item["id"], item["count"])
+                         for item in audit["breached"])
+    print("Known breach IDs:", findings or "none")
+elif audit["breach_status"] == "unavailable":
+    print("Known breach IDs: check unavailable; no clean result assumed")
+else:
+    print("Known breach IDs: not checked (use --breaches for the opt-in online check)")
+print("Passwords and full hashes are never sent, printed, or persisted.")
 PY
-	secure_wipe "$tmp"
+	secure_wipe "$report"
 }
 
 cmd_history_list() {
@@ -6966,7 +7118,7 @@ Main commands (CLI):
   ./spm.sh help            → Show this help
 
 Local-first 2.10 capabilities:
-  ./spm.sh security                     → Vault security dashboard
+  ./spm.sh security [--breaches]        → Local dashboard; optional k-anonymous breach check
   ./spm.sh history-list                 → List encrypted vault history
   ./spm.sh history-restore <snapshot>   → Restore after confirmation
   ./spm.sh backup-now [dir]             → Verified encrypted backup
@@ -8443,6 +8595,11 @@ I18N_SCRIPT = """
       "security.incomplete_d": "No service name or no username.",
       "security.malformed": "Malformed authenticators",
       "security.malformed_d": "Missing a secret, or an algorithm SPM cannot generate codes for.",
+      "security.breached": "Known breaches",
+      "security.breached_d": "Matches in Pwned Passwords. Only five SHA-1 prefix characters leave this device.",
+      "security.breach_check": "Check known breaches",
+      "security.breach_optin": "Opt-in online check. Passwords and full hashes are never sent.",
+      "security.breach_unavailable": "The breach service is unavailable. No clean result is assumed.",
       "page.history.desc": "Encrypted vault snapshots kept before each change.",
       "history.when": "When",
       "history.size": "Size",
@@ -8734,6 +8891,11 @@ I18N_SCRIPT = """
       "security.incomplete_d": "Tidak ada nama layanan atau username.",
       "security.malformed": "Authenticator rusak",
       "security.malformed_d": "Secret hilang, atau algoritma tidak didukung SPM.",
+      "security.breached": "Pelanggaran yang diketahui",
+      "security.breached_d": "Cocok di Pwned Passwords. Hanya lima karakter awalan SHA-1 yang meninggalkan perangkat ini.",
+      "security.breach_check": "Periksa pelanggaran yang diketahui",
+      "security.breach_optin": "Pemeriksaan daring opsional. Password dan hash lengkap tidak pernah dikirim.",
+      "security.breach_unavailable": "Layanan pemeriksaan tidak tersedia. Hasil bersih tidak diasumsikan.",
       "page.history.desc": "Snapshot brankas terenkripsi sebelum tiap perubahan.",
       "history.when": "Waktu",
       "history.size": "Ukuran",
@@ -9025,6 +9187,11 @@ I18N_SCRIPT = """
       "security.incomplete_d": "サービス名またはユーザー名がありません。",
       "security.malformed": "不正な認証アプリ",
       "security.malformed_d": "シークレットが無いか、SPMが対応しないアルゴリズムです。",
+      "security.breached": "既知の漏えい",
+      "security.breached_d": "Pwned Passwords との一致。端末外へ送るのは SHA-1 の先頭5文字だけです。",
+      "security.breach_check": "既知の漏えいを確認",
+      "security.breach_optin": "任意のオンライン確認です。パスワードと完全なハッシュは送信されません。",
+      "security.breach_unavailable": "漏えい確認サービスを利用できません。安全とは判定しません。",
       "page.history.desc": "変更前に保存される暗号化スナップショット。",
       "history.when": "日時",
       "history.size": "サイズ",
@@ -11024,6 +11191,26 @@ def security_page(audit):
         for group in audit["reused"])
     if not reused_html:
         reused_html = ('<div class="hint" data-i18n="security.none">Nothing to fix here.</div>')
+    breach_status = audit.get("breach_status", "not_checked")
+    if breach_status == "checked":
+        breached = audit.get("breached", [])
+        if breached:
+            breach_html = " ".join(
+                f'<a class="btn btn-ghost btn-sm" href="/view?id={_esc(item["id"])}">'
+                f'{_esc(item["id"])} · {_esc(item["count"])} sightings</a>'
+                for item in breached)
+        else:
+            breach_html = ('<div class="hint" data-i18n="security.none">'
+                           'Nothing to fix here.</div>')
+    elif breach_status == "unavailable":
+        breach_html = ('<div class="hint" data-i18n="security.breach_unavailable">'
+                       'The breach service is unavailable. No clean result is assumed.</div>')
+    else:
+        breach_html = (
+            '<div class="hint" data-i18n="security.breach_optin">Opt-in online check. '
+            'Passwords and full hashes are never sent.</div>'
+            '<a class="btn btn-ghost btn-sm" href="/security?breaches=1" '
+            'data-i18n="security.breach_check">Check known breaches</a>')
     days = audit["rotation_days"]
     return f"""
 <div class="page-head">
@@ -11056,6 +11243,10 @@ def security_page(audit):
                "security.incomplete_d", "No service name or no username.")}
     {_id_links(audit["malformed"], "security.malformed", "Malformed authenticators",
                "security.malformed_d", "Missing a secret, or an algorithm SPM cannot generate codes for.")}
+    <div class="field"><label data-i18n="security.breached">Known breaches</label>
+      <div class="hint" data-i18n="security.breached_d">Matches in Pwned Passwords. Only five SHA-1 prefix characters leave this device.</div>
+      <div class="actions" style="justify-content:flex-start;flex-wrap:wrap;gap:6px">{breach_html}</div>
+    </div>
   </div>
 </div>"""
 
@@ -13657,7 +13848,7 @@ def _entry_age_days(created, now):
     return (now - stamp) / 86400.0
 
 
-def compute_security(entries, plaintext):
+def compute_security(entries, plaintext, check_breaches=False):
     """Score the vault and name the offending IDs.
 
     The CLI's `spm security-dashboard` and this function have to agree: two
@@ -13669,43 +13860,9 @@ def compute_security(entries, plaintext):
 
     Secrets are read to compare and measure them; only IDs are ever returned.
     """
-    now = time.time()
-    limit = rotation_days()
-    seen = {}
-    weak, old, incomplete, malformed = [], [], [], []
-    for _, item in entries:
-        rid = item[0]
-        secret = item[3] if len(item) > 3 else ""
-        seen.setdefault(secret, []).append(rid)
-        classes = sum(bool(re.search(pattern, secret))
-                      for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]"))
-        if len(secret) < 12 or classes < 3:
-            weak.append(rid)
-        if not item[1] or not item[2]:
-            incomplete.append(rid)
-        age = _entry_age_days(item[5] if len(item) > 5 else "", now)
-        if age is not None and age > limit:
-            old.append(rid)
-    for line in plaintext.split("\n"):
-        if not line.startswith("AUTH\t"):
-            continue
-        parts = line.split("\t")
-        if len(parts) < 7 or parts[6] not in ("sha1", "sha256", "sha512") or not parts[3]:
-            malformed.append(parts[1] if len(parts) > 1 else "?")
-    reused = [ids for secret, ids in seen.items() if secret and len(ids) > 1]
-    reused_flat = [rid for ids in reused for rid in ids]
-    penalty = min(100, len(weak) * 12 + len(reused_flat) * 10
-                  + len(old) * 4 + len(incomplete) * 3 + len(malformed) * 8)
-    return {
-        "score": max(0, 100 - penalty),
-        "weak": weak,
-        "reused": reused,
-        "reused_flat": reused_flat,
-        "old": old,
-        "incomplete": incomplete,
-        "malformed": malformed,
-        "rotation_days": limit,
-    }
+    del entries  # retained for call-site compatibility; the core parses once.
+    return core.security_report(
+        plaintext, rotation_days(), check_breaches=check_breaches)
 
 
 # A tag is a #word in a plaintext field. The lookbehind keeps "C#" and the
@@ -14691,7 +14848,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 return self._expire_session()
             _, entries = parse_entries(plaintext)
-            audit = compute_security(entries, plaintext)
+            params = urllib.parse.parse_qs(parsed.query)
+            check_breaches = (params.get("breaches") or [""])[0] == "1"
+            audit = compute_security(entries, plaintext, check_breaches)
             self._send_html(200, render_shell(
                 security_page(audit), "security", VERSION, VAULT_PATH,
                 title="Security", counts=self._counts(plaintext)))

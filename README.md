@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.12.0**
+Current release: **3.12.1**
 
 ---
 
@@ -223,7 +223,8 @@ a URL in the notes the way it always did, so nothing needs migrating.
 - CLI and web import/export across CSV, JSON, TSV, NDJSON, Markdown, HTML,
   YAML, XML, SQL, INI, PSV, RST, TOML, Org, SCSV, JSONC, and related variants
 - Vault-wide security score for weak, reused, old, incomplete, or malformed
-  records, with an SPM Dashboard page listing the entries behind each finding
+  records, plus an opt-in k-anonymous Pwned Passwords review that sends only
+  five-character SHA-1 prefixes and lists affected record IDs
 - Cross-type search and `#hashtag` tags across every record type
 - A URL on every password record, scheme-restricted to `http(s)`, used to bind
   a credential to a site for the browser extension
@@ -305,7 +306,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.12.0
+bash install.sh --version 3.12.1
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -340,7 +341,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v3.12.0.zip \
+gh attestation verify Sans_Password_Manager_v3.12.1.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -356,9 +357,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v3.12.0
+git checkout v3.12.1
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v3.12.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v3.12.1.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -371,7 +372,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=3.12.0
+version=3.12.1
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -388,7 +389,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.12.0/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.12.1/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -410,7 +411,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.12.0 at /home/you/.local/bin/spm
+Installed SPM 3.12.1 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -1160,7 +1161,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.12.0**
+Version: **3.12.1**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
@@ -1209,6 +1210,7 @@ releases the lock when the holder exits, so there is no stale lock to clear.
 
 ```bash
 spm security
+spm security --breaches       # explicit online, k-anonymous check
 spm history-list
 spm history-restore <snapshot-name>
 spm backup-now [directory]

@@ -248,8 +248,13 @@ as such below rather than quietly dropped.
   Recorded at the write boundary rather than at the twenty-one CLI and nineteen
   dashboard edit paths, so a new one cannot forget. History never reaches an
   export and is never counted as a password.
-- Duplicate and breach review that performs its analysis without disclosing a
-  secret to any third party.
+- **Duplicate and breach review — shipped in 3.12.1.**
+  Duplicate grouping remains completely local. The breach check is explicit
+  opt-in and uses Pwned Passwords' k-anonymous range API: SHA-1 is computed on
+  the device and only five prefix characters leave it, with padded responses
+  requested. Passwords and full hashes are never sent, printed, logged or
+  persisted; a failed request reports unavailable rather than a false clean
+  result. CLI and Dashboard now consume one trusted-core report.
 - **Folders and custom fields — shipped in 3.11.0.** A password record carries
   a folder and any number of named fields, on the Add and Edit forms, masked on
   the view page like the password itself, and travelling through export and
