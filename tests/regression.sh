@@ -2108,13 +2108,21 @@ grep -q '^Architecture: all$' "$pkg_dir/control"
 grep -qE '^Depends:.*gnupg' "$pkg_dir/control" || {
 	printf 'the package does not depend on gnupg\n' >&2; exit 1
 }
-# The shipped binary must be the built one, not a stale copy.
+# Android has no /usr/bin/env, so the package must use the bash inside its
+# Termux prefix. Apart from that package-specific launcher line, the shipped
+# binary must be the built one, not a stale copy.
 tar -xzOf "$pkg_dir/data.tar.gz" "./data/data/com.termux/files/usr/bin/spm" \
 	> "$pkg_dir/packaged-spm" 2>/dev/null \
 	|| tar -xzOf "$pkg_dir/data.tar.gz" \
 		"$(grep 'bin/spm$' "$pkg_dir/data-listing" | head -1)" > "$pkg_dir/packaged-spm"
-cmp -s "$pkg_dir/packaged-spm" "$ROOT_DIR/spm.sh" || {
-	printf 'the packaged spm is not the spm.sh in this tree\n' >&2; exit 1
+head -n 1 "$pkg_dir/packaged-spm" \
+	| grep -qx '#!/data/data/com.termux/files/usr/bin/bash' || {
+	printf 'the packaged spm does not use the Termux bash interpreter\n' >&2; exit 1
+}
+tail -n +2 "$pkg_dir/packaged-spm" > "$pkg_dir/packaged-spm.body"
+tail -n +2 "$ROOT_DIR/spm.sh" > "$pkg_dir/source-spm.body"
+cmp -s "$pkg_dir/packaged-spm.body" "$pkg_dir/source-spm.body" || {
+	printf 'the packaged spm body is not the spm.sh in this tree\n' >&2; exit 1
 }
 fi
 

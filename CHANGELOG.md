@@ -18,7 +18,8 @@ Keep-a-Changelog style format.
   that installs into the Termux prefix and depends on `bash`, `gnupg` and
   `python`, so a package that installs is a package that runs. Built with `ar`
   and `tar` rather than `dpkg-deb`, because the machine cutting a release is
-  not a Debian machine.
+  not a Debian machine. Its launcher uses Bash inside the Termux prefix because
+  Android does not provide `/usr/bin/env`.
 - **A Homebrew formula**, attached to each release as `spm.rb`. Generated per
   release rather than checked in: it pins the sha256 of one archive, so a
   committed formula is either stale or carries a checksum that no longer
@@ -28,9 +29,9 @@ Keep-a-Changelog style format.
 ### Tested
 - The `.deb` is asserted to be an `ar` archive of exactly the three members
   `apt` expects, in order; to install `spm` at the Termux prefix; to depend on
-  gnupg; to carry the same bytes as the `spm.sh` in the tree; and to be
-  reproducible across two builds.
-- The Termux CI job now **installs the package with `dpkg -i`** and runs it,
+  gnupg; to carry the same generated body as the `spm.sh` in the tree with only
+  a Termux-specific interpreter line; and to be reproducible across two builds.
+- The Termux CI job now installs the package through `apt` and runs it,
   rather than only inspecting it. A `.deb` that unpacks and a `.deb` that the
   package manager accepts are different claims.
 - The formula generator is asserted to refuse a malformed version or checksum,

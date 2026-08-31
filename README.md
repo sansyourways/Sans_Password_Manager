@@ -378,9 +378,11 @@ sha256sum -c "spm_${version}_all.deb.sha256"
 dpkg -i "spm_${version}_all.deb"
 ```
 
-It installs `spm` into the Termux prefix and depends on `bash`, `gnupg` and
-`python`, so a package that installs is a package that runs. Like the archive,
-it is reproducible: the same commit rebuilt anywhere gives the same bytes.
+It installs `spm` into the Termux prefix, points its launcher at Bash inside
+that prefix because Android has no `/usr/bin/env`, and depends on `bash`,
+`gnupg` and `python`, so a package that installs is a package that runs. Like
+the archive, it is reproducible: the same commit rebuilt anywhere gives the
+same bytes.
 
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 

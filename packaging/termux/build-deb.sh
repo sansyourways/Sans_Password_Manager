@@ -80,7 +80,15 @@ epoch="$(TZ=UTC date -u -d "$stamp" +%s 2>/dev/null \
 	|| TZ=UTC date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$stamp" +%s)"
 
 install -d -m 0755 "$stage/data${prefix}/bin"
-install -m 0755 spm.sh "$stage/data${prefix}/bin/spm"
+# `/usr/bin/env` does not exist on Android. Keep the portable source script's
+# env shebang, but give the Termux package an interpreter inside the prefix it
+# targets. Everything after this one package-specific line stays byte-for-byte
+# identical to the generated spm.sh.
+{
+	printf '#!%s/bin/bash\n' "$prefix"
+	tail -n +2 spm.sh
+} > "$stage/data${prefix}/bin/spm"
+chmod 0755 "$stage/data${prefix}/bin/spm"
 install -d -m 0755 "$stage/data${prefix}/share/doc/spm"
 install -m 0644 README.md CHANGELOG.md ROADMAP.md LICENSE \
 	"$stage/data${prefix}/share/doc/spm/"
