@@ -9,6 +9,7 @@ shell, a web server, or a fixture vault built by another implementation.
 import base64
 import builtins
 import errno
+import json
 import os
 import shutil
 import stat
@@ -1001,6 +1002,85 @@ def _write_temp(text):
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(text)
     return path
+
+
+class _RangeResponse:
+    def __init__(self, payload):
+        self.payload = payload.encode("ascii")
+
+    def read(self):
+        return self.payload
+
+    def close(self):
+        pass
+
+
+def t_security_report_matches_breaches_without_sending_a_secret():
+    plaintext = (
+        "1\tOne\tu1\tpassword\t-\t2026-01-01T00:00:00Z\n"
+        "2\tTwo\tu2\tpassword\t-\t2026-01-01T00:00:00Z\n"
+        "3\tThree\tu3\tUnique9!Long\t-\t2026-01-01T00:00:00Z\n")
+    calls = []
+
+    def opener(request, timeout):
+        calls.append((request.full_url, dict(request.header_items()), timeout))
+        if request.full_url.endswith("5BAA6"):
+            return _RangeResponse(
+                "1E4C9B93F3F0682250B6CF8331B7EE68FD8:3861493\r\n"
+                "00000000000000000000000000000000000:0\r\n")
+        return _RangeResponse("00000000000000000000000000000000000:0\r\n")
+
+    report = core.security_report(
+        plaintext, check_breaches=True, opener=opener)
+    eq(report["breach_status"], "checked")
+    eq(report["breached"], [
+        {"id": "1", "count": 3861493}, {"id": "2", "count": 3861493}])
+    eq(report["reused"], [["1", "2"]], "duplicate review drifted")
+    eq(sum(url.endswith("5BAA6") for url, _, _ in calls), 1,
+       "the same prefix was queried once per record rather than once per range")
+    for url, headers, timeout in calls:
+        prefix = url.rsplit("/", 1)[-1]
+        if len(prefix) != 5 or not all(ch in "0123456789ABCDEF" for ch in prefix):
+            raise AssertionError("the breach request exposed more than a hash prefix")
+        eq(headers.get("Add-padding"), "true", "response padding was not requested")
+        eq(timeout, 5)
+    rendered = json.dumps(report)
+    if '"password"' in rendered or "1E4C9B" in rendered:
+        raise AssertionError("the secret or full hash reached the report")
+
+
+def t_security_report_never_turns_network_failure_into_clean():
+    plaintext = "1\tOne\tu\tpassword\t-\t2026-01-01T00:00:00Z\n"
+
+    def unavailable(request, timeout):
+        raise OSError("offline")
+
+    report = core.security_report(
+        plaintext, check_breaches=True, opener=unavailable)
+    eq(report["breach_status"], "unavailable")
+    eq(report["breached"], [])
+
+
+def t_security_report_never_turns_malformed_response_into_clean():
+    plaintext = "1\tOne\tu\tpassword\t-\t2026-01-01T00:00:00Z\n"
+
+    def malformed(request, timeout):
+        return _RangeResponse("not a range response\n")
+
+    report = core.security_report(
+        plaintext, check_breaches=True, opener=malformed)
+    eq(report["breach_status"], "unavailable")
+    eq(report["breached"], [])
+
+
+def t_security_report_is_offline_by_default():
+    plaintext = "1\tOne\tu\tpassword\t-\t2026-01-01T00:00:00Z\n"
+
+    def should_not_run(request, timeout):
+        raise AssertionError("default security report made a network request")
+
+    report = core.security_report(plaintext, opener=should_not_run)
+    eq(report["breach_status"], "not_checked")
 
 
 for name, fn in sorted(globals().items()):

@@ -864,6 +864,7 @@ printf 'AUTH\t9\tBrokenAlgo\t\t30\t2025-01-01T00:00:00Z\tmd5\n' >> "$malformed_t
 encrypt_file_to_vault "$malformed_tmp"
 secure_wipe "$malformed_tmp"
 cmd_security_dashboard | grep -q 'Malformed protected records: authenticator:9'
+cmd_security_dashboard | grep -q 'Known breach IDs: not checked'
 
 cli_score="$(cmd_security_dashboard | sed -n 's#^Score: \([0-9]*\)/100$#\1#p')"
 [ -n "$cli_score" ]
@@ -881,6 +882,8 @@ web_score="$(sed -n 's/.*<span class="stat-n score-[a-z]*">\([0-9]*\)<\/span>.*/
 if grep -qF 'DemoSecret42' "$TEST_ROOT/security.html"; then
 	printf 'security page leaked a password\n' >&2; exit 1
 fi
+grep -q 'href="/security?breaches=1"' "$TEST_ROOT/security.html"
+grep -q 'data-i18n="security.breach_optin"' "$TEST_ROOT/security.html"
 
 # Global search covers every record type by label, and must NOT search secret
 # fields -- a query that could match a password turns the result count into a
@@ -1349,6 +1352,8 @@ src = open(sys.argv[1], encoding="utf-8").read()
 need = ["nav.security", "nav.history", "nav.unlock", "security.weak",
         "security.reused",
         "security.aging", "security.incomplete", "security.malformed",
+        "security.breached", "security.breached_d", "security.breach_check",
+        "security.breach_optin", "security.breach_unavailable",
         "history.when", "btn.restore", "confirm.restore_snapshot",
         "search.kind", "badge.aging", "tags.all",
         "page.unlock.desc", "unlock.registered", "unlock.empty",

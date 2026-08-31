@@ -7,6 +7,24 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.12.1] - 2026-08-31
+
+### Added
+- **Opt-in breach review.** `spm security --breaches` and the SPM Dashboard
+  security page can check password records against Pwned Passwords using its
+  k-anonymous range API. SHA-1 is computed locally and only the first five hash
+  characters are requested; passwords and full hashes are never transmitted,
+  printed, logged, or persisted. Padded responses are requested, repeated
+  prefixes are queried once with at most four requests in flight, and an
+  unavailable service is reported as unavailable rather than as a clean vault.
+- CLI and Dashboard security reports now share the trusted-core implementation,
+  eliminating the duplicated scoring logic that had drifted before.
+
+### Tested
+- Synthetic range responses assert exact record IDs and occurrence counts,
+  one request per unique prefix, response padding, offline-by-default behavior,
+  failure-safe status, and the absence of passwords and full hashes in output.
+
 ## [3.12.0] - 2026-08-30
 
 ### Added

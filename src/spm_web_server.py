@@ -211,6 +211,11 @@ I18N_SCRIPT = """
       "security.incomplete_d": "No service name or no username.",
       "security.malformed": "Malformed authenticators",
       "security.malformed_d": "Missing a secret, or an algorithm SPM cannot generate codes for.",
+      "security.breached": "Known breaches",
+      "security.breached_d": "Matches in Pwned Passwords. Only five SHA-1 prefix characters leave this device.",
+      "security.breach_check": "Check known breaches",
+      "security.breach_optin": "Opt-in online check. Passwords and full hashes are never sent.",
+      "security.breach_unavailable": "The breach service is unavailable. No clean result is assumed.",
       "page.history.desc": "Encrypted vault snapshots kept before each change.",
       "history.when": "When",
       "history.size": "Size",
@@ -502,6 +507,11 @@ I18N_SCRIPT = """
       "security.incomplete_d": "Tidak ada nama layanan atau username.",
       "security.malformed": "Authenticator rusak",
       "security.malformed_d": "Secret hilang, atau algoritma tidak didukung SPM.",
+      "security.breached": "Pelanggaran yang diketahui",
+      "security.breached_d": "Cocok di Pwned Passwords. Hanya lima karakter awalan SHA-1 yang meninggalkan perangkat ini.",
+      "security.breach_check": "Periksa pelanggaran yang diketahui",
+      "security.breach_optin": "Pemeriksaan daring opsional. Password dan hash lengkap tidak pernah dikirim.",
+      "security.breach_unavailable": "Layanan pemeriksaan tidak tersedia. Hasil bersih tidak diasumsikan.",
       "page.history.desc": "Snapshot brankas terenkripsi sebelum tiap perubahan.",
       "history.when": "Waktu",
       "history.size": "Ukuran",
@@ -793,6 +803,11 @@ I18N_SCRIPT = """
       "security.incomplete_d": "サービス名またはユーザー名がありません。",
       "security.malformed": "不正な認証アプリ",
       "security.malformed_d": "シークレットが無いか、SPMが対応しないアルゴリズムです。",
+      "security.breached": "既知の漏えい",
+      "security.breached_d": "Pwned Passwords との一致。端末外へ送るのは SHA-1 の先頭5文字だけです。",
+      "security.breach_check": "既知の漏えいを確認",
+      "security.breach_optin": "任意のオンライン確認です。パスワードと完全なハッシュは送信されません。",
+      "security.breach_unavailable": "漏えい確認サービスを利用できません。安全とは判定しません。",
       "page.history.desc": "変更前に保存される暗号化スナップショット。",
       "history.when": "日時",
       "history.size": "サイズ",
@@ -2792,6 +2807,26 @@ def security_page(audit):
         for group in audit["reused"])
     if not reused_html:
         reused_html = ('<div class="hint" data-i18n="security.none">Nothing to fix here.</div>')
+    breach_status = audit.get("breach_status", "not_checked")
+    if breach_status == "checked":
+        breached = audit.get("breached", [])
+        if breached:
+            breach_html = " ".join(
+                f'<a class="btn btn-ghost btn-sm" href="/view?id={_esc(item["id"])}">'
+                f'{_esc(item["id"])} · {_esc(item["count"])} sightings</a>'
+                for item in breached)
+        else:
+            breach_html = ('<div class="hint" data-i18n="security.none">'
+                           'Nothing to fix here.</div>')
+    elif breach_status == "unavailable":
+        breach_html = ('<div class="hint" data-i18n="security.breach_unavailable">'
+                       'The breach service is unavailable. No clean result is assumed.</div>')
+    else:
+        breach_html = (
+            '<div class="hint" data-i18n="security.breach_optin">Opt-in online check. '
+            'Passwords and full hashes are never sent.</div>'
+            '<a class="btn btn-ghost btn-sm" href="/security?breaches=1" '
+            'data-i18n="security.breach_check">Check known breaches</a>')
     days = audit["rotation_days"]
     return f"""
 <div class="page-head">
@@ -2824,6 +2859,10 @@ def security_page(audit):
                "security.incomplete_d", "No service name or no username.")}
     {_id_links(audit["malformed"], "security.malformed", "Malformed authenticators",
                "security.malformed_d", "Missing a secret, or an algorithm SPM cannot generate codes for.")}
+    <div class="field"><label data-i18n="security.breached">Known breaches</label>
+      <div class="hint" data-i18n="security.breached_d">Matches in Pwned Passwords. Only five SHA-1 prefix characters leave this device.</div>
+      <div class="actions" style="justify-content:flex-start;flex-wrap:wrap;gap:6px">{breach_html}</div>
+    </div>
   </div>
 </div>"""
 
@@ -5425,7 +5464,7 @@ def _entry_age_days(created, now):
     return (now - stamp) / 86400.0
 
 
-def compute_security(entries, plaintext):
+def compute_security(entries, plaintext, check_breaches=False):
     """Score the vault and name the offending IDs.
 
     The CLI's `spm security-dashboard` and this function have to agree: two
@@ -5437,43 +5476,9 @@ def compute_security(entries, plaintext):
 
     Secrets are read to compare and measure them; only IDs are ever returned.
     """
-    now = time.time()
-    limit = rotation_days()
-    seen = {}
-    weak, old, incomplete, malformed = [], [], [], []
-    for _, item in entries:
-        rid = item[0]
-        secret = item[3] if len(item) > 3 else ""
-        seen.setdefault(secret, []).append(rid)
-        classes = sum(bool(re.search(pattern, secret))
-                      for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]"))
-        if len(secret) < 12 or classes < 3:
-            weak.append(rid)
-        if not item[1] or not item[2]:
-            incomplete.append(rid)
-        age = _entry_age_days(item[5] if len(item) > 5 else "", now)
-        if age is not None and age > limit:
-            old.append(rid)
-    for line in plaintext.split("\n"):
-        if not line.startswith("AUTH\t"):
-            continue
-        parts = line.split("\t")
-        if len(parts) < 7 or parts[6] not in ("sha1", "sha256", "sha512") or not parts[3]:
-            malformed.append(parts[1] if len(parts) > 1 else "?")
-    reused = [ids for secret, ids in seen.items() if secret and len(ids) > 1]
-    reused_flat = [rid for ids in reused for rid in ids]
-    penalty = min(100, len(weak) * 12 + len(reused_flat) * 10
-                  + len(old) * 4 + len(incomplete) * 3 + len(malformed) * 8)
-    return {
-        "score": max(0, 100 - penalty),
-        "weak": weak,
-        "reused": reused,
-        "reused_flat": reused_flat,
-        "old": old,
-        "incomplete": incomplete,
-        "malformed": malformed,
-        "rotation_days": limit,
-    }
+    del entries  # retained for call-site compatibility; the core parses once.
+    return core.security_report(
+        plaintext, rotation_days(), check_breaches=check_breaches)
 
 
 # A tag is a #word in a plaintext field. The lookbehind keeps "C#" and the
@@ -6459,7 +6464,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 return self._expire_session()
             _, entries = parse_entries(plaintext)
-            audit = compute_security(entries, plaintext)
+            params = urllib.parse.parse_qs(parsed.query)
+            check_breaches = (params.get("breaches") or [""])[0] == "1"
+            audit = compute_security(entries, plaintext, check_breaches)
             self._send_html(200, render_shell(
                 security_page(audit), "security", VERSION, VAULT_PATH,
                 title="Security", counts=self._counts(plaintext)))

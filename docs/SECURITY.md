@@ -26,11 +26,14 @@ SPM is designed around the following core principles:
 - **Platform-owned passkeys** — SPM stores passkey metadata, never private passkey key material.
 
 Core vault operations are offline. The optional updater contacts GitHub Releases,
-and SPM Dashboard serves the local vault UI on the address selected by the user. The
-startup release check is off unless the user enables it, and downloaded releases
-are SHA-256 verified and syntax-checked before they replace the installed
-script, which is swapped in by rename so a running instance is never rewritten
-underneath itself.
+and SPM Dashboard serves the local vault UI on the address selected by the user.
+The optional breach review contacts the Pwned Passwords range API only after an
+explicit CLI or Dashboard action; SHA-1 is computed locally and only a
+five-character prefix is sent, with padded responses requested. Passwords and
+full hashes are never transmitted or persisted. The startup release check is
+off unless the user enables it, and downloaded releases are SHA-256 verified
+and syntax-checked before they replace the installed script, which is swapped
+in by rename so a running instance is never rewritten underneath itself.
 
 ---
 

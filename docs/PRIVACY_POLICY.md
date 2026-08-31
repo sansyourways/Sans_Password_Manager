@@ -27,6 +27,12 @@ occurs only for features or deployment choices initiated by the user:
 
 - `spm update`, `install.sh`, and release checks contact GitHub to retrieve
   release metadata or artifacts.
+- The optional breach review (`spm security --breaches`, or the corresponding
+  SPM Dashboard action) contacts the Pwned Passwords range API operated by Have
+  I Been Pwned. SPM computes SHA-1 locally and sends only the first five
+  hexadecimal characters of each unique password hash, requests padded
+  responses, and compares suffixes locally. Passwords and complete hashes are
+  not sent. The check is off by default and results are not stored.
 - The startup release check is disabled by default. If the user turns it on
   (`spm auto-update notify|auto`, or the auto-update entry in the interactive
   menu), SPM requests the latest release metadata from GitHub when it starts,
