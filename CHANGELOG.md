@@ -7,6 +7,22 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.12.3] - 2026-09-01
+
+### Changed
+- Added a single README showcase GIF captured in Chromium from every Dashboard
+  page using only a disposable synthetic vault and browser profile.
+- Expanded uninstall guidance to distinguish application-only removal from
+  irreversible vault, recovery, browser-host, PM2, Nginx, and TLS cleanup.
+- Corrected the README's Apache 2.0 link label, XDG path notation, and portable
+  bundle guidance: recovery private keys remain excluded unless explicitly
+  requested with `SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1`.
+
+### Security
+- Showcase fixtures use reserved `.invalid` hostnames and synthetic secrets;
+  no personal vault, browser profile, real credential, or recovery material is
+  captured or committed.
+
 ## [3.12.2] - 2026-08-31
 
 ### Changed
