@@ -23,6 +23,12 @@ Sans Password Manager (SPM) is a local-first password manager for the terminal a
 - Broad import/export support for moving data without lock-in.
 - A small, inspectable release artifact generated from the repository source.
 
+## Product showcase
+
+![Animated Sans Password Manager showcase covering every Dashboard page in Chromium with a disposable synthetic vault](docs/product-demo.gif)
+
+The showcase is captured from every Dashboard page in Chromium on a disposable profile. Every name, hostname, password, token, recovery code, and vault record is synthetic; no personal vault or real credential is used.
+
 ## 60-second quick start
 
 Install the latest signed release:
@@ -109,8 +115,8 @@ The installer also uses `curl`, `sha256sum`, `unzip`, and `mktemp`. Clipboard in
 |---|---|
 | Encrypted vault | `~/.spm_vault.gpg` |
 | Recovery capsule | `~/.spm_vault.gpg.recovery` |
-| Configuration | `${XDG_CONFIG_HOME:-~/.config}/spm` |
-| Application data | `${XDG_DATA_HOME:-~/.local/share}/spm` |
+| Configuration | `${XDG_CONFIG_HOME:-$HOME/.config}/spm` |
+| Application data | `${XDG_DATA_HOME:-$HOME/.local/share}/spm` |
 | Recovery private key created by `spm init` | `./spm_recovery_private.pem` in the current directory |
 
 Paths can differ when you select another vault or override XDG directories. Treat every exported archive, portable bundle, and recovery key as sensitive.
@@ -139,7 +145,7 @@ The [usage guide](https://spm-docs.silentprotocol.top/#usage) is the source for 
 
 Keep at least one encrypted vault backup away from the primary device. Store the recovery private key separately from the vault, recovery capsule, portable/save bundles, and backup location. Test recovery only with disposable data before relying on the process.
 
-Portable and save bundles include the recovery private key and therefore require especially careful handling. Read [recovery](https://spm-docs.silentprotocol.top/#recovery-forgot-master-password), [health checks](https://spm-docs.silentprotocol.top/#doctor-health-check), and [portable/save bundle guidance](https://spm-docs.silentprotocol.top/#portable-and-save-bundles) before an emergency.
+Portable and save bundles exclude the recovery private key by default. Setting `SPM_BUNDLE_INCLUDE_RECOVERY_KEY=1` explicitly includes it and creates a self-contained archive that can bypass the master password; handle that opt-in archive as credential-equivalent material. Read [recovery](https://spm-docs.silentprotocol.top/#recovery-forgot-master-password), [health checks](https://spm-docs.silentprotocol.top/#doctor-health-check), and [portable/save bundle guidance](https://spm-docs.silentprotocol.top/#portable-and-save-bundles) before an emergency.
 
 ## Architecture and development
 
@@ -153,13 +159,50 @@ SPM ships as a single executable Bash script, but it is developed from three own
 
 ## Uninstall
 
-Remove only the installed executable with:
+### Remove the application only
+
+Use the command matching the installation method:
 
 ```bash
-sudo rm -f /usr/local/bin/spm
+sudo rm -f /usr/local/bin/spm  # Default release installer
+brew uninstall spm             # Homebrew formula
+pkg uninstall spm              # Termux package
 ```
 
-If you installed to another prefix, remove that executable instead. SPM intentionally does not delete vaults, recovery keys, configuration, or backups during uninstall. Review and back up the data locations above before manually removing any personal data.
+For a custom installer prefix, remove only `<prefix>/bin/spm`. If you manually added that directory to `PATH`, remove the matching line from your shell profile.
+
+If the Dashboard runs through PM2, stop it and remove its saved startup entry:
+
+```bash
+pm2 delete spm-web
+pm2 save
+```
+
+Remove the browser extension through the browser's extension manager. The native host is stored at `${XDG_DATA_HOME:-$HOME/.local/share}/spm/browser-extension`. Its registration is named `xyz.sansyourways.spm.json` in these platform locations:
+
+- Linux Chromium browsers: the browser directory under `~/.config/`, followed by `NativeMessagingHosts/`.
+- Linux Firefox: `~/.mozilla/native-messaging-hosts/`.
+- macOS browsers: the browser directory under `~/Library/Application Support/`, followed by `NativeMessagingHosts/`.
+
+Remove only the SPM-owned native-host directory and registration files.
+
+If you published the Dashboard, remove only the Nginx vhost and `sites-enabled` link for the exact domain you configured, run `sudo nginx -t`, and reload Nginx. If Certbot created a certificate solely for that hostname, review it with `sudo certbot certificates` before removing it with `sudo certbot delete --cert-name <domain>`.
+
+### Remove all SPM data
+
+> [!DANGER]
+> The following data can contain the only usable vault or recovery material. Verify an independent backup and inspect every path before deleting anything. Deletion is irreversible.
+
+After completing the application-only removal, locate and individually remove only the data you intend to destroy:
+
+- The active vault, normally `~/.spm_vault.gpg`, and its `<vault>.recovery` capsule.
+- `${XDG_CONFIG_HOME:-$HOME/.config}/spm` and `${XDG_DATA_HOME:-$HOME/.local/share}/spm`.
+- `spm_recovery_private.pem` from the directory where each vault was initialized.
+- User-selected backups, history exports, portable/save bundles, synchronization targets, and emergency kits.
+- The SPM browser extension, native-host directory, and `xyz.sansyourways.spm.json` manifests described above.
+- The PM2 process, Nginx vhost, and dedicated TLS certificate described above.
+
+SPM intentionally has no automatic “delete everything” command because vaults, recovery keys, custom profiles, backups, and deployment files may live in different user-selected locations.
 
 ## Known limitations
 
@@ -178,7 +221,7 @@ If you installed to another prefix, remove that executable instead. SPM intentio
 - **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Security policy:** [docs/SECURITY.md](docs/SECURITY.md)
 - **Privacy policy:** [docs/PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md)
-- **License:** [MIT](LICENSE)
+- **License:** [Apache 2.0](LICENSE)
 
 ## License
 

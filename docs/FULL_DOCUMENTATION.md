@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.12.2**
+Current release: **3.12.3**
 
 ---
 
@@ -306,7 +306,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.12.2
+bash install.sh --version 3.12.3
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -341,7 +341,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v3.12.2.zip \
+gh attestation verify Sans_Password_Manager_v3.12.3.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -357,9 +357,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v3.12.2
+git checkout v3.12.3
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v3.12.2.zip.sha256
+sha256sum -c Sans_Password_Manager_v3.12.3.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -372,7 +372,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=3.12.2
+version=3.12.3
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -389,7 +389,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.12.2/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.12.3/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -411,7 +411,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.12.2 at /home/you/.local/bin/spm
+Installed SPM 3.12.3 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -1128,6 +1128,55 @@ The recovery private key remains separate unless
 
 ---
 
+## Uninstall
+
+### Remove the application only
+
+Use the command matching the installation method:
+
+```bash
+sudo rm -f /usr/local/bin/spm  # Default release installer
+brew uninstall spm             # Homebrew formula
+pkg uninstall spm              # Termux package
+```
+
+For a custom installer prefix, remove only `<prefix>/bin/spm`. Remove any PATH
+entry you manually added for that prefix. If the Dashboard uses PM2, run
+`pm2 delete spm-web` followed by `pm2 save`.
+
+Remove the browser extension through its browser. Its native host lives at
+`${XDG_DATA_HOME:-$HOME/.local/share}/spm/browser-extension`. Registrations are
+named `xyz.sansyourways.spm.json` under each configured browser's
+`NativeMessagingHosts` directory: beneath `~/.config/<browser>/` for Linux
+Chromium browsers, `~/.mozilla/native-messaging-hosts/` for Linux Firefox, and
+`~/Library/Application Support/<browser>/` on macOS.
+
+For a published Dashboard, remove only the Nginx vhost and enabled link for the
+exact configured hostname. Run `sudo nginx -t` before reloading Nginx. Review
+Certbot ownership with `sudo certbot certificates` before removing a dedicated
+certificate using `sudo certbot delete --cert-name <domain>`.
+
+### Remove all SPM data
+
+> **Danger:** Verify an independent backup and inspect every path first. Vault
+> and recovery deletion is irreversible.
+
+After application removal, individually locate and remove only the intended:
+
+- Active and profile vaults plus each `<vault>.recovery` capsule.
+- `${XDG_CONFIG_HOME:-$HOME/.config}/spm` and
+  `${XDG_DATA_HOME:-$HOME/.local/share}/spm`.
+- Recovery private keys from the directories where vaults were initialized.
+- Backups, history exports, portable/save bundles, sync targets, and emergency
+  kits in user-selected locations.
+- SPM browser extension/native-host files, PM2 process, Nginx vhost, and
+  dedicated TLS certificate described above.
+
+SPM has no blanket delete command because these files may be distributed among
+multiple user-selected locations.
+
+---
+
 ## Contributing
 
 Bug reports, focused improvements, and portability fixes are welcome. Read
@@ -1161,7 +1210,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.12.2**
+Version: **3.12.3**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
