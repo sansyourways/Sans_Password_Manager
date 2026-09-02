@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.12.3**
+Current release: **3.12.4**
 
 ---
 
@@ -80,15 +80,11 @@ attacker with root access.
 
 ## Product tour
 
-Every web capture below was taken from the 2.13.0 build in headless Chromium at
-1440x900, against a disposable vault holding only synthetic documentation data.
-3.0.x changed how the vault is encrypted and nothing a user sees, so these
-remain the current interface; they are not re-captured for a release that would
-reproduce them pixel for pixel.
-No personal vault or real credential appears in these images, and the sidebar
-path is a placeholder. The locked-screen captures are from a real iPhone running
-the Home Screen web app -- the release target for SPM Dashboard -- and were taken at
-2.11.2, which is the last release that changed that screen.
+Every web capture below was taken from the 3.12.4 release candidate in Chromium
+at 1440x900, against a disposable vault holding only synthetic documentation
+data. No personal vault, browser profile, real credential, or production
+hostname appears in these images. The locked-screen captures use Chromium
+mobile emulation at 390x844 against the same build and synthetic session.
 
 ![Animated tour of SPM Dashboard cycling through the overview, the tagged password
 list, the security findings page, cross-type search, vault history and
@@ -121,6 +117,15 @@ so it cannot assume they can still reach the app's settings to change language.
 | --- | --- | --- |
 | ![SPM locked screen in English](docs/screenshots/ios-v2.11.2/01-vault-locked-en.jpg) | ![SPM locked screen in Indonesian](docs/screenshots/ios-v2.11.2/02-vault-locked-id.jpg) | ![SPM locked screen in Japanese](docs/screenshots/ios-v2.11.2/03-vault-locked-ja.jpg) |
 
+### Choose a Dashboard theme and manage settings
+
+The unified **Settings** page previews four themes before applying them:
+Sundial, Console, Cyberpunk, and Edgerunner. The preference stays in this
+browser and also paints the sign-in and locked-vault screens. Master-password
+and biometric-unlock controls remain in the same Settings destination.
+
+![SPM Settings showing the four theme previews and unified vault settings](docs/screenshots/web-v2.13.0/28-master-password.png)
+
 ### Rotate the master password
 
 The **Settings** group holds the vault's own credentials: the master password
@@ -129,9 +134,6 @@ whole vault, and rewrites the recovery file *first* — a vault re-encrypted und
 a new password while its `.recovery` file still names the old one is the one
 state `spm forgot` cannot recover from. Every other browser session is signed
 out; the session that made the change carries on.
-
-![SPM master password page showing current, new and confirmation fields and a
-summary of what changing it does](docs/screenshots/web-v2.13.0/28-master-password.png)
 
 ### Audit, search and roll back
 
@@ -148,10 +150,13 @@ password by whether a row appears.
 
 ### Work with credentials and protected records
 
-Password rows carry `#hashtag` tags parsed from their notes, with a filter chip
-row above the table and a `rotate` badge on anything past the rotation
-threshold. Tags are a convention over existing plaintext fields, so they need no
-schema change and survive export and import untouched.
+The Passwords page has a dedicated **Organize passwords** panel. Select one or
+more folders and `#hashtag` tags to narrow the records; folders and tags combine,
+active values carry a checkmark, and **Clear filters** always returns to the full
+list. Filter state stays in the URL using repeated `folder` and `tag` parameters,
+so the same view survives reloads, bookmarks, and back-button navigation. Tags
+remain a convention over names and notes, so they need no separate tag column
+and survive export and import untouched.
 
 Each record also has a **URL**, alongside the username / email, password and
 notes. It is what binds a credential to a site: the browser bridge matches the
@@ -166,12 +171,15 @@ a URL in the notes the way it always did, so nothing needs migrating.
 | --- | --- |
 | ![SPM password list](docs/screenshots/web-v2.13.0/07-passwords.png) | ![SPM TOTP authenticator view](docs/screenshots/web-v2.13.0/20-authenticator-view.png) |
 
+![SPM password list filtered to the Work folder and work tag, with selected
+filters and result count visible](docs/screenshots/web-v2.13.0/31-passwords-filtered.png)
+
 | Password generator | Import and export |
 | --- | --- |
 | ![SPM password generator](docs/screenshots/web-v2.13.0/26-generator.png) | ![SPM import and export workspace](docs/screenshots/web-v2.13.0/27-transfer.png) |
 
 <details>
-<summary><strong>Complete web interface gallery (28 pages)</strong></summary>
+<summary><strong>Complete web interface gallery</strong></summary>
 
 #### Passwords
 
@@ -306,7 +314,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.12.3
+bash install.sh --version 3.12.4
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -341,7 +349,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v3.12.3.zip \
+gh attestation verify Sans_Password_Manager_v3.12.4.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -357,9 +365,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v3.12.3
+git checkout v3.12.4
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v3.12.3.zip.sha256
+sha256sum -c Sans_Password_Manager_v3.12.4.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -372,7 +380,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=3.12.3
+version=3.12.4
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -389,7 +397,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.12.3/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.12.4/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -411,7 +419,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.12.3 at /home/you/.local/bin/spm
+Installed SPM 3.12.4 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -1210,7 +1218,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.12.3**
+Version: **3.12.4**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
