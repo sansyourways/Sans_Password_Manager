@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.13.0"
+VERSION="3.14.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -3610,6 +3610,142 @@ cmd_update() {
 	fi
 }
 
+# ----- split recovery --------------------------------------------------------
+# The recovery file and its private key must survive together, and stay secret
+# together. Shares replace that pair with a threshold: any `t` of `n`
+# reconstruct the vault key, any `t - 1` reveal nothing. Minting is CLI-only
+# and deliberately so -- the shares ARE the vault at threshold, and printing
+# them through a browser would put them in a page, a scrollback and possibly a
+# proxy log on their way to the person who is supposed to write them down.
+
+cmd_shares() {
+	local action="${1:-}"
+	[ "$#" -gt 0 ] && shift
+	case "$action" in
+		split) cmd_shares_split "$@" ;;
+		combine|recover) cmd_shares_combine "$@" ;;
+		status) cmd_shares_status "$@" ;;
+		""|-h|--help)
+			printf 'Usage: %s shares <command>\n\n' "$0"
+			printf '  split [--threshold N] [--shares N]   mint a new set (default 3 of 5)\n'
+			printf '  combine                              rebuild the vault key and reset the master password\n'
+			printf '  status                               what set this vault records, if any\n'
+			;;
+		*) die "Unknown shares command: $action" ;;
+	esac
+}
+
+cmd_shares_split() {
+	local threshold=3 count=5
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--threshold)
+				[ "$#" -ge 2 ] || die "Missing value for --threshold."
+				threshold="$2"; shift 2 ;;
+			--shares)
+				[ "$#" -ge 2 ] || die "Missing value for --shares."
+				count="$2"; shift 2 ;;
+			*) die "Unknown option: $1" ;;
+		esac
+	done
+	case "$threshold$count" in
+		*[!0-9]*) die "Threshold and share count must be whole numbers." ;;
+	esac
+	[ "$threshold" -ge 2 ] || die "A threshold below 2 is not a split."
+	[ "$count" -ge "$threshold" ] || \
+		die "$count shares cannot have a threshold of $threshold."
+	[ "$count" -le 255 ] || die "At most 255 shares."
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	ensure_master_password_loaded
+
+	local existing
+	existing="$(printf '%s' "$MASTER_PW" | core shares-status "$VAULT_FILE" 2>/dev/null)" || existing=""
+	if [ -n "$existing" ]; then
+		printf 'This vault already records a share set: %s\n' \
+			"$(printf '%s' "$existing" | cut -f1)"
+		printf 'Minting a new set does not revoke the old one. Any %s of the old\n' \
+			"$(printf '%s' "$existing" | cut -f2)"
+		printf 'shares still reconstruct this vault key, because the key does not change.\n'
+		printf 'Destroy the old shares yourself. Continue? [y/N]: '
+		local reply
+		read -r reply || true
+		case "$reply" in
+			y|Y|yes|YES) ;;
+			*) die "Cancelled. Nothing was changed." ;;
+		esac
+	fi
+
+	local out
+	out="$(printf '%s' "$MASTER_PW" | core shares-split "$VAULT_FILE" "$threshold" "$count")" \
+		|| die "Failed to split the vault key. The vault was not changed."
+
+	printf '\n'
+	printf 'Split recovery: %s of %s shares\n' "$threshold" "$count"
+	printf 'Set %s\n\n' "$(printf '%s\n' "$out" | sed -n '1p')"
+	printf '%s\n' "$out" | sed -n '2,$p'
+	printf '\n'
+	printf 'These are shown once and are not stored anywhere. Write them down or\n'
+	printf 'save them now, then keep them apart -- any %s together open this vault\n' "$threshold"
+	printf 'without the master password, and any fewer than %s reveal nothing at all.\n' \
+		"$threshold"
+	printf 'They stay valid after a master-password change.\n'
+}
+
+cmd_shares_status() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	ensure_master_password_loaded
+	local out
+	out="$(printf '%s' "$MASTER_PW" | core shares-status "$VAULT_FILE")" \
+		|| die "Failed to read the vault."
+	if [ -z "$out" ]; then
+		printf 'This vault records no share set. Run "%s shares split" to mint one.\n' "$0"
+		return
+	fi
+	printf 'Set       : %s\n' "$(printf '%s' "$out" | cut -f1)"
+	printf 'Threshold : %s of %s\n' "$(printf '%s' "$out" | cut -f2)" \
+		"$(printf '%s' "$out" | cut -f3)"
+	printf 'Minted    : %s\n' "$(printf '%s' "$out" | cut -f4)"
+	printf '\nThe vault records that this set exists. It does not hold any share,\n'
+	printf 'so it cannot tell you whether you still have enough of them.\n'
+}
+
+cmd_shares_combine() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found at '$VAULT_FILE'. Nothing to recover."
+
+	printf '>>> SPLIT RECOVERY <<<\n\n'
+	printf 'Enter one share per line. Blank line when done.\n\n'
+
+	local collected line
+	collected="$(make_tmp)"
+	while :; do
+		printf 'share: '
+		read -r line || break
+		[ -n "$line" ] || break
+		printf '%s\n' "$line" >> "$collected"
+	done
+
+	[ -s "$collected" ] || { secure_wipe "$collected"; die "No shares were given."; }
+
+	# The core proves the reconstruction by opening the vault with it, so a
+	# wrong or mixed set fails here rather than after a master password has
+	# been set against a key that opens nothing.
+	local recovered
+	if ! recovered="$(core shares-combine "$VAULT_FILE" < "$collected" 2>&1)"; then
+		secure_wipe "$collected"
+		die "$recovered"
+	fi
+	secure_wipe "$collected"
+
+	VAULT_KEY="$recovered"
+	printf '\nThe shares reconstructed this vault key and it opens the vault.\n'
+	printf 'Now set a NEW master password.\n\n'
+	prompt_master_password
+	rewrap_vault_key "$MASTER_PW"
+	printf '\nMaster password has been RESET.\n'
+	printf 'Your shares remain valid: a password change does not change the vault key.\n'
+}
+
 cmd_forgot() {
 	[ -f "$VAULT_FILE" ] || die "Vault not found at '$VAULT_FILE'. Nothing to recover."
 	[ -f "$RECOVERY_FILE" ] || die "Recovery file '$RECOVERY_FILE' not found. Forgot-mode unavailable."
@@ -5222,6 +5358,9 @@ Perintah utama (CLI):
   ./spm.sh auto-update [status|off|notify|auto]
                            → Aktifkan cek rilis harian saat mulai
   ./spm.sh forgot          → Reset kata sandi utama dengan private key
+  ./spm.sh shares split    → Buat share pemulihan Shamir (bawaan 3 dari 5)
+  ./spm.sh shares combine  → Susun ulang kunci vault dari share lalu set kata sandi utama baru
+  ./spm.sh shares status   → Set share yang tercatat pada vault ini
   ./spm.sh doctor          → Health / integrity check vault
   ./spm.sh doctor --json   → the same checks as JSON, for scripts
   ./spm.sh password-history <id> → previous passwords for one entry
@@ -5334,6 +5473,9 @@ Main commands (CLI):
                              → Import data (passwords/notes/passphrases/authenticators/backup codes) from csv/json and other supported formats
   ./spm.sh update          → Check & auto-install latest GitHub release
   ./spm.sh forgot          → Reset master password using the private key
+  ./spm.sh shares split    → Mint Shamir recovery shares (default 3 of 5)
+  ./spm.sh shares combine  → Rebuild the vault key from shares and reset the master password
+  ./spm.sh shares status   → What share set this vault records
   ./spm.sh doctor          → Vault health / integrity check
   ./spm.sh doctor --json   → the same checks as JSON, for scripts
   ./spm.sh password-history <id> → previous passwords for one entry
@@ -7447,6 +7589,7 @@ main() {
 		update)           cmd_update "$@" ;;
 		auto-update)      cmd_autoupdate "$@" ;;
 		forgot|forgotten) cmd_forgot "$@" ;;
+		shares)           cmd_shares "$@" ;;
 		doctor)           cmd_doctor "$@" ;;
 		password-history) cmd_password_history "$@" ;;
 		export)           cmd_export "$@" ;;

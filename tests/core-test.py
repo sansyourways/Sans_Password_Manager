@@ -1083,6 +1083,232 @@ def t_security_report_is_offline_by_default():
     eq(report["breach_status"], "not_checked")
 
 
+# ----- split recovery --------------------------------------------------------
+
+
+def t_gf_tables_describe_a_real_field():
+    """Generator 3, not 2.
+
+    Under the AES polynomial 2 has multiplicative order 51, so tables built
+    from powers of 2 cover a fifth of the field and are silently wrong for the
+    rest -- split would still run and combine would still return bytes.
+    """
+    logs = sorted(core._GF_LOG[x] for x in range(1, 256))
+    assert logs == list(range(255)), "the log table is not a permutation"
+    for x in range(1, 256):
+        assert core._GF_EXP[core._GF_LOG[x]] == x
+        assert core._gf_mul(x, core._gf_inv(x)) == 1
+    for a in (1, 7, 53, 128, 255):
+        for b in (1, 3, 99, 200, 254):
+            for c in (2, 17, 130, 251):
+                assert core._gf_mul(core._gf_mul(a, b), c) == \
+                    core._gf_mul(a, core._gf_mul(b, c))
+                assert core._gf_mul(a, b ^ c) == \
+                    (core._gf_mul(a, b) ^ core._gf_mul(a, c))
+
+
+def t_every_threshold_subset_reconstructs():
+    import itertools
+    secret = os.urandom(44)
+    shares = core.split_secret(secret, 3, 5)
+    assert len(shares) == 5
+    assert [x for x, _ in shares] == [1, 2, 3, 4, 5]
+    for size in (3, 4, 5):
+        for subset in itertools.combinations(shares, size):
+            assert core.combine_shares(list(subset)) == secret, \
+                "%d shares did not reconstruct" % size
+
+
+def t_below_threshold_never_reconstructs():
+    """Not a security proof -- Shamir's is information-theoretic -- but it
+    catches an off-by-one that made the polynomial one degree too low."""
+    import itertools
+    secret = os.urandom(44)
+    shares = core.split_secret(secret, 4, 6)
+    for size in (2, 3):
+        for subset in itertools.combinations(shares, size):
+            assert core.combine_shares(list(subset)) != secret
+
+
+def t_split_refuses_impossible_shapes():
+    for threshold, count in ((1, 5), (0, 5), (5, 4), (2, 256), (256, 256)):
+        try:
+            core.split_secret(b"secret", threshold, count)
+        except core.VaultError:
+            continue
+        raise AssertionError("split accepted %d of %d" % (threshold, count))
+    try:
+        core.split_secret(b"", 2, 3)
+    except core.VaultError:
+        pass
+    else:
+        raise AssertionError("split accepted an empty secret")
+
+
+def t_share_encoding_round_trips():
+    set_id = os.urandom(core.SHARE_SET_BYTES)
+    payload = os.urandom(44)
+    token = core.encode_share(3, 2, set_id, payload)
+    assert token.startswith("SPMS1-3-2-")
+    assert core.decode_share(token) == (3, 2, set_id, payload)
+    # Transcription is by hand, so case and stray spacing must not matter.
+    assert core.decode_share("  " + token.lower() + " \n") == \
+        (3, 2, set_id, payload)
+
+
+def t_a_mistyped_share_is_refused_not_combined():
+    """The share carries a checksum over its own text.
+
+    Without it a single wrong character combines cleanly into a wrong key, and
+    the only symptom is that the vault does not open -- with nothing to say
+    which of the shares was wrong.
+    """
+    set_id = os.urandom(core.SHARE_SET_BYTES)
+    token = core.encode_share(3, 2, set_id, os.urandom(44))
+    body, checksum = token.rsplit("-", 1)
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+    caught = 0
+    for position in range(len(body) - 8, len(body)):
+        for replacement in alphabet:
+            if body[position] == replacement:
+                continue
+            mutated = body[:position] + replacement + body[position + 1:]
+            try:
+                core.decode_share("%s-%s" % (mutated, checksum))
+            except core.VaultError:
+                caught += 1
+            break
+    assert caught == 8, "only %d of 8 single-character edits were caught" % caught
+
+
+def t_decode_refuses_malformed_shares():
+    set_id = os.urandom(core.SHARE_SET_BYTES)
+    good = core.encode_share(3, 2, set_id, os.urandom(44))
+    for bad in ("", "hello", "SPMS0-3-2-AABBCCDD-AAAA-0000",
+                good.replace("SPMS1", "SPMS2", 1),
+                "-".join(good.split("-")[:5]),
+                good + "-extra"):
+        try:
+            core.decode_share(bad)
+        except core.VaultError:
+            continue
+        raise AssertionError("decode accepted %r" % bad)
+
+
+def t_combine_refuses_duplicates_and_ragged_sets():
+    secret = os.urandom(20)
+    shares = core.split_secret(secret, 2, 3)
+    cases = [
+        ([shares[0], shares[0]], "more than once"),
+        ([shares[0]], "at least two"),
+        ([(1, b"short"), (2, b"much longer payload")], "different lengths"),
+        ([(0, b"aaaa"), (2, b"bbbb")], "impossible index"),
+    ]
+    for bad, expected in cases:
+        try:
+            core.combine_shares(bad)
+        except core.VaultError as exc:
+            # Not merely that it refused: refusing with "share arithmetic
+            # divided by zero" is what happens when the explicit check is
+            # gone, and it tells the person holding the shares nothing.
+            assert expected in str(exc), \
+                "refused %r with %r, expected to mention %r" % (
+                    bad, str(exc), expected)
+            continue
+        raise AssertionError("combine accepted %r" % (bad,))
+
+
+def t_shares_meta_round_trips_and_keeps_one_set():
+    plaintext = core.stamp_version(sample())
+    assert core.shares_meta(plaintext) is None
+    first = os.urandom(core.SHARE_SET_BYTES)
+    stamped = core.stamp_shares_meta(plaintext, first, 3, 5, "2026-01-01T00:00:00Z")
+    assert core.shares_meta(stamped) == (first, 3, 5, "2026-01-01T00:00:00Z")
+    # The version row stays first, or an older build reads the vault as
+    # unversioned.
+    assert stamped.splitlines()[0].split("\t")[0] == "META_VAULT_VERSION"
+    second = os.urandom(core.SHARE_SET_BYTES)
+    again = core.stamp_shares_meta(stamped, second, 2, 4, "2026-02-02T00:00:00Z")
+    assert core.shares_meta(again) == (second, 2, 4, "2026-02-02T00:00:00Z")
+    assert again.count("META_RECOVERY_SHARES") == 1, "a vault kept two sets"
+    # The row is metadata, never a record.
+    assert core._record_count(again) == core._record_count(plaintext)
+
+
+def t_shares_meta_ignores_a_damaged_row():
+    plaintext = core.stamp_version(sample())
+    for row in ("META_RECOVERY_SHARES\tnothex\t3\t5\tx",
+                "META_RECOVERY_SHARES\tAABB\t3\t5\tx",
+                "META_RECOVERY_SHARES\tAABBCCDD\tthree\t5\tx",
+                "META_RECOVERY_SHARES\tAABBCCDD\t3"):
+        assert core.shares_meta(plaintext + row + "\n") is None, row
+
+
+def t_shares_reconstruct_the_key_after_the_master_changes():
+    """The property that makes shares worth writing on paper.
+
+    `rewrap` changes only the envelope around the vault key, so a set minted
+    once keeps working. If the key were ever reminted, every share already
+    distributed would become silent landfill.
+    """
+    vault = fresh("shares-durable")
+    core.write_vault(vault, MASTER, sample(), None)
+    plaintext, key = core.read_vault(vault, MASTER)
+    shares = core.split_secret(key.encode("utf-8"), 2, 3)
+    core.rewrap(vault, MASTER, OTHER)
+    try:
+        core.read_vault(vault, MASTER)
+    except subprocess.CalledProcessError:
+        pass
+    else:
+        raise AssertionError("the old master password still opens the vault")
+    rebuilt = core.combine_shares(shares[:2]).decode("utf-8")
+    assert rebuilt == key
+    again, _ = core.read_vault(vault, OTHER)
+    assert core.gpg_decrypt(rebuilt, core.parse_container(
+        open(vault, "rb").read())[1]).decode("utf-8") == again
+
+
+def t_doctor_reports_split_recovery():
+    plaintext = core.stamp_version(sample())
+    vault = fresh("doctor-shares")
+    core.write_vault(vault, MASTER, plaintext, None)
+
+    def check_named(report, name):
+        for entry in report["checks"]:
+            if entry["id"] == name:
+                return entry
+        raise AssertionError("no %s check in the report" % name)
+
+    plain_report = core.doctor_report(plaintext, vault, "match-current")
+    entry = check_named(plain_report, "split_recovery")
+    assert entry["status"] == "ok" and entry["state"] == "none", entry
+
+    set_id = os.urandom(core.SHARE_SET_BYTES)
+    with_set = core.stamp_shares_meta(plaintext, set_id, 3, 5,
+                                      "2026-01-01T00:00:00Z")
+    entry = check_named(core.doctor_report(with_set, vault, "match-current"),
+                        "split_recovery")
+    assert entry["status"] == "ok" and entry["state"] == "set", entry
+    assert entry["threshold"] == 3 and entry["shares"] == 5, entry
+    assert entry["set_id"] == set_id.hex().upper(), entry
+    # A health report is the kind of thing people paste into an issue, so it
+    # must record that a set exists and never any share from it.
+    assert core.SHARE_MAGIC not in json.dumps(
+        core.doctor_report(with_set, vault, "match-current"))
+
+    # The combination neither check sees alone: no recovery file and no set
+    # means there is no way back into this vault at all.
+    entry = check_named(core.doctor_report(plaintext, vault, "no-recovery-file"),
+                        "split_recovery")
+    assert entry["status"] == "fail", entry
+    assert "no recovery path" in entry["summary"], entry
+    # A recorded set is exactly what rescues that case.
+    entry = check_named(core.doctor_report(with_set, vault, "no-recovery-file"),
+                        "split_recovery")
+    assert entry["status"] == "ok", entry
+
+
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):
         check(name[2:], fn)

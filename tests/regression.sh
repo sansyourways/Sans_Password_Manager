@@ -3759,6 +3759,151 @@ fi
 # change rewraps a small envelope and leaves the vault ciphertext, every .bak,
 # every history snapshot and the recovery file untouched. These assert that
 # property directly rather than only that the new password works.
+printf 'Recovery regression: Shamir split recovery\n'
+# The recovery file and its private key have to survive together and stay
+# secret together. Shares replace that pair with a threshold. What has to hold:
+# any `t` reconstruct, fewer never do, a mistyped share is refused rather than
+# combined into a wrong key, and the set keeps working after the master
+# password changes -- which is the only reason writing them down is sensible.
+sh_root="$TEST_ROOT/shares"
+mkdir -p "$sh_root"
+sh_vault="$sh_root/vault.gpg"
+sh_plain="$sh_root/plain"
+sh_master="Shares-Regression-Master-1"
+sh_rotated="Shares-Regression-Master-2"
+printf 'META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n1\tExample\tu@example.invalid\tSecret1\thttps://a.invalid\t2025-01-01T00:00:00Z\n' \
+	"$TEST_RECOVERY_B64" > "$sh_plain"
+printf '%s' "$sh_master" | core write "$sh_vault" "$sh_plain" > "$sh_root/key"
+[ -s "$sh_root/key" ] || { printf 'no vault key was minted\n' >&2; exit 1; }
+
+printf '%s' "$sh_master" | core shares-split "$sh_vault" 3 5 > "$sh_root/out"
+sh_set="$(sed -n '1p' "$sh_root/out")"
+sed -n '2,$p' "$sh_root/out" > "$sh_root/shares"
+[ "$(wc -l < "$sh_root/shares")" -eq 5 ] || {
+	printf 'expected 5 shares, got %s\n' "$(wc -l < "$sh_root/shares")" >&2; exit 1
+}
+grep -qE "^SPMS1-3-[1-5]-$sh_set-[A-Z2-7]+-[0-9A-F]{4}$" "$sh_root/shares" || {
+	printf 'a share is not in the documented format\n' >&2; exit 1
+}
+
+# The shares are shown once and stored nowhere. A copy on disk beside the
+# vault would quietly undo the whole point of distributing them.
+if grep -rqF "$(sed -n '1p' "$sh_root/shares")" "$sh_vault" "$sh_vault.recovery" 2>/dev/null; then
+	printf 'a share was written next to the vault it protects\n' >&2
+	exit 1
+fi
+
+# Any three of the five, and the vault proves it is the right key.
+for sh_pick in '1p;2p;3p' '1p;3p;5p' '3p;4p;5p'; do
+	sed -n "$sh_pick" "$sh_root/shares" \
+		| core shares-combine "$sh_vault" > "$sh_root/got"
+	cmp -s "$sh_root/got" "$sh_root/key" || {
+		printf 'shares %s did not reconstruct the vault key\n' "$sh_pick" >&2
+		exit 1
+	}
+done
+
+# Two of five is one short, and must be refused rather than answered.
+sh_err="$(sed -n '1p;2p' "$sh_root/shares" \
+	| core shares-combine "$sh_vault" 2>&1 >/dev/null)" && {
+	printf 'two shares of a three-of-five set reconstructed the key\n' >&2
+	exit 1
+}
+case "$sh_err" in
+	*"needs 3"*) ;;
+	*) printf 'below-threshold refusal did not say how many are needed: %s\n' \
+		"$sh_err" >&2; exit 1 ;;
+esac
+
+# One wrong character. Without the per-share checksum this combines cleanly
+# into a wrong key and the only symptom is a vault that will not open.
+sh_typo="$(sed -n '1p' "$sh_root/shares" | PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 -c '
+import sys
+token = sys.stdin.read().strip()
+parts = token.split("-")
+payload = parts[4]
+swap = "B" if payload[0] != "B" else "C"
+parts[4] = swap + payload[1:]
+mutated = "-".join(parts)
+if mutated == token:
+    sys.exit("the share was not actually altered")
+sys.stdout.write(mutated)
+')"
+[ -n "$sh_typo" ] || { printf 'could not build a mistyped share\n' >&2; exit 1; }
+[ "$sh_typo" != "$(sed -n '1p' "$sh_root/shares")" ] || {
+	printf 'the mistyped share is identical to the original\n' >&2; exit 1
+}
+sh_err="$({ printf '%s\n' "$sh_typo"; sed -n '2p;3p' "$sh_root/shares"; } \
+	| core shares-combine "$sh_vault" 2>&1 >/dev/null)" && {
+	printf 'a mistyped share was accepted\n' >&2; exit 1
+}
+case "$sh_err" in
+	*transcription*) ;;
+	*) printf 'a mistyped share was refused, but not as a transcription error: %s\n' \
+		"$sh_err" >&2; exit 1 ;;
+esac
+
+# Shares from another vault must be caught before they are combined, and the
+# other vault's own complete set must still not open this one.
+sh_other="$sh_root/other.gpg"
+printf '%s' "$sh_master" | core write "$sh_other" "$sh_plain" >/dev/null
+printf '%s' "$sh_master" | core shares-split "$sh_other" 2 3 > "$sh_root/other-out"
+sed -n '2,$p' "$sh_root/other-out" > "$sh_root/other-shares"
+sh_err="$({ sed -n '1p;2p' "$sh_root/shares"; sed -n '1p' "$sh_root/other-shares"; } \
+	| core shares-combine "$sh_vault" 2>&1 >/dev/null)" && {
+	printf 'shares from two different sets were combined\n' >&2; exit 1
+}
+case "$sh_err" in
+	*"different sets"*) ;;
+	*) printf 'mixed sets were refused for the wrong reason: %s\n' "$sh_err" >&2; exit 1 ;;
+esac
+sh_err="$(sed -n '1p;2p' "$sh_root/other-shares" \
+	| core shares-combine "$sh_vault" 2>&1 >/dev/null)" && {
+	printf "another vault's shares opened this vault\n" >&2; exit 1
+}
+case "$sh_err" in
+	*"does not open this vault"*) ;;
+	*) printf "another vault's shares were refused for the wrong reason: %s\n" \
+		"$sh_err" >&2; exit 1 ;;
+esac
+
+# The durability claim, and the reason a share is worth writing on paper: the
+# master password changes, the vault key does not.
+printf '%s\n%s\n' "$sh_master" "$sh_rotated" | core rewrap "$sh_vault"
+printf '%s' "$sh_master" | core read "$sh_vault" "$sh_root/nope" >/dev/null 2>&1 && {
+	printf 'the old master password still opens the rotated vault\n' >&2; exit 1
+}
+sed -n '1p;3p;5p' "$sh_root/shares" | core shares-combine "$sh_vault" > "$sh_root/after"
+cmp -s "$sh_root/after" "$sh_root/key" || {
+	printf 'the shares stopped working after a master-password change\n' >&2
+	exit 1
+}
+
+# The vault records that a set exists, and never a share.
+sh_status="$(printf '%s' "$sh_rotated" | core shares-status "$sh_vault")"
+[ "$(printf '%s' "$sh_status" | cut -f1)" = "$sh_set" ] || {
+	printf 'the vault records a different set: %s\n' "$sh_status" >&2; exit 1
+}
+[ "$(printf '%s' "$sh_status" | cut -f2)" = "3" ] || {
+	printf 'the vault records the wrong threshold: %s\n' "$sh_status" >&2; exit 1
+}
+printf '%s' "$sh_rotated" | core read "$sh_vault" "$sh_root/after-plain" >/dev/null
+while IFS= read -r sh_line; do
+	[ -n "$sh_line" ] || continue
+	if grep -qF "$sh_line" "$sh_root/after-plain"; then
+		printf 'a share is stored inside the vault it protects\n' >&2
+		exit 1
+	fi
+done < "$sh_root/shares"
+grep -q '^META_RECOVERY_SHARES' "$sh_root/after-plain" || {
+	printf 'the vault does not record its share set\n' >&2; exit 1
+}
+# The set row is metadata, not a record: it must not appear as an entry.
+[ "$(grep -c '^[0-9]' "$sh_root/after-plain")" = "1" ] || {
+	printf 'the share row was counted as a record\n' >&2; exit 1
+}
+printf '  shares: 3-of-5 minted, every triple reconstructs, 2 refused, typo and foreign set refused, survives a master change\n'
+
 printf 'CLI regression: wrapped vault key\n'
 
 VK_ROOT="$TEST_ROOT/vaultkey"
