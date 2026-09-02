@@ -241,9 +241,35 @@ as such below rather than quietly dropped.
 
 ### Foundation — the work this unblocks
 
-- **Replace the gpg data layer.** Now the single-file change it was not
-  before, and the one that brings a memory-hard KDF with it. Measured on a
-  format-3 vault: a read costs **452 ms**, of which 280 ms is the key unwrap
+- ~~**Replace the gpg data layer.**~~ **Shipped in 4.0.0.** A vault is sealed
+  with AES-256-CTR and authenticated with HMAC-SHA256; the master password is
+  stretched with scrypt at n=32768, r=8, p=1 and the vault key is not stretched
+  at all, because it never had anything to stretch. Measured on a 200-record
+  vault, a cold read went from **663 ms to 168 ms** and a read with the vault
+  key already held from **248 ms to 11 ms**.
+
+  Three things are worth recording beyond the numbers. The vault names its KDF
+  and its parameters, which is what turns Argon2id from another format change
+  into a value the reader dispatches on. The data is authenticated for the
+  first time, so a damaged vault and a wrong master password stopped being the
+  same refusal -- they have opposite remedies and now read differently. And
+  the vault key does not change during the upgrade, which is what let a format
+  change ship without touching recovery files, Shamir share sets, or any .bak
+  written before it.
+
+  What decided the shape was openssl's command line, not the design. Keys go
+  in on a file descriptor because `-K` puts them in argv; they go in as base64
+  because a passphrase is read as a line and a raw key holding an 0x0A byte
+  would be truncated in silence, sealing the vault under a fraction of itself
+  with nothing reporting anything. And `openssl enc` carries no AEAD tag, so
+  encrypt-then-MAC is written out here rather than delegated.
+
+  Argon2id remains out of reach on the terms below, unchanged: what shipped is
+  the reachable memory-hard KDF, plus the header field that makes adopting the
+  other one cheap.
+
+  The original measurement that motivated this, kept for the record. On a
+  format-3 vault a read cost **452 ms**, of which 280 ms is the key unwrap
   and 172 ms the data layer — two gpg invocations, and gpg's symmetric path
   carries a fixed cost that payload size barely moves. Against that,
   `openssl aes-256-ctr` with an HMAC-SHA256 tag costs **~30 ms**, and
@@ -267,6 +293,10 @@ as such below rather than quietly dropped.
   turns Argon2id from another format change into a value the reader already
   knows how to dispatch on. It must also keep reading format-3 vaults, which is
   what the version row exists for.
+
+  All three constraints held. Keys reach openssl on a descriptor, the MAC is
+  explicit and encrypt-then-MAC, `hashlib.scrypt` is given an explicit
+  `maxmem`, and gpg-sealed vaults still open.
 - **Cache the dashboard session key — shipped in 3.4.0.** Two gpg invocations
   per request became one, counted through a shim in front of the real binary:
   10 calls for 5 page loads before, 5 after. The key lives in the session

@@ -12,7 +12,12 @@ SPM is designed around the following core principles:
 
 - **Offline-first** — no servers, no cloud sync, no telemetry.
 - **Zero data collection** — all vault data stays on the user's device.
-- **Strong encryption** — GnuPG symmetric encryption with AES-256 protects stored vault data.
+- **Strong encryption** — vault data is sealed with AES-256-CTR and
+  authenticated with HMAC-SHA256 (encrypt-then-MAC). The master password is
+  stretched with scrypt (n=32768, r=8, p=1); the vault key it unwraps is 256
+  random bits and is not stretched, because it has nothing to stretch.
+  Vaults written before 4.0.0 are GnuPG symmetric AES-256 and are still read;
+  they upgrade in place on their next write, keeping the same vault key.
 - **User-controlled keys** — the user is the sole owner of all keys and passwords.
 - **User-controlled recovery** — recovery requires the locally generated RSA private key and recovery blob; the developer cannot recover either.
 - **Crash-safe writes** — ciphertext is staged and atomically installed, with a last-known-good encrypted backup.

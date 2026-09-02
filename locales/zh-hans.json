@@ -152,8 +152,6 @@
     "section.backups": "备用码",
     "section.backups_desc": "保存恢复码（查看时会显示完整代码）。",
     "btn.add_backups": "+ 添加备用码",
-    "section.session": "网页会话",
-    "section.session_desc": "由你的主密码保护。界面在闲置 30 秒后自动锁定；服务器在闲置 5 分钟后让会话过期，任何会话满 12 小时也会过期。",
     "form.vault": "密码库：",
     "form.back_list": "← 返回列表",
     "form.save": "保存",
@@ -304,8 +302,7 @@
     "overview.view_all": "查看全部",
     "overview.console_eyebrow": "会话 / 本地密码库 / 已认证",
     "overview.console_records": "条加密记录已建立索引",
-    "overview.console_gpg": "本机 GnuPG 边界已启用",
-    "overview.console_lock": "闲置锁定已设为 30 秒",
+    "overview.console_lock": "闲置锁定",
     "overview.console_lede": "在一次可审计的会话中检查、生成并维护你的凭据。",
     "btn.view": "查看",
     "generator.mode": "模式",
@@ -346,6 +343,13 @@
     "tidy.offer_t": "有条目可以整理",
     "tidy.offer_d": "个条目的备注中含有文件夹，或使用了包名形式的名称。写入前请先查看这些更改。",
     "tidy.review": "查看更改",
-    "tidy.done": "个条目已整理。"
+    "tidy.done": "个条目已整理。",
+    "overview.console_cipher": "保险库加密算法",
+    "settings.lock.title": "闲置锁定",
+    "settings.lock.desc": "仪表板在自动锁定前等待的时间。",
+    "settings.lock.label": "锁定延时",
+    "settings.lock.apply": "应用锁定延时",
+    "settings.lock.note": "等待越久，已解密的保险库停留在屏幕上的时间就越长。无论浏览器处于何种状态，服务器都会在该计时之后不久结束闲置会话。",
+    "settings.lock.saved": "闲置锁定已更新。"
   }
 }

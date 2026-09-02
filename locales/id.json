@@ -152,8 +152,6 @@
     "section.backups": "Kode Cadangan",
     "section.backups_desc": "Simpan kode pemulihan (tampilan memperlihatkan penuh).",
     "btn.add_backups": "+ Tambah Kode Cadangan",
-    "section.session": "Sesi Web",
-    "section.session_desc": "Dilindungi kata sandi master. Terkunci otomatis setelah 30 detik tidak aktif; server menutup sesi menganggur setelah 5 menit dan sesi apa pun setelah 12 jam.",
     "form.vault": "Brankas:",
     "form.back_list": "← Kembali ke daftar",
     "form.save": "Simpan",
@@ -304,8 +302,7 @@
     "overview.view_all": "Lihat semua",
     "overview.console_eyebrow": "sesi / brankas lokal / terautentikasi",
     "overview.console_records": "rekaman terenkripsi terindeks",
-    "overview.console_gpg": "Batas GnuPG aktif pada host ini",
-    "overview.console_lock": "kunci diam disiapkan selama 30 detik",
+    "overview.console_lock": "kunci otomatis",
     "overview.console_lede": "Periksa, buat, dan kelola kredensial dari satu sesi yang dapat diaudit.",
     "btn.view": "Lihat",
     "generator.mode": "Mode",
@@ -346,6 +343,13 @@
     "tidy.offer_t": "Ada entri yang bisa dirapikan",
     "tidy.offer_d": "entri memuat folder di catatannya atau bernama gaya paket aplikasi. Periksa perubahannya sebelum apa pun ditulis.",
     "tidy.review": "Periksa perubahan",
-    "tidy.done": "entri dirapikan."
+    "tidy.done": "entri dirapikan.",
+    "overview.console_cipher": "sandi enkripsi vault",
+    "settings.lock.title": "Kunci Otomatis",
+    "settings.lock.desc": "Berapa lama Dasbor menunggu sebelum mengunci dirinya sendiri.",
+    "settings.lock.label": "Kunci setelah",
+    "settings.lock.apply": "Terapkan waktu kunci",
+    "settings.lock.note": "Menunggu lebih lama membuat vault yang sudah didekripsi tampil lebih lama di layar. Server mengakhiri sesi yang diam tak lama setelah pengatur waktu ini, apa pun yang dilakukan peramban.",
+    "settings.lock.saved": "Kunci otomatis diperbarui."
   }
 }

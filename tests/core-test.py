@@ -9,6 +9,7 @@ shell, a web server, or a fixture vault built by another implementation.
 import base64
 import builtins
 import errno
+import hashlib
 import json
 import os
 import shutil
@@ -142,7 +143,9 @@ def recovered(path):
 
 
 def data_section(path):
-    return core.parse_container(open(path, "rb").read())[1]
+    raw = open(path, "rb").read()
+    modern = core.parse_container_aead(raw)
+    return modern[2] if modern is not None else core.parse_container(raw)[1]
 
 
 # ----- format ----------------------------------------------------------------
@@ -211,7 +214,7 @@ def t_wrong_password_refuses():
     path = fresh("wrongpw")
     legacy_vault(path, MASTER)
     core.write_vault(path, MASTER, sample())
-    raises(subprocess.CalledProcessError,
+    raises(core.VaultSecretError,
            lambda: core.read_vault(path, OTHER), "wrong password")
 
 
@@ -247,7 +250,7 @@ def t_rewrap_preserves_data_and_recovery():
     plaintext, got = core.read_vault(path, OTHER)
     eq(got, key, "the vault key must survive a password change")
     assert "CoreSecret42" in plaintext
-    raises(subprocess.CalledProcessError,
+    raises(core.VaultSecretError,
            lambda: core.read_vault(path, MASTER), "the old password must stop working")
 
 
@@ -272,8 +275,11 @@ def t_migration_window_is_recoverable():
     eq(secret, MASTER)
     # Read as a vault key it opens nothing; as a master password it works,
     # because the envelope was sealed under the password .recovery still names.
-    raises(subprocess.CalledProcessError,
-           lambda: core.gpg_decrypt(secret, data_section(path)),
+    # Against the live backend, so that migrating the vault to another one
+    # cannot turn this into an assertion that gpg fails to read openssl -- true
+    # of every input, and therefore proof of nothing.
+    raises(core.VaultError,
+           lambda: core.unseal(secret, data_section(path)),
            "the stale secret must not be a data key")
     plaintext, _ = core.read_vault(path, secret)
     assert "CoreSecret42" in plaintext
@@ -381,6 +387,36 @@ def t_command_interface_roundtrip():
     run(["rewrap", path], MASTER + "\n" + OTHER)
     eq(run(["unwrap", path], OTHER), key, "the key survives a rewrap")
     run(["unwrap", path], MASTER, expect=1)
+
+
+def t_command_interface_answers_for_both_backends():
+    """`is-container` and `seal-info` must answer for whichever backend sealed
+    the file. The shell decides whether to migrate on the first of these, and
+    it read too few bytes to see the current magic at all -- reporting every
+    vault this release writes as not a container, which is the answer that
+    makes the CLI try to migrate an already-migrated vault.
+    """
+    modern = fresh("cli-backends")
+    core.write_vault(modern, MASTER, sample(), core.new_vault_key())
+    run(["is-container", modern], "")
+    eq(run(["seal-info", modern], "").split("\t"),
+       ["openssl", core.KDF_NAME, str(core.KDF_N), str(core.KDF_R),
+        str(core.KDF_P) + "\n"])
+
+    legacy = fresh("cli-backends-gpg")
+    key = core.new_vault_key()
+    with open(legacy, "wb") as handle:
+        handle.write(core.build_container(
+            core.gpg_encrypt(MASTER, key.encode("utf-8")),
+            core.gpg_encrypt(key, sample().encode("utf-8"))))
+    run(["is-container", legacy], "")
+    eq(run(["seal-info", legacy], "").split("\t")[0], "gpg")
+
+    raw = fresh("cli-backends-raw")
+    legacy_vault(raw, MASTER)
+    run(["is-container", raw], "", expect=1)
+    eq(run(["seal-info", raw], "").split("\t")[0], "legacy")
+    run(["seal-info", os.path.join(ROOT, "no-such-vault")], "", expect=1)
 
 
 def t_command_interface_reports_refusals():
@@ -614,23 +650,24 @@ def t_fault_disk_full_while_staging():
 
 
 def t_fault_encryption_failure_leaves_nothing_behind():
-    """A refusal from gpg must leave neither a changed vault nor a stage file."""
-    path = fresh("fault-gpg")
+    """A refusal from the cipher must leave neither a changed vault nor a
+    stage file."""
+    path = fresh("fault-cipher")
     legacy_vault(path, MASTER)
     core.write_vault(path, MASTER, sample())
     before = open(path, "rb").read()
 
-    real_encrypt = core.gpg_encrypt
+    real_seal = core.seal
 
-    def refuse(secret, payload, timeout=60):
-        raise core.VaultError("gpg refused")
+    def refuse(key_text, payload):
+        raise core.VaultError("the cipher refused")
 
-    core.gpg_encrypt = refuse
+    core.seal = refuse
     try:
         raises(core.VaultError, lambda: core.write_vault(path, MASTER, sample()),
                "an encryption failure must propagate")
     finally:
-        core.gpg_encrypt = real_encrypt
+        core.seal = real_seal
 
     eq(open(path, "rb").read(), before, "the vault changed despite a failed encrypt")
     _no_stage_files(path, "a failed encrypt")
@@ -1258,15 +1295,18 @@ def t_shares_reconstruct_the_key_after_the_master_changes():
     core.rewrap(vault, MASTER, OTHER)
     try:
         core.read_vault(vault, MASTER)
-    except subprocess.CalledProcessError:
+    except core.VaultSecretError:
         pass
     else:
         raise AssertionError("the old master password still opens the vault")
     rebuilt = core.combine_shares(shares[:2]).decode("utf-8")
     assert rebuilt == key
     again, _ = core.read_vault(vault, OTHER)
-    assert core.gpg_decrypt(rebuilt, core.parse_container(
-        open(vault, "rb").read())[1]).decode("utf-8") == again
+    # The reconstructed key is proved by opening the vault with it, which is
+    # the only proof the share format offers -- it deliberately carries no
+    # digest of the secret for an attacker holding threshold-1 shares to
+    # attack offline.
+    assert core.unseal(rebuilt, data_section(vault)).decode("utf-8") == again
 
 
 def t_doctor_reports_split_recovery():
@@ -1457,6 +1497,273 @@ def t_tidy_is_idempotent():
     assert changed == 0 and twice == once
     # And the original is recorded once, not once per run.
     assert once.count("com.duolingo") == 1
+
+
+# ----- the openssl backend ---------------------------------------------------
+# The format is only as portable as the two derivations underneath it, and
+# neither is visible from a round trip: a build whose openssl derived a
+# different key would encrypt and decrypt perfectly against itself and produce
+# vaults no other machine could open. Known answers are what catch that, so
+# they come first.
+
+KAT_KEY = "c3BtLWtub3duLWFuc3dlci10ZXN0LWtleS0zMmJ5dGVz"
+KAT_SALT = bytes.fromhex("0011223344556677")
+KAT_IV = bytes.fromhex("000102030405060708090a0b0c0d0e0f")
+KAT_PLAINTEXT = b"SPM known-answer plaintext\n"
+KAT_CIPHER = bytes.fromhex(
+    "dfe9f4760bea6b3e981671cb9706ef8977b45761e56af2de3b54a4")
+
+
+def _openssl_printed(text):
+    """openssl -P prints "salt=..", "key=.." and "iv =.." -- note the space."""
+    out = {}
+    for line in text.splitlines():
+        name, _, value = line.partition("=")
+        out[name.strip()] = value.strip().lower()
+    return out
+
+
+def t_openssl_known_answer():
+    """Fixed key, salt, IV and plaintext produce fixed ciphertext.
+
+    This is the test that fails on a platform whose openssl disagrees, rather
+    than that platform silently writing vaults nobody else can read.
+    """
+    eq(core.openssl_ctr(KAT_KEY, KAT_SALT, KAT_IV, KAT_PLAINTEXT), KAT_CIPHER,
+       "openssl produced different ciphertext for the known answer")
+    eq(core.openssl_ctr(KAT_KEY, KAT_SALT, KAT_IV, KAT_CIPHER, decrypt=True),
+       KAT_PLAINTEXT, "the known answer did not decrypt back")
+
+
+def t_openssl_derivation_is_reproducible_in_python():
+    """openssl's -pbkdf2 -iter 1 must be exactly PBKDF2-HMAC-SHA256.
+
+    The format states the derivation; this proves the command line implements
+    the stated one. Without it, "the KDF is pinned" would be a claim about
+    flags rather than about bytes.
+    """
+    expected = hashlib.pbkdf2_hmac("sha256", KAT_KEY.encode("ascii"),
+                                   KAT_SALT, 1, 48)
+    printed = subprocess.check_output(
+        ["openssl", "enc", "-" + core.SEAL_CIPHER, "-e", "-pbkdf2", "-iter", "1",
+         "-md", "sha256", "-S", KAT_SALT.hex(), "-P", "-pass", "fd:0"],
+        input=KAT_KEY.encode("ascii"), stderr=subprocess.DEVNULL).decode()
+    fields = _openssl_printed(printed)
+    eq(fields["key"], expected[:32].hex(), "openssl derived another key")
+    eq(fields["iv"], expected[32:].hex(), "openssl derived another IV")
+
+
+def t_openssl_ignores_the_trailing_newline():
+    """The newline _key_fd writes is a line terminator, not key material.
+
+    If openssl ever kept it, every vault this build wrote would be sealed
+    under a key one byte longer than the format says.
+    """
+    printed = subprocess.check_output(
+        ["openssl", "enc", "-" + core.SEAL_CIPHER, "-e", "-pbkdf2", "-iter", "1",
+         "-md", "sha256", "-S", KAT_SALT.hex(), "-P", "-pass", "fd:0"],
+        input=KAT_KEY.encode("ascii") + b"\n", stderr=subprocess.DEVNULL).decode()
+    expected = hashlib.pbkdf2_hmac("sha256", KAT_KEY.encode("ascii"),
+                                   KAT_SALT, 1, 48)[:32].hex()
+    eq(_openssl_printed(printed)["key"], expected,
+       "openssl treated the terminating newline as part of the key")
+
+
+def t_key_material_must_be_a_single_ascii_line():
+    """A newline in key material would truncate it, silently and completely.
+
+    openssl reads the passphrase as a line. A raw 32-byte key holding an 0x0A
+    would seal the vault under whatever preceded it -- with no error anywhere,
+    because the same truncated key opens it again.
+    """
+    raises(core.VaultError, lambda: core.seal("abc\ndef", b"x"),
+           "a newline in key material must be refused")
+    raises(core.VaultError, lambda: core.seal("abc\rdef", b"x"),
+           "a carriage return in key material must be refused")
+    raises(core.VaultError, lambda: core.seal("caf\u00e9", b"x"),
+           "non-ASCII key material must be refused")
+
+
+def t_scrypt_known_answer():
+    eq(core.derive_kek("known-answer master", bytes(range(16))),
+       "sY/qpCGUjWtqIvzA9NiHoCRCrzQ3WbQ6TaNrJEwGr+E=",
+       "scrypt derived a different key-encryption key")
+
+
+def t_seal_roundtrip_and_freshness():
+    payload = b"a\tb\nc\x00\xff"
+    blob = core.seal(KAT_KEY, payload)
+    eq(core.unseal(KAT_KEY, blob), payload)
+    assert blob != core.seal(KAT_KEY, payload), \
+        "two seals of the same payload must differ; salt and IV are per-seal"
+
+
+def t_seal_detects_every_kind_of_tampering():
+    """Encrypt-then-MAC covers the salt and the IV, not only the ciphertext.
+
+    A MAC over the ciphertext alone would let an attacker move the IV and
+    change the plaintext CTR produces without ever failing authentication.
+    """
+    payload = b"authentic payload"
+    blob = core.seal(KAT_KEY, payload)
+    for offset in (0, 5, 14, len(blob) - 40, len(blob) - 1):
+        broken = bytearray(blob)
+        broken[offset] ^= 0x01
+        raises(core.VaultError, lambda b=bytes(broken): core.unseal(KAT_KEY, b),
+               "a flipped bit at offset %d was accepted" % offset)
+    raises(core.VaultError, lambda: core.unseal(KAT_KEY, blob[:-1]),
+           "a truncated blob was accepted")
+    raises(core.VaultError, lambda: core.unseal(KAT_KEY, blob[:20]),
+           "a blob shorter than its own header was accepted")
+    other = core.new_vault_key()
+    raises(core.VaultError, lambda: core.unseal(other, blob),
+           "the wrong key was accepted")
+
+
+def t_container_aead_roundtrip_and_separation():
+    salt = bytes(range(16))
+    blob = core.build_container_aead(salt, b"envelope-bytes", b"cipher-bytes")
+    assert core.is_container(blob)
+    eq(core.container_backend(blob), "openssl")
+    kdf, envelope, cipher = core.parse_container_aead(blob)
+    eq((envelope, cipher), (b"envelope-bytes", b"cipher-bytes"))
+    eq((kdf["name"], kdf["n"], kdf["r"], kdf["p"], kdf["salt"]),
+       (core.KDF_NAME, core.KDF_N, core.KDF_R, core.KDF_P, salt))
+    # Neither parser may accept the other's file. The gpg reader used to,
+    # because a AEAD header also carries a KEY line and a DATA marker.
+    legacy = core.build_container(b"envelope-bytes", b"cipher-bytes")
+    eq(core.parse_container(blob), None, "the gpg parser accepted an AEAD vault")
+    eq(core.parse_container_aead(legacy), None,
+       "the AEAD parser accepted a gpg vault")
+    eq(core.container_backend(legacy), "gpg")
+    eq(core.container_backend(b"\x85\x02raw gpg message"), None)
+
+
+def t_container_aead_uses_the_vaults_own_kdf_parameters():
+    """The cost parameter is read from the vault, not taken from this build.
+
+    Raising it later must not strand vaults written before the change, and the
+    only way that holds is if the unwrap uses the numbers in the file.
+    """
+    path = fresh("kdf-params")
+    salt = os.urandom(core.KDF_SALT_BYTES)
+    cheap = 1 << 12
+    key = core.new_vault_key()
+    kek = core.derive_kek(MASTER, salt, n=cheap)
+    with open(path, "wb") as handle:
+        handle.write(core.build_container_aead(
+            salt, core.seal(kek, key.encode("utf-8")),
+            core.seal(key, sample().encode("utf-8")), n=cheap))
+    eq(core.unwrap_key(path, MASTER), key,
+       "a vault written at another cost parameter did not open")
+    plaintext, got = core.read_vault(path, MASTER)
+    eq(got, key)
+    assert "CoreSecret42" in plaintext
+
+
+def t_container_aead_refuses_an_unknown_kdf():
+    blob = core.build_container_aead(bytes(range(16)), b"env", b"data")
+    swapped = blob.replace(b"KDF scrypt", b"KDF argon2id", 1)
+    raises(core.VaultError, lambda: core.parse_container_aead(swapped),
+           "a vault naming another KDF must be refused, not guessed at")
+
+
+def t_gpg_vault_upgrades_in_place_keeping_its_key():
+    """The migration that makes this release invisible to everything else.
+
+    A gpg-sealed vault becomes openssl-sealed on its next write, and the vault
+    key does not change -- so the recovery file, any Shamir share set, and
+    every .bak from before the upgrade still refer to the same key.
+    """
+    path = fresh("upgrade")
+    key = core.new_vault_key()
+    with open(path, "wb") as handle:
+        handle.write(core.build_container(
+            core.gpg_encrypt(MASTER, key.encode("utf-8")),
+            core.gpg_encrypt(key, sample().encode("utf-8"))))
+    eq(core.container_backend(open(path, "rb").read()), "gpg")
+    plaintext, got = core.read_vault(path, MASTER)
+    eq(got, key, "a gpg vault must still read after the backend changed")
+
+    eq(core.write_vault(path, MASTER, plaintext), key,
+       "the upgrade must reuse the key, not mint one")
+    eq(core.container_backend(open(path, "rb").read()), "openssl")
+    eq(core.unwrap_key(path, MASTER), key)
+    assert "CoreSecret42" in core.read_vault(path, MASTER)[0]
+
+
+def t_rewrap_upgrades_a_gpg_vault():
+    """A password change moves the last gpg vaults off the old backend.
+
+    It cannot leave them: the new envelope is openssl-sealed, so a gpg data
+    block beside it would be unreadable to the reader that opens the envelope.
+    """
+    path = fresh("rewrap-upgrade")
+    key = core.new_vault_key()
+    with open(path, "wb") as handle:
+        handle.write(core.build_container(
+            core.gpg_encrypt(MASTER, key.encode("utf-8")),
+            core.gpg_encrypt(key, sample().encode("utf-8"))))
+    eq(core.rewrap(path, MASTER, OTHER), key, "rewrap must not remint the key")
+    eq(core.container_backend(open(path, "rb").read()), "openssl")
+    eq(core.unwrap_key(path, OTHER), key)
+    assert "CoreSecret42" in core.read_vault(path, OTHER)[0]
+    raises(core.VaultSecretError, lambda: core.read_vault(path, MASTER),
+           "the old password must stop working")
+
+
+def t_damage_is_reported_as_damage_not_as_a_wrong_password():
+    """The distinction gpg could not make, and the reason it is worth making.
+
+    A wrong password and a corrupted vault have opposite remedies. Under gpg
+    both arrived as one refusal, so the honest message named neither.
+    """
+    path = fresh("damaged")
+    _events_env(path)
+    core.write_vault(path, MASTER, sample(), core.new_vault_key())
+    raw = open(path, "rb").read()
+    head, data = raw.split(b"\nDATA\n", 1)
+    blob = bytearray(base64.b64decode(data))
+    blob[len(core.SEAL_MAGIC) + core.SEAL_SALT_BYTES + core.SEAL_IV_BYTES] ^= 0x01
+    with open(path, "wb") as handle:
+        handle.write(head + b"\nDATA\n" + base64.b64encode(bytes(blob)) + b"\n")
+
+    raises(core.VaultIntegrityError, lambda: core.read_vault(path, MASTER),
+           "damage under the right password must not be reported as a bad password")
+    raises(core.VaultSecretError, lambda: core.read_vault(path, OTHER),
+           "a wrong password must not be reported as damage")
+    reasons = [event["detail"].get("reason") for event in core.read_events(path)
+               if event["outcome"] == "fail"]
+    eq(sorted(set(reasons)), ["bad-master", "corrupt"],
+       "the log must record which of the two refusals happened")
+
+
+def t_doctor_names_the_backend_that_sealed_the_file():
+    path = fresh("doctor-cipher")
+    plaintext = core.stamp_version(sample())
+    core.write_vault(path, MASTER, plaintext, core.new_vault_key())
+
+    def named(report, ident):
+        for entry in report["checks"]:
+            if entry["id"] == ident:
+                return entry
+        raise AssertionError("no %s check in the report" % ident)
+
+    entry = named(core.doctor_report(plaintext, path, "match-current"), "vault_cipher")
+    eq(entry["status"], "ok")
+    eq(entry["backend"], "openssl")
+    eq(entry["kdf"], core.KDF_NAME)
+    eq(entry["kdf_n"], core.KDF_N)
+
+    legacy = fresh("doctor-cipher-gpg")
+    key = core.new_vault_key()
+    with open(legacy, "wb") as handle:
+        handle.write(core.build_container(
+            core.gpg_encrypt(MASTER, key.encode("utf-8")),
+            core.gpg_encrypt(key, plaintext.encode("utf-8"))))
+    entry = named(core.doctor_report(plaintext, legacy, "match-current"), "vault_cipher")
+    eq(entry["status"], "warn", "a gpg vault must be reported as upgradable")
+    eq(entry["backend"], "gpg")
 
 
 for name, fn in sorted(globals().items()):

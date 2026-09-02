@@ -512,22 +512,52 @@ fi
 grep -q 'X-Real-IP' "$web_script"
 grep -q '_sweep_login_failures_locked' "$web_script"
 grep -q 'Stored passphrase cannot be decoded; vault was not changed' "$web_script"
-# The 30-second auto-lock users see runs in the browser, so it protects nobody
-# whose scripts fail to execute. The server-side idle expiry is the control
-# that still holds in that case, and it silently used to be half an hour.
-# [0-9][0-9]* rather than [0-9]\+ -- BSD sed has no \+ in a basic regex, and
-# this suite runs on macOS in CI.
-web_ttl="$(sed -n 's/^SESSION_TTL = \([0-9][0-9]*\)$/\1/p' "$web_script" | head -n1)"
-[ -n "$web_ttl" ] || { printf 'SESSION_TTL not found in generated web script\n' >&2; exit 1; }
-if [ "$web_ttl" -gt 300 ]; then
-	printf 'server-side idle expiry is %ss; the browser lock cannot be the only fast one\n' \
-		"$web_ttl" >&2
-	exit 1
-fi
+# The auto-lock users see runs in the browser, so it protects nobody whose
+# scripts fail to execute. The server-side idle expiry is the control that
+# still holds in that case, and it silently used to be half an hour.
+#
+# Now that the browser lock is configurable the two are coupled, and the
+# coupling is what is checked: the server bound must outlast every offered
+# lock (otherwise the setting promises time the server will not give), must
+# stay at its old 300s for the default (so the common case was not quietly
+# loosened), and must stay bounded at the top of the range.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" SPM_VAULT_PATH="$PASSWORD_VAULT" \
+	XDG_CONFIG_HOME="$TEST_ROOT/lockcfg" python3 - "$web_script" <<'TTLPY'
+import importlib.util, os, sys
+
+spec = importlib.util.spec_from_file_location("spm_web_ttl", sys.argv[1])
+web = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(web)
+
+for choice in web.LOCK_CHOICES:
+    assert web.set_lock_timeout(choice), "%d is offered but cannot be stored" % choice
+    ttl = web.session_ttl()
+    if ttl <= choice:
+        sys.exit("a %ds lock would outlive the %ds server session" % (choice, ttl))
+    if ttl > 1200:
+        sys.exit("server session may idle for %ds, which is unbounded in practice" % ttl)
+    if choice == web.LOCK_DEFAULT and ttl != 300:
+        sys.exit("the default lock changed the server bound from 300s to %ds" % ttl)
+
+# A setting file nobody wrote through the dashboard must not be obeyed. This
+# value decides how long a decrypted vault sits on screen unattended, so it
+# fails towards the short end.
+with open(web.LOCK_CONFIG, "w", encoding="utf-8") as handle:
+    handle.write("86400\n")
+if web.lock_timeout() != web.LOCK_DEFAULT:
+    sys.exit("a hand-edited lock timeout of 86400 was obeyed")
+if web.set_lock_timeout(86400):
+    sys.exit("86400 was accepted as a lock timeout")
+print("  web: idle lock %s, server bound never shorter than the lock it backs"
+      % ", ".join("%ds" % c for c in web.LOCK_CHOICES))
+TTLPY
 PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 -m py_compile \
 	"$web_script" "$ROOT_DIR/browser-extension/native_host.py"
+# XDG_CONFIG_HOME so the idle-lock setting the dashboard persists lands in the
+# test root rather than in the developer's real ~/.config.
 SPM_VAULT_PATH="$PASSWORD_VAULT" SPM_WEB_BIND=127.0.0.1 \
 	SPM_WEB_PORT="$WEB_PORT" SPM_VERSION="$VERSION" \
+	XDG_CONFIG_HOME="$TEST_ROOT/config" \
 	SPM_WEB_RP_ID=localhost python3 "$web_script" \
 	>"$TEST_ROOT/web.log" 2>&1 &
 WEB_PID="$!"
@@ -3416,22 +3446,47 @@ for i, text in enumerate(cases):
 print("  one shared core; shell wrapper verified over %d cases" % len(cases))
 PYFMT
 
-# Key derivation is pinned, not inherited. The measurable part is the digest:
-# GnuPG 2.2 already defaults to s2k mode 3 at the maximum count, but defaults to
-# SHA1 (hash 2) for the digest. hash 10 is SHA512.
-# list-packets exits non-zero on a symmetric file it cannot decrypt, but it
-# still prints the header packet, which is the only part being asserted.
-awk 'NR==2{sub(/^KEY /,"");print;exit}' "$PASSWORD_VAULT" | base64 -d >"$TEST_ROOT/key-envelope.gpg"
-sed -n '/^DATA$/,$p' "$PASSWORD_VAULT" | sed '1d' | base64 -d >"$TEST_ROOT/vault-data.gpg"
-gpg --list-packets "$TEST_ROOT/key-envelope.gpg" >"$TEST_ROOT/vault-packets" 2>/dev/null || true
-gpg --list-packets "$TEST_ROOT/vault-data.gpg" >>"$TEST_ROOT/vault-packets" 2>/dev/null || true
-grep -q 'symkey enc packet' "$TEST_ROOT/vault-packets"
-if ! grep -qE 's2k 3, hash 10' "$TEST_ROOT/vault-packets"; then
-	printf 'vault was not written under the pinned s2k policy:\n' >&2
-	grep 'symkey enc packet' "$TEST_ROOT/vault-packets" >&2
-	exit 1
-fi
-grep -qE 'count 65011712' "$TEST_ROOT/vault-packets"
+# Key derivation is pinned, not inherited, and from 4.0.0 the vault says so in
+# its own header instead of it having to be recovered from gpg packet dumps.
+# Asserted against the file on disk and against the core's constants -- not
+# against numbers written here, because a hardcoded copy would fail a raise of
+# the cost parameter for no reason and pass a silent drop of it.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$PASSWORD_VAULT" \
+	"$ROOT_DIR/src/spm_core.py" <<'KDFPY'
+import base64, importlib.util, re, sys
+
+vault = open(sys.argv[1], "rb").read()
+spec = importlib.util.spec_from_file_location("spm_core_kdf", sys.argv[2])
+core = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(core)
+
+if core.container_backend(vault) != "openssl":
+    sys.exit("the vault was not written by the current backend")
+kdf, envelope, cipher = core.parse_container_aead(vault)
+if (kdf["name"], kdf["n"], kdf["r"], kdf["p"]) != (
+        core.KDF_NAME, core.KDF_N, core.KDF_R, core.KDF_P):
+    sys.exit("the vault header does not carry the core's KDF policy: %r" % kdf)
+if len(kdf["salt"]) != core.KDF_SALT_BYTES:
+    sys.exit("KDF salt is %d bytes, not %d" % (len(kdf["salt"]), core.KDF_SALT_BYTES))
+
+# Both layers are sealed, and sealed separately: a salt or an IV shared between
+# the envelope and the data would mean one keystream covering both.
+head = len(core.SEAL_MAGIC) + core.SEAL_SALT_BYTES + core.SEAL_IV_BYTES
+for name, blob in (("key envelope", envelope), ("vault data", cipher)):
+    if not blob.startswith(core.SEAL_MAGIC):
+        sys.exit("the %s is not a sealed block" % name)
+    if len(blob) < head + core.SEAL_TAG_BYTES:
+        sys.exit("the %s carries no authentication tag" % name)
+if envelope[len(core.SEAL_MAGIC):head] == cipher[len(core.SEAL_MAGIC):head]:
+    sys.exit("the key envelope and the vault data share a salt and IV")
+
+# And it is no longer an OpenPGP message at all, which is the half a header
+# check cannot show on its own.
+if vault[:1] == b"\x85" or b"BEGIN PGP" in vault[:200]:
+    sys.exit("the vault still looks like an OpenPGP message")
+print("  vault: %s n=%d r=%d p=%d, both layers sealed and separately salted"
+      % (kdf["name"], kdf["n"], kdf["r"], kdf["p"]))
+KDFPY
 
 # The new row must be invisible to every parser and to the integrity scanner.
 [ "$(awk -F '\t' '$1 ~ /^[0-9]+$/' "$TEST_ROOT/fmt-plain" | wc -l)" -ge 1 ]
@@ -3446,6 +3501,57 @@ fi
 grep -q "Vault format version $VAULT_FORMAT_VERSION (current)" "$TEST_ROOT/doctor-fmt.txt" \
 	|| { printf 'doctor did not see the upgraded format:\n' >&2
 	     grep -i 'format' "$TEST_ROOT/doctor-fmt.txt" >&2; exit 1; }
+
+printf 'Web regression: the idle lock is a setting, not a constant\n'
+# The lock was 30 seconds in a literal inside the page script. What has to hold
+# now is that the number a page carries comes from the setting -- on every page,
+# not only the one the form is on -- because the failure mode of a stamped
+# value is one forgotten template still locking at the old time.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/settings.html" \
+	"http://127.0.0.1:$WEB_PORT/settings"
+grep -q 'id="lock-timeout"' "$TEST_ROOT/settings.html" || {
+	printf 'the settings page offers no idle lock control\n' >&2; exit 1
+}
+grep -q 'var IDLE_MS = 30000;' "$TEST_ROOT/settings.html" || {
+	printf 'the default idle lock is not 30s in the page as served\n' >&2; exit 1
+}
+lock_csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' \
+	"$TEST_ROOT/settings.html" | head -n1)"
+[ "${#lock_csrf}" -eq 64 ]
+curl -fsS -D "$TEST_ROOT/lock.headers" -b "$TEST_ROOT/cookies" -o /dev/null \
+	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$lock_csrf" --data-urlencode 'seconds=600' \
+	"http://127.0.0.1:$WEB_PORT/settings/lock-timeout"
+grep -q '303 See Other' "$TEST_ROOT/lock.headers"
+for lock_page in / /settings /passwords; do
+	curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/lock-page.html" \
+		"http://127.0.0.1:$WEB_PORT$lock_page"
+	grep -q 'var IDLE_MS = 600000;' "$TEST_ROOT/lock-page.html" || {
+		printf '%s still carries the old idle lock after the setting changed\n' \
+			"$lock_page" >&2
+		exit 1
+	}
+done
+# A value outside the offered list must be refused rather than stored, and the
+# stored one must survive the attempt.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/lock-refused.html" \
+	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$lock_csrf" --data-urlencode 'seconds=86400' \
+	"http://127.0.0.1:$WEB_PORT/settings/lock-timeout"
+grep -q 'not one of the available lock timeouts' "$TEST_ROOT/lock-refused.html" || {
+	printf 'an unlisted lock timeout was not refused\n' >&2; exit 1
+}
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/lock-after.html" \
+	"http://127.0.0.1:$WEB_PORT/settings"
+grep -q 'var IDLE_MS = 600000;' "$TEST_ROOT/lock-after.html" || {
+	printf 'a refused lock timeout still changed the setting\n' >&2; exit 1
+}
+# Put it back, so the pages the rest of this suite fetches carry the default.
+curl -fsS -b "$TEST_ROOT/cookies" -o /dev/null \
+	-X POST -H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$lock_csrf" --data-urlencode 'seconds=30' \
+	"http://127.0.0.1:$WEB_PORT/settings/lock-timeout"
+printf '  web: the lock timer on every page follows the setting; 86400 refused\n'
 
 # --- 2.13.0 master password change from the SPM Dashboard --------------------
 printf 'Web regression: master password change\n'
@@ -3582,11 +3688,29 @@ for known in "$NEW_MASTER" "$AUDIT_PASSWORD"; do
 		exit 1
 	fi
 done
-sed -n '/^DATA$/,$p' "$PASSWORD_VAULT" | sed '1d' | base64 -d >"$TEST_ROOT/recover-data.gpg"
-gpg --batch --quiet --pinentry-mode loopback \
-	--passphrase-file "$TEST_ROOT/recovered-vault-key" \
-	--decrypt "$TEST_ROOT/recover-data.gpg" >"$TEST_ROOT/recovered-plain" 2>/dev/null \
-	|| { printf 'the recovered vault key does not decrypt the vault data\n' >&2; exit 1; }
+# Opened through the live backend rather than through gpg. Reaching for gpg
+# here would keep passing on a vault gpg cannot read at all -- it fails on
+# every input, so proving it fails on this one proves nothing.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$PASSWORD_VAULT" \
+	"$TEST_ROOT/recovered-vault-key" "$TEST_ROOT/recovered-plain" \
+	"$ROOT_DIR/src/spm_core.py" <<'RECOVERPY'
+import importlib.util, sys
+
+spec = importlib.util.spec_from_file_location("spm_core_recover", sys.argv[4])
+core = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(core)
+
+vault = open(sys.argv[1], "rb").read()
+key = open(sys.argv[2], encoding="utf-8").read()
+parsed = core.parse_container_aead(vault)
+if parsed is None:
+    sys.exit("the vault is not in the current format")
+try:
+    plaintext = core.unseal(key, parsed[2])
+except core.VaultError as exc:
+    sys.exit("the recovered vault key does not decrypt the vault data: %s" % exc)
+open(sys.argv[3], "wb").write(plaintext)
+RECOVERPY
 grep -q 'DemoSecret42' "$TEST_ROOT/recovered-plain" \
 	|| { printf 'vault key decrypted the container but the contents are wrong\n' >&2; exit 1; }
 
@@ -4237,6 +4361,28 @@ VK_NEW="VaultKey-New-Password-2"
 prompt_master_password() { MASTER_PW="$STUB_NEW_MASTER"; }
 
 vk_data_section() { sed -n '/^DATA$/,$p' "$1" | sed '1d'; }
+vk_open_data() {
+	# Open the DATA block with a vault key, through whichever backend actually
+	# sealed the file. Reaching for gpg here would keep passing on a vault gpg
+	# cannot read at all: it fails on every input, so proving it fails on this
+	# one proves nothing. Reads the key from a file so no secret is in argv.
+	PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$1" "$2" \
+		"$ROOT_DIR/src/spm_core.py" <<'VKOPENPY'
+import importlib.util, sys
+
+spec = importlib.util.spec_from_file_location("spm_core_vk", sys.argv[3])
+core = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(core)
+key = open(sys.argv[2], encoding="utf-8").read()
+try:
+    text = core.read_vault_with_key(sys.argv[1], key)
+except Exception:
+    sys.exit(1)
+if text is None:
+    sys.exit(1)
+sys.stdout.write(text)
+VKOPENPY
+}
 vk_unwrap() {
 	# The vault key as `spm forgot` would recover it: straight out of the
 	# recovery file with the private key, no master password involved.
@@ -4284,9 +4430,7 @@ vk_new_legacy_vault() {
 		[ "$(cat "$VK_ROOT/key-a")" != "$known" ] \
 			|| { printf 'recovery file still holds a master password\n' >&2; exit 1; }
 	done
-	vk_data_section "$VAULT_FILE" | base64 -d > "$VK_ROOT/data-a.gpg"
-	gpg --batch --quiet --pinentry-mode loopback --passphrase-file "$VK_ROOT/key-a" \
-		--decrypt "$VK_ROOT/data-a.gpg" 2>/dev/null | grep -q 'DemoSecret42' \
+	vk_open_data "$VAULT_FILE" "$VK_ROOT/key-a" | grep -q 'DemoSecret42' \
 		|| { printf 'the recovered vault key does not open the vault\n' >&2; exit 1; }
 
 	# The new password opens it; the old one does not.
@@ -4354,9 +4498,8 @@ vk_new_legacy_vault() {
 	[ "$recovered" = "$VK_OLD" ] || { printf 'the stale recovery file did not hold the master password\n' >&2; exit 1; }
 	# Read as a vault key it opens nothing, so only the master-password
 	# fallback can rescue this vault.
-	vk_data_section "$VAULT_FILE" | base64 -d > "$VK_ROOT/data-c.gpg"
-	if printf '%s' "$recovered" | gpg --batch --quiet --pinentry-mode loopback \
-		--passphrase-fd 0 --decrypt "$VK_ROOT/data-c.gpg" >/dev/null 2>&1; then
+	printf '%s' "$recovered" > "$VK_ROOT/key-stale"
+	if vk_open_data "$VAULT_FILE" "$VK_ROOT/key-stale" >/dev/null 2>&1; then
 		printf 'the recovered secret should not have been a vault key\n' >&2; exit 1
 	fi
 
@@ -4371,9 +4514,7 @@ vk_new_legacy_vault() {
 	vk_unwrap "$VAULT_FILE" > "$VK_ROOT/key-c"
 	[ "$(cat "$VK_ROOT/key-c")" != "$VK_OLD" ] \
 		|| { printf 'forgot left the stale recovery file in place\n' >&2; exit 1; }
-	vk_data_section "$VAULT_FILE" | base64 -d > "$VK_ROOT/data-c2.gpg"
-	gpg --batch --quiet --pinentry-mode loopback --passphrase-file "$VK_ROOT/key-c" \
-		--decrypt "$VK_ROOT/data-c2.gpg" 2>/dev/null | grep -q 'DemoSecret42' \
+	vk_open_data "$VAULT_FILE" "$VK_ROOT/key-c" | grep -q 'DemoSecret42' \
 		|| { printf 'the repaired recovery file does not hold the vault key\n' >&2; exit 1; }
 )
 

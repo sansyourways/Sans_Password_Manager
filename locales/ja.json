@@ -152,8 +152,6 @@
     "section.backups": "バックアップコード",
     "section.backups_desc": "復旧コードを保存（表示時は全文表示）。",
     "btn.add_backups": "+ コード追加",
-    "section.session": "Webセッション",
-    "section.session_desc": "マスターパスワードで保護。30秒間操作がないと自動ロックされ、サーバーも5分でアイドルセッションを、12時間で全セッションを失効させます。",
     "form.vault": "ボールト:",
     "form.back_list": "← 一覧に戻る",
     "form.save": "保存",
@@ -304,8 +302,7 @@
     "overview.view_all": "すべて表示",
     "overview.console_eyebrow": "セッション / ローカル保管庫 / 認証済み",
     "overview.console_records": "件の暗号化レコードを索引済み",
-    "overview.console_gpg": "このホストで GnuPG 境界が有効",
-    "overview.console_lock": "30 秒のアイドルロックを有効化",
+    "overview.console_lock": "自動ロック",
     "overview.console_lede": "監査可能な1つのセッションで認証情報を確認、生成、管理します。",
     "btn.view": "表示",
     "generator.mode": "モード",
@@ -346,6 +343,13 @@
     "tidy.offer_t": "整理できる項目があります",
     "tidy.offer_d": "件の項目がメモにフォルダーを持つか、パッケージ名形式です。書き込む前に変更内容を確認してください。",
     "tidy.review": "変更を確認",
-    "tidy.done": "件の項目を整理しました。"
+    "tidy.done": "件の項目を整理しました。",
+    "overview.console_cipher": "保管庫の暗号",
+    "settings.lock.title": "自動ロック",
+    "settings.lock.desc": "ダッシュボードが自動的にロックするまでの待ち時間です。",
+    "settings.lock.label": "ロックまでの時間",
+    "settings.lock.apply": "ロック時間を適用",
+    "settings.lock.note": "待ち時間を長くすると、復号された保管庫が画面に残る時間も長くなります。ブラウザーの状態にかかわらず、サーバーはこのタイマーの少し後に無操作セッションを終了します。",
+    "settings.lock.saved": "自動ロックを更新しました。"
   }
 }

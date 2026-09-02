@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.15.0"
+VERSION="4.0.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -4121,6 +4121,39 @@ cmd_doctor() {
 			printf "    Its key was derived with GnuPG's older default digest (SHA1).\n"
 		fi
 	fi
+
+	# Report what actually seals the file, which is not the same question as
+	# which format the records are in -- a vault upgraded to format 4 by a
+	# release before 4.0.0 is still gpg-sealed until its next write.
+	local seal_info seal_backend seal_kdf seal_n seal_r seal_p
+	seal_info="$(core seal-info "$VAULT_FILE" 2>/dev/null || true)"
+	seal_backend="$(printf '%s' "$seal_info" | cut -f1)"
+	seal_kdf="$(printf '%s' "$seal_info" | cut -f2)"
+	seal_n="$(printf '%s' "$seal_info" | cut -f3)"
+	seal_r="$(printf '%s' "$seal_info" | cut -f4)"
+	seal_p="$(printf '%s' "$seal_info" | cut -f5)"
+	case "$seal_backend" in
+	openssl)
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "[✔] Vault disegel dengan AES-256-CTR + HMAC-SHA256.\n"
+			printf "    Derivasi kunci %s n=%s r=%s p=%s.\n" \
+				"$seal_kdf" "$seal_n" "$seal_r" "$seal_p"
+		else
+			printf "[✔] Vault sealed with AES-256-CTR and HMAC-SHA256.\n"
+			printf "    Key derivation %s n=%s r=%s p=%s.\n" \
+				"$seal_kdf" "$seal_n" "$seal_r" "$seal_p"
+		fi
+		;;
+	gpg|legacy)
+		if [ "$SPM_LANG" = "id" ]; then
+			printf "[!] Vault masih disegel GnuPG dan belum terautentikasi.\n"
+			printf "    Perubahan berikutnya memutakhirkannya; kunci vault tidak berubah.\n"
+		else
+			printf "[!] Vault is still gpg-sealed, and therefore unauthenticated.\n"
+			printf "    The next change upgrades it in place; the vault key does not change.\n"
+		fi
+		;;
+	esac
 
 	# Check recovery meta public key
 	local pub_b64

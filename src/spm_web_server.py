@@ -260,8 +260,6 @@ WEB_CATALOGUES = {
         "section.backups": "Backup Codes",
         "section.backups_desc": "Store recovery codes (view shows full codes).",
         "btn.add_backups": "+ Add Backup Codes",
-        "section.session": "Web Session",
-        "section.session_desc": "Protected by your master password. The interface auto-locks after 30 seconds of inactivity; the server expires an idle session after 5 minutes and any session after 12 hours.",
         "form.vault": "Vault:",
         "form.back_list": "\u2190 Back to list",
         "form.save": "Save",
@@ -412,8 +410,7 @@ WEB_CATALOGUES = {
         "overview.view_all": "View all",
         "overview.console_eyebrow": "session / local vault / authenticated",
         "overview.console_records": "encrypted records indexed",
-        "overview.console_gpg": "GnuPG boundary active on this host",
-        "overview.console_lock": "idle lock armed for 30 seconds",
+        "overview.console_lock": "idle lock",
         "overview.console_lede": "Inspect, generate, and maintain credentials from one auditable session.",
         "btn.view": "View",
         "generator.mode": "Mode",
@@ -455,6 +452,13 @@ WEB_CATALOGUES = {
         "tidy.offer_d": "entries carry a folder in their notes or a package-style name. Review the changes before anything is written.",
         "tidy.review": "Review changes",
         "tidy.done": "entries tidied.",
+        "overview.console_cipher": "vault cipher",
+        "settings.lock.title": "Idle Lock",
+        "settings.lock.desc": "How long the Dashboard waits before locking itself.",
+        "settings.lock.label": "Lock after",
+        "settings.lock.apply": "Apply lock timeout",
+        "settings.lock.note": "A longer wait leaves the decrypted vault on screen for longer. The server ends an idle session shortly after this timer, whatever the browser is doing.",
+        "settings.lock.saved": "Idle lock updated.",
     },
     "ar": {
         "nav.security": "\u0627\u0644\u0623\u0645\u0627\u0646",
@@ -602,8 +606,6 @@ WEB_CATALOGUES = {
         "section.backups": "\u0631\u0645\u0648\u0632 \u0627\u0644\u0646\u0633\u062e \u0627\u0644\u0627\u062d\u062a\u064a\u0627\u0637\u064a",
         "section.backups_desc": "\u0627\u062d\u0641\u0638 \u0631\u0645\u0648\u0632 \u0627\u0644\u0627\u0633\u062a\u0631\u062f\u0627\u062f (\u064a\u0639\u0631\u0636\u0647\u0627 \u0627\u0644\u0639\u0631\u0636 \u0643\u0627\u0645\u0644\u0629).",
         "btn.add_backups": "+ \u0625\u0636\u0627\u0641\u0629 \u0631\u0645\u0648\u0632 \u0646\u0633\u062e \u0627\u062d\u062a\u064a\u0627\u0637\u064a",
-        "section.session": "\u062c\u0644\u0633\u0629 \u0627\u0644\u0648\u064a\u0628",
-        "section.session_desc": "\u0645\u062d\u0645\u064a\u0629 \u0628\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629. \u062a\u064f\u0642\u0641\u0644 \u0627\u0644\u0648\u0627\u062c\u0647\u0629 \u0646\u0641\u0633\u0647\u0627 \u0628\u0639\u062f 30 \u062b\u0627\u0646\u064a\u0629 \u0645\u0646 \u0627\u0644\u062e\u0645\u0648\u0644\u061b \u0648\u064a\u0646\u0647\u064a \u0627\u0644\u062e\u0627\u062f\u0645 \u0627\u0644\u062c\u0644\u0633\u0629 \u0627\u0644\u062e\u0627\u0645\u0644\u0629 \u0628\u0639\u062f 5 \u062f\u0642\u0627\u0626\u0642\u060c \u0648\u0623\u064a \u062c\u0644\u0633\u0629 \u0628\u0639\u062f 12 \u0633\u0627\u0639\u0629.",
         "form.vault": "\u0627\u0644\u062e\u0632\u0646\u0629:",
         "form.back_list": "\u2190 \u0627\u0644\u0639\u0648\u062f\u0629 \u0625\u0644\u0649 \u0627\u0644\u0642\u0627\u0626\u0645\u0629",
         "form.save": "\u062d\u0641\u0638",
@@ -754,8 +756,7 @@ WEB_CATALOGUES = {
         "overview.view_all": "\u0639\u0631\u0636 \u0627\u0644\u0643\u0644",
         "overview.console_eyebrow": "\u062c\u0644\u0633\u0629 / \u062e\u0632\u0646\u0629 \u0645\u062d\u0644\u064a\u0629 / \u0645\u0648\u062b\u0651\u0642\u0629",
         "overview.console_records": "\u0633\u062c\u0644\u064b\u0627 \u0645\u0634\u0641\u0651\u0631\u064b\u0627 \u0645\u0641\u0647\u0631\u0633\u064b\u0627",
-        "overview.console_gpg": "\u062d\u062f\u0651 GnuPG \u0641\u0639\u0651\u0627\u0644 \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0645\u0636\u064a\u0641",
-        "overview.console_lock": "\u0642\u0641\u0644 \u0627\u0644\u062e\u0645\u0648\u0644 \u0645\u0636\u0628\u0648\u0637 \u0639\u0644\u0649 30 \u062b\u0627\u0646\u064a\u0629",
+        "overview.console_lock": "\u0642\u0641\u0644 \u0627\u0644\u062e\u0645\u0648\u0644",
         "overview.console_lede": "\u0627\u0641\u062d\u0635 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0627\u0639\u062a\u0645\u0627\u062f \u0648\u0623\u0646\u0634\u0626\u0647\u0627 \u0648\u062a\u0639\u0647\u0651\u062f\u0647\u0627 \u0645\u0646 \u062c\u0644\u0633\u0629 \u0648\u0627\u062d\u062f\u0629 \u0642\u0627\u0628\u0644\u0629 \u0644\u0644\u062a\u062f\u0642\u064a\u0642.",
         "btn.view": "\u0639\u0631\u0636",
         "generator.mode": "\u0627\u0644\u0648\u0636\u0639",
@@ -797,6 +798,13 @@ WEB_CATALOGUES = {
         "tidy.offer_d": "\u0645\u062f\u062e\u0644\u064b\u0627 \u064a\u062d\u0645\u0644 \u0645\u062c\u0644\u062f\u064b\u0627 \u0641\u064a \u0645\u0644\u0627\u062d\u0638\u0627\u062a\u0647 \u0623\u0648 \u0627\u0633\u0645\u064b\u0627 \u0639\u0644\u0649 \u0647\u064a\u0626\u0629 \u062d\u0632\u0645\u0629 \u062a\u0637\u0628\u064a\u0642. \u0631\u0627\u062c\u0639 \u0627\u0644\u062a\u063a\u064a\u064a\u0631\u0627\u062a \u0642\u0628\u0644 \u0643\u062a\u0627\u0628\u0629 \u0623\u064a \u0634\u064a\u0621.",
         "tidy.review": "\u0631\u0627\u062c\u0639 \u0627\u0644\u062a\u063a\u064a\u064a\u0631\u0627\u062a",
         "tidy.done": "\u0645\u062f\u062e\u0644\u064b\u0627 \u062c\u0631\u0649 \u062a\u0631\u062a\u064a\u0628\u0647.",
+        "overview.console_cipher": "\u062a\u0634\u0641\u064a\u0631 \u0627\u0644\u062e\u0632\u0646\u0629",
+        "settings.lock.title": "\u0642\u0641\u0644 \u0627\u0644\u062e\u0645\u0648\u0644",
+        "settings.lock.desc": "\u0627\u0644\u0645\u062f\u0629 \u0627\u0644\u062a\u064a \u062a\u0646\u062a\u0638\u0631\u0647\u0627 \u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645 \u0642\u0628\u0644 \u0623\u0646 \u062a\u0642\u0641\u0644 \u0646\u0641\u0633\u0647\u0627.",
+        "settings.lock.label": "\u0627\u0642\u0641\u0644 \u0628\u0639\u062f",
+        "settings.lock.apply": "\u062a\u0637\u0628\u064a\u0642 \u0645\u0647\u0644\u0629 \u0627\u0644\u0642\u0641\u0644",
+        "settings.lock.note": "\u0627\u0644\u0627\u0646\u062a\u0638\u0627\u0631 \u0627\u0644\u0623\u0637\u0648\u0644 \u064a\u062a\u0631\u0643 \u0627\u0644\u062e\u0632\u0646\u0629 \u0627\u0644\u0645\u0641\u0643\u0648\u0643\u0629 \u0639\u0644\u0649 \u0627\u0644\u0634\u0627\u0634\u0629 \u0645\u062f\u0629 \u0623\u0637\u0648\u0644. \u064a\u064f\u0646\u0647\u064a \u0627\u0644\u062e\u0627\u062f\u0645 \u0627\u0644\u062c\u0644\u0633\u0629 \u0627\u0644\u062e\u0627\u0645\u0644\u0629 \u0628\u0639\u062f \u0647\u0630\u0627 \u0627\u0644\u0645\u0624\u0642\u062a \u0628\u0642\u0644\u064a\u0644\u060c \u0645\u0647\u0645\u0627 \u0641\u0639\u0644 \u0627\u0644\u0645\u062a\u0635\u0641\u062d.",
+        "settings.lock.saved": "\u062a\u0645 \u062a\u062d\u062f\u064a\u062b \u0642\u0641\u0644 \u0627\u0644\u062e\u0645\u0648\u0644.",
     },
     "de": {
         "nav.security": "Sicherheit",
@@ -944,8 +952,6 @@ WEB_CATALOGUES = {
         "section.backups": "Backup-Codes",
         "section.backups_desc": "Bewahre Wiederherstellungscodes auf (die Ansicht zeigt sie vollst\u00e4ndig).",
         "btn.add_backups": "+ Backup-Codes hinzuf\u00fcgen",
-        "section.session": "Web-Sitzung",
-        "section.session_desc": "Durch dein Hauptpasswort gesch\u00fctzt. Die Oberfl\u00e4che sperrt sich nach 30 Sekunden Inaktivit\u00e4t selbst; der Server l\u00e4sst eine unt\u00e4tige Sitzung nach 5 Minuten und jede Sitzung nach 12 Stunden verfallen.",
         "form.vault": "Tresor:",
         "form.back_list": "\u2190 Zur\u00fcck zur Liste",
         "form.save": "Speichern",
@@ -1096,8 +1102,7 @@ WEB_CATALOGUES = {
         "overview.view_all": "Alle ansehen",
         "overview.console_eyebrow": "Sitzung / lokaler Tresor / authentifiziert",
         "overview.console_records": "verschl\u00fcsselte Eintr\u00e4ge indiziert",
-        "overview.console_gpg": "GnuPG-Grenze auf diesem Rechner aktiv",
-        "overview.console_lock": "Inaktivit\u00e4tssperre auf 30 Sekunden scharf",
+        "overview.console_lock": "Leerlaufsperre",
         "overview.console_lede": "Zugangsdaten pr\u00fcfen, erzeugen und pflegen \u2013 aus einer einzigen nachvollziehbaren Sitzung.",
         "btn.view": "Ansehen",
         "generator.mode": "Modus",
@@ -1139,6 +1144,13 @@ WEB_CATALOGUES = {
         "tidy.offer_d": "Eintr\u00e4ge tragen einen Ordner in ihren Notizen oder einen Namen in Paketform. Pr\u00fcfe die \u00c4nderungen, bevor etwas geschrieben wird.",
         "tidy.review": "\u00c4nderungen pr\u00fcfen",
         "tidy.done": "Eintr\u00e4ge aufger\u00e4umt.",
+        "overview.console_cipher": "Tresor-Chiffre",
+        "settings.lock.title": "Leerlaufsperre",
+        "settings.lock.desc": "Wie lange das Dashboard wartet, bevor es sich selbst sperrt.",
+        "settings.lock.label": "Sperren nach",
+        "settings.lock.apply": "Sperrzeit \u00fcbernehmen",
+        "settings.lock.note": "Eine l\u00e4ngere Wartezeit l\u00e4sst den entschl\u00fcsselten Tresor l\u00e4nger auf dem Bildschirm. Der Server beendet eine unt\u00e4tige Sitzung kurz nach diesem Timer, unabh\u00e4ngig davon, was der Browser tut.",
+        "settings.lock.saved": "Leerlaufsperre aktualisiert.",
     },
     "es": {
         "nav.security": "Seguridad",
@@ -1286,8 +1298,6 @@ WEB_CATALOGUES = {
         "section.backups": "C\u00f3digos de respaldo",
         "section.backups_desc": "Guarda c\u00f3digos de recuperaci\u00f3n (al verlos se muestran completos).",
         "btn.add_backups": "+ A\u00f1adir c\u00f3digos de respaldo",
-        "section.session": "Sesi\u00f3n web",
-        "section.session_desc": "Protegida por tu contrase\u00f1a maestra. La interfaz se bloquea sola tras 30 segundos de inactividad; el servidor caduca una sesi\u00f3n inactiva a los 5 minutos y cualquier sesi\u00f3n a las 12 horas.",
         "form.vault": "Caja fuerte:",
         "form.back_list": "\u2190 Volver a la lista",
         "form.save": "Guardar",
@@ -1438,8 +1448,7 @@ WEB_CATALOGUES = {
         "overview.view_all": "Ver todo",
         "overview.console_eyebrow": "sesi\u00f3n / caja fuerte local / autenticada",
         "overview.console_records": "registros cifrados indexados",
-        "overview.console_gpg": "l\u00edmite de GnuPG activo en este equipo",
-        "overview.console_lock": "bloqueo por inactividad armado a 30 segundos",
+        "overview.console_lock": "bloqueo por inactividad",
         "overview.console_lede": "Inspecciona, genera y mant\u00e9n credenciales desde una \u00fanica sesi\u00f3n auditable.",
         "btn.view": "Ver",
         "generator.mode": "Modo",
@@ -1481,6 +1490,13 @@ WEB_CATALOGUES = {
         "tidy.offer_d": "entradas llevan una carpeta en sus notas o un nombre con forma de paquete. Revisa los cambios antes de escribir nada.",
         "tidy.review": "Revisar los cambios",
         "tidy.done": "entradas ordenadas.",
+        "overview.console_cipher": "cifrado de la b\u00f3veda",
+        "settings.lock.title": "Bloqueo por inactividad",
+        "settings.lock.desc": "Cu\u00e1nto espera el panel antes de bloquearse solo.",
+        "settings.lock.label": "Bloquear despu\u00e9s de",
+        "settings.lock.apply": "Aplicar tiempo de bloqueo",
+        "settings.lock.note": "Una espera m\u00e1s larga deja la b\u00f3veda descifrada m\u00e1s tiempo en pantalla. El servidor termina una sesi\u00f3n inactiva poco despu\u00e9s de este temporizador, haga lo que haga el navegador.",
+        "settings.lock.saved": "Bloqueo por inactividad actualizado.",
     },
     "fr": {
         "nav.security": "S\u00e9curit\u00e9",
@@ -1628,8 +1644,6 @@ WEB_CATALOGUES = {
         "section.backups": "Codes de secours",
         "section.backups_desc": "Conservez des codes de r\u00e9cup\u00e9ration (l'affichage montre les codes complets).",
         "btn.add_backups": "+ Ajouter des codes de secours",
-        "section.session": "Session web",
-        "section.session_desc": "Prot\u00e9g\u00e9e par votre mot de passe ma\u00eetre. L'interface se verrouille seule apr\u00e8s 30 secondes d'inactivit\u00e9 ; le serveur expire une session inactive au bout de 5 minutes, et toute session au bout de 12 heures.",
         "form.vault": "Coffre :",
         "form.back_list": "\u2190 Retour \u00e0 la liste",
         "form.save": "Enregistrer",
@@ -1780,8 +1794,7 @@ WEB_CATALOGUES = {
         "overview.view_all": "Tout voir",
         "overview.console_eyebrow": "session / coffre local / authentifi\u00e9e",
         "overview.console_records": "fiches chiffr\u00e9es index\u00e9es",
-        "overview.console_gpg": "fronti\u00e8re GnuPG active sur cet h\u00f4te",
-        "overview.console_lock": "verrouillage automatique arm\u00e9 \u00e0 30 secondes",
+        "overview.console_lock": "verrouillage par inactivit\u00e9",
         "overview.console_lede": "Inspectez, g\u00e9n\u00e9rez et entretenez vos identifiants depuis une seule session auditable.",
         "btn.view": "Consulter",
         "generator.mode": "Mode",
@@ -1823,6 +1836,13 @@ WEB_CATALOGUES = {
         "tidy.offer_d": "fiches portent un dossier dans leurs notes ou un nom en forme d'identifiant de paquet. V\u00e9rifiez les modifications avant toute \u00e9criture.",
         "tidy.review": "V\u00e9rifier les modifications",
         "tidy.done": "fiches rang\u00e9es.",
+        "overview.console_cipher": "chiffrement du coffre",
+        "settings.lock.title": "Verrouillage par inactivit\u00e9",
+        "settings.lock.desc": "Combien de temps le tableau de bord attend avant de se verrouiller.",
+        "settings.lock.label": "Verrouiller apr\u00e8s",
+        "settings.lock.apply": "Appliquer le d\u00e9lai de verrouillage",
+        "settings.lock.note": "Une attente plus longue laisse le coffre d\u00e9chiffr\u00e9 plus longtemps \u00e0 l'\u00e9cran. Le serveur met fin \u00e0 une session inactive peu apr\u00e8s ce d\u00e9lai, quoi que fasse le navigateur.",
+        "settings.lock.saved": "Verrouillage par inactivit\u00e9 mis \u00e0 jour.",
     },
     "hi": {
         "nav.security": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e",
@@ -1970,8 +1990,6 @@ WEB_CATALOGUES = {
         "section.backups": "\u092c\u0948\u0915\u0905\u092a \u0915\u094b\u0921",
         "section.backups_desc": "\u0930\u093f\u0915\u0935\u0930\u0940 \u0915\u094b\u0921 \u0930\u0916\u0947\u0902 (\u0926\u0947\u0916\u0928\u0947 \u092a\u0930 \u092a\u0942\u0930\u0947 \u0915\u094b\u0921 \u0926\u093f\u0916\u0924\u0947 \u0939\u0948\u0902)\u0964",
         "btn.add_backups": "+ \u092c\u0948\u0915\u0905\u092a \u0915\u094b\u0921 \u091c\u094b\u0921\u093c\u0947\u0902",
-        "section.session": "\u0935\u0947\u092c \u0938\u0924\u094d\u0930",
-        "section.session_desc": "\u0906\u092a\u0915\u0947 \u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0938\u0947 \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924\u0964 30 \u0938\u0947\u0915\u0902\u0921 \u0928\u093f\u0937\u094d\u0915\u094d\u0930\u093f\u092f \u0930\u0939\u0928\u0947 \u092a\u0930 \u0907\u0902\u091f\u0930\u092b\u093c\u0947\u0938 \u0905\u092a\u0928\u0947 \u0906\u092a \u0932\u0949\u0915 \u0939\u094b \u091c\u093e\u0924\u093e \u0939\u0948; \u0938\u0930\u094d\u0935\u0930 \u0928\u093f\u0937\u094d\u0915\u094d\u0930\u093f\u092f \u0938\u0924\u094d\u0930 \u0915\u094b 5 \u092e\u093f\u0928\u091f \u092e\u0947\u0902 \u0914\u0930 \u0915\u093f\u0938\u0940 \u092d\u0940 \u0938\u0924\u094d\u0930 \u0915\u094b 12 \u0918\u0902\u091f\u0947 \u092e\u0947\u0902 \u0938\u092e\u093e\u092a\u094d\u0924 \u0915\u0930 \u0926\u0947\u0924\u093e \u0939\u0948\u0964",
         "form.vault": "\u0924\u093f\u091c\u094b\u0930\u0940:",
         "form.back_list": "\u2190 \u0938\u0942\u091a\u0940 \u092a\u0930 \u0935\u093e\u092a\u0938",
         "form.save": "\u0938\u0939\u0947\u091c\u0947\u0902",
@@ -2122,8 +2140,7 @@ WEB_CATALOGUES = {
         "overview.view_all": "\u0938\u092c \u0926\u0947\u0916\u0947\u0902",
         "overview.console_eyebrow": "\u0938\u0924\u094d\u0930 / \u0938\u094d\u0925\u093e\u0928\u0940\u092f \u0924\u093f\u091c\u094b\u0930\u0940 / \u092a\u094d\u0930\u092e\u093e\u0923\u093f\u0924",
         "overview.console_records": "\u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u0905\u0928\u0941\u0915\u094d\u0930\u092e\u093f\u0924",
-        "overview.console_gpg": "\u0907\u0938 \u0939\u094b\u0938\u094d\u091f \u092a\u0930 GnuPG \u0938\u0940\u092e\u093e \u0938\u0915\u094d\u0930\u093f\u092f",
-        "overview.console_lock": "\u0928\u093f\u0937\u094d\u0915\u094d\u0930\u093f\u092f\u0924\u093e \u0932\u0949\u0915 30 \u0938\u0947\u0915\u0902\u0921 \u092a\u0930 \u0924\u0948\u092f\u093e\u0930",
+        "overview.console_lock": "\u0928\u093f\u0937\u094d\u0915\u094d\u0930\u093f\u092f\u0924\u093e \u0932\u0949\u0915",
         "overview.console_lede": "\u090f\u0915 \u0939\u0940 \u091c\u093e\u0901\u091a\u0928\u0947 \u092f\u094b\u0917\u094d\u092f \u0938\u0924\u094d\u0930 \u092e\u0947\u0902 \u0905\u092a\u0928\u0947 \u0915\u094d\u0930\u0947\u0921\u0947\u0902\u0936\u093f\u092f\u0932 \u0926\u0947\u0916\u0947\u0902, \u092c\u0928\u093e\u090f\u0901 \u0914\u0930 \u0938\u0901\u092d\u093e\u0932\u0947\u0902\u0964",
         "btn.view": "\u0926\u0947\u0916\u0947\u0902",
         "generator.mode": "\u092e\u094b\u0921",
@@ -2165,6 +2182,13 @@ WEB_CATALOGUES = {
         "tidy.offer_d": "\u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u094b\u0902 \u0915\u0947 \u0928\u094b\u091f \u092e\u0947\u0902 \u092b\u093c\u094b\u0932\u094d\u0921\u0930 \u0939\u0948 \u092f\u093e \u0909\u0928\u0915\u093e \u0928\u093e\u092e \u092a\u0948\u0915\u0947\u091c \u0936\u0948\u0932\u0940 \u0915\u093e \u0939\u0948\u0964 \u0915\u0941\u091b \u092d\u0940 \u0932\u093f\u0916\u0928\u0947 \u0938\u0947 \u092a\u0939\u0932\u0947 \u092c\u0926\u0932\u093e\u0935 \u0926\u0947\u0916 \u0932\u0947\u0902\u0964",
         "tidy.review": "\u092c\u0926\u0932\u093e\u0935 \u0926\u0947\u0916\u0947\u0902",
         "tidy.done": "\u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u0935\u094d\u092f\u0935\u0938\u094d\u0925\u093f\u0924 \u0939\u0941\u0908\u0902\u0964",
+        "overview.console_cipher": "\u0935\u0949\u0932\u094d\u091f \u0938\u093f\u092b\u0930",
+        "settings.lock.title": "\u0928\u093f\u0937\u094d\u0915\u094d\u0930\u093f\u092f\u0924\u093e \u0932\u0949\u0915",
+        "settings.lock.desc": "\u0921\u0948\u0936\u092c\u094b\u0930\u094d\u0921 \u0938\u094d\u0935\u092f\u0902 \u0932\u0949\u0915 \u0939\u094b\u0928\u0947 \u0938\u0947 \u092a\u0939\u0932\u0947 \u0915\u093f\u0924\u0928\u0940 \u0926\u0947\u0930 \u092a\u094d\u0930\u0924\u0940\u0915\u094d\u0937\u093e \u0915\u0930\u0924\u093e \u0939\u0948\u0964",
+        "settings.lock.label": "\u0907\u0938\u0915\u0947 \u092c\u093e\u0926 \u0932\u0949\u0915 \u0915\u0930\u0947\u0902",
+        "settings.lock.apply": "\u0932\u0949\u0915 \u0938\u092e\u092f \u0932\u093e\u0917\u0942 \u0915\u0930\u0947\u0902",
+        "settings.lock.note": "\u0932\u0902\u092c\u0940 \u092a\u094d\u0930\u0924\u0940\u0915\u094d\u0937\u093e \u0921\u093f\u0915\u094d\u0930\u093f\u092a\u094d\u091f \u0915\u093f\u090f \u0917\u090f \u0935\u0949\u0932\u094d\u091f \u0915\u094b \u0938\u094d\u0915\u094d\u0930\u0940\u0928 \u092a\u0930 \u0905\u0927\u093f\u0915 \u0938\u092e\u092f \u0924\u0915 \u091b\u094b\u0921\u093c\u0924\u0940 \u0939\u0948\u0964 \u092c\u094d\u0930\u093e\u0909\u095b\u0930 \u091c\u094b \u092d\u0940 \u0915\u0930\u0947, \u0938\u0930\u094d\u0935\u0930 \u0907\u0938 \u091f\u093e\u0907\u092e\u0930 \u0915\u0947 \u0915\u0941\u091b \u0939\u0940 \u092c\u093e\u0926 \u0928\u093f\u0937\u094d\u0915\u094d\u0930\u093f\u092f \u0938\u0924\u094d\u0930 \u0938\u092e\u093e\u092a\u094d\u0924 \u0915\u0930 \u0926\u0947\u0924\u093e \u0939\u0948\u0964",
+        "settings.lock.saved": "\u0928\u093f\u0937\u094d\u0915\u094d\u0930\u093f\u092f\u0924\u093e \u0932\u0949\u0915 \u0905\u092a\u0921\u0947\u091f \u0939\u094b \u0917\u092f\u093e\u0964",
     },
     "id": {
         "nav.security": "Keamanan",
@@ -2312,8 +2336,6 @@ WEB_CATALOGUES = {
         "section.backups": "Kode Cadangan",
         "section.backups_desc": "Simpan kode pemulihan (tampilan memperlihatkan penuh).",
         "btn.add_backups": "+ Tambah Kode Cadangan",
-        "section.session": "Sesi Web",
-        "section.session_desc": "Dilindungi kata sandi master. Terkunci otomatis setelah 30 detik tidak aktif; server menutup sesi menganggur setelah 5 menit dan sesi apa pun setelah 12 jam.",
         "form.vault": "Brankas:",
         "form.back_list": "\u2190 Kembali ke daftar",
         "form.save": "Simpan",
@@ -2464,8 +2486,7 @@ WEB_CATALOGUES = {
         "overview.view_all": "Lihat semua",
         "overview.console_eyebrow": "sesi / brankas lokal / terautentikasi",
         "overview.console_records": "rekaman terenkripsi terindeks",
-        "overview.console_gpg": "Batas GnuPG aktif pada host ini",
-        "overview.console_lock": "kunci diam disiapkan selama 30 detik",
+        "overview.console_lock": "kunci otomatis",
         "overview.console_lede": "Periksa, buat, dan kelola kredensial dari satu sesi yang dapat diaudit.",
         "btn.view": "Lihat",
         "generator.mode": "Mode",
@@ -2507,6 +2528,13 @@ WEB_CATALOGUES = {
         "tidy.offer_d": "entri memuat folder di catatannya atau bernama gaya paket aplikasi. Periksa perubahannya sebelum apa pun ditulis.",
         "tidy.review": "Periksa perubahan",
         "tidy.done": "entri dirapikan.",
+        "overview.console_cipher": "sandi enkripsi vault",
+        "settings.lock.title": "Kunci Otomatis",
+        "settings.lock.desc": "Berapa lama Dasbor menunggu sebelum mengunci dirinya sendiri.",
+        "settings.lock.label": "Kunci setelah",
+        "settings.lock.apply": "Terapkan waktu kunci",
+        "settings.lock.note": "Menunggu lebih lama membuat vault yang sudah didekripsi tampil lebih lama di layar. Server mengakhiri sesi yang diam tak lama setelah pengatur waktu ini, apa pun yang dilakukan peramban.",
+        "settings.lock.saved": "Kunci otomatis diperbarui.",
     },
     "ja": {
         "nav.security": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3",
@@ -2654,8 +2682,6 @@ WEB_CATALOGUES = {
         "section.backups": "\u30d0\u30c3\u30af\u30a2\u30c3\u30d7\u30b3\u30fc\u30c9",
         "section.backups_desc": "\u5fa9\u65e7\u30b3\u30fc\u30c9\u3092\u4fdd\u5b58\uff08\u8868\u793a\u6642\u306f\u5168\u6587\u8868\u793a\uff09\u3002",
         "btn.add_backups": "+ \u30b3\u30fc\u30c9\u8ffd\u52a0",
-        "section.session": "Web\u30bb\u30c3\u30b7\u30e7\u30f3",
-        "section.session_desc": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\u3067\u4fdd\u8b77\u300230\u79d2\u9593\u64cd\u4f5c\u304c\u306a\u3044\u3068\u81ea\u52d5\u30ed\u30c3\u30af\u3055\u308c\u3001\u30b5\u30fc\u30d0\u30fc\u30825\u5206\u3067\u30a2\u30a4\u30c9\u30eb\u30bb\u30c3\u30b7\u30e7\u30f3\u3092\u300112\u6642\u9593\u3067\u5168\u30bb\u30c3\u30b7\u30e7\u30f3\u3092\u5931\u52b9\u3055\u305b\u307e\u3059\u3002",
         "form.vault": "\u30dc\u30fc\u30eb\u30c8:",
         "form.back_list": "\u2190 \u4e00\u89a7\u306b\u623b\u308b",
         "form.save": "\u4fdd\u5b58",
@@ -2806,8 +2832,7 @@ WEB_CATALOGUES = {
         "overview.view_all": "\u3059\u3079\u3066\u8868\u793a",
         "overview.console_eyebrow": "\u30bb\u30c3\u30b7\u30e7\u30f3 / \u30ed\u30fc\u30ab\u30eb\u4fdd\u7ba1\u5eab / \u8a8d\u8a3c\u6e08\u307f",
         "overview.console_records": "\u4ef6\u306e\u6697\u53f7\u5316\u30ec\u30b3\u30fc\u30c9\u3092\u7d22\u5f15\u6e08\u307f",
-        "overview.console_gpg": "\u3053\u306e\u30db\u30b9\u30c8\u3067 GnuPG \u5883\u754c\u304c\u6709\u52b9",
-        "overview.console_lock": "30 \u79d2\u306e\u30a2\u30a4\u30c9\u30eb\u30ed\u30c3\u30af\u3092\u6709\u52b9\u5316",
+        "overview.console_lock": "\u81ea\u52d5\u30ed\u30c3\u30af",
         "overview.console_lede": "\u76e3\u67fb\u53ef\u80fd\u306a1\u3064\u306e\u30bb\u30c3\u30b7\u30e7\u30f3\u3067\u8a8d\u8a3c\u60c5\u5831\u3092\u78ba\u8a8d\u3001\u751f\u6210\u3001\u7ba1\u7406\u3057\u307e\u3059\u3002",
         "btn.view": "\u8868\u793a",
         "generator.mode": "\u30e2\u30fc\u30c9",
@@ -2849,6 +2874,13 @@ WEB_CATALOGUES = {
         "tidy.offer_d": "\u4ef6\u306e\u9805\u76ee\u304c\u30e1\u30e2\u306b\u30d5\u30a9\u30eb\u30c0\u30fc\u3092\u6301\u3064\u304b\u3001\u30d1\u30c3\u30b1\u30fc\u30b8\u540d\u5f62\u5f0f\u3067\u3059\u3002\u66f8\u304d\u8fbc\u3080\u524d\u306b\u5909\u66f4\u5185\u5bb9\u3092\u78ba\u8a8d\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
         "tidy.review": "\u5909\u66f4\u3092\u78ba\u8a8d",
         "tidy.done": "\u4ef6\u306e\u9805\u76ee\u3092\u6574\u7406\u3057\u307e\u3057\u305f\u3002",
+        "overview.console_cipher": "\u4fdd\u7ba1\u5eab\u306e\u6697\u53f7",
+        "settings.lock.title": "\u81ea\u52d5\u30ed\u30c3\u30af",
+        "settings.lock.desc": "\u30c0\u30c3\u30b7\u30e5\u30dc\u30fc\u30c9\u304c\u81ea\u52d5\u7684\u306b\u30ed\u30c3\u30af\u3059\u308b\u307e\u3067\u306e\u5f85\u3061\u6642\u9593\u3067\u3059\u3002",
+        "settings.lock.label": "\u30ed\u30c3\u30af\u307e\u3067\u306e\u6642\u9593",
+        "settings.lock.apply": "\u30ed\u30c3\u30af\u6642\u9593\u3092\u9069\u7528",
+        "settings.lock.note": "\u5f85\u3061\u6642\u9593\u3092\u9577\u304f\u3059\u308b\u3068\u3001\u5fa9\u53f7\u3055\u308c\u305f\u4fdd\u7ba1\u5eab\u304c\u753b\u9762\u306b\u6b8b\u308b\u6642\u9593\u3082\u9577\u304f\u306a\u308a\u307e\u3059\u3002\u30d6\u30e9\u30a6\u30b6\u30fc\u306e\u72b6\u614b\u306b\u304b\u304b\u308f\u3089\u305a\u3001\u30b5\u30fc\u30d0\u30fc\u306f\u3053\u306e\u30bf\u30a4\u30de\u30fc\u306e\u5c11\u3057\u5f8c\u306b\u7121\u64cd\u4f5c\u30bb\u30c3\u30b7\u30e7\u30f3\u3092\u7d42\u4e86\u3057\u307e\u3059\u3002",
+        "settings.lock.saved": "\u81ea\u52d5\u30ed\u30c3\u30af\u3092\u66f4\u65b0\u3057\u307e\u3057\u305f\u3002",
     },
     "ko": {
         "nav.security": "\ubcf4\uc548",
@@ -2996,8 +3028,6 @@ WEB_CATALOGUES = {
         "section.backups": "\ubc31\uc5c5 \ucf54\ub4dc",
         "section.backups_desc": "\ubcf5\uad6c \ucf54\ub4dc\ub97c \ubcf4\uad00\ud569\ub2c8\ub2e4 (\uc5f4\uc5b4 \ubcf4\uba74 \uc804\uccb4 \ucf54\ub4dc\uac00 \ud45c\uc2dc\ub429\ub2c8\ub2e4).",
         "btn.add_backups": "+ \ubc31\uc5c5 \ucf54\ub4dc \ucd94\uac00",
-        "section.session": "\uc6f9 \uc138\uc158",
-        "section.session_desc": "\ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638\ub85c \ubcf4\ud638\ub429\ub2c8\ub2e4. \uc778\ud130\ud398\uc774\uc2a4\ub294 30\ucd08\uac04 \uc544\ubb34 \ub3d9\uc791\uc774 \uc5c6\uc73c\uba74 \uc2a4\uc2a4\ub85c \uc7a0\uae30\uace0, \uc11c\ubc84\ub294 \ub180\uace0 \uc788\ub294 \uc138\uc158\uc744 5\ubd84 \ub4a4\uc5d0, \uc5b4\ub5a4 \uc138\uc158\uc774\ub4e0 12\uc2dc\uac04 \ub4a4\uc5d0 \ub9cc\ub8cc\uc2dc\ud0b5\ub2c8\ub2e4.",
         "form.vault": "\uae08\uace0:",
         "form.back_list": "\u2190 \ubaa9\ub85d\uc73c\ub85c \ub3cc\uc544\uac00\uae30",
         "form.save": "\uc800\uc7a5",
@@ -3148,8 +3178,7 @@ WEB_CATALOGUES = {
         "overview.view_all": "\uc804\uccb4 \ubcf4\uae30",
         "overview.console_eyebrow": "\uc138\uc158 / \ub85c\uceec \uae08\uace0 / \uc778\uc99d\ub428",
         "overview.console_records": "\uac1c\uc758 \uc554\ud638\ud654\ub41c \ud56d\ubaa9\uc774 \uc0c9\uc778\ub428",
-        "overview.console_gpg": "\uc774 \ud638\uc2a4\ud2b8\uc5d0\uc11c GnuPG \uacbd\uacc4 \ud65c\uc131",
-        "overview.console_lock": "\uc790\ub3d9 \uc7a0\uae08 30\ucd08\ub85c \uc124\uc815\ub428",
+        "overview.console_lock": "\uc720\ud734 \uc7a0\uae08",
         "overview.console_lede": "\uac10\uc0ac \uac00\ub2a5\ud55c \ud558\ub098\uc758 \uc138\uc158\uc5d0\uc11c \uc790\uaca9 \uc99d\uba85\uc744 \uc0b4\ud3b4\ubcf4\uace0, \ub9cc\ub4e4\uace0, \uad00\ub9ac\ud558\uc138\uc694.",
         "btn.view": "\ubcf4\uae30",
         "generator.mode": "\ubaa8\ub4dc",
@@ -3191,6 +3220,13 @@ WEB_CATALOGUES = {
         "tidy.offer_d": "\uac1c \ud56d\ubaa9\uc774 \uba54\ubaa8\uc5d0 \ud3f4\ub354\ub97c \ub2f4\uace0 \uc788\uac70\ub098 \ud328\ud0a4\uc9c0 \uc774\ub984 \ud615\uc2dd\uc785\ub2c8\ub2e4. \uae30\ub85d\ud558\uae30 \uc804\uc5d0 \ubcc0\uacbd \ub0b4\uc6a9\uc744 \ud655\uc778\ud558\uc138\uc694.",
         "tidy.review": "\ubcc0\uacbd \ub0b4\uc6a9 \ud655\uc778",
         "tidy.done": "\uac1c \ud56d\ubaa9\uc744 \uc815\ub9ac\ud588\uc2b5\ub2c8\ub2e4.",
+        "overview.console_cipher": "\ubcf4\uad00\ud568 \uc554\ud638",
+        "settings.lock.title": "\uc720\ud734 \uc7a0\uae08",
+        "settings.lock.desc": "\ub300\uc2dc\ubcf4\ub4dc\uac00 \uc2a4\uc2a4\ub85c \uc7a0\uae30\uae30\uae4c\uc9c0 \uae30\ub2e4\ub9ac\ub294 \uc2dc\uac04\uc785\ub2c8\ub2e4.",
+        "settings.lock.label": "\uc7a0\uae08\uae4c\uc9c0",
+        "settings.lock.apply": "\uc7a0\uae08 \uc2dc\uac04 \uc801\uc6a9",
+        "settings.lock.note": "\ub300\uae30 \uc2dc\uac04\uc774 \uae38\uc218\ub85d \ubcf5\ud638\ud654\ub41c \ubcf4\uad00\ud568\uc774 \ud654\uba74\uc5d0 \ub354 \uc624\ub798 \ub0a8\uc2b5\ub2c8\ub2e4. \ube0c\ub77c\uc6b0\uc800 \uc0c1\ud0dc\uc640 \uad00\uacc4\uc5c6\uc774 \uc11c\ubc84\ub294 \uc774 \ud0c0\uc774\uba38 \uc9c1\ud6c4 \uc720\ud734 \uc138\uc158\uc744 \uc885\ub8cc\ud569\ub2c8\ub2e4.",
+        "settings.lock.saved": "\uc720\ud734 \uc7a0\uae08\uc744 \uc5c5\ub370\uc774\ud2b8\ud588\uc2b5\ub2c8\ub2e4.",
     },
     "pt-br": {
         "nav.security": "Seguran\u00e7a",
@@ -3338,8 +3374,6 @@ WEB_CATALOGUES = {
         "section.backups": "C\u00f3digos de backup",
         "section.backups_desc": "Guarde c\u00f3digos de recupera\u00e7\u00e3o (a visualiza\u00e7\u00e3o mostra os c\u00f3digos completos).",
         "btn.add_backups": "+ Adicionar c\u00f3digos de backup",
-        "section.session": "Sess\u00e3o web",
-        "section.session_desc": "Protegida pela sua senha mestra. A interface se bloqueia sozinha ap\u00f3s 30 segundos de inatividade; o servidor expira uma sess\u00e3o ociosa em 5 minutos e qualquer sess\u00e3o em 12 horas.",
         "form.vault": "Cofre:",
         "form.back_list": "\u2190 Voltar para a lista",
         "form.save": "Salvar",
@@ -3490,8 +3524,7 @@ WEB_CATALOGUES = {
         "overview.view_all": "Ver tudo",
         "overview.console_eyebrow": "sess\u00e3o / cofre local / autenticada",
         "overview.console_records": "registros criptografados indexados",
-        "overview.console_gpg": "limite do GnuPG ativo neste host",
-        "overview.console_lock": "bloqueio por inatividade armado em 30 segundos",
+        "overview.console_lock": "bloqueio por inatividade",
         "overview.console_lede": "Inspecione, gere e mantenha credenciais a partir de uma \u00fanica sess\u00e3o audit\u00e1vel.",
         "btn.view": "Ver",
         "generator.mode": "Modo",
@@ -3533,6 +3566,13 @@ WEB_CATALOGUES = {
         "tidy.offer_d": "entradas trazem uma pasta nas notas ou um nome em formato de pacote. Revise as mudan\u00e7as antes de qualquer grava\u00e7\u00e3o.",
         "tidy.review": "Revisar mudan\u00e7as",
         "tidy.done": "entradas organizadas.",
+        "overview.console_cipher": "cifra do cofre",
+        "settings.lock.title": "Bloqueio por inatividade",
+        "settings.lock.desc": "Quanto tempo o Painel espera antes de se bloquear.",
+        "settings.lock.label": "Bloquear ap\u00f3s",
+        "settings.lock.apply": "Aplicar tempo de bloqueio",
+        "settings.lock.note": "Uma espera maior deixa o cofre descriptografado mais tempo na tela. O servidor encerra uma sess\u00e3o inativa pouco depois deste temporizador, fa\u00e7a o navegador o que fizer.",
+        "settings.lock.saved": "Bloqueio por inatividade atualizado.",
     },
     "ru": {
         "nav.security": "\u0411\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c",
@@ -3680,8 +3720,6 @@ WEB_CATALOGUES = {
         "section.backups": "\u0420\u0435\u0437\u0435\u0440\u0432\u043d\u044b\u0435 \u043a\u043e\u0434\u044b",
         "section.backups_desc": "\u0425\u0440\u0430\u043d\u0438\u0442\u0435 \u043a\u043e\u0434\u044b \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f (\u043f\u0440\u0438 \u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0435 \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u044e\u0442\u0441\u044f \u0446\u0435\u043b\u0438\u043a\u043e\u043c).",
         "btn.add_backups": "+ \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0440\u0435\u0437\u0435\u0440\u0432\u043d\u044b\u0435 \u043a\u043e\u0434\u044b",
-        "section.session": "\u0412\u0435\u0431-\u0441\u0435\u0430\u043d\u0441",
-        "section.session_desc": "\u0417\u0430\u0449\u0438\u0449\u0451\u043d \u0432\u0430\u0448\u0438\u043c \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u0435\u043c. \u0418\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441 \u0441\u0430\u043c \u0431\u043b\u043e\u043a\u0438\u0440\u0443\u0435\u0442\u0441\u044f \u043f\u043e\u0441\u043b\u0435 30 \u0441\u0435\u043a\u0443\u043d\u0434 \u0431\u0435\u0437\u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f; \u0441\u0435\u0440\u0432\u0435\u0440 \u0437\u0430\u0432\u0435\u0440\u0448\u0430\u0435\u0442 \u043f\u0440\u043e\u0441\u0442\u0430\u0438\u0432\u0430\u044e\u0449\u0438\u0439 \u0441\u0435\u0430\u043d\u0441 \u0447\u0435\u0440\u0435\u0437 5 \u043c\u0438\u043d\u0443\u0442, \u0430 \u043b\u044e\u0431\u043e\u0439 \u0441\u0435\u0430\u043d\u0441 \u2014 \u0447\u0435\u0440\u0435\u0437 12 \u0447\u0430\u0441\u043e\u0432.",
         "form.vault": "\u0425\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435:",
         "form.back_list": "\u2190 \u041d\u0430\u0437\u0430\u0434 \u043a \u0441\u043f\u0438\u0441\u043a\u0443",
         "form.save": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c",
@@ -3832,8 +3870,7 @@ WEB_CATALOGUES = {
         "overview.view_all": "\u0421\u043c\u043e\u0442\u0440\u0435\u0442\u044c \u0432\u0441\u0451",
         "overview.console_eyebrow": "\u0441\u0435\u0430\u043d\u0441 / \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u043e\u0435 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 / \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043d",
         "overview.console_records": "\u0437\u0430\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0445 \u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u043f\u0440\u043e\u0438\u043d\u0434\u0435\u043a\u0441\u0438\u0440\u043e\u0432\u0430\u043d\u043e",
-        "overview.console_gpg": "\u0433\u0440\u0430\u043d\u0438\u0446\u0430 GnuPG \u0430\u043a\u0442\u0438\u0432\u043d\u0430 \u043d\u0430 \u044d\u0442\u043e\u043c \u0445\u043e\u0441\u0442\u0435",
-        "overview.console_lock": "\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430 \u043f\u043e \u0431\u0435\u0437\u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044e \u0432\u0437\u0432\u0435\u0434\u0435\u043d\u0430 \u043d\u0430 30 \u0441\u0435\u043a\u0443\u043d\u0434",
+        "overview.console_lock": "\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430 \u043f\u0440\u0438 \u043f\u0440\u043e\u0441\u0442\u043e\u0435",
         "overview.console_lede": "\u041f\u0440\u043e\u0432\u0435\u0440\u044f\u0439\u0442\u0435, \u0441\u043e\u0437\u0434\u0430\u0432\u0430\u0439\u0442\u0435 \u0438 \u043e\u0431\u0441\u043b\u0443\u0436\u0438\u0432\u0430\u0439\u0442\u0435 \u0443\u0447\u0451\u0442\u043d\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u0432 \u043e\u0434\u043d\u043e\u043c \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u0435\u043c\u043e\u043c \u0441\u0435\u0430\u043d\u0441\u0435.",
         "btn.view": "\u0421\u043c\u043e\u0442\u0440\u0435\u0442\u044c",
         "generator.mode": "\u0420\u0435\u0436\u0438\u043c",
@@ -3875,6 +3912,13 @@ WEB_CATALOGUES = {
         "tidy.offer_d": "\u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u0441\u043e\u0434\u0435\u0440\u0436\u0430\u0442 \u043f\u0430\u043f\u043a\u0443 \u0432 \u0437\u0430\u043c\u0435\u0442\u043a\u0430\u0445 \u0438\u043b\u0438 \u043d\u0430\u0437\u0432\u0430\u043d\u044b \u043a\u0430\u043a \u043f\u0430\u043a\u0435\u0442 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f. \u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0438\u0442\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f, \u043f\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043c \u0447\u0442\u043e-\u043b\u0438\u0431\u043e \u0431\u0443\u0434\u0435\u0442 \u0437\u0430\u043f\u0438\u0441\u0430\u043d\u043e.",
         "tidy.review": "\u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0435\u0442\u044c \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f",
         "tidy.done": "\u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u043f\u0440\u0438\u0432\u0435\u0434\u0435\u043d\u043e \u0432 \u043f\u043e\u0440\u044f\u0434\u043e\u043a.",
+        "overview.console_cipher": "\u0448\u0438\u0444\u0440 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0430",
+        "settings.lock.title": "\u0411\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430 \u043f\u0440\u0438 \u043f\u0440\u043e\u0441\u0442\u043e\u0435",
+        "settings.lock.desc": "\u0421\u043a\u043e\u043b\u044c\u043a\u043e \u043f\u0430\u043d\u0435\u043b\u044c \u0436\u0434\u0451\u0442, \u043f\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043c \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u0442\u044c\u0441\u044f.",
+        "settings.lock.label": "\u0411\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0447\u0435\u0440\u0435\u0437",
+        "settings.lock.apply": "\u041f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c \u0432\u0440\u0435\u043c\u044f \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0438",
+        "settings.lock.note": "\u0427\u0435\u043c \u0434\u043e\u043b\u044c\u0448\u0435 \u043e\u0436\u0438\u0434\u0430\u043d\u0438\u0435, \u0442\u0435\u043c \u0434\u043e\u043b\u044c\u0448\u0435 \u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0435 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u043d\u0430 \u044d\u043a\u0440\u0430\u043d\u0435. \u0421\u0435\u0440\u0432\u0435\u0440 \u0437\u0430\u0432\u0435\u0440\u0448\u0430\u0435\u0442 \u043f\u0440\u043e\u0441\u0442\u0430\u0438\u0432\u0430\u044e\u0449\u0438\u0439 \u0441\u0435\u0430\u043d\u0441 \u0432\u0441\u043a\u043e\u0440\u0435 \u043f\u043e\u0441\u043b\u0435 \u044d\u0442\u043e\u0433\u043e \u0442\u0430\u0439\u043c\u0435\u0440\u0430, \u0447\u0442\u043e \u0431\u044b \u043d\u0438 \u0434\u0435\u043b\u0430\u043b \u0431\u0440\u0430\u0443\u0437\u0435\u0440.",
+        "settings.lock.saved": "\u0411\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430 \u043f\u0440\u0438 \u043f\u0440\u043e\u0441\u0442\u043e\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0430.",
     },
     "zh-hans": {
         "nav.security": "\u5b89\u5168",
@@ -4022,8 +4066,6 @@ WEB_CATALOGUES = {
         "section.backups": "\u5907\u7528\u7801",
         "section.backups_desc": "\u4fdd\u5b58\u6062\u590d\u7801\uff08\u67e5\u770b\u65f6\u4f1a\u663e\u793a\u5b8c\u6574\u4ee3\u7801\uff09\u3002",
         "btn.add_backups": "+ \u6dfb\u52a0\u5907\u7528\u7801",
-        "section.session": "\u7f51\u9875\u4f1a\u8bdd",
-        "section.session_desc": "\u7531\u4f60\u7684\u4e3b\u5bc6\u7801\u4fdd\u62a4\u3002\u754c\u9762\u5728\u95f2\u7f6e 30 \u79d2\u540e\u81ea\u52a8\u9501\u5b9a\uff1b\u670d\u52a1\u5668\u5728\u95f2\u7f6e 5 \u5206\u949f\u540e\u8ba9\u4f1a\u8bdd\u8fc7\u671f\uff0c\u4efb\u4f55\u4f1a\u8bdd\u6ee1 12 \u5c0f\u65f6\u4e5f\u4f1a\u8fc7\u671f\u3002",
         "form.vault": "\u5bc6\u7801\u5e93\uff1a",
         "form.back_list": "\u2190 \u8fd4\u56de\u5217\u8868",
         "form.save": "\u4fdd\u5b58",
@@ -4174,8 +4216,7 @@ WEB_CATALOGUES = {
         "overview.view_all": "\u67e5\u770b\u5168\u90e8",
         "overview.console_eyebrow": "\u4f1a\u8bdd / \u672c\u5730\u5bc6\u7801\u5e93 / \u5df2\u8ba4\u8bc1",
         "overview.console_records": "\u6761\u52a0\u5bc6\u8bb0\u5f55\u5df2\u5efa\u7acb\u7d22\u5f15",
-        "overview.console_gpg": "\u672c\u673a GnuPG \u8fb9\u754c\u5df2\u542f\u7528",
-        "overview.console_lock": "\u95f2\u7f6e\u9501\u5b9a\u5df2\u8bbe\u4e3a 30 \u79d2",
+        "overview.console_lock": "\u95f2\u7f6e\u9501\u5b9a",
         "overview.console_lede": "\u5728\u4e00\u6b21\u53ef\u5ba1\u8ba1\u7684\u4f1a\u8bdd\u4e2d\u68c0\u67e5\u3001\u751f\u6210\u5e76\u7ef4\u62a4\u4f60\u7684\u51ed\u636e\u3002",
         "btn.view": "\u67e5\u770b",
         "generator.mode": "\u6a21\u5f0f",
@@ -4217,6 +4258,13 @@ WEB_CATALOGUES = {
         "tidy.offer_d": "\u4e2a\u6761\u76ee\u7684\u5907\u6ce8\u4e2d\u542b\u6709\u6587\u4ef6\u5939\uff0c\u6216\u4f7f\u7528\u4e86\u5305\u540d\u5f62\u5f0f\u7684\u540d\u79f0\u3002\u5199\u5165\u524d\u8bf7\u5148\u67e5\u770b\u8fd9\u4e9b\u66f4\u6539\u3002",
         "tidy.review": "\u67e5\u770b\u66f4\u6539",
         "tidy.done": "\u4e2a\u6761\u76ee\u5df2\u6574\u7406\u3002",
+        "overview.console_cipher": "\u4fdd\u9669\u5e93\u52a0\u5bc6\u7b97\u6cd5",
+        "settings.lock.title": "\u95f2\u7f6e\u9501\u5b9a",
+        "settings.lock.desc": "\u4eea\u8868\u677f\u5728\u81ea\u52a8\u9501\u5b9a\u524d\u7b49\u5f85\u7684\u65f6\u95f4\u3002",
+        "settings.lock.label": "\u9501\u5b9a\u5ef6\u65f6",
+        "settings.lock.apply": "\u5e94\u7528\u9501\u5b9a\u5ef6\u65f6",
+        "settings.lock.note": "\u7b49\u5f85\u8d8a\u4e45\uff0c\u5df2\u89e3\u5bc6\u7684\u4fdd\u9669\u5e93\u505c\u7559\u5728\u5c4f\u5e55\u4e0a\u7684\u65f6\u95f4\u5c31\u8d8a\u957f\u3002\u65e0\u8bba\u6d4f\u89c8\u5668\u5904\u4e8e\u4f55\u79cd\u72b6\u6001\uff0c\u670d\u52a1\u5668\u90fd\u4f1a\u5728\u8be5\u8ba1\u65f6\u4e4b\u540e\u4e0d\u4e45\u7ed3\u675f\u95f2\u7f6e\u4f1a\u8bdd\u3002",
+        "settings.lock.saved": "\u95f2\u7f6e\u9501\u5b9a\u5df2\u66f4\u65b0\u3002",
     },
 }
 # --- END GENERATED LOCALES ---
@@ -5740,12 +5788,17 @@ SHELL_SCRIPT = """
 </script>
 """
 
-# Auto-lock with a visible countdown. Same 30s idle policy as before, but the
-# user can now see it coming instead of being logged out with no warning.
+# Auto-lock with a visible countdown, on whatever timer the vault is set to.
 LOCKBAR_SCRIPT = """
 <script>
 (function () {
-  var IDLE_MS = 30000, WARN_AT = 10;
+  /* Stamped by the server from the vault's own setting, the way __LANG__ is.
+     A page that hardcoded it would keep locking at 30 seconds after the user
+     changed it, on whichever pages nobody remembered to update. */
+  var IDLE_MS = __SPM_LOCK_MS__;
+  /* The warning has to fit inside the countdown it warns about: ten seconds of
+     a fifteen-second lock is not a warning, it is the whole timer. */
+  var WARN_AT = Math.max(5, Math.min(10, Math.round(IDLE_MS / 3000)));
   var deadline = Date.now() + IDLE_MS, paused = false, locking = false, ticker;
   /* The session dot is allowed to pulse only while the session is actually
      counting down (A07 4.2 permits a loop on live state and nothing else),
@@ -5754,6 +5807,13 @@ LOCKBAR_SCRIPT = """
     if (document.body) document.body.classList.toggle("lock-paused", paused || locking);
   }
   function reset() { if (!paused && !locking) deadline = Date.now() + IDLE_MS; }
+  /* "Locks in 875s" is a number, not a duration anyone reads. Past a minute
+     the countdown switches to m:ss, which needs no translation. */
+  function clock(left) {
+    if (left < 60) return left + "s";
+    var s = left % 60;
+    return Math.floor(left / 60) + ":" + (s < 10 ? "0" : "") + s;
+  }
   function render() {
     var left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
     var bar = document.getElementById("lockbar");
@@ -5764,7 +5824,7 @@ LOCKBAR_SCRIPT = """
       var lbl = bar.querySelector(".lbl");
       if (lbl) {
         var t = (window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t("lock.in", "Locks in") : "Locks in";
-        lbl.textContent = paused ? ((window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t("lock.paused", "Lock paused") : "Lock paused") : (t + " " + left + "s");
+        lbl.textContent = paused ? ((window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t("lock.paused", "Lock paused") : "Lock paused") : (t + " " + clock(left));
       }
     }
     if (!paused && !locking && left <= 0) {
@@ -6679,14 +6739,21 @@ def overview_page(counts, recent):
 </div></div>"""
 
     total = sum(counts.get(k, 0) for k in ("passwords", "notes", "passphrases", "authenticators", "backups"))
+    # Read from the file rather than printed from a constant. This line used to
+    # say "GnuPG boundary active on this host" unconditionally, which stopped
+    # being true for a vault the moment it was upgraded -- and would have gone
+    # on saying it forever, because nothing connected the sentence to the
+    # bytes.
+    cipher = html.escape(vault_cipher_label())
+    lock = html.escape(lock_label(lock_timeout()))
     return f"""
 <section class="console-hero" aria-labelledby="overview-command">
   <div class="eyebrow" data-i18n="overview.console_eyebrow">session / local vault / authenticated</div>
   <h1 id="overview-command">spm vault status</h1>
   <div class="console-output" aria-label="Vault status output">
     <span><b>{total}</b> <i data-i18n="overview.console_records">encrypted records indexed</i></span>
-    <span data-i18n="overview.console_gpg">GnuPG boundary active on this host</span>
-    <span data-i18n="overview.console_lock">idle lock armed for 30 seconds</span>
+    <span><b>{cipher}</b> <i data-i18n="overview.console_cipher">vault cipher</i></span>
+    <span><b>{lock}</b> <i data-i18n="overview.console_lock">idle lock</i></span>
   </div>
   <p class="lede" data-i18n="overview.console_lede">Inspect, generate, and maintain credentials from one auditable session.</p>
 </section>
@@ -7485,6 +7552,11 @@ def unlock_settings_page(creds, csrf, flash=""):
 
 def settings_page(flash=""):
     """Render the Dashboard's single settings destination."""
+    current = lock_timeout()
+    lock_options = "".join(
+        '<option value="%d"%s>%s</option>'
+        % (value, " selected" if value == current else "", lock_label(value))
+        for value in LOCK_CHOICES)
     unlock_html = ""
     if WEBAUTHN_ENABLED:
         unlock_html = f"""
@@ -7569,6 +7641,26 @@ def settings_page(flash=""):
               data-i18n="settings.theme.apply">Apply theme</button>
       <span class="theme-status" id="theme-status" role="status" aria-live="polite"></span>
     </div>
+  </div>
+</section>
+<section class="card settings-section" id="idle-lock">
+  <div class="card-head"><div>
+    <h2 data-i18n="settings.lock.title">Idle Lock</h2>
+    <p class="faint" data-i18n="settings.lock.desc">How long the Dashboard waits
+      before locking itself.</p>
+  </div></div>
+  <div class="card-body">
+  <form method="post" action="/settings/lock-timeout">
+    <div class="field">
+      <label for="lock-timeout" data-i18n="settings.lock.label">Lock after</label>
+      <select class="input" id="lock-timeout" name="seconds">{lock_options}</select>
+    </div>
+    <p class="faint" style="margin-bottom:var(--sp-4)" data-i18n="settings.lock.note">A
+      longer wait leaves the decrypted vault on screen for longer. The server ends
+      an idle session shortly after this timer, whatever the browser is doing.</p>
+    <button class="btn btn-primary" type="submit"
+            data-i18n="settings.lock.apply">Apply lock timeout</button>
+  </form>
   </div>
 </section>
 <section class="card settings-section" id="master-password">
@@ -8381,6 +8473,87 @@ def rewrite_recovery_file(plaintext: str, vault_key: str) -> None:
 # than a decision worth copying, since this is the one password that protects
 # every other one and nothing rate-limits an attacker who holds the vault file.
 MASTER_MIN_LEN = 12
+
+# ----- idle lock policy ------------------------------------------------------
+# The auto-lock was 30 seconds and only 30 seconds, which is right for a phone
+# left on a table and wrong for anyone reading a long note or typing a card
+# number off the screen -- they were being logged out mid-task, and the way
+# around it was to keep jiggling the mouse, which is not a security control.
+#
+# It stays a *short* list rather than a free-text field. A number typed into a
+# box invites 86400; a list is a policy someone chose from.
+LOCK_CHOICES = (15, 30, 60, 120, 300, 600, 900)
+LOCK_DEFAULT = 30
+# Per vault, not per installation: two profiles are two different exposures,
+# and a policy chosen for the throwaway one must not quietly follow the real
+# one. Same shape the CLI uses for its own per-vault settings.
+LOCK_CONFIG = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.join(
+        os.path.expanduser("~"), ".config"),
+    "spm", "web-lock-%s.conf" % core.vault_scope_id(VAULT_PATH))
+
+
+def lock_timeout():
+    """The configured idle lock, in seconds. Never anything but a listed choice.
+
+    A file that has been edited by hand into something absurd is treated as
+    absent rather than obeyed: this value decides how long a decrypted vault
+    stays on screen unattended, so an unreadable setting must fail towards the
+    short end, not the long one.
+    """
+    try:
+        with open(LOCK_CONFIG, "r", encoding="utf-8") as handle:
+            value = int(handle.read().strip())
+    except (OSError, ValueError):
+        return LOCK_DEFAULT
+    return value if value in LOCK_CHOICES else LOCK_DEFAULT
+
+
+def set_lock_timeout(value):
+    """Persist a listed choice. Returns True when it was one."""
+    if value not in LOCK_CHOICES:
+        return False
+    directory = os.path.dirname(LOCK_CONFIG)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    fd, staged = tempfile.mkstemp(prefix=".web-lock.", dir=directory)
+    try:
+        os.write(fd, b"%d\n" % value)
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.chmod(staged, 0o600)
+        os.replace(staged, LOCK_CONFIG)
+        staged = ""
+    finally:
+        if fd != -1:
+            os.close(fd)
+        if staged and os.path.exists(staged):
+            os.remove(staged)
+    return True
+
+
+def lock_label(seconds):
+    """A duration for a console readout: "30s", "15m".
+
+    Abbreviated units rather than words, because this string is rendered
+    beside a translated label in twelve languages and a spelled-out "minutes"
+    would be the one English word left in the middle of them.
+    """
+    return "%ds" % seconds if seconds < 60 else "%dm" % (seconds // 60)
+
+
+def vault_cipher_label():
+    """What actually seals the vault file on disk, not what this build writes."""
+    try:
+        backend, _ = core.vault_seal_summary(VAULT_PATH)
+    except (OSError, core.VaultError):
+        return "unknown"
+    if backend == "openssl":
+        return "AES-256-CTR + HMAC-SHA256"
+    if backend == "gpg":
+        return "GnuPG (upgrades on next write)"
+    return "GnuPG (pre-container)"
+
 
 
 
@@ -9428,15 +9601,27 @@ class SPMServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         self.vault_lock_file = open(VAULT_PATH + ".lock", "a+", encoding="utf-8")
         os.chmod(VAULT_PATH + ".lock", 0o600)
 
-# Idle timeout enforced by the server. The 30-second auto-lock users actually
-# see is implemented in the browser, which means it is not a control at all
-# against a client whose JavaScript does not run -- and that is not a
-# hypothetical: a CDN rewriting inline scripts disabled it outright once. This
-# is the backstop that holds when the browser lock does not. It cannot match
-# the browser's 30 seconds, because the browser resets on mouse and touch
-# activity that reaches no server; 5 minutes is long enough to read a page and
-# far short of the half hour this used to grant.
-SESSION_TTL = 300
+# Idle timeout enforced by the server. The auto-lock users actually see is
+# implemented in the browser, which means it is not a control at all against a
+# client whose JavaScript does not run -- and that is not a hypothetical: a CDN
+# rewriting inline scripts disabled it outright once. This is the backstop that
+# holds when the browser lock does not. It cannot match the browser's timer,
+# because the browser resets on mouse and touch activity that reaches no
+# server, so it carries a margin above it.
+SESSION_TTL_FLOOR = 300
+SESSION_TTL_MARGIN = 120
+
+
+def session_ttl():
+    """The server-side idle bound, which must outlast the browser's lock.
+
+    A configured lock longer than this floor would otherwise be a lie: the
+    browser would still be counting down while the server had already swept
+    the session, and the user would be asked for the master password at a
+    moment the setting promised they would not be. So the backstop follows the
+    setting upward -- and only upward. At the default it is unchanged.
+    """
+    return max(SESSION_TTL_FLOOR, lock_timeout() + SESSION_TTL_MARGIN)
 # Absolute lifetime: the idle TTL above slides on every request, so without
 # this a session (and the plaintext master password it holds) could live for
 # as long as the browser kept poking it.
@@ -9523,6 +9708,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if "__SPM_LANG_REVIEWS__" in body:
             body = body.replace("__SPM_LANG_REVIEWS__", jsonlib.dumps(
                 {code: meta["review"] for code, meta in WEB_LOCALES.items()}))
+        if "__SPM_LOCK_MS__" in body:
+            body = body.replace("__SPM_LOCK_MS__", str(lock_timeout() * 1000))
         if "__SPM_DICT__" in body:
             body = body.replace(
                 "__SPM_DICT__", catalogue_json(catalogue_payload(active)))
@@ -9647,7 +9834,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if now - sess.get("suspended_at", 0) > SUSPEND_MAX_AGE:
                     self.server.sessions.pop(tok, None)
                 continue
-            if now - sess.get("last_seen", 0) > SESSION_TTL:
+            if now - sess.get("last_seen", 0) > session_ttl():
                 self.server.sessions.pop(tok, None)
 
     def _login_client(self):
@@ -10369,10 +10556,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._expire_session()
             params = urllib.parse.parse_qs(parsed.query)
             flash = ""
-            if (params.get("msg") or [""])[0] == "changed":
+            message = (params.get("msg") or [""])[0]
+            if message == "changed":
                 flash = ("<div class='flash'>Master password changed. The recovery "
                          "file was rewritten and every other session was signed "
                          "out.</div>")
+            elif message == "locktimeout":
+                flash = ("<div class='flash' data-i18n='settings.lock.saved'>"
+                         "Idle lock updated.</div>")
             self._send_html(200, render_shell(
                 settings_page(flash), "settings", VERSION, VAULT_PATH,
                 title="Settings", counts=self._counts(plaintext)))
@@ -10949,7 +11140,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # produced; discarding it would make the first page render pay
                 # for the same unwrap a second time.
                 opened, opened_key = core.read_vault(VAULT_PATH, password)
-            except subprocess.CalledProcessError:
+            except (subprocess.CalledProcessError, core.VaultError):
+                # Both, because the two vault backends refuse differently:
+                # gpg exits non-zero, the current format raises. Catching only
+                # one meant a wrong password on the other reached the user as a
+                # server error AND skipped the failure counter, which is the
+                # thing that rate-limits guessing.
                 self._record_login_failure()
                 page = login_page(VERSION, "<div class='msg'>Invalid master password.</div>")
                 self._send_html(200, page)
@@ -11000,6 +11196,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if not self._write_authorized(raw_body_bytes, data):
             self.send_error(403, "Cross-origin write rejected")
+            return
+
+        if path == "/settings/lock-timeout":
+            raw_choice = (data.get("seconds") or [""])[0]
+            try:
+                choice = int(raw_choice)
+            except ValueError:
+                choice = -1
+            # set_lock_timeout is the only thing that decides what is allowed.
+            # Validating here as well would be two lists to keep in step, and
+            # the one that matters is the one the file is written from.
+            if not set_lock_timeout(choice):
+                self.log_message("idle lock change refused: %r is not a choice",
+                                 raw_choice)
+                self._send_html(200, render_shell(
+                    settings_page("<div class='flash error'>That is not one of "
+                                  "the available lock timeouts.</div>"),
+                    "settings", VERSION, VAULT_PATH, title="Settings"))
+                return
+            self.log_message("idle lock set to %d seconds", choice)
+            self.send_response(303)
+            self.send_header("Location", "/settings?msg=locktimeout")
+            self.end_headers()
             return
 
         if path == "/settings/master-password":

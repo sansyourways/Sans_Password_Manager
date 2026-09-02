@@ -62,7 +62,7 @@ See the [installation guide](https://spm-docs.silentprotocol.top/#installation) 
 
 ## Security at a glance
 
-SPM encrypts vault data with GnuPG and keeps routine vault operations inside a shared Python trusted core. The CLI invokes that core as a subprocess; the dashboard imports the same implementation. Sensitive operations are local by default.
+SPM seals vault data with AES-256-CTR under an HMAC-SHA256 tag, unlocked through scrypt, and keeps routine vault operations inside a shared Python trusted core. Vaults written before 4.0.0 remain readable and upgrade in place. The CLI invokes that core as a subprocess; the dashboard imports the same implementation. Sensitive operations are local by default.
 
 SPM assumes the host operating system is trustworthy. It cannot protect secrets from malware, root compromise, memory inspection, a compromised browser, or an already-compromised endpoint. The project has **not received an independent professional security audit**; repository review and automated tests are not substitutes for one.
 
@@ -112,7 +112,7 @@ For platform-specific requirements and limitations, see the [requirements](https
 Runtime requirements:
 
 - Bash
-- GnuPG (`gpg`)
+- GnuPG (`gpg`) — reads vaults written before 4.0.0; still required
 - OpenSSL
 - Python 3
 
