@@ -15,12 +15,13 @@ An offline, portable password manager for people who want to own the vault,
 understand the storage model, and keep cloud infrastructure out of the trust
 boundary.
 
-SPM is one executable Bash script backed by GnuPG. It provides a terminal
-interface for automation and administration, plus an optional local web
-interface for everyday browsing. There are no accounts, hosted APIs,
-subscriptions, analytics, or vendor-operated recovery services.
+SPM is one executable Bash script backed by OpenSSL, and by GnuPG for vaults
+written before 4.0.0. It provides a terminal interface for automation and
+administration, plus an optional local web interface for everyday browsing.
+There are no accounts, hosted APIs, subscriptions, analytics, or
+vendor-operated recovery services.
 
-Current release: **3.15.0**
+Current release: **4.0.0**
 
 ---
 
@@ -44,6 +45,7 @@ Current release: **3.15.0**
   - [Secure Notes](#secure-notes)
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
   - [Doctor / Health Check](#doctor--health-check)
+- [How the vault is sealed](#how-the-vault-is-sealed)
 - [Languages](#languages)
 - [Split recovery](#split-recovery)
 - [Sync transports](#sync-transports)
@@ -69,7 +71,7 @@ them. SPM deliberately keeps that trust boundary small.
 | --- | --- |
 | Your vault stays yours | The encrypted vault, recovery material, backups, and sync target remain on storage you control. |
 | No service dependency | Core vault operations work without an internet connection, hosted account, license server, or vendor API. |
-| Auditable implementation | The primary application is one readable Bash file that delegates encryption to standard GnuPG and OpenSSL tools. |
+| Auditable implementation | The primary application is one readable Bash file that delegates encryption to standard OpenSSL tools, and to GnuPG for vaults written before 4.0.0. |
 | Terminal and browser workflows | Use deterministic CLI commands for administration and automation, or launch the optional web interface for a more visual workflow. |
 | Portable by design | Create a self-contained encrypted bundle for removable media or move between Linux, macOS, and Termux environments. |
 | Recovery without vendor custody | Generate your own RSA recovery key and store it offline; SPM never holds a copy. |
@@ -84,7 +86,7 @@ attacker with root access.
 
 ## Product tour
 
-Every web capture below was taken from the 3.15.0 release candidate in Chromium
+Every web capture below was taken from the 4.0.0 release candidate in Chromium
 at 1440x900, against a disposable vault holding only synthetic documentation
 data. No personal vault, browser profile, real credential, or production
 hostname appears in these images. The locked-screen captures use Chromium
@@ -227,7 +229,7 @@ filters and result count visible](docs/screenshots/web-v2.13.0/31-passwords-filt
 
 ## Capabilities
 
-- GnuPG AES-256 encrypted vault with atomic writes and advisory locking
+- AES-256-CTR vault under an HMAC-SHA256 tag, with atomic writes and advisory locking
 - Interactive terminal interface with English, Indonesian, and Japanese modes
 - Optional Console-style web interface with inactivity locking
 - Password records, secure notes, passphrases, backup codes, and TOTP
@@ -256,7 +258,9 @@ filters and result count visible](docs/screenshots/web-v2.13.0/31-passwords-filt
 ## Architecture & Security Model
 
 ### Encryption
-- **Vault:** GnuPG symmetric AES-256
+- **Vault:** AES-256-CTR, authenticated with HMAC-SHA256 (encrypt-then-MAC)
+- **Master password:** scrypt, n=32768, r=8, p=1, recorded in the vault header
+- **Vault key:** 256 random bits, sealed under the master password and not stretched
 - **Recovery:** RSA-2048 private/public key
 - **Notes:** Base64 + encrypted
 - **Metadata:** Stored inside encrypted vault
@@ -320,7 +324,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.15.0
+bash install.sh --version 4.0.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -355,7 +359,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v3.15.0.zip \
+gh attestation verify Sans_Password_Manager_v4.0.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -371,9 +375,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v3.15.0
+git checkout v4.0.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v3.15.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v4.0.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -386,7 +390,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=3.15.0
+version=4.0.0
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -403,7 +407,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.15.0/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v4.0.0/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -425,7 +429,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.15.0 at /home/you/.local/bin/spm
+Installed SPM 4.0.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -548,8 +552,8 @@ Includes:
   - Local copy-to-clipboard with inline toast feedback
   - Language dropdown (EN/ID/JP) that translates the dashboard/import card and remembers your choice via cookie
   - Detail pages (/view, /edit, authenticator viewer/editor, generator) inherit that language selection so every screen stays localized
-  - A **Settings** group holding the gear-marked **Master Password** page and
-    **Biometric Unlock**. Changing the master password re-encrypts the vault,
+  - A **Settings** group holding the **Idle Lock** timer, the gear-marked
+    **Master Password** page and **Biometric Unlock**. Changing the master password re-encrypts the vault,
     rewrites the recovery file first so `spm forgot` keeps working, and signs
     out every other browser session
   - Dark-only Console presentation with a command-style vault status overview, visible keyboard focus, and mobile record layouts
@@ -563,6 +567,27 @@ Includes:
 Console deliberately favors dense, auditable rows over spacious cards. Very long
 vault labels still wrap and can make mobile records tall; this is preferable to
 shrinking text or forcing page-level horizontal scrolling.
+
+#### The idle lock
+
+The Dashboard locks itself after a period of inactivity. **Settings → Idle
+Lock** offers 15s, 30s, 1m, 2m, 5m, 10m and 15m, stored per vault; 30 seconds
+is the default and was the only option before 4.0.0.
+
+It is a short list rather than a free-text field on purpose. A number typed
+into a box invites `86400`; a list is a policy someone chose from. A value
+edited into `~/.config/spm/web-lock-<scope>.conf` by hand is treated as absent
+rather than obeyed, because this setting decides how long a decrypted vault
+sits on an unattended screen and an unreadable one has to fail towards the
+short end.
+
+There are two timers, and the setting moves both. The countdown you can see
+runs in the browser, which means it protects nobody whose JavaScript does not
+execute — not hypothetical, since a CDN rewriting inline scripts disabled it
+outright once. The server-side idle expiry is the control that still holds in
+that case, and it now follows your setting upward, always staying longer than
+the lock it backs. At the default it is unchanged, at 300 seconds. A session is
+still capped absolutely at 12 hours regardless of either.
 
 ---
 
@@ -934,6 +959,105 @@ knows, and write it back stamped with its own version — the vault reads fine
 afterwards, which is what makes it dangerous. **Note the guard only helps from
 3.11.0 onward**: a 3.10.0 or earlier build has no such check, so do not open a
 format-4 vault with one and save.
+
+---
+
+## How the vault is sealed
+
+From 4.0.0 a vault is encrypted with **AES-256-CTR** and authenticated with
+**HMAC-SHA256**, and the master password is stretched with **scrypt**. Before
+that, both layers were gpg symmetric messages.
+
+The file is still one file, with the same shape:
+
+```text
+SPM-VAULT-AEAD1
+KDF scrypt n=32768 r=8 p=1 salt=<base64>
+KEY <base64: the vault key, sealed under the master password>
+DATA
+<base64: the vault, sealed under the vault key>
+```
+
+### Why the master password and the vault key are treated differently
+
+The vault is sealed under a random 256-bit **vault key**, and only that key is
+sealed under your master password. gpg stretched both — sixty-five million
+SHA512 iterations each — which is right for a password someone can guess and
+pure waste for a value that is already uniformly random. Stretching now happens
+once, where the guessable secret is:
+
+| | before 4.0.0 | 4.0.0 |
+|---|---|---|
+| master password | SHA512 × 65,011,712 | scrypt, n=32768, r=8, p=1 (32 MiB) |
+| vault key → data | SHA512 × 65,011,712 | none needed |
+| cipher | AES-256 | AES-256-CTR |
+| authentication | none | HMAC-SHA256, encrypt-then-MAC |
+
+Measured on a 200-record vault, a cold read went from 663 ms to 168 ms, and a
+read with the vault key already held from 248 ms to 11 ms.
+
+The `KDF` line records the derivation **by name and by parameters**, and the
+unwrap uses the vault's own numbers rather than the running build's constants.
+That is what lets the cost parameter be raised, or the function replaced, without
+stranding vaults written before the change.
+
+### The vault is authenticated now
+
+gpg's symmetric mode gave the vault no integrity, so a modified vault and a
+wrong master password produced the same refusal — SPM's event log recorded
+`reason=bad-master` for both because nothing could tell them apart. Every
+sealed block now carries an HMAC-SHA256 tag over its magic, salt, IV and
+ciphertext, checked before anything is decrypted, so the two read differently:
+
+```text
+that secret does not open this vault
+
+this vault's data failed authentication; the master password was right, so the
+file itself is damaged -- restore the .bak or a history snapshot beside it
+```
+
+They have opposite remedies, which is why the distinction is worth the tag.
+
+### Upgrading and downgrading
+
+There is nothing to run. A gpg-sealed vault is read for as long as you keep
+one, and is rewritten in the new format the next time anything writes it.
+
+**The vault key does not change during the upgrade.** The recovery file still
+names the same key, a Shamir share set still reconstructs it, and a `.bak` from
+before the upgrade still opens under the same master password.
+
+`spm doctor` reports what is actually on disk, not what this build would write:
+
+```text
+vault_cipher  ok    sealed with AES-256-CTR and HMAC-SHA256; key derivation
+                    scrypt n=32768 r=8 p=1
+```
+
+**Do not downgrade to 3.15.0 or earlier after a vault has been upgraded.** Those
+builds cannot read the container at all and will report a wrong master password,
+because from their point of view that is what it looks like.
+
+### Why openssl, and what that forced
+
+Python's `hashlib` carries scrypt, HMAC and PBKDF2 but no AES, and a
+third-party dependency is the portability rule this project is built on, so the
+cipher is the `openssl` binary. Three consequences, each visible in the code:
+
+- **Keys go in on a file descriptor.** `openssl enc -K` puts the key in argv,
+  where any local user can read it out of `/proc/<pid>/cmdline`.
+- **Key material is base64, never raw.** A passphrase on that descriptor is
+  read as a *line*, so a raw key containing a `0x0A` byte would be truncated
+  silently — and the vault would still encrypt and decrypt against itself,
+  under a fraction of the intended key, with nothing reporting anything.
+- **The MAC is written out here.** `openssl enc` has no AEAD mode carrying a
+  tag, so encrypt-then-MAC is explicit, with a MAC key derived in-process that
+  never crosses to another program.
+
+Argon2id is still not adopted, for the reasons recorded in the roadmap: it is
+reachable only through OpenSSL 3.2 or a third-party dependency, and the
+platforms SPM supports are behind the first. The `KDF` header is what makes
+adopting it later a dispatch rather than another format change.
 
 ---
 
@@ -1502,7 +1626,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.15.0**
+Version: **4.0.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down

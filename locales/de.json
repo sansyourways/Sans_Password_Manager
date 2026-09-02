@@ -152,8 +152,6 @@
     "section.backups": "Backup-Codes",
     "section.backups_desc": "Bewahre Wiederherstellungscodes auf (die Ansicht zeigt sie vollständig).",
     "btn.add_backups": "+ Backup-Codes hinzufügen",
-    "section.session": "Web-Sitzung",
-    "section.session_desc": "Durch dein Hauptpasswort geschützt. Die Oberfläche sperrt sich nach 30 Sekunden Inaktivität selbst; der Server lässt eine untätige Sitzung nach 5 Minuten und jede Sitzung nach 12 Stunden verfallen.",
     "form.vault": "Tresor:",
     "form.back_list": "← Zurück zur Liste",
     "form.save": "Speichern",
@@ -304,8 +302,7 @@
     "overview.view_all": "Alle ansehen",
     "overview.console_eyebrow": "Sitzung / lokaler Tresor / authentifiziert",
     "overview.console_records": "verschlüsselte Einträge indiziert",
-    "overview.console_gpg": "GnuPG-Grenze auf diesem Rechner aktiv",
-    "overview.console_lock": "Inaktivitätssperre auf 30 Sekunden scharf",
+    "overview.console_lock": "Leerlaufsperre",
     "overview.console_lede": "Zugangsdaten prüfen, erzeugen und pflegen – aus einer einzigen nachvollziehbaren Sitzung.",
     "btn.view": "Ansehen",
     "generator.mode": "Modus",
@@ -346,6 +343,13 @@
     "tidy.offer_t": "Einige Einträge lassen sich aufräumen",
     "tidy.offer_d": "Einträge tragen einen Ordner in ihren Notizen oder einen Namen in Paketform. Prüfe die Änderungen, bevor etwas geschrieben wird.",
     "tidy.review": "Änderungen prüfen",
-    "tidy.done": "Einträge aufgeräumt."
+    "tidy.done": "Einträge aufgeräumt.",
+    "overview.console_cipher": "Tresor-Chiffre",
+    "settings.lock.title": "Leerlaufsperre",
+    "settings.lock.desc": "Wie lange das Dashboard wartet, bevor es sich selbst sperrt.",
+    "settings.lock.label": "Sperren nach",
+    "settings.lock.apply": "Sperrzeit übernehmen",
+    "settings.lock.note": "Eine längere Wartezeit lässt den entschlüsselten Tresor länger auf dem Bildschirm. Der Server beendet eine untätige Sitzung kurz nach diesem Timer, unabhängig davon, was der Browser tut.",
+    "settings.lock.saved": "Leerlaufsperre aktualisiert."
   }
 }

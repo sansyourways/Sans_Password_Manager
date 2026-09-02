@@ -152,8 +152,6 @@
     "section.backups": "Codes de secours",
     "section.backups_desc": "Conservez des codes de récupération (l'affichage montre les codes complets).",
     "btn.add_backups": "+ Ajouter des codes de secours",
-    "section.session": "Session web",
-    "section.session_desc": "Protégée par votre mot de passe maître. L'interface se verrouille seule après 30 secondes d'inactivité ; le serveur expire une session inactive au bout de 5 minutes, et toute session au bout de 12 heures.",
     "form.vault": "Coffre :",
     "form.back_list": "← Retour à la liste",
     "form.save": "Enregistrer",
@@ -304,8 +302,7 @@
     "overview.view_all": "Tout voir",
     "overview.console_eyebrow": "session / coffre local / authentifiée",
     "overview.console_records": "fiches chiffrées indexées",
-    "overview.console_gpg": "frontière GnuPG active sur cet hôte",
-    "overview.console_lock": "verrouillage automatique armé à 30 secondes",
+    "overview.console_lock": "verrouillage par inactivité",
     "overview.console_lede": "Inspectez, générez et entretenez vos identifiants depuis une seule session auditable.",
     "btn.view": "Consulter",
     "generator.mode": "Mode",
@@ -346,6 +343,13 @@
     "tidy.offer_t": "Des fiches peuvent être rangées",
     "tidy.offer_d": "fiches portent un dossier dans leurs notes ou un nom en forme d'identifiant de paquet. Vérifiez les modifications avant toute écriture.",
     "tidy.review": "Vérifier les modifications",
-    "tidy.done": "fiches rangées."
+    "tidy.done": "fiches rangées.",
+    "overview.console_cipher": "chiffrement du coffre",
+    "settings.lock.title": "Verrouillage par inactivité",
+    "settings.lock.desc": "Combien de temps le tableau de bord attend avant de se verrouiller.",
+    "settings.lock.label": "Verrouiller après",
+    "settings.lock.apply": "Appliquer le délai de verrouillage",
+    "settings.lock.note": "Une attente plus longue laisse le coffre déchiffré plus longtemps à l'écran. Le serveur met fin à une session inactive peu après ce délai, quoi que fasse le navigateur.",
+    "settings.lock.saved": "Verrouillage par inactivité mis à jour."
   }
 }

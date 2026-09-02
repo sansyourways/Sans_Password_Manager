@@ -45,6 +45,12 @@ CONTAINER_MAGIC = b"SPM-VAULT-3"
 # implicit can be neither reviewed nor migrated. GnuPG 2.2 already defaults to
 # s2k mode 3 at the maximum count, so the measurable change is the digest,
 # whose default is SHA1.
+#
+# From 4.0.0 nothing in production writes a gpg vault -- the openssl backend
+# below does -- so this policy now describes only vaults written by earlier
+# releases, and gpg_encrypt exists to build them for the tests that prove the
+# migration path. It stays here rather than in the suite so that there is still
+# exactly one statement of the policy in the repository.
 S2K_ARGS = ["--s2k-mode", "3", "--s2k-digest-algo", "SHA512",
             "--s2k-count", "65011712"]
 
@@ -53,6 +59,25 @@ HISTORY_RETENTION_DEFAULT = 20
 
 class VaultError(Exception):
     """Anything that should reach a user as a refusal rather than a traceback."""
+
+
+class VaultSecretError(VaultError):
+    """The supplied secret does not open this vault.
+
+    gpg could not tell a caller this: it refused a wrong passphrase and a
+    damaged file with the same non-zero exit, so every caller that wanted to
+    say "wrong master password" was guessing. An authenticated envelope makes
+    the two separable, and separating them is the point of naming them.
+    """
+
+
+class VaultIntegrityError(VaultError):
+    """The envelope opened but the sealed data failed authentication.
+
+    Which means the secret was right and the bytes are damaged -- a distinction
+    worth surfacing, because the two have opposite remedies: retype, or
+    restore.
+    """
 
 
 # ----- gpg backend -----------------------------------------------------------
@@ -72,6 +97,12 @@ def _passphrase_fd(secret):
 
 
 def gpg_encrypt(secret, payload, timeout=60):
+    """Seal under gpg, the way releases before 4.0.0 did.
+
+    No production path calls this any more. It is what the migration tests
+    build a pre-4.0.0 vault with, so that they upgrade a real one rather than
+    an approximation of one.
+    """
     fd = _passphrase_fd(secret)
     try:
         return subprocess.check_output(
@@ -96,6 +127,169 @@ def gpg_decrypt(secret, payload, timeout=60):
         os.close(fd)
 
 
+# ----- openssl backend -------------------------------------------------------
+# gpg seals both layers of a vault by stretching a passphrase. That is right
+# for the master password and pure waste for the vault key, which is 256
+# random bits and has nothing left to stretch -- format 3 established the
+# separation and then paid the stretching cost twice anyway. Format 5 stops:
+# the master password goes through scrypt, which is memory-hard where gpg's
+# SHA512 iteration is not, and the data is sealed under the vault key directly.
+#
+# openssl is the cipher because it is the only one on every platform SPM
+# supports. Python's hashlib carries scrypt, HMAC and PBKDF2 but no AES, and a
+# third-party dependency is the portability rule this project is built on.
+# Using its command line imposes three constraints, and each one shapes the
+# code below rather than being worked around:
+#
+#   Keys reach it on a file descriptor. `openssl enc -K` puts the key in argv,
+#   where any local user reads it out of /proc/<pid>/cmdline. OpenSSL 3 scrubs
+#   argv shortly after startup, but there is a window, and LibreSSL is not
+#   known to scrub at all. `-pass fd:` has no such window.
+#
+#   A passphrase read from that descriptor is read as a *line*, so key
+#   material handed to openssl must be text containing no newline: a raw
+#   32-byte key with an 0x0A byte in it would be silently truncated, and the
+#   vault would still encrypt and decrypt perfectly with a key a fifth of the
+#   intended length. Everything passed here is base64.
+#
+#   Authentication is ours. `openssl enc` offers no AEAD mode that carries a
+#   tag, so this is encrypt-then-MAC, with a MAC key derived in-process that
+#   never crosses to another program at all.
+
+# Named for what it is rather than numbered, deliberately. The gpg container
+# was "SPM-VAULT-3" back when the record format was also 3; the two drifted at
+# format 4, and a header reading "SPM-VAULT-5" beside a META_VAULT_VERSION row
+# saying 4 would invite exactly the confusion that gets a format misread. This
+# magic names the sealing generation; the record format keeps its own number.
+CONTAINER_MAGIC_AEAD = b"SPM-VAULT-AEAD1"
+
+SEAL_MAGIC = b"SPMSEAL1"
+# openssl's PKCS5 salt is eight bytes and it discards anything longer with a
+# warning, so eight is what the format carries rather than a size that only
+# looks stronger. The IV is separate and full width: a salt collision alone
+# must not repeat a CTR keystream, and an IV is not secret, so it is the one
+# value here that may travel in argv.
+SEAL_SALT_BYTES = 8
+SEAL_IV_BYTES = 16
+SEAL_TAG_BYTES = 32
+SEAL_CIPHER = "aes-256-ctr"
+SEAL_MAC_INFO = b"SPMSEAL1-mac"
+
+# The vault records the KDF by name and parameters, which is what turns a
+# later move to Argon2id into a value the reader dispatches on instead of
+# another format change. n=2**15 is 32 MiB and measures ~145 ms here, against
+# ~390 ms for the gpg envelope it replaces.
+KDF_NAME = "scrypt"
+KDF_N = 1 << 15
+KDF_R = 8
+KDF_P = 1
+KDF_SALT_BYTES = 16
+KDF_DKLEN = 32
+# hashlib.scrypt refuses anything past its default maxmem with "memory limit
+# exceeded", and the default is below what n=2**15 needs, so the bound is
+# stated rather than inherited: 128 * n * r is the working set.
+KDF_MAXMEM = 128 * KDF_N * KDF_R * 2
+
+
+def _key_fd(key_text):
+    """A read fd holding `key_text`, for openssl's -pass fd:.
+
+    Same reasoning as _passphrase_fd: argv is world-readable. The newline is
+    what openssl strips when it reads the line back, so it is not part of the
+    passphrase.
+    """
+    try:
+        material = key_text.encode("ascii")
+    except UnicodeEncodeError:
+        # Every key this format seals with is base64, so non-ASCII here means
+        # the caller passed something else -- an old master password from a
+        # recovery file, which recover() tries speculatively. A refusal it can
+        # catch is better than a UnicodeEncodeError out of a crypto path.
+        raise VaultError("key material for openssl must be ASCII")
+    if b"\n" in material or b"\r" in material:
+        raise VaultError("key material for openssl must be a single line")
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, material + b"\n")
+    finally:
+        os.close(write_fd)
+    return read_fd
+
+
+def openssl_ctr(key_text, salt, iv, payload, decrypt=False, timeout=60):
+    """AES-256-CTR under a key openssl derives from `key_text` and `salt`.
+
+    The derivation is PBKDF2-HMAC-SHA256 at one iteration, which
+    hashlib.pbkdf2_hmac reproduces byte for byte -- the known-answer test in
+    the suite depends on exactly that, so a platform whose openssl derives
+    differently fails a test rather than writing a vault nothing can open.
+
+    One iteration is not an oversight. Both callers pass full-entropy key
+    material -- a random vault key, or an scrypt output -- so this step exists
+    to produce a key and an IV, not to stretch a guessable secret. The
+    stretching happens once, in scrypt, where the low-entropy secret actually
+    is.
+    """
+    fd = _key_fd(key_text)
+    try:
+        return subprocess.check_output(
+            ["openssl", "enc", "-" + SEAL_CIPHER, "-d" if decrypt else "-e",
+             "-pbkdf2", "-iter", "1", "-md", "sha256",
+             "-S", salt.hex(), "-iv", iv.hex(), "-pass", "fd:%d" % fd],
+            input=payload, stderr=subprocess.DEVNULL,
+            timeout=timeout, pass_fds=(fd,))
+    finally:
+        os.close(fd)
+
+
+def _seal_mac_key(key_text, salt):
+    """A MAC key independent of the encryption key openssl derives.
+
+    openssl computes HMAC(key_text, salt || counter) for its blocks; this
+    computes HMAC(key_text, "SPMSEAL1-mac" || salt), a different message under the
+    same key, so neither derivation reveals the other.
+    """
+    return hmac.new(key_text.encode("ascii"), SEAL_MAC_INFO + salt,
+                    hashlib.sha256).digest()
+
+
+def seal(key_text, payload):
+    """Encrypt-then-MAC `payload` under `key_text`. Returns one opaque blob."""
+    salt = os.urandom(SEAL_SALT_BYTES)
+    iv = os.urandom(SEAL_IV_BYTES)
+    cipher = openssl_ctr(key_text, salt, iv, payload)
+    body = SEAL_MAGIC + salt + iv + cipher
+    return body + hmac.new(_seal_mac_key(key_text, salt), body,
+                           hashlib.sha256).digest()
+
+
+def unseal(key_text, blob):
+    """`payload` from a blob `seal` produced, or a refusal.
+
+    The tag is checked before anything is decrypted, so a modified blob is
+    never fed to a cipher. CTR decryption cannot fail on its own -- it will
+    happily turn corrupted input into corrupted output -- which is precisely
+    why the tag has to be the gate rather than an afterthought.
+    """
+    head = len(SEAL_MAGIC) + SEAL_SALT_BYTES + SEAL_IV_BYTES
+    if len(blob) < head + SEAL_TAG_BYTES or not blob.startswith(SEAL_MAGIC):
+        raise VaultError("sealed block is not in this format")
+    body, tag = blob[:-SEAL_TAG_BYTES], blob[-SEAL_TAG_BYTES:]
+    salt = body[len(SEAL_MAGIC):len(SEAL_MAGIC) + SEAL_SALT_BYTES]
+    iv = body[len(SEAL_MAGIC) + SEAL_SALT_BYTES:head]
+    expected = hmac.new(_seal_mac_key(key_text, salt), body, hashlib.sha256)
+    if not hmac.compare_digest(expected.digest(), tag):
+        raise VaultError("sealed block failed authentication")
+    return openssl_ctr(key_text, salt, iv, body[head:], decrypt=True)
+
+
+def derive_kek(master, salt, n=KDF_N, r=KDF_R, p=KDF_P):
+    """The key-encryption key for the master password, as openssl-safe text."""
+    raw = hashlib.scrypt(master.encode("utf-8"), salt=salt, n=n, r=r, p=p,
+                         dklen=KDF_DKLEN, maxmem=KDF_MAXMEM)
+    return base64.b64encode(raw).decode("ascii")
+
+
 # ----- container -------------------------------------------------------------
 # A format-3 vault is one file: a header line, the vault key sealed under the
 # master password, then the vault ciphertext sealed under that key. Keeping it
@@ -103,7 +297,18 @@ def gpg_decrypt(secret, payload, timeout=60):
 # syncs or bundles "the vault" needed no change when the format did.
 
 def is_container(raw):
-    return raw.startswith(CONTAINER_MAGIC + b"\n")
+    """True for any sealed vault, whichever backend sealed it."""
+    return (raw.startswith(CONTAINER_MAGIC + b"\n")
+            or raw.startswith(CONTAINER_MAGIC_AEAD + b"\n"))
+
+
+def container_backend(raw):
+    """"openssl", "gpg", or None for a vault that predates the container."""
+    if raw.startswith(CONTAINER_MAGIC_AEAD + b"\n"):
+        return "openssl"
+    if raw.startswith(CONTAINER_MAGIC + b"\n"):
+        return "gpg"
+    return None
 
 
 def build_container(envelope, cipher):
@@ -112,8 +317,14 @@ def build_container(envelope, cipher):
 
 
 def parse_container(raw):
-    """(envelope, cipher), or None when `raw` predates the container format."""
-    if not is_container(raw):
+    """(envelope, cipher) for a gpg-sealed vault, else None.
+
+    The magic is checked exactly rather than through is_container, which
+    answers for both backends: an AEAD header also carries a KEY line and a
+    DATA marker, so the lenient test parsed one happily and handed back an
+    envelope no gpg would ever open.
+    """
+    if not raw.startswith(CONTAINER_MAGIC + b"\n"):
         return None
     try:
         key_line, data = raw.split(b"\nDATA\n", 1)
@@ -128,6 +339,84 @@ def parse_container(raw):
 
 def new_vault_key():
     return base64.b64encode(os.urandom(32)).decode("ascii")
+
+
+# An AEAD-format vault keeps the shape format 3 established -- one file, a key
+# envelope, then the data -- and adds the line that made the whole exercise
+# worth doing: the KDF, by name and by parameter. Without it a change of
+# stretching function is another format version; with it, it is a value the
+# reader already knows how to dispatch on.
+
+def build_container_aead(kdf_salt, envelope, cipher, n=KDF_N, r=KDF_R, p=KDF_P):
+    return (CONTAINER_MAGIC_AEAD +
+            b"\nKDF " + KDF_NAME.encode("ascii") +
+            b" n=%d r=%d p=%d salt=" % (n, r, p) +
+            base64.b64encode(kdf_salt) +
+            b"\nKEY " + base64.b64encode(envelope) +
+            b"\nDATA\n" + base64.b64encode(cipher) + b"\n")
+
+
+def parse_container_aead(raw):
+    """(kdf, envelope, cipher) for an AEAD vault, else None.
+
+    `kdf` is a dict carrying the name and every parameter the vault was
+    written with, so the unwrap uses the vault's own numbers rather than this
+    build's constants -- which is what lets a cost parameter be raised without
+    stranding vaults written before the change.
+    """
+    if not raw.startswith(CONTAINER_MAGIC_AEAD + b"\n"):
+        return None
+    try:
+        header, data = raw.split(b"\nDATA\n", 1)
+        _, kdf_line, key_line = header.split(b"\n", 2)
+        name, params = kdf_line[len(b"KDF "):].split(b" ", 1)
+        fields = dict(item.split(b"=", 1) for item in params.split(b" "))
+        kdf = {"name": name.decode("ascii"),
+               "n": int(fields[b"n"]), "r": int(fields[b"r"]),
+               "p": int(fields[b"p"]),
+               "salt": base64.b64decode(fields[b"salt"])}
+        envelope = base64.b64decode(key_line[len(b"KEY "):])
+        cipher = base64.b64decode(data)
+    except Exception as exc:
+        raise VaultError("vault key container is corrupt") from exc
+    if not envelope or not cipher or not kdf["salt"]:
+        raise VaultError("vault key container is incomplete")
+    if kdf["name"] != KDF_NAME:
+        # Named, not guessed. A vault written by a build that adopted a
+        # different stretching function must refuse here rather than derive
+        # the wrong key and report a wrong master password.
+        raise VaultError(
+            "this vault was written with the %s key derivation and this SPM "
+            "implements %s; upgrade SPM rather than guessing"
+            % (kdf["name"], KDF_NAME))
+    return kdf, envelope, cipher
+
+
+def vault_seal_summary(vault_path):
+    """(backend, kdf) describing how a vault file on disk is sealed.
+
+    kdf is None for anything gpg sealed, which is the point: the old format
+    had no way to say what it stretched a password with, so a report about it
+    can only name the backend.
+    """
+    # An unreadable file is the caller's problem and raises. Only a readable
+    # one that is not a container returns None -- "there is no vault here" and
+    # "this vault predates the container" are different answers and must not
+    # arrive as the same one.
+    with open(vault_path, "rb") as handle:
+        raw = handle.read()
+    backend = container_backend(raw)
+    if backend != "openssl":
+        return backend, None
+    return backend, parse_container_aead(raw)[0]
+
+
+def unwrap_key_aead(kdf, envelope, master):
+    kek = derive_kek(master, kdf["salt"], kdf["n"], kdf["r"], kdf["p"])
+    try:
+        return unseal(kek, envelope).decode("utf-8")
+    except VaultError:
+        raise VaultSecretError("that secret does not open this vault")
 
 
 # ----- version stamping ------------------------------------------------------
@@ -1107,10 +1396,16 @@ def install_recovery(vault_path, staged):
 def unwrap_key(vault_path, master):
     """The vault key alone, or None when the vault predates the container."""
     with open(vault_path, "rb") as handle:
-        parts = parse_container(handle.read())
-    if parts is None:
-        return None
-    key = gpg_decrypt(master, parts[0]).decode("utf-8")
+        raw = handle.read()
+    modern = parse_container_aead(raw)
+    if modern is not None:
+        kdf, envelope, _ = modern
+        key = unwrap_key_aead(kdf, envelope, master)
+    else:
+        parts = parse_container(raw)
+        if parts is None:
+            return None
+        key = gpg_decrypt(master, parts[0]).decode("utf-8")
     if not key:
         raise VaultError("vault key envelope decrypted to nothing")
     return key
@@ -1133,6 +1428,31 @@ def read_vault(vault_path, master):
     except OSError:
         record_event("unlock", "fail", scope + ",reason=missing")
         raise
+    modern = parse_container_aead(raw)
+    if modern is not None:
+        kdf, envelope, cipher = modern
+        try:
+            key = unwrap_key_aead(kdf, envelope, master)
+        except Exception:
+            record_event("unlock", "fail", scope + ",reason=bad-master")
+            raise
+        if not key:
+            record_event("unlock", "fail", scope + ",reason=bad-master")
+            raise VaultError("vault key envelope decrypted to nothing")
+        try:
+            plaintext = unseal(key, cipher).decode("utf-8", errors="ignore")
+        except VaultError:
+            # The envelope opened, so the password was right and the data
+            # block is damaged. gpg could never separate these two -- it
+            # refused both identically, and the log had to say so -- and an
+            # authenticated data block is what makes the distinction real.
+            record_event("unlock", "fail", scope + ",reason=corrupt")
+            raise VaultIntegrityError(
+                "this vault's data failed authentication; the master password "
+                "was right, so the file itself is damaged -- restore the .bak "
+                "or a history snapshot beside it")
+        record_event("unlock", "ok", scope)
+        return plaintext, key
     try:
         parts = parse_container(raw)
         if parts is None:
@@ -1144,9 +1464,9 @@ def read_vault(vault_path, master):
             raise VaultError("vault key envelope decrypted to nothing")
         plaintext = gpg_decrypt(key, parts[1]).decode("utf-8", errors="ignore")
     except Exception:
-        # A wrong master password and a damaged file are indistinguishable from
-        # here -- gpg refuses both the same way -- so the log says the honest
-        # thing rather than guessing which it was.
+        # For a gpg-sealed vault a wrong master password and a damaged file
+        # stay indistinguishable -- gpg refuses both the same way -- so the log
+        # says the honest thing rather than guessing which it was.
         record_event("unlock", "fail", scope + ",reason=bad-master")
         raise
     record_event("unlock", "ok", scope)
@@ -1168,6 +1488,9 @@ def read_vault_with_key(vault_path, vault_key):
     """
     with open(vault_path, "rb") as handle:
         raw = handle.read()
+    modern = parse_container_aead(raw)
+    if modern is not None:
+        return unseal(vault_key, modern[2]).decode("utf-8", errors="ignore")
     parts = parse_container(raw)
     if parts is None:
         return None
@@ -1177,7 +1500,14 @@ def read_vault_with_key(vault_path, vault_key):
 # ----- writing ---------------------------------------------------------------
 
 def write_vault(vault_path, master, plaintext, vault_key=None):
-    """Install `plaintext` as a format-3 vault. Returns the vault key used.
+    """Install `plaintext` as an AEAD vault. Returns the vault key used.
+
+    A gpg-sealed vault becomes an openssl-sealed one here, on its next write,
+    with no flag day and nothing for the user to run. The upgrade is invisible
+    to everything downstream because the vault key does not change: the
+    recovery file still names it, Shamir shares still reconstruct it, and a
+    .bak from before the upgrade still opens under the same master password.
+    That is the whole reason format 3 separated the key from the password.
 
     A write reuses the key the vault already has. Minting a fresh one whenever
     the caller did not supply it would strand every .bak, history snapshot and
@@ -1210,10 +1540,11 @@ def write_vault(vault_path, master, plaintext, vault_key=None):
     os.close(tmp_fd)
     try:
         os.chmod(tmp_path, 0o600)
-        envelope = gpg_encrypt(master, vault_key.encode("utf-8"))
-        cipher = gpg_encrypt(vault_key, plaintext.encode("utf-8"))
+        kdf_salt = os.urandom(KDF_SALT_BYTES)
+        envelope = seal(derive_kek(master, kdf_salt), vault_key.encode("utf-8"))
+        cipher = seal(vault_key, plaintext.encode("utf-8"))
         with open(tmp_path, "wb") as handle:
-            handle.write(build_container(envelope, cipher))
+            handle.write(build_container_aead(kdf_salt, envelope, cipher))
 
         if os.path.exists(vault_path):
             archive_generation(vault_path)
@@ -1253,11 +1584,9 @@ def write_vault(vault_path, master, plaintext, vault_key=None):
 
 def rewrap(vault_path, old_master, new_master):
     """Change only the master-password envelope, given the old password."""
-    with open(vault_path, "rb") as handle:
-        parts = parse_container(handle.read())
-    if parts is None:
+    key = unwrap_key(vault_path, old_master)
+    if key is None:
         raise VaultError("vault must be migrated before its key can be rewrapped")
-    key = gpg_decrypt(old_master, parts[0]).decode("utf-8")
     if not key:
         raise VaultError("vault key envelope decrypted to nothing")
     return rewrap_with_key(vault_path, key, new_master)
@@ -1266,8 +1595,9 @@ def rewrap(vault_path, old_master, new_master):
 def rewrap_with_key(vault_path, vault_key, new_master):
     """Change only the master-password envelope, given the vault key.
 
-    The vault ciphertext stays byte-identical and the recovery file is not
-    touched at all, because both key off the vault key, which does not change.
+    The vault ciphertext stays byte-identical -- for a vault already on the
+    current format -- and the recovery file is not touched at all, because
+    both key off the vault key, which does not change.
     This is the reason for separating the vault key: a password change stops
     being a re-encryption of everything the user owns.
 
@@ -1276,11 +1606,28 @@ def rewrap_with_key(vault_path, vault_key, new_master):
     of any vault operation.
     """
     with open(vault_path, "rb") as handle:
-        parts = parse_container(handle.read())
-    if parts is None:
-        raise VaultError("vault must be migrated before its key can be rewrapped")
+        raw = handle.read()
     key = vault_key
-    updated = build_container(gpg_encrypt(new_master, key.encode("utf-8")), parts[1])
+    kdf_salt = os.urandom(KDF_SALT_BYTES)
+    envelope = seal(derive_kek(new_master, kdf_salt), key.encode("utf-8"))
+    modern = parse_container_aead(raw)
+    if modern is not None:
+        updated = build_container_aead(kdf_salt, envelope, modern[2])
+    else:
+        parts = parse_container(raw)
+        if parts is None:
+            raise VaultError(
+                "vault must be migrated before its key can be rewrapped")
+        # A gpg-sealed vault is upgraded here rather than rewrapped in place.
+        # The two cannot both hold: the new envelope is openssl-sealed, so the
+        # gpg data block beside it would be unreadable to the reader that
+        # opens the envelope. Re-sealing the data costs one decryption, which
+        # a password change was already paying for, and it means the last
+        # vaults on the old backend leave it the next time anyone touches
+        # them rather than lingering until a write happens to come along.
+        updated = build_container_aead(
+            kdf_salt, envelope,
+            seal(key, gpg_decrypt(key, parts[1])))
 
     vault_dir = os.path.dirname(os.path.abspath(vault_path)) or "."
     fd, staged = tempfile.mkstemp(
@@ -1310,8 +1657,9 @@ def rewrap_with_key(vault_path, vault_key, new_master):
 def recover(vault_path, secret, out_path):
     """Open a vault with a secret recovered from the .recovery file.
 
-    What that file holds depends on when it was last written: format 3 stores
-    the vault key, the formats before it stored the master password, and a
+    What that file holds depends on when it was last written: formats 3 and 5
+    store the vault key, the formats before them stored the master password,
+    and a
     vault caught mid-migration is described by neither. Try every reading
     rather than assume -- the master-password route is also what makes the
     migration window recoverable, because the key envelope of a just-migrated
@@ -1323,6 +1671,28 @@ def recover(vault_path, secret, out_path):
     """
     with open(vault_path, "rb") as handle:
         raw = handle.read()
+
+    modern = parse_container_aead(raw)
+    if modern is not None:
+        kdf, envelope, cipher = modern
+        try:
+            plaintext = unseal(secret, cipher).decode("utf-8", errors="ignore")
+            key, stale = secret, False
+        except VaultError:
+            # Not the vault key, so read it as the master password the older
+            # recovery files hold. A failure here is genuinely "this file does
+            # not open this vault" rather than a guess between the two.
+            try:
+                key = unwrap_key_aead(kdf, envelope, secret)
+            except VaultError:
+                raise VaultError("the recovery file does not open this vault")
+            if not key:
+                raise VaultError("vault key envelope decrypted to nothing")
+            plaintext = unseal(key, cipher).decode("utf-8", errors="ignore")
+            stale = True
+        write_plaintext(out_path, plaintext)
+        return key, stale
+
     parts = parse_container(raw)
 
     if parts is None:
@@ -1974,6 +2344,34 @@ def doctor_report(plaintext, vault_path, recovery_status="unchecked",
             % (found, VAULT_FORMAT_VERSION),
             found=found, current=VAULT_FORMAT_VERSION))
 
+    # Which backend actually sealed this file, not which one this build would
+    # write. A vault upgrades on its next write, so between installing a
+    # release and saving anything the two genuinely differ, and a report that
+    # showed the build's answer would be describing itself.
+    try:
+        backend, kdf = vault_seal_summary(vault_path)
+    except (OSError, VaultError) as exc:
+        backend, kdf = "unreadable", None
+        checks.append(_check("vault_cipher", "fail", str(exc)))
+    if backend == "openssl":
+        checks.append(_check(
+            "vault_cipher", "ok",
+            "sealed with AES-256-CTR and HMAC-SHA256; key derivation %s "
+            "n=%d r=%d p=%d" % (kdf["name"], kdf["n"], kdf["r"], kdf["p"]),
+            backend=backend, kdf=kdf["name"],
+            kdf_n=kdf["n"], kdf_r=kdf["r"], kdf_p=kdf["p"]))
+    elif backend == "gpg":
+        checks.append(_check(
+            "vault_cipher", "warn",
+            "sealed with gpg; the next write upgrades it to AES-256-CTR with "
+            "a memory-hard key derivation, in place and without a new key",
+            backend=backend))
+    elif backend is None:
+        checks.append(_check(
+            "vault_cipher", "warn",
+            "predates the key container; the next write upgrades it in place",
+            backend="legacy"))
+
     try:
         recovery_pubkey_pem(plaintext)
         checks.append(_check("recovery_pubkey", "ok",
@@ -2156,12 +2554,17 @@ def main(argv):
                     "these shares did not reconstruct a usable key; one of "
                     "them is probably from a different set")
             with open(vault, "rb") as handle:
-                container = parse_container(handle.read())
+                raw = handle.read()
+            modern = parse_container_aead(raw)
+            container = modern[1:] if modern else parse_container(raw)
             if container is None:
                 raise VaultError("this vault predates the key container")
             try:
-                gpg_decrypt(key, container[1])
-            except subprocess.CalledProcessError:
+                if modern:
+                    unseal(key, container[1])
+                else:
+                    gpg_decrypt(key, container[1])
+            except (subprocess.CalledProcessError, VaultError):
                 raise VaultError(
                     "these shares reconstructed a key that does not open this "
                     "vault; check that every share belongs to set %s"
@@ -2188,8 +2591,23 @@ def main(argv):
             (master,) = _secrets(1)
             sys.stdout.write(unwrap_key(argv[2], master) or "")
         elif command == "is-container":
+            # Enough bytes for the longest magic, not for one of them. Sized to
+            # CONTAINER_MAGIC alone, this read truncated an AEAD header mid-word
+            # and reported every current vault as not a container.
             with open(argv[2], "rb") as handle:
-                return 0 if is_container(handle.read(len(CONTAINER_MAGIC) + 1)) else 1
+                head = handle.read(
+                    max(len(CONTAINER_MAGIC), len(CONTAINER_MAGIC_AEAD)) + 1)
+            return 0 if is_container(head) else 1
+        elif command == "seal-info":
+            # seal-info <vault> ; stdout: backend<TAB>kdf<TAB>n<TAB>r<TAB>p
+            # No secret is read: this describes the header, not the contents,
+            # so `doctor` can report it without holding the vault open.
+            backend, kdf = vault_seal_summary(argv[2])
+            if kdf:
+                sys.stdout.write("%s\t%s\t%d\t%d\t%d\n" % (
+                    backend, kdf["name"], kdf["n"], kdf["r"], kdf["p"]))
+            else:
+                sys.stdout.write("%s\t-\t-\t-\t-\n" % (backend or "legacy"))
         elif command == "format-version":
             with open(argv[2], "r", encoding="utf-8", errors="ignore") as handle:
                 sys.stdout.write("%d\n" % format_version(handle.read()))
@@ -2290,7 +2708,7 @@ def main(argv):
         sys.stderr.write("%s\n" % exc)
         return 1
     except subprocess.CalledProcessError:
-        sys.stderr.write("gpg refused the supplied secret\n")
+        sys.stderr.write("the cipher refused the supplied secret\n")
         return 1
     except (OSError, IndexError) as exc:
         sys.stderr.write("%s\n" % exc)

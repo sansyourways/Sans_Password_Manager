@@ -152,8 +152,6 @@
     "section.backups": "Backup Codes",
     "section.backups_desc": "Store recovery codes (view shows full codes).",
     "btn.add_backups": "+ Add Backup Codes",
-    "section.session": "Web Session",
-    "section.session_desc": "Protected by your master password. The interface auto-locks after 30 seconds of inactivity; the server expires an idle session after 5 minutes and any session after 12 hours.",
     "form.vault": "Vault:",
     "form.back_list": "← Back to list",
     "form.save": "Save",
@@ -304,8 +302,7 @@
     "overview.view_all": "View all",
     "overview.console_eyebrow": "session / local vault / authenticated",
     "overview.console_records": "encrypted records indexed",
-    "overview.console_gpg": "GnuPG boundary active on this host",
-    "overview.console_lock": "idle lock armed for 30 seconds",
+    "overview.console_lock": "idle lock",
     "overview.console_lede": "Inspect, generate, and maintain credentials from one auditable session.",
     "btn.view": "View",
     "generator.mode": "Mode",
@@ -346,6 +343,13 @@
     "tidy.offer_t": "Some entries can be tidied",
     "tidy.offer_d": "entries carry a folder in their notes or a package-style name. Review the changes before anything is written.",
     "tidy.review": "Review changes",
-    "tidy.done": "entries tidied."
+    "tidy.done": "entries tidied.",
+    "overview.console_cipher": "vault cipher",
+    "settings.lock.title": "Idle Lock",
+    "settings.lock.desc": "How long the Dashboard waits before locking itself.",
+    "settings.lock.label": "Lock after",
+    "settings.lock.apply": "Apply lock timeout",
+    "settings.lock.note": "A longer wait leaves the decrypted vault on screen for longer. The server ends an idle session shortly after this timer, whatever the browser is doing.",
+    "settings.lock.saved": "Idle lock updated."
   }
 }

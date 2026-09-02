@@ -7,6 +7,57 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-09-03
+
+Major because the vault's sealing format changed: a vault this release writes
+cannot be opened by 3.15.0 or earlier. Existing vaults are upgraded in place on
+their next write, keeping the same vault key, so recovery files and Shamir
+share sets continue to work.
+
+### Added
+- Added a configurable idle lock. Settings offers 15s, 30s, 1m, 2m, 5m, 10m and
+  15m; the previous fixed 30 seconds remains the default. The server-side idle
+  bound follows the setting upward so a longer lock is real rather than a
+  promise the server breaks, and stays at its former 300s for the default.
+- Added a `vault_cipher` check to `spm doctor`, reporting which backend sealed
+  the file on disk and, for the current format, the key-derivation function and
+  its parameters.
+
+### Changed
+- Replaced the gpg data layer. A vault is now sealed with AES-256-CTR and
+  authenticated with HMAC-SHA256 (encrypt-then-MAC), and the master password is
+  stretched with scrypt at n=32768, r=8, p=1 instead of gpg's SHA512 iteration.
+  On a 200-record vault this measures 663 ms to 168 ms for a cold read and
+  248 ms to 11 ms once the vault key is held.
+- The vault records its key-derivation function by name and parameters, so a
+  later change of KDF is a value the reader dispatches on rather than another
+  format version, and raising the cost parameter does not strand vaults written
+  before the change.
+- A corrupted vault is now reported as corruption rather than as a wrong master
+  password. gpg refused both identically; an authenticated data block separates
+  them, and the two have opposite remedies.
+- The overview console reads the cipher and the idle lock from the vault and
+  the setting instead of printing "GnuPG boundary active on this host"
+  unconditionally, which stopped being true for a vault the moment it upgraded.
+
+### Fixed
+- The dashboard login only caught the refusal gpg produces, so once a vault was
+  on the new format a wrong master password reached the user as a server error
+  and never incremented the failure counter that rate-limits guessing.
+- `parse_container` accepted an AEAD header, because that header also carries a
+  KEY line and a DATA marker, and handed back an envelope no gpg could open.
+
+### Security
+- gpg stretched both the master password and the vault key, though the vault
+  key is 256 random bits with nothing left to stretch. Stretching now happens
+  once, with a memory-hard function, where the guessable secret actually is.
+- Vault data is authenticated for the first time. Under gpg a modified vault
+  was indistinguishable from a wrong password; a tampered file now fails a MAC
+  check before anything is decrypted.
+- Keys reach openssl on a file descriptor, never in argv, and only as base64
+  text: a raw key containing a newline byte would be silently truncated by a
+  passphrase read as a line.
+
 ## [3.15.0] - 2026-09-02
 
 ### Added

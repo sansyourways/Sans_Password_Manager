@@ -152,8 +152,6 @@
     "section.backups": "Códigos de backup",
     "section.backups_desc": "Guarde códigos de recuperação (a visualização mostra os códigos completos).",
     "btn.add_backups": "+ Adicionar códigos de backup",
-    "section.session": "Sessão web",
-    "section.session_desc": "Protegida pela sua senha mestra. A interface se bloqueia sozinha após 30 segundos de inatividade; o servidor expira uma sessão ociosa em 5 minutos e qualquer sessão em 12 horas.",
     "form.vault": "Cofre:",
     "form.back_list": "← Voltar para a lista",
     "form.save": "Salvar",
@@ -304,8 +302,7 @@
     "overview.view_all": "Ver tudo",
     "overview.console_eyebrow": "sessão / cofre local / autenticada",
     "overview.console_records": "registros criptografados indexados",
-    "overview.console_gpg": "limite do GnuPG ativo neste host",
-    "overview.console_lock": "bloqueio por inatividade armado em 30 segundos",
+    "overview.console_lock": "bloqueio por inatividade",
     "overview.console_lede": "Inspecione, gere e mantenha credenciais a partir de uma única sessão auditável.",
     "btn.view": "Ver",
     "generator.mode": "Modo",
@@ -346,6 +343,13 @@
     "tidy.offer_t": "Algumas entradas podem ser organizadas",
     "tidy.offer_d": "entradas trazem uma pasta nas notas ou um nome em formato de pacote. Revise as mudanças antes de qualquer gravação.",
     "tidy.review": "Revisar mudanças",
-    "tidy.done": "entradas organizadas."
+    "tidy.done": "entradas organizadas.",
+    "overview.console_cipher": "cifra do cofre",
+    "settings.lock.title": "Bloqueio por inatividade",
+    "settings.lock.desc": "Quanto tempo o Painel espera antes de se bloquear.",
+    "settings.lock.label": "Bloquear após",
+    "settings.lock.apply": "Aplicar tempo de bloqueio",
+    "settings.lock.note": "Uma espera maior deixa o cofre descriptografado mais tempo na tela. O servidor encerra uma sessão inativa pouco depois deste temporizador, faça o navegador o que fizer.",
+    "settings.lock.saved": "Bloqueio por inatividade atualizado."
   }
 }

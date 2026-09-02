@@ -152,8 +152,6 @@
     "section.backups": "Códigos de respaldo",
     "section.backups_desc": "Guarda códigos de recuperación (al verlos se muestran completos).",
     "btn.add_backups": "+ Añadir códigos de respaldo",
-    "section.session": "Sesión web",
-    "section.session_desc": "Protegida por tu contraseña maestra. La interfaz se bloquea sola tras 30 segundos de inactividad; el servidor caduca una sesión inactiva a los 5 minutos y cualquier sesión a las 12 horas.",
     "form.vault": "Caja fuerte:",
     "form.back_list": "← Volver a la lista",
     "form.save": "Guardar",
@@ -304,8 +302,7 @@
     "overview.view_all": "Ver todo",
     "overview.console_eyebrow": "sesión / caja fuerte local / autenticada",
     "overview.console_records": "registros cifrados indexados",
-    "overview.console_gpg": "límite de GnuPG activo en este equipo",
-    "overview.console_lock": "bloqueo por inactividad armado a 30 segundos",
+    "overview.console_lock": "bloqueo por inactividad",
     "overview.console_lede": "Inspecciona, genera y mantén credenciales desde una única sesión auditable.",
     "btn.view": "Ver",
     "generator.mode": "Modo",
@@ -346,6 +343,13 @@
     "tidy.offer_t": "Hay entradas que se pueden ordenar",
     "tidy.offer_d": "entradas llevan una carpeta en sus notas o un nombre con forma de paquete. Revisa los cambios antes de escribir nada.",
     "tidy.review": "Revisar los cambios",
-    "tidy.done": "entradas ordenadas."
+    "tidy.done": "entradas ordenadas.",
+    "overview.console_cipher": "cifrado de la bóveda",
+    "settings.lock.title": "Bloqueo por inactividad",
+    "settings.lock.desc": "Cuánto espera el panel antes de bloquearse solo.",
+    "settings.lock.label": "Bloquear después de",
+    "settings.lock.apply": "Aplicar tiempo de bloqueo",
+    "settings.lock.note": "Una espera más larga deja la bóveda descifrada más tiempo en pantalla. El servidor termina una sesión inactiva poco después de este temporizador, haga lo que haga el navegador.",
+    "settings.lock.saved": "Bloqueo por inactividad actualizado."
   }
 }

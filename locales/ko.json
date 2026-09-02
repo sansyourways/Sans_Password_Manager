@@ -152,8 +152,6 @@
     "section.backups": "백업 코드",
     "section.backups_desc": "복구 코드를 보관합니다 (열어 보면 전체 코드가 표시됩니다).",
     "btn.add_backups": "+ 백업 코드 추가",
-    "section.session": "웹 세션",
-    "section.session_desc": "마스터 비밀번호로 보호됩니다. 인터페이스는 30초간 아무 동작이 없으면 스스로 잠기고, 서버는 놀고 있는 세션을 5분 뒤에, 어떤 세션이든 12시간 뒤에 만료시킵니다.",
     "form.vault": "금고:",
     "form.back_list": "← 목록으로 돌아가기",
     "form.save": "저장",
@@ -304,8 +302,7 @@
     "overview.view_all": "전체 보기",
     "overview.console_eyebrow": "세션 / 로컬 금고 / 인증됨",
     "overview.console_records": "개의 암호화된 항목이 색인됨",
-    "overview.console_gpg": "이 호스트에서 GnuPG 경계 활성",
-    "overview.console_lock": "자동 잠금 30초로 설정됨",
+    "overview.console_lock": "유휴 잠금",
     "overview.console_lede": "감사 가능한 하나의 세션에서 자격 증명을 살펴보고, 만들고, 관리하세요.",
     "btn.view": "보기",
     "generator.mode": "모드",
@@ -346,6 +343,13 @@
     "tidy.offer_t": "정리할 수 있는 항목이 있습니다",
     "tidy.offer_d": "개 항목이 메모에 폴더를 담고 있거나 패키지 이름 형식입니다. 기록하기 전에 변경 내용을 확인하세요.",
     "tidy.review": "변경 내용 확인",
-    "tidy.done": "개 항목을 정리했습니다."
+    "tidy.done": "개 항목을 정리했습니다.",
+    "overview.console_cipher": "보관함 암호",
+    "settings.lock.title": "유휴 잠금",
+    "settings.lock.desc": "대시보드가 스스로 잠기기까지 기다리는 시간입니다.",
+    "settings.lock.label": "잠금까지",
+    "settings.lock.apply": "잠금 시간 적용",
+    "settings.lock.note": "대기 시간이 길수록 복호화된 보관함이 화면에 더 오래 남습니다. 브라우저 상태와 관계없이 서버는 이 타이머 직후 유휴 세션을 종료합니다.",
+    "settings.lock.saved": "유휴 잠금을 업데이트했습니다."
   }
 }
