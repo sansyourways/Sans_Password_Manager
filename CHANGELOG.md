@@ -7,6 +7,27 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.12.4] - 2026-09-02
+
+### Added
+- Added a Dashboard theme setting with an isolated preview-before-apply flow.
+  Sundial is the first selectable theme and the existing Console theme remains
+  available; Cyberpunk adds a right-side neon HUD and Edgerunner adds a
+  horizontal hazard command dock. Each has its own preview, effects, purposeful
+  live-state motion, and reduced-motion fallback. The applied preference is
+  stored only in the browser and follows the login and biometric lock screens.
+- Added a dedicated Passwords organization panel for folder and tag filtering.
+  Filters apply server-side, support multiple values, remain visible without
+  relying on colour, and persist in the page URL across all four themes.
+
+### Changed
+- Consolidated Dashboard configuration under one **Settings** sidebar entry,
+  containing theme, master-password, and optional biometric-unlock controls.
+- Made the Edgerunner command dock responsive: compact icon controls prevent
+  clipping on ordinary desktops, while full labels return on 2K/4K displays.
+- Updated the Dashboard, browser-extension manifests, documentation, and
+  release metadata to version 3.12.4.
+
 ## [3.12.3] - 2026-09-01
 
 ### Changed

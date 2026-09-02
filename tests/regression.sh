@@ -502,6 +502,8 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 	sleep 0.25
 done
 grep -q 'Sans Password Manager' "$TEST_ROOT/login.html"
+grep -q '<body class="theme-console">' "$TEST_ROOT/login.html"
+grep -q 'localStorage.getItem("spm.theme")' "$TEST_ROOT/login.html"
 grep -q 'rel="apple-touch-icon"' "$TEST_ROOT/login.html"
 
 # The icon routes are deliberately fetched with no session cookie. Unknown
@@ -1207,7 +1209,7 @@ curl -fsS -b "$TEST_ROOT/cookies" -o /dev/null -X POST \
 	-H "Origin: http://127.0.0.1:$WEB_PORT" \
 	--data-urlencode "csrf=$fold_csrf" --data-urlencode 'name=Foldered Site' \
 	--data-urlencode 'user=fu' --data-urlencode 'password=Fd9!qqqqqqqqqq' \
-	--data-urlencode 'notes=' --data-urlencode 'url=' \
+	--data-urlencode 'notes=Owned by platform #work #ops' --data-urlencode 'url=' \
 	--data-urlencode 'folder=Work' \
 	--data-urlencode 'cf_name_0=Account' --data-urlencode 'cf_value_0=123-456' \
 	--data-urlencode 'cf_name_1=Odd	Value' \
@@ -1272,7 +1274,7 @@ curl -fsS -b "$TEST_ROOT/cookies" -o /dev/null -X POST \
 	-H "Origin: http://127.0.0.1:$WEB_PORT" \
 	--data-urlencode "csrf=$edit_csrf" --data-urlencode 'name=Foldered Site' \
 	--data-urlencode 'user=changed' --data-urlencode 'password=Fd9!qqqqqqqqqq' \
-	--data-urlencode 'notes=' --data-urlencode 'url=' \
+	--data-urlencode 'notes=Owned by platform #work #ops' --data-urlencode 'url=' \
 	--data-urlencode 'folder=Work' \
 	--data-urlencode 'cf_name_0=Account' --data-urlencode 'cf_value_0=123-456' \
 	"http://127.0.0.1:$WEB_PORT/edit?id=$fold_id"
@@ -1327,6 +1329,32 @@ PYEXPORT
 
 printf '  folders: round trip through the form, tabs and newlines contained, edit preserves\n'
 
+# Folder and tag discovery is a separate, URL-addressable Passwords section.
+# A URL must reproduce the same filtered result without relying on prior
+# JavaScript state, and selected values need a non-colour marker.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/password-filters.html" \
+	"http://127.0.0.1:$WEB_PORT/passwords"
+grep -q 'id="password-filters-title"' "$TEST_ROOT/password-filters.html"
+grep -q 'data-i18n="filters.folders"' "$TEST_ROOT/password-filters.html"
+grep -q 'data-i18n="filters.tags"' "$TEST_ROOT/password-filters.html"
+grep -q 'href="/passwords?folder=Work"' "$TEST_ROOT/password-filters.html"
+grep -q 'href="/passwords?tag=work"' "$TEST_ROOT/password-filters.html"
+
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/password-filtered.html" \
+	"http://127.0.0.1:$WEB_PORT/passwords?folder=Work&tag=work"
+grep -q 'Foldered Site' "$TEST_ROOT/password-filtered.html"
+grep -q 'aria-current="true"' "$TEST_ROOT/password-filtered.html"
+grep -q 'href="/passwords" data-i18n="filters.clear"' \
+	"$TEST_ROOT/password-filtered.html"
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$TEST_ROOT/password-filtered.html" <<'PYFILTER'
+import re, sys
+page = open(sys.argv[1], encoding="utf-8").read()
+rows = re.findall(r'<tr data-row="[^"]*">', page)
+assert len(rows) == 1, "URL filters did not narrow to one row: %d" % len(rows)
+assert '>1</span> <span data-i18n="filters.of">' in page, "shown count is wrong"
+PYFILTER
+printf '  filters: folder and tag state survives in the URL and narrows server-side\n'
+
 # Tags are a convention inside existing plaintext fields. "C#" and a URL
 # fragment must not become tags, or every note with a link would sprout one.
 python3 - "$web_script" <<'PYTAG'
@@ -1355,7 +1383,10 @@ need = ["nav.security", "nav.history", "nav.unlock", "security.weak",
         "security.breached", "security.breached_d", "security.breach_check",
         "security.breach_optin", "security.breach_unavailable",
         "history.when", "btn.restore", "confirm.restore_snapshot",
-        "search.kind", "badge.aging", "tags.all",
+        "search.kind", "badge.aging", "tags.all", "filters.title",
+        "filters.desc", "filters.folders", "filters.tags",
+        "filters.unfiled", "filters.clear", "filters.of",
+        "filters.passwords_shown", "empty.filtered.t", "empty.filtered.d",
         "page.unlock.desc", "unlock.registered", "unlock.empty",
         "unlock.empty_sub", "unlock.field.label", "unlock.register",
         "unlock.note", "unlock.title", "unlock.sub", "unlock.btn",
@@ -1500,7 +1531,9 @@ assert code == 200, ("registration refused", code, res)
 
 boot, body = bootstrap()
 assert boot["available"] is True, "unlock still not advertised after registering"
-assert "/unlock/settings" in body, "no nav entry for the unlock settings page"
+_, combined_settings, _ = get("/settings")
+assert "/unlock/settings" in combined_settings, "unlock controls missing from Settings"
+assert 'data-i18n="nav.settings"' in body, "combined Settings nav entry is missing"
 csrf = boot["csrf"]
 
 # Revocation, on a second credential so the first stays available to unlock
@@ -3189,8 +3222,24 @@ curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/settings.html" \
 grep -q '<use href="#i-gear"' "$TEST_ROOT/settings.html"
 grep -q 'action="/settings/master-password"' "$TEST_ROOT/settings.html"
 grep -q 'data-i18n="nav.group.settings"' "$TEST_ROOT/settings.html"
-grep -q 'data-i18n="nav.master_password"' "$TEST_ROOT/settings.html"
-# Biometric Unlock moved into Settings; it must not have been dropped on the way.
+grep -q 'data-i18n="nav.settings"' "$TEST_ROOT/settings.html"
+# Theme selection previews independently and persists only through Apply.
+grep -q 'name="dashboard-theme" value="sundial"' "$TEST_ROOT/settings.html"
+grep -q 'name="dashboard-theme" value="console"' "$TEST_ROOT/settings.html"
+grep -q 'name="dashboard-theme" value="cyberpunk"' "$TEST_ROOT/settings.html"
+grep -q 'name="dashboard-theme" value="edgerunner"' "$TEST_ROOT/settings.html"
+[ "$(grep -o 'class="theme-preview"' "$TEST_ROOT/settings.html" | wc -l)" -eq 4 ]
+grep -q 'data-preview="sundial"' "$TEST_ROOT/settings.html"
+grep -q 'data-preview="console"' "$TEST_ROOT/settings.html"
+grep -q 'data-preview="cyberpunk"' "$TEST_ROOT/settings.html"
+grep -q 'data-preview="edgerunner"' "$TEST_ROOT/settings.html"
+grep -q 'prefers-reduced-motion:no-preference' "$TEST_ROOT/settings.html"
+grep -q '@media (min-width:1601px)' "$TEST_ROOT/settings.html"
+grep -q 'body.theme-edgerunner .nav-label' "$TEST_ROOT/settings.html"
+grep -q 'id="apply-theme"' "$TEST_ROOT/settings.html"
+grep -q 'localStorage.setItem("spm.theme", next)' "$TEST_ROOT/settings.html"
+# Biometric Unlock is part of the one Settings page; it must not have been
+# dropped when its separate sidebar destination was removed.
 grep -q 'href="/unlock/settings"' "$TEST_ROOT/settings.html"
 # The form is a plain in-flow POST, and _send_html must have stamped its token.
 mp_csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' "$TEST_ROOT/settings.html" | head -n1)"

@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.12.3"
+VERSION="3.12.4"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -8616,6 +8616,16 @@ I18N_SCRIPT = """
       "empty.search.d": "No label, name or username matches that text.",
       "badge.aging": "rotate",
       "tags.all": "All",
+      "filters.title": "Organize passwords",
+      "filters.desc": "Narrow this list by folder or tag. Active filters stay in the page address.",
+      "filters.folders": "Folders",
+      "filters.tags": "Tags",
+      "filters.unfiled": "Unfiled",
+      "filters.clear": "Clear filters",
+      "filters.of": "of",
+      "filters.passwords_shown": "passwords shown",
+      "empty.filtered.t": "No passwords match these filters",
+      "empty.filtered.d": "Clear the filters or choose a different folder or tag.",
       "header.title": "Sans Password Manager",
       "header.subtitle": "Liquid-glass web interface · GPG encrypted",
       "header.check_update": "Check update",
@@ -8782,9 +8792,29 @@ I18N_SCRIPT = """
       "nav.group.vault": "Vault",
       "nav.group.tools": "Tools",
       "nav.group.settings": "Settings",
-      "nav.master_password": "Master Password",
-      "page.settings.title": "Master Password",
-      "page.settings.desc": "Change the password that encrypts this vault.",
+      "nav.settings": "Settings",
+      "page.settings.title": "Settings",
+      "page.settings.desc": "Choose how the Dashboard looks and how this vault is unlocked.",
+      "settings.theme.title": "Theme",
+      "settings.theme.desc": "Select a theme to preview it here. The Dashboard changes only after you apply it.",
+      "settings.theme.sundial": "Sundial",
+      "settings.theme.sundial_desc": "A bright daylight transcript with teal controls and rust output.",
+      "settings.theme.console": "Console",
+      "settings.theme.console_desc": "The original dark operator transcript.",
+      "settings.theme.cyberpunk": "Cyberpunk",
+      "settings.theme.cyberpunk_desc": "Neon grid instrumentation with magenta controls and cyan output.",
+      "settings.theme.edgerunner": "Edgerunner",
+      "settings.theme.edgerunner_desc": "Hazard-cut panels with yellow controls and high-speed cyan telemetry.",
+      "settings.theme.preview": "Theme preview",
+      "settings.theme.preview_prompt": "spm settings --preview",
+      "settings.theme.preview_output": "vault ready / 12 records protected",
+      "settings.theme.apply": "Apply theme",
+      "settings.theme.applied": "Theme applied.",
+      "settings.master.title": "Master Password",
+      "settings.master.desc": "Change the password that encrypts this vault.",
+      "settings.unlock.title": "Biometric Unlock",
+      "settings.unlock.desc": "Manage the devices that can resume an authenticated vault session.",
+      "settings.unlock.manage": "Manage biometric unlock",
       "settings.current": "Current master password",
       "settings.new": "New master password",
       "settings.confirm": "Confirm new master password",
@@ -8912,6 +8942,16 @@ I18N_SCRIPT = """
       "empty.search.d": "Tidak ada label, nama, atau username yang cocok.",
       "badge.aging": "ganti",
       "tags.all": "Semua",
+      "filters.title": "Atur kata sandi",
+      "filters.desc": "Saring daftar ini menurut folder atau tag. Filter aktif tersimpan di alamat halaman.",
+      "filters.folders": "Folder",
+      "filters.tags": "Tag",
+      "filters.unfiled": "Tanpa folder",
+      "filters.clear": "Hapus filter",
+      "filters.of": "dari",
+      "filters.passwords_shown": "kata sandi ditampilkan",
+      "empty.filtered.t": "Tidak ada kata sandi yang cocok dengan filter ini",
+      "empty.filtered.d": "Hapus filter atau pilih folder maupun tag lain.",
       "header.title": "Sans Password Manager",
       "header.subtitle": "Antarmuka web liquid-glass · terenkripsi GPG",
       "header.check_update": "Periksa pembaruan",
@@ -9078,9 +9118,29 @@ I18N_SCRIPT = """
       "nav.group.vault": "Brankas",
       "nav.group.tools": "Alat",
       "nav.group.settings": "Pengaturan",
-      "nav.master_password": "Kata Sandi Utama",
-      "page.settings.title": "Kata Sandi Utama",
-      "page.settings.desc": "Ubah kata sandi yang mengenkripsi brankas ini.",
+      "nav.settings": "Pengaturan",
+      "page.settings.title": "Pengaturan",
+      "page.settings.desc": "Pilih tampilan Dasbor dan cara membuka brankas ini.",
+      "settings.theme.title": "Tema",
+      "settings.theme.desc": "Pilih tema untuk melihat pratinjau. Dasbor hanya berubah setelah Anda menerapkannya.",
+      "settings.theme.sundial": "Sundial",
+      "settings.theme.sundial_desc": "Transkrip siang yang cerah dengan kontrol hijau kebiruan dan keluaran warna karat.",
+      "settings.theme.console": "Console",
+      "settings.theme.console_desc": "Transkrip operator gelap yang asli.",
+      "settings.theme.cyberpunk": "Cyberpunk",
+      "settings.theme.cyberpunk_desc": "Instrumen kisi neon dengan kontrol magenta dan keluaran sian.",
+      "settings.theme.edgerunner": "Edgerunner",
+      "settings.theme.edgerunner_desc": "Panel potongan bahaya dengan kontrol kuning dan telemetri sian berkecepatan tinggi.",
+      "settings.theme.preview": "Pratinjau tema",
+      "settings.theme.preview_prompt": "spm settings --preview",
+      "settings.theme.preview_output": "brankas siap / 12 catatan terlindungi",
+      "settings.theme.apply": "Terapkan tema",
+      "settings.theme.applied": "Tema diterapkan.",
+      "settings.master.title": "Kata Sandi Utama",
+      "settings.master.desc": "Ubah kata sandi yang mengenkripsi brankas ini.",
+      "settings.unlock.title": "Buka Biometrik",
+      "settings.unlock.desc": "Kelola perangkat yang dapat melanjutkan sesi brankas terautentikasi.",
+      "settings.unlock.manage": "Kelola buka biometrik",
       "settings.current": "Kata sandi utama saat ini",
       "settings.new": "Kata sandi utama baru",
       "settings.confirm": "Konfirmasi kata sandi utama baru",
@@ -9208,6 +9268,16 @@ I18N_SCRIPT = """
       "empty.search.d": "一致するラベル・名前・ユーザー名がありません。",
       "badge.aging": "更新",
       "tags.all": "すべて",
+      "filters.title": "パスワードを整理",
+      "filters.desc": "フォルダまたはタグで絞り込みます。有効なフィルターはページのアドレスに保持されます。",
+      "filters.folders": "フォルダ",
+      "filters.tags": "タグ",
+      "filters.unfiled": "未分類",
+      "filters.clear": "フィルターを解除",
+      "filters.of": "件中",
+      "filters.passwords_shown": "件のパスワードを表示",
+      "empty.filtered.t": "このフィルターに一致するパスワードはありません",
+      "empty.filtered.d": "フィルターを解除するか、別のフォルダまたはタグを選択してください。",
       "header.title": "Sans Password Manager",
       "header.subtitle": "リキッドガラス風Webインターフェース · GPG暗号化",
       "header.check_update": "アップデートを確認",
@@ -9374,9 +9444,29 @@ I18N_SCRIPT = """
       "nav.group.vault": "\u4fdd\u7ba1\u5eab",
       "nav.group.tools": "\u30c4\u30fc\u30eb",
       "nav.group.settings": "\u8a2d\u5b9a",
-      "nav.master_password": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
-      "page.settings.title": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
-      "page.settings.desc": "\u3053\u306e\u4fdd\u7ba1\u5eab\u3092\u6697\u53f7\u5316\u3057\u3066\u3044\u308b\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5909\u66f4\u3057\u307e\u3059\u3002",
+      "nav.settings": "\u8a2d\u5b9a",
+      "page.settings.title": "\u8a2d\u5b9a",
+      "page.settings.desc": "\u30c0\u30c3\u30b7\u30e5\u30dc\u30fc\u30c9\u306e\u8868\u793a\u3068\u4fdd\u7ba1\u5eab\u306e\u30ed\u30c3\u30af\u89e3\u9664\u65b9\u6cd5\u3092\u9078\u629e\u3057\u307e\u3059\u3002",
+      "settings.theme.title": "\u30c6\u30fc\u30de",
+      "settings.theme.desc": "\u30c6\u30fc\u30de\u3092\u9078\u629e\u3057\u3066\u30d7\u30ec\u30d3\u30e5\u30fc\u3067\u304d\u307e\u3059\u3002\u9069\u7528\u3059\u308b\u307e\u3067\u30c0\u30c3\u30b7\u30e5\u30dc\u30fc\u30c9\u306f\u5909\u66f4\u3055\u308c\u307e\u305b\u3093\u3002",
+      "settings.theme.sundial": "Sundial",
+      "settings.theme.sundial_desc": "\u30c6\u30a3\u30fc\u30eb\u306e\u64cd\u4f5c\u3068\u9306\u8272\u306e\u51fa\u529b\u3092\u5099\u3048\u305f\u660e\u308b\u3044\u30c8\u30e9\u30f3\u30b9\u30af\u30ea\u30d7\u30c8\u3002",
+      "settings.theme.console": "Console",
+      "settings.theme.console_desc": "\u5f93\u6765\u306e\u6697\u3044\u30aa\u30da\u30ec\u30fc\u30bf\u30fc\u30c8\u30e9\u30f3\u30b9\u30af\u30ea\u30d7\u30c8\u3002",
+      "settings.theme.cyberpunk": "Cyberpunk",
+      "settings.theme.cyberpunk_desc": "\u30de\u30bc\u30f3\u30bf\u306e\u64cd\u4f5c\u3068\u30b7\u30a2\u30f3\u306e\u51fa\u529b\u3092\u5099\u3048\u305f\u30cd\u30aa\u30f3\u30b0\u30ea\u30c3\u30c9\u8a08\u5668\u3002",
+      "settings.theme.edgerunner": "Edgerunner",
+      "settings.theme.edgerunner_desc": "\u9ec4\u8272\u306e\u64cd\u4f5c\u3068\u9ad8\u901f\u30b7\u30a2\u30f3\u30c6\u30ec\u30e1\u30c8\u30ea\u3092\u5099\u3048\u305f\u30cf\u30b6\u30fc\u30c9\u30ab\u30c3\u30c8\u30d1\u30cd\u30eb\u3002",
+      "settings.theme.preview": "\u30c6\u30fc\u30de\u30d7\u30ec\u30d3\u30e5\u30fc",
+      "settings.theme.preview_prompt": "spm settings --preview",
+      "settings.theme.preview_output": "\u4fdd\u7ba1\u5eab\u6e96\u5099\u5b8c\u4e86 / 12\u4ef6\u306e\u30ec\u30b3\u30fc\u30c9\u3092\u4fdd\u8b77",
+      "settings.theme.apply": "\u30c6\u30fc\u30de\u3092\u9069\u7528",
+      "settings.theme.applied": "\u30c6\u30fc\u30de\u3092\u9069\u7528\u3057\u307e\u3057\u305f\u3002",
+      "settings.master.title": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
+      "settings.master.desc": "\u3053\u306e\u4fdd\u7ba1\u5eab\u3092\u6697\u53f7\u5316\u3057\u3066\u3044\u308b\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5909\u66f4\u3057\u307e\u3059\u3002",
+      "settings.unlock.title": "\u751f\u4f53\u8a8d\u8a3c\u30ed\u30c3\u30af\u89e3\u9664",
+      "settings.unlock.desc": "\u8a8d\u8a3c\u6e08\u307f\u306e\u4fdd\u7ba1\u5eab\u30bb\u30c3\u30b7\u30e7\u30f3\u3092\u518d\u958b\u3067\u304d\u308b\u30c7\u30d0\u30a4\u30b9\u3092\u7ba1\u7406\u3057\u307e\u3059\u3002",
+      "settings.unlock.manage": "\u751f\u4f53\u8a8d\u8a3c\u30ed\u30c3\u30af\u89e3\u9664\u3092\u7ba1\u7406",
       "settings.current": "\u73fe\u5728\u306e\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
       "settings.new": "\u65b0\u3057\u3044\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
       "settings.confirm": "\u65b0\u3057\u3044\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\uff08\u78ba\u8a8d\uff09",
@@ -9531,18 +9621,6 @@ I18N_SCRIPT = """
     else if (act === "copy-text") { if (node && window.SPM_copy) SPM_copy(node.textContent); }
     else if (act === "regen") { if (window.SPM_regen) SPM_regen(); }
     else if (act === "copy-pw") { if (window.SPM_copyPw) SPM_copyPw(); }
-    else if (act === "tag") {
-      // A tag chip drives the search box that already filters this table,
-      // rather than adding a second filtering path that could disagree with it.
-      var box = document.getElementById("q");
-      if (box) {
-        box.value = el.getAttribute("data-tag") || "";
-        box.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-      document.querySelectorAll("[data-act='tag']").forEach(function (c) {
-        c.classList.toggle("chip-on", c === el);
-      });
-    }
     else return;
     ev.preventDefault();
   });
@@ -10162,7 +10240,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
   --mono:"JetBrains Mono","DejaVu Sans Mono",ui-monospace,monospace;
   --ease:cubic-bezier(.2,.7,.3,1); --sidebar-w:248px; color-scheme:dark;
 }
-body, body.theme-dark, body.theme-amoled, body.theme-cyberpunk, body.theme-light {
+body, body.theme-console {
   --bg:#0a0e0c; --surface:#121815; --surface-2:#0f1412; --surface-3:#18201c;
   --border:#232e28; --border-hi:#3b4a42; --text:#d8e8dc; --text-dim:#9aada1; --text-faint:#84968b;
   --accent:#5fd095; --accent-hi:#7be0aa; --accent-fg:#05120b; --accent-soft:#10251a;
@@ -10170,9 +10248,45 @@ body, body.theme-dark, body.theme-amoled, body.theme-cyberpunk, body.theme-light
   --danger:#ff8b84; --danger-soft:#291311; --shadow:none; --shadow-lg:none;
   background:var(--bg); color:var(--text);
 }
+/* Sundial / SDL-58: a daylight transcript. Teal is always an action; rust is
+   always a value emitted by the vault. The square, rule-separated structure
+   makes the theme recognisable without relying on colour. */
+body.theme-sundial {
+  --bg:#F7F2E7; --surface:#FFFDF7; --surface-2:#F7F2E7; --surface-3:#F3D5C2;
+  --border:#B8C1C7; --border-hi:#586875; --text:#1D2A35; --text-dim:#586875;
+  --text-faint:#586875; --accent:#006D77; --accent-hi:#006D77; --accent-fg:#FFFFFF;
+  --accent-soft:#D8E9E7; --ok:#006D77; --ok-soft:#D8E9E7; --warn:#A23E00;
+  --warn-soft:#F3D5C2; --danger:#A52720; --danger-soft:#F7D8D5;
+  --shadow:none; --shadow-lg:none; color-scheme:light;
+  background:var(--bg); color:var(--text);
+}
+/* Cyberpunk: the vault is a neon instrument panel. Magenta is reserved for
+   actions; cyan is reserved for values the vault emits. */
+body.theme-cyberpunk {
+  --bg:#080512; --surface:#120B20; --surface-2:#1A0F2B; --surface-3:#24143A;
+  --border:#4D2B66; --border-hi:#8A4CAF; --text:#F7F1FF; --text-dim:#C8B4D8;
+  --text-faint:#A98DBD; --accent:#FF4FD8; --accent-hi:#FF82E5; --accent-fg:#160019;
+  --accent-soft:#35102F; --ok:#4EF6A5; --ok-soft:#123725; --warn:#49E7FF;
+  --warn-soft:#102B35; --danger:#FF7B8D; --danger-soft:#35131C;
+  --shadow:none; --shadow-lg:none; color-scheme:dark;
+  background:radial-gradient(circle at 82% 8%,var(--accent-soft),transparent 34%),var(--bg);
+}
+/* Edgerunner: a fast hazard-marked control surface. Yellow acts; cyan reports.
+   The clipped labels and diagonal field distinguish it in greyscale. */
+body.theme-edgerunner {
+  --bg:#090B0D; --surface:#121518; --surface-2:#191D20; --surface-3:#252B2F;
+  --border:#586167; --border-hi:#96A1A8; --text:#F7F8F2; --text-dim:#B8C0C4;
+  --text-faint:#939DA3; --accent:#F5E642; --accent-hi:#FFF36B; --accent-fg:#111300;
+  --accent-soft:#302F0E; --ok:#5EE6A8; --ok-soft:#143426; --warn:#48D9FF;
+  --warn-soft:#102A31; --danger:#FF7182; --danger-soft:#35151B;
+  --shadow:none; --shadow-lg:none; color-scheme:dark;
+  background:linear-gradient(135deg,var(--bg) 0 74%,var(--surface-2) 74% 75%,var(--bg) 75% 100%);
+}
 body { font-variant-numeric:tabular-nums; transition:none; }
 body::before { content:""; position:fixed; inset:0; pointer-events:none; opacity:.16;
   background-image:repeating-linear-gradient(to bottom,var(--border) 0 1px,transparent 1px 4px); }
+body.theme-cyberpunk::before { opacity:.22; background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px); background-size:32px 32px; }
+body.theme-edgerunner::before { opacity:.18; background-image:repeating-linear-gradient(135deg,transparent 0 18px,var(--accent) 18px 20px,transparent 20px 38px); }
 .skip-link { position:fixed; top:var(--sp-2); left:var(--sp-2); z-index:300; padding:var(--sp-2) var(--sp-3);
   background:var(--accent); color:var(--accent-fg); transform:translateY(-160%); }
 .skip-link:focus { transform:translateY(0); }
@@ -10236,6 +10350,23 @@ body::before { content:""; position:fixed; inset:0; pointer-events:none; opacity
   100% { opacity:1; transform:translateY(0); }
 }
 
+body.theme-cyberpunk .page-title { text-transform:uppercase; letter-spacing:.04em; text-shadow:2px 0 var(--accent-soft); }
+body.theme-cyberpunk .card, body.theme-cyberpunk .stat { border-left-color:var(--accent); border-right:1px solid var(--border); }
+body.theme-cyberpunk .nav-item.active { box-shadow:inset -3px 0 var(--warn); }
+body.theme-cyberpunk .btn:hover, body.theme-cyberpunk .nav-item:hover { transform:translateX(2px); text-shadow:0 0 10px currentColor; }
+body.theme-edgerunner .page-title { text-transform:uppercase; letter-spacing:.08em; }
+body.theme-edgerunner .page-title::before { content:"// "; }
+body.theme-edgerunner .card, body.theme-edgerunner .stat { border-left-width:4px; }
+body.theme-edgerunner .nav-item.active, body.theme-edgerunner .btn-primary { clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,0 100%); }
+body.theme-edgerunner .btn:hover, body.theme-edgerunner .nav-item:hover { transform:translateY(-1px); }
+
+@keyframes cyber-live { 50% { opacity:.35; transform:scale(.72); } }
+@keyframes edge-live { 50% { transform:scaleX(1.8); } }
+@media (prefers-reduced-motion:no-preference) {
+  body.theme-cyberpunk:not(.lock-paused) .vault-chip .dot { animation:cyber-live 1.4s ease-in-out infinite; }
+  body.theme-edgerunner:not(.lock-paused) .vault-chip .dot { animation:edge-live 900ms steps(2,end) infinite; }
+}
+
 @media (max-width:620px) {
   .content, .console-hero { padding:var(--sp-4); }
   .stats { grid-template-columns:1fr; }
@@ -10287,9 +10418,64 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .chip-on { background: var(--accent); color: var(--bg); border-color: transparent; }
 .chip-warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 tr[data-row] .chip { margin-left: 6px; vertical-align: middle; }
+.filter-panel { margin-bottom:var(--sp-4); }
+.filter-panel .card-head { align-items:flex-start; gap:var(--sp-3); }
+.filter-panel-copy { display:grid; gap:var(--sp-1); }
+.filter-panel-copy p { margin:0; color:var(--text-dim); max-width:66ch; }
+.filter-groups { display:grid; grid-template-columns:1fr; gap:var(--sp-4); }
+.filter-group { min-width:0; margin:0; padding:0; border:0; }
+.filter-group legend { margin-bottom:var(--sp-2); color:var(--text); font-weight:600; }
+.filter-options { display:flex; flex-wrap:wrap; gap:var(--sp-2); }
+.filter-option { min-height:44px; display:inline-flex; align-items:center; text-decoration:none; }
+.filter-option[aria-current="true"]::before { content:"✓"; margin-right:var(--sp-1); font-weight:700; }
+.filter-summary { display:flex; align-items:center; gap:var(--sp-1); margin:var(--sp-3) 0 0; color:var(--text-dim); }
+.filter-summary .num { color:var(--warn); font-weight:700; }
+@media (min-width:621px) {
+  .filter-groups { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .filter-option { min-height:32px; }
+}
 .score-ok { color: var(--ok); }
 .score-warn { color: var(--warn); }
 .score-bad { color: var(--danger); }
+
+/* Settings / theme comparison. The preview is a framed specimen, not the
+   live page: selection is reversible and Apply is the sole persistence step. */
+.settings-stack { display:grid; gap:var(--sp-4); }
+.settings-section { scroll-margin-top:calc(var(--topbar-h) + var(--sp-4)); }
+.theme-choices { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--sp-3); border:0; padding:0; margin:0 0 var(--sp-4); }
+.theme-choice { position:relative; display:grid; grid-template-columns:auto 1fr; gap:var(--sp-3); min-height:44px; padding:var(--sp-3); border:1px solid var(--border); background:var(--surface-2); cursor:pointer; }
+.theme-choice:has(input:checked) { border-left:3px solid var(--accent); background:var(--accent-soft); }
+.theme-choice input { margin-top:var(--sp-1); accent-color:var(--accent); }
+.theme-choice strong, .theme-choice span { display:block; }
+.theme-choice span { color:var(--text-dim); margin-top:var(--sp-1); }
+.theme-preview { position:relative; overflow:hidden; }
+.theme-preview { --preview-bg:#F7F2E7; --preview-surface:#FFFDF7; --preview-fg:#1D2A35; --preview-dim:#586875; --preview-line:#B8C1C7; --preview-control:#006D77; --preview-on-control:#FFFFFF; --preview-value:#A23E00; --preview-value-soft:#F3D5C2; grid-column:1 / -1; background:var(--preview-bg); color:var(--preview-fg); border:1px solid var(--preview-line); border-left:3px solid var(--preview-control); padding:var(--sp-3); font-family:var(--mono); min-height:140px; }
+.theme-preview[data-preview="console"] { --preview-bg:#0a0e0c; --preview-surface:#121815; --preview-fg:#d8e8dc; --preview-dim:#9aada1; --preview-line:#3b4a42; --preview-control:#5fd095; --preview-on-control:#05120b; --preview-value:#dda95e; --preview-value-soft:#1c1610; }
+.theme-preview[data-preview="cyberpunk"] { --preview-bg:#080512; --preview-surface:#120B20; --preview-fg:#F7F1FF; --preview-dim:#C8B4D8; --preview-line:#8A4CAF; --preview-control:#FF4FD8; --preview-on-control:#160019; --preview-value:#49E7FF; --preview-value-soft:#102B35; background-image:linear-gradient(var(--preview-line) 1px,transparent 1px),linear-gradient(90deg,var(--preview-line) 1px,transparent 1px); background-size:24px 24px; }
+.theme-preview[data-preview="edgerunner"] { --preview-bg:#090B0D; --preview-surface:#121518; --preview-fg:#F7F8F2; --preview-dim:#B8C0C4; --preview-line:#96A1A8; --preview-control:#F5E642; --preview-on-control:#111300; --preview-value:#48D9FF; --preview-value-soft:#102A31; clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,0 100%); }
+.theme-preview[data-preview="cyberpunk"]::after, .theme-preview[data-preview="edgerunner"]::after { content:""; position:absolute; inset:0; pointer-events:none; }
+.theme-preview[data-preview="cyberpunk"]::after { border-top:2px solid var(--preview-control); transform:translateY(-100%); }
+.theme-preview[data-preview="edgerunner"]::after { inline-size:18%; background:var(--preview-control); opacity:.16; transform:translateX(-140%) skewX(-18deg); }
+.theme-preview[data-preview="cyberpunk"] { padding-right:28%; }
+.theme-preview[data-preview="cyberpunk"] .theme-preview-label { border-right:1px solid var(--preview-line); padding-right:var(--sp-2); }
+.theme-preview[data-preview="edgerunner"] { padding-top:calc(var(--sp-3) + 22px); background-image:linear-gradient(90deg,var(--preview-control) 0 38%,var(--preview-line) 38% 41%,transparent 41%); background-size:100% 10px; background-repeat:no-repeat; }
+.theme-preview[data-preview="edgerunner"] .theme-preview-output { margin-left:18%; }
+.theme-choice .theme-preview-label { color:var(--preview-dim); font-size:var(--fs-xs); letter-spacing:.08em; text-transform:uppercase; }
+.theme-choice .theme-preview-prompt { color:var(--preview-fg); margin-top:var(--sp-4); font-size:var(--fs-lg); }
+.theme-preview-prompt::before { content:"$ "; color:var(--preview-control); }
+.theme-choice .theme-preview-output { color:var(--preview-value); background:var(--preview-value-soft); border-top:1px solid var(--preview-line); margin-top:var(--sp-3); padding:var(--sp-3) 0; }
+.theme-preview-output::before { content:"> "; }
+.theme-actions { display:flex; align-items:center; flex-wrap:wrap; gap:var(--sp-3); margin-top:var(--sp-4); }
+.theme-status { min-height:1.2em; color:var(--ok); }
+@media (max-width:620px) { .theme-choices { grid-template-columns:1fr; } }
+@media (prefers-reduced-motion:no-preference) {
+  .theme-choice:has(input:checked) .theme-preview[data-preview="cyberpunk"]::after { animation:preview-scan 2.4s linear infinite; }
+  .theme-choice:has(input:checked) .theme-preview[data-preview="edgerunner"]::after { animation:preview-slash 1.8s ease-in-out infinite; }
+}
+@keyframes preview-scan { to { transform:translateY(140px); } }
+@keyframes preview-slash { 50%,100% { transform:translateX(680%) skewX(-18deg); } }
+@media (prefers-reduced-motion:reduce) { .theme-preview::after, body.theme-cyberpunk .vault-chip .dot, body.theme-edgerunner .vault-chip .dot { animation:none; transform:none; } }
+@media (forced-colors:active) { .theme-choice:has(input:checked), .theme-preview { border:2px solid CanvasText; } .theme-preview::after, body.theme-cyberpunk::before, body.theme-edgerunner::before { display:none; } }
 
 /* ============================================================
    Desktop rail, and the motion layer.
@@ -10329,6 +10515,57 @@ tr[data-row] .chip { margin-left: 6px; vertical-align: middle; }
   /* With the label gone, the left rule and the tinted ground are the only
      things left saying which page you are on, so both have to stay. */
   body.rail .nav-item.active .nav-ico { color: var(--accent); }
+
+  /* Cyberpunk moves navigation to a right-side HUD. The reading plane starts
+     at the left edge and the instrument rail closes the composition. */
+  body.theme-cyberpunk .app { grid-template-columns:1fr var(--sidebar-w); }
+  body.theme-cyberpunk .sidebar { grid-column:2; grid-row:1; border-left:1px solid var(--border); border-right:0; }
+  body.theme-cyberpunk .main { grid-column:1; grid-row:1; }
+  body.theme-cyberpunk .nav-item { border-left:0; border-right:2px solid transparent; }
+  body.theme-cyberpunk .nav-item::after { content:"]"; margin-left:auto; color:var(--border-hi); }
+  body.theme-cyberpunk .nav-item.active { border-right-color:var(--warn); }
+
+  /* Edgerunner replaces the side rail with a horizontal command dock. It is
+     internally scrollable at dense widths, so the page itself never overflows. */
+  body.theme-edgerunner .app { display:block; }
+  body.theme-edgerunner .sidebar { position:sticky; inset:0 0 auto; width:100%; height:76px; display:flex; flex-direction:row; align-items:center; gap:var(--sp-3); overflow-x:auto; overflow-y:hidden; border-bottom:3px solid var(--accent); padding:var(--sp-2) var(--sp-3); }
+  body.theme-edgerunner .brand { flex:none; border:0; padding:0 var(--sp-3) 0 0; }
+  body.theme-edgerunner .brand-text, body.theme-edgerunner .nav-label { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); }
+  body.theme-edgerunner .nav { flex:none; flex-direction:row; gap:var(--sp-1); }
+  body.theme-edgerunner .nav-item { flex:none; border:1px solid var(--border); border-left:3px solid var(--border); padding:var(--sp-2); }
+  body.theme-edgerunner .nav-item.active { border-left-color:var(--accent); }
+  body.theme-edgerunner .nav-text { max-width:14ch; }
+  body.theme-edgerunner .sidebar-foot { flex:none; flex-direction:row; align-items:center; margin:0 0 0 auto; }
+  body.theme-edgerunner .vault-chip { max-width:150px; }
+  body.theme-edgerunner .main { min-height:calc(100vh - 76px); }
+  body.theme-edgerunner .topbar { top:76px; }
+}
+
+/* The Edgerunner dock has three deliberate forms: drawer below 901px, icon
+   command strip through ordinary desktops, and fully labelled dock on wide
+   2K/4K canvases. This is replacement, not compressed overflow. */
+@media (min-width:901px) and (max-width:1600px) {
+  body.theme-edgerunner .sidebar { gap:var(--sp-2); }
+  body.theme-edgerunner .nav-text,
+  body.theme-edgerunner .nav-count,
+  body.theme-edgerunner .vault-chip .path,
+  body.theme-edgerunner .rail-label { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  body.theme-edgerunner .nav-item { inline-size:44px; block-size:44px; justify-content:center; padding:0; }
+  body.theme-edgerunner .sidebar-foot .btn { inline-size:44px; block-size:44px; justify-content:center; padding:0; }
+  body.theme-edgerunner .vault-chip { inline-size:44px; block-size:44px; justify-content:center; padding:0; }
+}
+@media (min-width:1601px) {
+  body.theme-edgerunner .brand-text,
+  body.theme-edgerunner .nav-label {
+    position:static; width:auto; height:auto; overflow:visible; clip:auto;
+  }
+}
+@media (min-width:2000px) {
+  body.theme-cyberpunk .content { max-width:1680px; }
+  body.theme-edgerunner .content { max-width:1920px; }
+}
+@media (pointer:coarse) {
+  .nav-item, .btn, .icon-btn, .select, .input, textarea.input, select.input { min-height:44px; }
 }
 
 /* ---- First-sight reveal: the transcript prints ----
@@ -10795,19 +11032,9 @@ NAV_SECTIONS = [
         ("transfer",  "/transfer",  "transfer", "nav.transfer",  "Export / Import", None),
     ]),
     ("nav.group.settings", [
-        ("settings", "/settings", "gear", "nav.master_password", "Master Password", None),
+        ("settings", "/settings", "gear", "nav.settings", "Settings", None),
     ]),
 ]
-
-if WEBAUTHN_ENABLED:
-    # Only offered when a relying-party id is configured. Without one the
-    # endpoints 404, and a nav entry pointing at a 404 is worse than no entry.
-    # It sits in Settings next to the master password because both answer the
-    # same question -- how this vault gets opened -- and having one of them
-    # under Tools made the gear a half-answer.
-    NAV_SECTIONS[2][1].append(
-        ("unlock-settings", "/unlock/settings", "shield", "nav.unlock",
-         "Biometric Unlock", None))
 
 
 def _nav_html(active, counts):
@@ -10849,6 +11076,24 @@ RAIL_BOOTSTRAP = """
         window.matchMedia && window.matchMedia("(min-width: 901px)").matches) {
       document.body.classList.add("rail");
     }
+  } catch (e) {}
+})();
+</script>
+"""
+
+
+THEME_BOOTSTRAP = """
+<script>
+/* Theme preference is device-local and contains no vault data. Resolve it
+   immediately after <body> opens to avoid painting the default before the
+   saved theme. A blocked storage API safely leaves Console active. */
+(function () {
+  var allowed = ["sundial", "console", "cyberpunk", "edgerunner"];
+  try {
+    var saved = localStorage.getItem("spm.theme") || "console";
+    if (allowed.indexOf(saved) < 0) saved = "console";
+    document.body.className = document.body.className.replace(/theme-[^\\s]+/g, "").trim();
+    document.body.classList.add("theme-" + saved);
   } catch (e) {}
 })();
 </script>
@@ -10899,7 +11144,8 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
 {HEAD_ICONS}
 {DESIGN_CSS}
 </head>
-<body class="theme-dark">
+<body class="theme-console">
+{THEME_BOOTSTRAP}
 {RAIL_BOOTSTRAP}
 {ICON_SPRITE}
 <a class="skip-link" href="#main-content">Skip to vault content</a>
@@ -10996,8 +11242,15 @@ def _actions(view_href, edit_href, delete_action, item_id, confirm_key, confirm_
 # --------------------------------------------------------------------------
 # Row builders  (each row carries data-row for the instant client-side filter)
 # --------------------------------------------------------------------------
-def build_rows_html(entries):
+def build_rows_html(entries, filtered=False):
     if not entries:
+        if filtered:
+            return _empty("search", "empty.filtered.t",
+                          "No passwords match these filters",
+                          "empty.filtered.d",
+                          "Clear the filters or choose a different folder or tag.",
+                          '<a class="btn btn-ghost btn-sm" href="/passwords" '
+                          'data-i18n="filters.clear">Clear filters</a>', 4)
         return _empty("key", "empty.passwords.t", "No passwords yet",
                       "empty.passwords.d", "Entries you add will appear here.",
                       '<a class="btn btn-primary btn-sm" href="/add" data-i18n="btn.add_entry">+ Add Entry</a>', 4)
@@ -11007,12 +11260,15 @@ def build_rows_html(entries):
     for _, parts in entries:
         eid, name, user = _esc(parts[0]), _esc(parts[1]), _esc(parts[2])
         tags = entry_tags(parts)
+        folder, _ = core.decode_attrs(parts[7] if len(parts) > 7 else "")
         # Tags join the filter key so the existing instant filter matches them
         # without a second mechanism.
         key = " ".join([f"{name} {user} {eid}".lower()] + ["#" + t for t in tags])
         # Display only -- the clickable chips live in the tag bar above the
         # table, which is the single control that drives filtering.
-        chips = "".join(f'<span class="chip">#{_esc(t)}</span>' for t in tags)
+        folder_chip = (f'<span class="chip">{_esc(folder)}</span>' if folder else "")
+        chips = folder_chip + "".join(
+            f'<span class="chip">#{_esc(t)}</span>' for t in tags)
         age = _entry_age_days(parts[5] if len(parts) > 5 else "", now)
         aging = ('<span class="chip chip-warn" data-i18n="badge.aging">rotate</span>'
                  if age is not None and age > limit else "")
@@ -11027,20 +11283,118 @@ def build_rows_html(entries):
     return "".join(rows)
 
 
-def build_tag_filter_html(entries):
-    """Tag chips above the password table; filtering reuses the search box."""
-    tags = []
-    for _, parts in entries:
-        for tag in entry_tags(parts):
-            if tag not in tags:
-                tags.append(tag)
-    if not tags:
-        return ""
-    chips = "".join(
-        f'<button class="chip chip-btn" type="button" data-act="tag" data-tag="#{_esc(t)}">#{_esc(t)}</button>'
-        for t in sorted(tags))
-    return (f'<div class="tagbar"><button class="chip chip-btn" type="button" data-act="tag" data-tag="" '
-            f'data-i18n="tags.all">All</button>{chips}</div>')
+def password_filter_state(entries, query):
+    """Canonical filter values and matching password rows.
+
+    Folder and tag names are derived only from the decrypted vault already in
+    this request. Unknown query values are ignored, so a crafted URL cannot
+    manufacture labels in the page. Values in one facet are ORed; the folder
+    and tag facets are ANDed together.
+    """
+    folders = {}
+    tags = set()
+    has_unfiled = False
+    indexed = []
+    for entry in entries:
+        parts = entry[1]
+        folder, _ = core.decode_attrs(parts[7] if len(parts) > 7 else "")
+        if folder:
+            folders.setdefault(folder.casefold(), folder)
+        else:
+            has_unfiled = True
+        row_tags = set(entry_tags(parts))
+        tags.update(row_tags)
+        indexed.append((entry, folder, row_tags))
+
+    selected_folders = []
+    for raw in query.get("folder", []):
+        key = raw.casefold()
+        if key == "__unfiled__" and has_unfiled:
+            value = "__unfiled__"
+        else:
+            value = folders.get(key)
+        if value and value not in selected_folders:
+            selected_folders.append(value)
+    selected_tags = []
+    for raw in query.get("tag", []):
+        value = raw.casefold().lstrip("#")
+        if value in tags and value not in selected_tags:
+            selected_tags.append(value)
+
+    selected_folder_keys = {v.casefold() for v in selected_folders}
+    matched = []
+    for entry, folder, row_tags in indexed:
+        folder_key = folder.casefold() if folder else "__unfiled__"
+        folder_hit = not selected_folder_keys or folder_key in selected_folder_keys
+        tag_hit = not selected_tags or bool(row_tags.intersection(selected_tags))
+        if folder_hit and tag_hit:
+            matched.append(entry)
+    available_folders = [folders[k] for k in sorted(folders)]
+    if has_unfiled:
+        available_folders.append("__unfiled__")
+    return available_folders, sorted(tags), selected_folders, selected_tags, matched
+
+
+def build_password_filters_html(folders, tags, selected_folders, selected_tags,
+                                shown, total):
+    """Theme-neutral, URL-backed folder and tag filter panel."""
+    def href(next_folders, next_tags):
+        pairs = ([('folder', value) for value in next_folders] +
+                 [('tag', value) for value in next_tags])
+        suffix = urllib.parse.urlencode(pairs)
+        return "/passwords" + (("?" + suffix) if suffix else "")
+
+    def option(value, label, facet, selected, i18n=""):
+        next_values = list(selected)
+        if value in next_values:
+            next_values.remove(value)
+        else:
+            next_values.append(value)
+        target = href(next_values, selected_tags) if facet == "folder" else href(selected_folders, next_values)
+        active = value in selected
+        key = f' data-i18n="{i18n}"' if i18n else ""
+        current = ' aria-current="true"' if active else ""
+        cls = "chip chip-btn filter-option" + (" chip-on" if active else "")
+        return (f'<a class="{cls}" href="{_esc(target)}"{current}{key}>'
+                f'{_esc(label)}</a>')
+
+    folder_options = []
+    for folder in folders:
+        if folder == "__unfiled__":
+            folder_options.append(option(folder, "Unfiled", "folder",
+                                         selected_folders, "filters.unfiled"))
+        else:
+            folder_options.append(option(folder, folder, "folder", selected_folders))
+    tag_options = [option(tag, "#" + tag, "tag", selected_tags) for tag in tags]
+    clear = (f'<a class="btn btn-ghost btn-sm" href="/passwords" '
+             f'data-i18n="filters.clear">Clear filters</a>'
+             if selected_folders or selected_tags else "")
+    return f"""
+<section class="card filter-panel" aria-labelledby="password-filters-title">
+  <div class="card-head">
+    <div class="filter-panel-copy">
+      <h2 id="password-filters-title" data-i18n="filters.title">Organize passwords</h2>
+      <p data-i18n="filters.desc">Narrow this list by folder or tag. Active filters stay in the page address.</p>
+    </div>
+    {clear}
+  </div>
+  <div class="card-body">
+    <div class="filter-groups">
+      <fieldset class="filter-group">
+        <legend data-i18n="filters.folders">Folders</legend>
+        <div class="filter-options">{"".join(folder_options) or '<span class="faint">&mdash;</span>'}</div>
+      </fieldset>
+      <fieldset class="filter-group">
+        <legend data-i18n="filters.tags">Tags</legend>
+        <div class="filter-options">{"".join(tag_options) or '<span class="faint">&mdash;</span>'}</div>
+      </fieldset>
+    </div>
+    <p class="filter-summary" role="status" aria-live="polite">
+      <span class="num">{shown}</span> <span data-i18n="filters.of">of</span>
+      <span class="num">{total}</span> <span data-i18n="filters.passwords_shown">passwords shown</span>
+    </p>
+  </div>
+</section>"""
 
 
 def build_notes_rows_html(notes):
@@ -11835,7 +12189,8 @@ def login_page(version, message=""):
 {HEAD_ICONS}
 {DESIGN_CSS}
 </head>
-<body class="theme-dark">
+<body class="theme-console">
+{THEME_BOOTSTRAP}
 {ICON_SPRITE}
 <a class="skip-link" href="#main-content">Skip to unlock form</a>
 <div class="login-wrap">
@@ -12053,7 +12408,8 @@ def unlock_page(version, csrf):
 {HEAD_ICONS}
 {DESIGN_CSS}
 </head>
-<body class="theme-dark">
+<body class="theme-console">
+{THEME_BOOTSTRAP}
 {ICON_SPRITE}
 <div class="login-wrap">
   <main class="login-card" id="main-content">
@@ -12153,28 +12509,104 @@ def unlock_settings_page(creds, csrf, flash=""):
 
 
 def settings_page(flash=""):
-    """Change the master password.
-
-    Built from the same page-head / card / field primitives as every other form
-    page rather than a bespoke layout, so it inherits the focus ring, the
-    dark-only palette and the split accent for free. Nothing on this page is an
-    emitted value, so nothing here is painted with the value role -- the submit
-    is the only accent, and it is a control.
-    """
+    """Render the Dashboard's single settings destination."""
+    unlock_html = ""
+    if WEBAUTHN_ENABLED:
+        unlock_html = f"""
+<section class="card settings-section" id="biometric-unlock">
+  <div class="card-head"><h2 data-i18n="settings.unlock.title">Biometric Unlock</h2></div>
+  <div class="card-body">
+    <p class="faint" data-i18n="settings.unlock.desc">Manage the devices that can
+      resume an authenticated vault session.</p>
+    <a class="btn btn-ghost" href="/unlock/settings" style="margin-top:var(--sp-3)">
+      {_icon("shield", "icon icon-sm")}
+      <span data-i18n="settings.unlock.manage">Manage biometric unlock</span>
+    </a>
+  </div>
+</section>"""
     return f"""{flash}
 <div class="page-head">
   <div>
-    <h1 class="page-title" data-i18n="page.settings.title">Master Password</h1>
-    <div class="page-sub" data-i18n="page.settings.desc">Change the password that
-      encrypts this vault.</div>
+    <h1 class="page-title" data-i18n="page.settings.title">Settings</h1>
+    <div class="page-sub" data-i18n="page.settings.desc">Choose how the Dashboard
+      looks and how this vault is unlocked.</div>
   </div>
 </div>
-<div class="card"><div class="card-body">
+<div class="settings-stack">
+<section class="card settings-section" id="theme">
+  <div class="card-head"><h2 data-i18n="settings.theme.title">Theme</h2></div>
+  <div class="card-body">
+    <p class="faint" data-i18n="settings.theme.desc">Select a theme to preview it
+      here. The Dashboard changes only after you apply it.</p>
+    <fieldset class="theme-choices" style="margin-top:var(--sp-4)">
+      <legend class="sr-only" data-i18n="settings.theme.title">Theme</legend>
+      <label class="theme-choice">
+        <input type="radio" name="dashboard-theme" value="sundial">
+        <span><strong id="theme-sundial-name" data-i18n="settings.theme.sundial">Sundial</strong>
+          <span data-i18n="settings.theme.sundial_desc">A bright daylight transcript
+          with teal controls and rust output.</span></span>
+        <span class="theme-preview" data-preview="sundial" role="img"
+              aria-labelledby="theme-sundial-name theme-sundial-preview-label">
+          <span class="theme-preview-label" id="theme-sundial-preview-label" data-i18n="settings.theme.preview">Theme preview</span>
+          <span class="theme-preview-prompt" data-i18n="settings.theme.preview_prompt">spm settings --preview</span>
+          <span class="theme-preview-output" data-i18n="settings.theme.preview_output">vault ready / 12 records protected</span>
+        </span>
+      </label>
+      <label class="theme-choice">
+        <input type="radio" name="dashboard-theme" value="console">
+        <span><strong id="theme-console-name" data-i18n="settings.theme.console">Console</strong>
+          <span data-i18n="settings.theme.console_desc">The original dark operator
+          transcript.</span></span>
+        <span class="theme-preview" data-preview="console" role="img"
+              aria-labelledby="theme-console-name theme-console-preview-label">
+          <span class="theme-preview-label" id="theme-console-preview-label" data-i18n="settings.theme.preview">Theme preview</span>
+          <span class="theme-preview-prompt" data-i18n="settings.theme.preview_prompt">spm settings --preview</span>
+          <span class="theme-preview-output" data-i18n="settings.theme.preview_output">vault ready / 12 records protected</span>
+        </span>
+      </label>
+      <label class="theme-choice">
+        <input type="radio" name="dashboard-theme" value="cyberpunk">
+        <span><strong id="theme-cyberpunk-name" data-i18n="settings.theme.cyberpunk">Cyberpunk</strong>
+          <span data-i18n="settings.theme.cyberpunk_desc">Neon grid instrumentation
+          with magenta controls and cyan output.</span></span>
+        <span class="theme-preview" data-preview="cyberpunk" role="img"
+              aria-labelledby="theme-cyberpunk-name theme-cyberpunk-preview-label">
+          <span class="theme-preview-label" id="theme-cyberpunk-preview-label" data-i18n="settings.theme.preview">Theme preview</span>
+          <span class="theme-preview-prompt" data-i18n="settings.theme.preview_prompt">spm settings --preview</span>
+          <span class="theme-preview-output" data-i18n="settings.theme.preview_output">vault ready / 12 records protected</span>
+        </span>
+      </label>
+      <label class="theme-choice">
+        <input type="radio" name="dashboard-theme" value="edgerunner">
+        <span><strong id="theme-edgerunner-name" data-i18n="settings.theme.edgerunner">Edgerunner</strong>
+          <span data-i18n="settings.theme.edgerunner_desc">Hazard-cut panels with
+          yellow controls and high-speed cyan telemetry.</span></span>
+        <span class="theme-preview" data-preview="edgerunner" role="img"
+              aria-labelledby="theme-edgerunner-name theme-edgerunner-preview-label">
+          <span class="theme-preview-label" id="theme-edgerunner-preview-label" data-i18n="settings.theme.preview">Theme preview</span>
+          <span class="theme-preview-prompt" data-i18n="settings.theme.preview_prompt">spm settings --preview</span>
+          <span class="theme-preview-output" data-i18n="settings.theme.preview_output">vault ready / 12 records protected</span>
+        </span>
+      </label>
+    </fieldset>
+    <div class="theme-actions">
+      <button class="btn btn-primary" type="button" id="apply-theme"
+              data-i18n="settings.theme.apply">Apply theme</button>
+      <span class="theme-status" id="theme-status" role="status" aria-live="polite"></span>
+    </div>
+  </div>
+</section>
+<section class="card settings-section" id="master-password">
+  <div class="card-head"><div>
+    <h2 data-i18n="settings.master.title">Master Password</h2>
+    <p class="faint" data-i18n="settings.master.desc">Change the password that encrypts this vault.</p>
+  </div></div>
+  <div class="card-body">
   <form method="post" action="/settings/master-password" autocomplete="off">
     <div class="field">
       <label for="mp-current" data-i18n="settings.current">Current master password</label>
       <input class="input" id="mp-current" name="current" type="password"
-             autocomplete="current-password" required autofocus>
+             autocomplete="current-password" required>
     </div>
     <div class="field">
       <label for="mp-new" data-i18n="settings.new">New master password</label>
@@ -12194,10 +12626,9 @@ def settings_page(flash=""):
     <button class="btn btn-primary" type="submit"
             data-i18n="settings.submit">Change master password</button>
   </form>
-</div></div>
-<div class="card" style="margin-top:var(--sp-4)">
-  <div class="card-head"><h2 data-i18n="settings.effect">What this does</h2></div>
-  <div class="card-body">
+</div>
+  <div class="card-body" style="border-top:1px solid var(--border)">
+    <h3 data-i18n="settings.effect">What this does</h3>
     <ul style="margin:0;padding-left:var(--sp-5);line-height:1.9">
       <li data-i18n="settings.effect_vault">Re-encrypts the whole vault under the
         new password.</li>
@@ -12209,6 +12640,8 @@ def settings_page(flash=""):
         and a history snapshot.</li>
     </ul>
   </div>
+</section>
+{unlock_html}
 </div>
 {SETTINGS_SCRIPT}
 """
@@ -12218,6 +12651,38 @@ SETTINGS_SCRIPT = """
 <script>
 (function () {
   var form = document.querySelector('form[action="/settings/master-password"]');
+  var choices = document.querySelectorAll('input[name="dashboard-theme"]');
+  var apply = document.getElementById("apply-theme");
+  var themeStatus = document.getElementById("theme-status");
+  var allowed = ["sundial", "console", "cyberpunk", "edgerunner"];
+  var saved = "console";
+  try { saved = localStorage.getItem("spm.theme") || "console"; } catch (e) {}
+  if (allowed.indexOf(saved) < 0) saved = "console";
+
+  function selectedTheme() {
+    var checked = document.querySelector('input[name="dashboard-theme"]:checked');
+    return checked && allowed.indexOf(checked.value) >= 0 ? checked.value : saved;
+  }
+  function showPreview() {
+    if (themeStatus) themeStatus.textContent = "";
+  }
+  choices.forEach(function (choice) {
+    choice.checked = choice.value === saved;
+    choice.addEventListener("change", showPreview);
+  });
+  showPreview();
+  if (apply) apply.addEventListener("click", function () {
+    var next = selectedTheme();
+    try { localStorage.setItem("spm.theme", next); } catch (e) {
+      if (themeStatus) themeStatus.textContent = "Theme could not be saved on this device.";
+      return;
+    }
+    allowed.forEach(function (name) { document.body.classList.remove("theme-" + name); });
+    document.body.classList.add("theme-" + next);
+    saved = next;
+    if (themeStatus) themeStatus.textContent = t("settings.theme.applied", "Theme applied.");
+  });
+
   if (!form) return;
   var pw = document.getElementById("mp-new");
   var cf = document.getElementById("mp-confirm");
@@ -14873,7 +15338,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 flash = "<div class='flash'>Unlock credential removed.</div>"
             self._send_html(200, render_shell(
                 unlock_settings_page(creds, self._session_csrf(), flash),
-                "unlock-settings", VERSION, VAULT_PATH,
+                "settings", VERSION, VAULT_PATH,
                 title="Biometric Unlock", counts=self._counts(plaintext)))
             return
 
@@ -14890,7 +15355,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                          "out.</div>")
             self._send_html(200, render_shell(
                 settings_page(flash), "settings", VERSION, VAULT_PATH,
-                title="Master Password", counts=self._counts(plaintext)))
+                title="Settings", counts=self._counts(plaintext)))
             return
 
         if path == "/events":
@@ -14957,13 +15422,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "passphrases": len(passphrases), "backups": len(backups),
                 "authenticators": len(auths),
             }
+            password_rows = entries
+            password_filters = ""
+            if path == "/passwords":
+                query = urllib.parse.parse_qs(parsed.query)
+                (folders, tags, selected_folders, selected_tags,
+                 password_rows) = password_filter_state(entries, query)
+                password_filters = build_password_filters_html(
+                    folders, tags, selected_folders, selected_tags,
+                    len(password_rows), len(entries))
             spec = {
                 "/passwords": ("nav.passwords", "Passwords", "page.passwords.desc",
                                "Login credentials stored in your vault.", "/add",
                                "btn.add_entry", "+ Add Entry",
                                [("table.id", "ID", "num"), ("table.name", "Name", ""),
                                 ("table.username", "Username", ""), ("table.actions", "Actions", "act")],
-                               build_rows_html(entries), "passwords"),
+                               build_rows_html(password_rows,
+                                               bool(selected_folders or selected_tags)
+                                               if path == "/passwords" else False),
+                               "passwords"),
                 "/notes": ("nav.notes", "Secure Notes", "page.notes.desc",
                            "Encrypted notes stored inside the same vault.", "/notes-add",
                            "btn.add_note", "+ Add Note",
@@ -14992,7 +15469,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             }[path]
             content = list_page(spec[0], spec[1], spec[2], spec[3], spec[4], spec[5], spec[6], spec[7], spec[8])
             if path == "/passwords":
-                content = build_tag_filter_html(entries) + content
+                content = password_filters + content
             self._send_html(200, render_shell(content, spec[9], VERSION, VAULT_PATH,
                                               title=spec[1], counts=counts, searchable=True))
             return
@@ -15476,7 +15953,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             def _reject(message):
                 self._send_html(200, render_shell(
                     settings_page("<div class='flash error'>%s</div>" % message),
-                    "settings", VERSION, VAULT_PATH, title="Master Password"))
+                    "settings", VERSION, VAULT_PATH, title="Settings"))
 
             # Compared against the copy this session already proved at login
             # rather than by decrypting again: a typo should not cost a gpg
