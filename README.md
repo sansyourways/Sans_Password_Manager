@@ -85,7 +85,7 @@ SPM may not be a good fit when you need:
 ## Features
 
 - Encrypted password vault with history, health checks, backups, and recovery.
-- Interactive terminal interface plus a local multilingual web dashboard.
+- Interactive terminal interface plus a local web dashboard in twelve languages, including right-to-left Arabic.
 - Passphrases, backup codes, authenticator/TOTP entries, and biometric unlock where supported.
 - Import and export across common and advanced text formats.
 - Browser extensions for Chromium and Firefox with a local native host.
@@ -217,6 +217,7 @@ SPM intentionally has no automatic “delete everything” command because vault
 - Browser integration requires local native-host setup and is not available in Termux.
 - The dashboard binds locally by default. Remote exposure changes the threat model and requires correctly configured TLS, authentication, proxy, and firewall controls.
 - Sync transports can copy encrypted files but do not make an untrusted endpoint safe.
+- Nine of the twelve interface languages are unreviewed translations. They are marked in the language picker, and the English text is authoritative wherever a warning matters.
 
 ## Documentation and project links
 

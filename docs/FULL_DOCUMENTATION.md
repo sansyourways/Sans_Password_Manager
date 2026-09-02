@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.12.4**
+Current release: **3.13.0**
 
 ---
 
@@ -44,6 +44,7 @@ Current release: **3.12.4**
   - [Secure Notes](#secure-notes)
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
   - [Doctor / Health Check](#doctor--health-check)
+- [Languages](#languages)
 - [Password Strength Coaching](#password-strength-coaching)
 - [Clipboard Auto-Clean](#clipboard-auto-clean)
 - [Portable & Save Bundles](#portable--save-bundles)
@@ -80,7 +81,7 @@ attacker with root access.
 
 ## Product tour
 
-Every web capture below was taken from the 3.12.4 release candidate in Chromium
+Every web capture below was taken from the 3.13.0 release candidate in Chromium
 at 1440x900, against a disposable vault holding only synthetic documentation
 data. No personal vault, browser profile, real credential, or production
 hostname appears in these images. The locked-screen captures use Chromium
@@ -316,7 +317,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.12.4
+bash install.sh --version 3.13.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -351,7 +352,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v3.12.4.zip \
+gh attestation verify Sans_Password_Manager_v3.13.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -367,9 +368,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v3.12.4
+git checkout v3.13.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v3.12.4.zip.sha256
+sha256sum -c Sans_Password_Manager_v3.13.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -382,7 +383,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=3.12.4
+version=3.13.0
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -399,7 +400,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.12.4/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.13.0/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -421,7 +422,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.12.4 at /home/you/.local/bin/spm
+Installed SPM 3.13.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -933,6 +934,107 @@ format-4 vault with one and save.
 
 ---
 
+## Languages
+
+The Dashboard ships in twelve languages. Three are maintained; the other nine
+are translations nobody has reviewed, and the interface says so rather than
+leaving you to find out.
+
+| Language | Code | Direction | Status |
+| --- | --- | --- | --- |
+| English | `en` | ltr | maintained |
+| Indonesia | `id` | ltr | maintained |
+| 日本語 | `ja` | ltr | maintained |
+| العربية | `ar` | **rtl** | unreviewed |
+| Deutsch | `de` | ltr | unreviewed |
+| Español | `es` | ltr | unreviewed |
+| Français | `fr` | ltr | unreviewed |
+| हिन्दी | `hi` | ltr | unreviewed |
+| 한국어 | `ko` | ltr | unreviewed |
+| Português (Brasil) | `pt-br` | ltr | unreviewed |
+| Русский | `ru` | ltr | unreviewed |
+| 简体中文 | `zh-hans` | ltr | unreviewed |
+
+Pick one from the selector on the sign-in page, the locked screen, or the
+Dashboard header. The choice is stored in a cookie in that browser and nowhere
+else.
+
+### What "unreviewed" means
+
+An unreviewed language is marked **(β)** in the picker, and while it is active
+the interface carries a line saying the translation has not been checked by a
+speaker and that the English text is authoritative where a warning matters.
+
+That caveat is not boilerplate. Some of these strings describe actions nothing
+can undo — that a forgotten master password is unrecoverable, that changing it
+re-encrypts the whole vault, that deleting a record deletes its password
+history with it. A translation that softens one of those is worse than no
+translation, so the interface would rather tell you it is unsure.
+
+Correcting one is the most useful contribution this project can receive, and
+the point of the file layout below is that it takes no programming.
+
+### Right-to-left
+
+Arabic is not a word swap. The sidebar, the navigation rail, the table columns
+and every marker change side, and the fixed-width type the Console theme is
+built on is abandoned — a cursive script rendered in a monospace face stops
+joining and reads as a row of loose letters. Machine values keep their own
+direction inside the mirrored layout: a password, a URL, a Base32 secret and
+the vault path stay left-to-right, because reordering a file path around its
+own slashes makes it wrong rather than merely foreign.
+
+![The SPM Dashboard password list in Arabic, with the sidebar, navigation and
+table columns mirrored to the right and the vault path still reading
+left-to-right](docs/screenshots/web-v2.13.0/32-passwords-rtl.png)
+
+### Adding or fixing a language
+
+Every catalogue is one JSON file in `locales/`, and nothing else:
+
+```json
+{
+  "meta": {
+    "code": "sv",
+    "name": "Svenska",
+    "english_name": "Swedish",
+    "dir": "ltr",
+    "review": "unreviewed"
+  },
+  "strings": {
+    "login.unlock": "Lås upp"
+  }
+}
+```
+
+`meta.name` is the language's name in its own script — somebody who needs
+Swedish cannot be expected to find it listed as "Swedish". `dir` is `ltr` or
+`rtl`. `review` is `unreviewed` until a speaker has been through it.
+
+To add a language, copy `locales/en.json`, translate the values, and check it:
+
+```bash
+cp locales/en.json locales/sv.json      # then edit meta and translate
+python3 tools/i18n-lint.py              # parity, markup, placeholders
+python3 tools/build-locales.py          # fold it into the web server
+./build.sh                              # regenerate spm.sh
+```
+
+The lint refuses a catalogue that is missing a key, carries one English does
+not, contains markup, or drops a placeholder such as `{n}` — each of which
+fails silently at runtime rather than loudly.
+
+`tools/build-locales.py` writes a generated region inside
+`src/spm_web_server.py`; that region is committed, and `./build.sh --check`
+verifies it matches `locales/`. Editing the JSON without rebuilding is caught
+there rather than shipping yesterday's words.
+
+A page carries only the language it is in, plus English as the fallback. The
+rest are fetched from `/locale?lang=<code>` the first time somebody switches,
+so adding a language costs nothing to anyone not reading it.
+
+---
+
 ## Security events
 
 SPM records what was done to your vault, so you can notice what you did not do.
@@ -1223,7 +1325,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.12.4**
+Version: **3.13.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
