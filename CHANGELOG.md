@@ -7,6 +7,44 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.0.1] - 2026-09-03
+
+Fault tolerance for the two paths the roadmap still listed as uncovered:
+restore and import.
+
+### Fixed
+- `spm restore` replaced the live vault with whatever the bundle held, with no
+  archive, no `.bak`, and no check that the bundle even opened — so restoring a
+  truncated or corrupted copy destroyed a working vault and left one that opens
+  nothing. It now proves the bundle decrypts before replacing a vault that
+  already does, and archives what it replaces.
+- `spm restore` held the *bundle's* advisory lock while overwriting
+  `~/.spm_vault.gpg`, leaving the file it was about to replace unprotected
+  against a concurrent dashboard write. It now locks the destination.
+- `spm restore` deleted the vault from the bundle before installing the
+  recovery file, so any later failure left a bundle holding a recovery file and
+  no vault. The bundle is consumed only after both files land.
+- A web import cleared the reviewed rows before writing the vault, so a failed
+  write — a full disk, a locked vault — cost the user the whole upload and
+  review for a failure that had nothing to do with the confirmation token. The
+  review is now retired after the write succeeds. Replay, token guessing and
+  expiry are refused exactly as before.
+
+### Changed
+- `restore`, `history-restore` and `sync pull` share one install path in the
+  trusted core. All three now archive the previous generation, keep a `.bak`,
+  fsync the staged copy and the directory, and verify a digest when one is
+  known — previously each carried its own `cp`/`chmod`/`mv`, none of them
+  fsynced, and only two archived anything.
+- `spm restore` asks for the bundle's master password when a vault already
+  exists at the destination. Restoring onto a machine with no vault still asks
+  for nothing.
+
+### Added
+- `spm doctor` and the core report nothing new, but the core gained
+  `install-file`, which is the single implementation the three replace paths
+  now call.
+
 ## [4.0.0] - 2026-09-03
 
 Major because the vault's sealing format changed: a vault this release writes

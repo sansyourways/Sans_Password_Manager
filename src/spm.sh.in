@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="4.0.0"
+VERSION="4.0.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -925,6 +925,24 @@ vault_lock_hold_fd9() {
 		return $?
 	fi
 	python3 -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX)' 2>/dev/null
+}
+
+# Restore is the one command whose target is not VAULT_FILE, so it needs a
+# second lock on a second descriptor. Held until the process exits, which is
+# the whole of the restore.
+acquire_restore_lock() {
+	local target="$1"
+	if ! command -v flock >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
+		return 0
+	fi
+	exec 8>"${target}.lock" || die "Cannot open the destination vault lock file."
+	chmod 600 "${target}.lock" 2>/dev/null || true
+	if command -v flock >/dev/null 2>&1; then
+		flock -x 8 || die "Cannot lock the destination vault."
+	else
+		python3 -c 'import fcntl; fcntl.flock(8, fcntl.LOCK_EX)' 2>/dev/null \
+			|| die "Cannot lock the destination vault."
+	fi
 }
 
 acquire_cli_vault_lock() {
@@ -3135,7 +3153,7 @@ cmd_restore() {
 	local bundle_recovery="./spm_vault.gpg.recovery"
 	local dest_vault="$HOME/.spm_vault.gpg"
 	local dest_recovery="${dest_vault}.recovery"
-	local restore_tmp=""
+	local verify_tmp=""
 
 	if [ "$VAULT_FILE" != "$bundle_vault" ] || [ ! -f "$bundle_vault" ]; then
 		if [ "$SPM_LANG" = "id" ]; then
@@ -3162,11 +3180,38 @@ cmd_restore() {
 
 	mkdir -p "$(dirname "$dest_vault")" || die "Failed to create destination directory."
 
-	restore_tmp="$(mktemp "$(dirname "$dest_vault")/.spm_restore.XXXXXX")" || die "Failed to create restore staging file."
-	cp "$bundle_vault" "$restore_tmp" || { rm -f "$restore_tmp"; die "Failed to stage vault restore."; }
-	chmod 600 "$restore_tmp" 2>/dev/null || true
-	mv -f "$restore_tmp" "$dest_vault" || { rm -f "$restore_tmp"; die "Failed to install restored vault."; }
-	rm -f "$bundle_vault"
+	# Lock the DESTINATION. main() already holds a lock, but during restore
+	# VAULT_FILE is the bundle, so that lock protects the file being read and
+	# not the one being replaced -- a dashboard writing the real vault was free
+	# to interleave with the rename that overwrote it.
+	acquire_restore_lock "$dest_vault"
+
+	if [ -f "$dest_vault" ]; then
+		# Prove the bundle opens before replacing a vault that already does.
+		# `sync pull` refuses to install a remote it cannot decrypt; restore
+		# installed whatever the bundle held and only found out afterwards, by
+		# which point the vault it replaced was gone.
+		#
+		# Asked only when there is something to lose. Restoring onto a machine
+		# with no vault risks nothing, and demanding a password there would
+		# break staging a bundle for someone else to open later.
+		ensure_master_password_loaded
+		verify_tmp="$(make_tmp)"
+		if ! decrypt_vault_container "$bundle_vault" "$verify_tmp" "$MASTER_PW"; then
+			secure_wipe "$verify_tmp"
+			if [ "$SPM_LANG" = "id" ]; then
+				die "Vault bundle tidak terbuka dengan kata sandi itu, jadi vault yang ada dibiarkan utuh."
+			else
+				die "The bundle vault did not open with that master password, so the vault already at $dest_vault was left untouched."
+			fi
+		fi
+		secure_wipe "$verify_tmp"
+	fi
+
+	# Archived and copied to .bak before the rename, the way every other write
+	# in SPM is. This was the one write that could not be undone.
+	core install-file "$bundle_vault" "$dest_vault" >/dev/null \
+		|| die "Failed to install the restored vault."
 
 	if [ -f "$bundle_recovery" ]; then
 		if [ -f "$dest_recovery" ]; then
@@ -3183,12 +3228,23 @@ cmd_restore() {
 			esac
 		fi
 		if [ -n "$bundle_recovery" ] && [ -f "./spm_vault.gpg.recovery" ]; then
-			restore_tmp="$(mktemp "$(dirname "$dest_recovery")/.spm_recovery_restore.XXXXXX")" || die "Failed to create recovery staging file."
-			cp "./spm_vault.gpg.recovery" "$restore_tmp" || { rm -f "$restore_tmp"; die "Failed to stage recovery file."; }
-			chmod 600 "$restore_tmp" 2>/dev/null || true
-			mv -f "$restore_tmp" "$dest_recovery" || { rm -f "$restore_tmp"; die "Failed to install recovery file."; }
-			rm -f "./spm_vault.gpg.recovery"
+			# Reported, not fatal. The vault is already installed and opens
+			# under its own master password; dying here would suggest the
+			# restore failed when what is actually stale is the recovery file.
+			if ! core install-file "./spm_vault.gpg.recovery" "$dest_recovery" --no-archive >/dev/null; then
+				printf 'warning: the vault was restored but its recovery file was not; %s still names the previous vault\n' \
+					"$dest_recovery" >&2
+				bundle_recovery=""
+			fi
 		fi
+	fi
+
+	# The bundle is consumed last. Removing the vault from it first left a
+	# bundle holding a recovery file and no vault whenever anything after that
+	# point failed.
+	rm -f "$bundle_vault"
+	if [ -n "$bundle_recovery" ] && [ -f "./spm_vault.gpg.recovery" ]; then
+		rm -f "./spm_vault.gpg.recovery"
 	fi
 
 	VAULT_FILE="$dest_vault"
@@ -5030,7 +5086,7 @@ cmd_history_list() {
 }
 
 cmd_history_restore() {
-	local name="${1:-}" dir source answer staged verify_tmp
+	local name="${1:-}" dir source answer verify_tmp
 	[ -n "$name" ] || die "Usage: $0 history-restore <snapshot-name>"
 	case "$name" in */*|*\\*|.|..) die "Invalid snapshot name." ;; esac
 	dir="$(history_dir)"; source="$dir/$name"
@@ -5043,11 +5099,8 @@ cmd_history_restore() {
 	decrypt_vault_container "$source" "$verify_tmp" "$MASTER_PW" \
 		|| { secure_wipe "$verify_tmp"; die "History snapshot failed authentication or uses a different master password."; }
 	secure_wipe "$verify_tmp"
-	staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm_history_restore.XXXXXX")"
-	cp "$source" "$staged" || { rm -f "$staged"; die "Failed to stage history snapshot."; }
-	chmod 600 "$staged" 2>/dev/null || true
-	archive_current_vault
-	mv -f "$staged" "$VAULT_FILE" || { rm -f "$staged"; die "Failed to restore history snapshot."; }
+	core install-file "$source" "$VAULT_FILE" >/dev/null \
+		|| die "Failed to restore history snapshot."
 	printf 'History snapshot restored.\n'
 }
 
@@ -5337,7 +5390,7 @@ sync_usage() {
 
 cmd_sync() {
 	local action="" target="" channel="default" transport="dir"
-	local positional=0 local_sha remote_sha base_sha staged tmp fetched rc
+	local positional=0 local_sha remote_sha base_sha tmp fetched rc
 
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
@@ -5439,13 +5492,11 @@ cmd_sync() {
 			decrypt_vault_container "$fetched" "$tmp" "$MASTER_PW" \
 				|| { secure_wipe "$tmp"; die "Remote vault cannot be decrypted with this master password."; }
 			secure_wipe "$tmp"
-			archive_current_vault
-			staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm-sync.XXXXXX")"
-			cp "$fetched" "$staged" || { rm -f "$staged"; die "Cannot stage sync pull."; }
-			chmod 600 "$staged"
-			[ "$(sha256sum "$staged" | awk '{print $1}')" = "$remote_sha" ] \
-				|| { secure_wipe "$staged"; die "Staged sync pull failed verification."; }
-			mv -f "$staged" "$VAULT_FILE"
+			# One install path for every command that replaces the vault
+			# file: archived, copied to .bak, digest-checked while the
+			# destination is still intact, fsynced, then renamed.
+			core install-file "$fetched" "$VAULT_FILE" --sha256 "$remote_sha" \
+				>/dev/null || die "Staged sync pull failed verification."
 			write_sync_state "$remote_sha"
 			printf 'Encrypted vault pulled over %s.\n' "$transport"
 			;;
