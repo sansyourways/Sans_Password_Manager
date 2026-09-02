@@ -7,6 +7,40 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-09-02
+
+### Added
+- Added split recovery: `spm shares split` divides the vault key into `n`
+  Shamir shares over GF(2**8) with a threshold `t`, so recovery no longer
+  depends on the recovery file and its private key remaining simultaneously
+  available and secret. Any `t` reconstruct the key; any `t - 1` reveal
+  nothing. `spm shares combine` rebuilds the key and resets the master
+  password, and `spm shares status` reports the set a vault records.
+- Added a `split_recovery` check to `spm doctor`. It reports the recorded set,
+  and fails when a vault has neither a usable recovery file nor a share set —
+  the one state with no way back, which neither check could see alone.
+- Added `META_RECOVERY_SHARES`, recording a set's identifier, threshold, count
+  and date. It never holds a share. Older builds skip it with every other
+  `META_` row, so no format change was needed.
+
+### Changed
+- Updated the Dashboard, browser-extension manifests, documentation, captures,
+  and release metadata to version 3.14.0.
+
+### Security
+- Shares are split from the vault key rather than the RSA private key, so they
+  stay valid across master-password changes; `rewrap` only changes the
+  envelope around the key.
+- Every share carries a checksum over its own text. Shamir provides no
+  integrity, so without one a single mistyped character reconstructs a
+  different key silently.
+- The share format deliberately carries no digest of the secret. Reconstruction
+  is proved by opening the vault, because an offline-verifiable digest is the
+  one thing an attacker holding `t - 1` shares could attack.
+- Minting is CLI-only: at threshold the shares are equivalent to the vault key,
+  and rendering them through a browser would place them in a page, a
+  scrollback, and possibly a proxy log.
+
 ## [3.13.0] - 2026-09-02
 
 ### Added

@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.13.0"
+VERSION="3.14.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -1476,6 +1476,210 @@ def stage_recovery(vault_path, plaintext, vault_key):
             os.remove(staged)
 
 
+# ----- split recovery --------------------------------------------------------
+# The recovery file and its private key have to survive together: lose the PEM
+# and the capsule is inert, leak the PEM while somebody holds the capsule and
+# the vault is open. Shamir shares replace that pair with a threshold -- any
+# `t` of `n` reconstruct the vault key, any `t - 1` reveal nothing at all --
+# so the material can be spread across people or places without any single one
+# of them being either a single point of failure or a single point of trust.
+#
+# What is split is the vault key itself, which is stable for the life of the
+# vault: `rewrap` changes only the master-password envelope around it. Shares
+# minted once therefore keep working after a master-password change, which is
+# the property that makes them worth writing on paper. They are also exactly
+# what `recover()` already consumes, so this adds an input to the existing
+# recovery path rather than a second one beside it.
+
+SHARE_MAGIC = "SPMS1"
+SHARE_SET_BYTES = 4
+_GF_EXP = [0] * 512
+_GF_LOG = [0] * 256
+
+
+def _build_gf_tables():
+    """Log tables for GF(2**8) with the AES polynomial, generator 3.
+
+    Not generator 2: 2 has multiplicative order 51 under 0x11b, so powers of it
+    reach a fifth of the field and the tables would be silently wrong for the
+    rest. 3 is primitive and enumerates all 255 non-zero elements.
+    """
+    x = 1
+    for power in range(255):
+        _GF_EXP[power] = x
+        _GF_LOG[x] = power
+        # x * 3 == (x * 2) XOR x, with the reduction when the high bit is set.
+        doubled = (x << 1) ^ (0x11B if x & 0x80 else 0)
+        x = doubled ^ x
+    for power in range(255, 512):
+        _GF_EXP[power] = _GF_EXP[power - 255]
+
+
+_build_gf_tables()
+
+
+def _gf_mul(a, b):
+    if a == 0 or b == 0:
+        return 0
+    return _GF_EXP[_GF_LOG[a] + _GF_LOG[b]]
+
+
+def _gf_inv(a):
+    if a == 0:
+        raise VaultError("share arithmetic divided by zero")
+    return _GF_EXP[255 - _GF_LOG[a]]
+
+
+def split_secret(secret, threshold, count):
+    """Split `secret` (bytes) into `count` shares, any `threshold` sufficing.
+
+    Every coefficient above the constant term is drawn uniformly, including
+    the highest, and including zero. That is deliberate and should not be
+    "fixed" into drawing the top coefficient from 1..255: the security proof
+    needs the polynomial to be uniform over all of degree <= threshold-1, and
+    forcing the leading term non-zero excludes one candidate secret for any
+    given set of threshold-1 shares. Uniform coefficients leak exactly nothing.
+    """
+    if not isinstance(secret, bytes) or not secret:
+        raise VaultError("there is no secret to split")
+    if not 2 <= threshold <= 255:
+        raise VaultError("threshold must be between 2 and 255")
+    if not threshold <= count <= 255:
+        raise VaultError(
+            "a set of %d shares cannot have a threshold of %d"
+            % (count, threshold))
+
+    shares = [bytearray() for _ in range(count)]
+    for byte in secret:
+        coefficients = [byte] + list(os.urandom(threshold - 1))
+        for index in range(count):
+            x = index + 1  # never 0: f(0) is the secret itself
+            acc = 0
+            for coefficient in reversed(coefficients):
+                acc = _gf_mul(acc, x) ^ coefficient
+            shares[index].append(acc)
+    return [(index + 1, bytes(share)) for index, share in enumerate(shares)]
+
+
+def combine_shares(shares):
+    """Reconstruct the secret from (x, bytes) pairs by interpolating at 0."""
+    if len(shares) < 2:
+        raise VaultError("at least two shares are needed")
+    xs = [x for x, _ in shares]
+    if len(set(xs)) != len(xs):
+        raise VaultError("the same share was given more than once")
+    if any(not 1 <= x <= 255 for x in xs):
+        raise VaultError("a share carries an impossible index")
+    lengths = {len(payload) for _, payload in shares}
+    if len(lengths) != 1:
+        raise VaultError("these shares are different lengths and cannot belong "
+                         "to one set")
+
+    secret = bytearray()
+    for position in range(lengths.pop()):
+        total = 0
+        for i, (xi, payload) in enumerate(shares):
+            numerator, denominator = 1, 1
+            for j, (xj, _) in enumerate(shares):
+                if i == j:
+                    continue
+                numerator = _gf_mul(numerator, xj)
+                denominator = _gf_mul(denominator, xi ^ xj)
+            total ^= _gf_mul(payload[position],
+                             _gf_mul(numerator, _gf_inv(denominator)))
+        secret.append(total)
+    return bytes(secret)
+
+
+def _share_body(threshold, index, set_id, payload):
+    return "%s-%d-%d-%s-%s" % (
+        SHARE_MAGIC, threshold, index, set_id.hex().upper(),
+        base64.b32encode(payload).decode("ascii").rstrip("="))
+
+
+def _share_checksum(body):
+    return hashlib.sha256(body.encode("ascii")).hexdigest()[:4].upper()
+
+
+def encode_share(threshold, index, set_id, payload):
+    """One share as a single transcribable token, with its own checksum.
+
+    The checksum covers the share's own text, not the secret. A mistyped share
+    is then rejected the moment it is read, rather than combining cleanly into
+    a wrong key that only fails later against the vault -- at which point
+    nothing says which of the shares was wrong.
+    """
+    body = _share_body(threshold, index, set_id, payload)
+    return "%s-%s" % (body, _share_checksum(body))
+
+
+def decode_share(text):
+    """(threshold, index, set_id, payload) or an exception naming the problem."""
+    token = "".join((text or "").split()).upper()
+    parts = token.split("-")
+    if len(parts) != 6 or parts[0] != SHARE_MAGIC:
+        raise VaultError("this is not an SPM recovery share")
+    _, threshold_text, index_text, set_text, data_text, checksum = parts
+    body = "-".join(parts[:5])
+    if _share_checksum(body) != checksum:
+        raise VaultError("share %s did not survive transcription; its checksum "
+                         "does not match" % (index_text or "?"))
+    if not threshold_text.isdigit() or not index_text.isdigit():
+        raise VaultError("a share carries a non-numeric threshold or index")
+    threshold, index = int(threshold_text), int(index_text)
+    if not 2 <= threshold <= 255 or not 1 <= index <= 255:
+        raise VaultError("a share carries an impossible threshold or index")
+    try:
+        set_id = bytes.fromhex(set_text)
+    except ValueError:
+        raise VaultError("a share carries a malformed set identifier")
+    if len(set_id) != SHARE_SET_BYTES:
+        raise VaultError("a share carries a set identifier of the wrong size")
+    padding = "=" * (-len(data_text) % 8)
+    try:
+        payload = base64.b32decode(data_text + padding)
+    except Exception:
+        raise VaultError("a share carries a malformed payload")
+    if not payload:
+        raise VaultError("a share carries no payload")
+    return threshold, index, set_id, payload
+
+
+def shares_meta(plaintext):
+    """(set_id, threshold, count, minted) for the vault's share set, or None.
+
+    The row records that a set exists and which one, never any share. It is
+    what lets `doctor` say a vault has split recovery and what catches shares
+    from a different vault before they are combined.
+    """
+    for line in plaintext.splitlines():
+        parts = line.split("\t")
+        if parts[0] == "META_RECOVERY_SHARES" and len(parts) >= 5:
+            try:
+                set_id = bytes.fromhex(parts[1].strip())
+            except ValueError:
+                return None
+            if len(set_id) != SHARE_SET_BYTES:
+                return None
+            if not parts[2].strip().isdigit() or not parts[3].strip().isdigit():
+                return None
+            return (set_id, int(parts[2].strip()), int(parts[3].strip()),
+                    parts[4].strip())
+    return None
+
+
+def stamp_shares_meta(plaintext, set_id, threshold, count, minted):
+    """Replace any existing share row; a vault has at most one live set."""
+    rows = [line for line in plaintext.splitlines()
+            if line.split("\t", 1)[0] != "META_RECOVERY_SHARES"]
+    row = "META_RECOVERY_SHARES\t%s\t%d\t%d\t%s" % (
+        set_id.hex().upper(), threshold, count, minted)
+    # After the version row, which stamp_version keeps first.
+    insert_at = 1 if rows and rows[0].split("\t", 1)[0] == "META_VAULT_VERSION" else 0
+    rows.insert(insert_at, row)
+    return "\n".join(rows) + ("\n" if plaintext.endswith("\n") else "")
+
+
 def install_recovery(vault_path, staged):
     target = recovery_path(vault_path)
     os.replace(staged, target)
@@ -2376,6 +2580,31 @@ def doctor_report(plaintext, vault_path, recovery_status="unchecked",
                                   ("warn", "unrecognised recovery state"))
     checks.append(_check("recovery_pairing", status, summary, state=recovery_status))
 
+    # Split recovery is optional, so its absence is not a defect on its own.
+    # The combination is: a vault whose recovery file or private key is gone
+    # AND which records no share set has no way back at all, and neither check
+    # can see that alone.
+    shares = shares_meta(plaintext)
+    if shares:
+        set_id, threshold, count, minted = shares
+        checks.append(_check(
+            "split_recovery", "ok",
+            "%d of %d shares recorded, set %s" % (
+                threshold, count, set_id.hex().upper()),
+            state="set", threshold=threshold, shares=count,
+            set_id=set_id.hex().upper(), minted=minted))
+    elif status == "fail":
+        checks.append(_check(
+            "split_recovery", "fail",
+            "no share set and no usable recovery file: this vault has no "
+            "recovery path left",
+            state="none"))
+    else:
+        checks.append(_check(
+            "split_recovery", "ok",
+            "no share set recorded; recovery rests on the recovery file",
+            state="none"))
+
     exposed = []
     for path in sensitive_files:
         try:
@@ -2446,6 +2675,93 @@ def main(argv):
             if not key:
                 raise VaultError("a vault key is required")
             rewrap_with_key(argv[2], key, new)
+        elif command == "shares-split":
+            # shares-split <vault> <threshold> <count> ; stdin: master
+            # stdout: set id, then one share per line
+            vault = argv[2]
+            threshold, count = int(argv[3]), int(argv[4])
+            (master,) = _secrets(1)
+            plaintext, key = read_vault(vault, master)
+            if not key:
+                raise VaultError(
+                    "this vault predates the key container and has no vault "
+                    "key to split; open and save it once to migrate it")
+            set_id = os.urandom(SHARE_SET_BYTES)
+            minted = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            parts = split_secret(key.encode("utf-8"), threshold, count)
+            # The vault records that a set exists before the shares are shown.
+            # A crash between the two leaves a recorded set nobody holds, which
+            # `shares status` reports and a re-split replaces; the reverse
+            # order would leave live shares the vault never mentions.
+            write_vault(vault, master,
+                        stamp_shares_meta(plaintext, set_id, threshold, count,
+                                          minted),
+                        key)
+            sys.stdout.write("%s\n" % set_id.hex().upper())
+            for index, payload in parts:
+                sys.stdout.write("%s\n" % encode_share(
+                    threshold, index, set_id, payload))
+        elif command == "shares-combine":
+            # shares-combine <vault> ; stdin: one share per line
+            # stdout: the vault key, once it has been shown to open the vault
+            vault = argv[2]
+            lines = [line.strip() for line
+                     in sys.stdin.buffer.read().decode("utf-8").splitlines()]
+            decoded = [decode_share(line) for line in lines if line]
+            if not decoded:
+                raise VaultError("no shares were given")
+            thresholds = {threshold for threshold, _, _, _ in decoded}
+            sets = {set_id for _, _, set_id, _ in decoded}
+            if len(sets) != 1:
+                raise VaultError(
+                    "these shares come from %d different sets; every share "
+                    "must carry the same set identifier" % len(sets))
+            if len(thresholds) != 1:
+                raise VaultError("these shares disagree about the threshold")
+            threshold = thresholds.pop()
+            set_id = sets.pop()
+            seen = {index for _, index, _, _ in decoded}
+            if len(seen) != len(decoded):
+                raise VaultError("the same share was given more than once")
+            if len(decoded) < threshold:
+                raise VaultError(
+                    "%d share(s) given; this set needs %d"
+                    % (len(decoded), threshold))
+            secret = combine_shares(
+                [(index, payload) for _, index, _, payload in decoded])
+            # Reconstruction always produces *something*. Proving it is the
+            # right something means opening the vault with it -- the share
+            # format deliberately carries no digest of the secret to check
+            # against, because that digest would be the one thing an attacker
+            # holding threshold-1 shares could attack offline.
+            try:
+                key = secret.decode("utf-8")
+            except UnicodeDecodeError:
+                raise VaultError(
+                    "these shares did not reconstruct a usable key; one of "
+                    "them is probably from a different set")
+            with open(vault, "rb") as handle:
+                container = parse_container(handle.read())
+            if container is None:
+                raise VaultError("this vault predates the key container")
+            try:
+                gpg_decrypt(key, container[1])
+            except subprocess.CalledProcessError:
+                raise VaultError(
+                    "these shares reconstructed a key that does not open this "
+                    "vault; check that every share belongs to set %s"
+                    % set_id.hex().upper())
+            sys.stdout.write(key)
+        elif command == "shares-status":
+            # shares-status <vault> ; stdin: master ; stdout: tsv or nothing
+            (master,) = _secrets(1)
+            plaintext, _ = read_vault(argv[2], master)
+            meta = shares_meta(plaintext)
+            if meta:
+                set_id, threshold, count, minted = meta
+                sys.stdout.write("%s\t%d\t%d\t%s\n"
+                                 % (set_id.hex().upper(), threshold, count,
+                                    minted))
         elif command == "recover":
             # recover <vault> <out> ; stdin: recovered secret
             # stdout: "<vault key>\n<1 if the recovery file is stale else 0>"
@@ -5386,6 +5702,142 @@ cmd_update() {
 	fi
 }
 
+# ----- split recovery --------------------------------------------------------
+# The recovery file and its private key must survive together, and stay secret
+# together. Shares replace that pair with a threshold: any `t` of `n`
+# reconstruct the vault key, any `t - 1` reveal nothing. Minting is CLI-only
+# and deliberately so -- the shares ARE the vault at threshold, and printing
+# them through a browser would put them in a page, a scrollback and possibly a
+# proxy log on their way to the person who is supposed to write them down.
+
+cmd_shares() {
+	local action="${1:-}"
+	[ "$#" -gt 0 ] && shift
+	case "$action" in
+		split) cmd_shares_split "$@" ;;
+		combine|recover) cmd_shares_combine "$@" ;;
+		status) cmd_shares_status "$@" ;;
+		""|-h|--help)
+			printf 'Usage: %s shares <command>\n\n' "$0"
+			printf '  split [--threshold N] [--shares N]   mint a new set (default 3 of 5)\n'
+			printf '  combine                              rebuild the vault key and reset the master password\n'
+			printf '  status                               what set this vault records, if any\n'
+			;;
+		*) die "Unknown shares command: $action" ;;
+	esac
+}
+
+cmd_shares_split() {
+	local threshold=3 count=5
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--threshold)
+				[ "$#" -ge 2 ] || die "Missing value for --threshold."
+				threshold="$2"; shift 2 ;;
+			--shares)
+				[ "$#" -ge 2 ] || die "Missing value for --shares."
+				count="$2"; shift 2 ;;
+			*) die "Unknown option: $1" ;;
+		esac
+	done
+	case "$threshold$count" in
+		*[!0-9]*) die "Threshold and share count must be whole numbers." ;;
+	esac
+	[ "$threshold" -ge 2 ] || die "A threshold below 2 is not a split."
+	[ "$count" -ge "$threshold" ] || \
+		die "$count shares cannot have a threshold of $threshold."
+	[ "$count" -le 255 ] || die "At most 255 shares."
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	ensure_master_password_loaded
+
+	local existing
+	existing="$(printf '%s' "$MASTER_PW" | core shares-status "$VAULT_FILE" 2>/dev/null)" || existing=""
+	if [ -n "$existing" ]; then
+		printf 'This vault already records a share set: %s\n' \
+			"$(printf '%s' "$existing" | cut -f1)"
+		printf 'Minting a new set does not revoke the old one. Any %s of the old\n' \
+			"$(printf '%s' "$existing" | cut -f2)"
+		printf 'shares still reconstruct this vault key, because the key does not change.\n'
+		printf 'Destroy the old shares yourself. Continue? [y/N]: '
+		local reply
+		read -r reply || true
+		case "$reply" in
+			y|Y|yes|YES) ;;
+			*) die "Cancelled. Nothing was changed." ;;
+		esac
+	fi
+
+	local out
+	out="$(printf '%s' "$MASTER_PW" | core shares-split "$VAULT_FILE" "$threshold" "$count")" \
+		|| die "Failed to split the vault key. The vault was not changed."
+
+	printf '\n'
+	printf 'Split recovery: %s of %s shares\n' "$threshold" "$count"
+	printf 'Set %s\n\n' "$(printf '%s\n' "$out" | sed -n '1p')"
+	printf '%s\n' "$out" | sed -n '2,$p'
+	printf '\n'
+	printf 'These are shown once and are not stored anywhere. Write them down or\n'
+	printf 'save them now, then keep them apart -- any %s together open this vault\n' "$threshold"
+	printf 'without the master password, and any fewer than %s reveal nothing at all.\n' \
+		"$threshold"
+	printf 'They stay valid after a master-password change.\n'
+}
+
+cmd_shares_status() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	ensure_master_password_loaded
+	local out
+	out="$(printf '%s' "$MASTER_PW" | core shares-status "$VAULT_FILE")" \
+		|| die "Failed to read the vault."
+	if [ -z "$out" ]; then
+		printf 'This vault records no share set. Run "%s shares split" to mint one.\n' "$0"
+		return
+	fi
+	printf 'Set       : %s\n' "$(printf '%s' "$out" | cut -f1)"
+	printf 'Threshold : %s of %s\n' "$(printf '%s' "$out" | cut -f2)" \
+		"$(printf '%s' "$out" | cut -f3)"
+	printf 'Minted    : %s\n' "$(printf '%s' "$out" | cut -f4)"
+	printf '\nThe vault records that this set exists. It does not hold any share,\n'
+	printf 'so it cannot tell you whether you still have enough of them.\n'
+}
+
+cmd_shares_combine() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found at '$VAULT_FILE'. Nothing to recover."
+
+	printf '>>> SPLIT RECOVERY <<<\n\n'
+	printf 'Enter one share per line. Blank line when done.\n\n'
+
+	local collected line
+	collected="$(make_tmp)"
+	while :; do
+		printf 'share: '
+		read -r line || break
+		[ -n "$line" ] || break
+		printf '%s\n' "$line" >> "$collected"
+	done
+
+	[ -s "$collected" ] || { secure_wipe "$collected"; die "No shares were given."; }
+
+	# The core proves the reconstruction by opening the vault with it, so a
+	# wrong or mixed set fails here rather than after a master password has
+	# been set against a key that opens nothing.
+	local recovered
+	if ! recovered="$(core shares-combine "$VAULT_FILE" < "$collected" 2>&1)"; then
+		secure_wipe "$collected"
+		die "$recovered"
+	fi
+	secure_wipe "$collected"
+
+	VAULT_KEY="$recovered"
+	printf '\nThe shares reconstructed this vault key and it opens the vault.\n'
+	printf 'Now set a NEW master password.\n\n'
+	prompt_master_password
+	rewrap_vault_key "$MASTER_PW"
+	printf '\nMaster password has been RESET.\n'
+	printf 'Your shares remain valid: a password change does not change the vault key.\n'
+}
+
 cmd_forgot() {
 	[ -f "$VAULT_FILE" ] || die "Vault not found at '$VAULT_FILE'. Nothing to recover."
 	[ -f "$RECOVERY_FILE" ] || die "Recovery file '$RECOVERY_FILE' not found. Forgot-mode unavailable."
@@ -6998,6 +7450,9 @@ Perintah utama (CLI):
   ./spm.sh auto-update [status|off|notify|auto]
                            → Aktifkan cek rilis harian saat mulai
   ./spm.sh forgot          → Reset kata sandi utama dengan private key
+  ./spm.sh shares split    → Buat share pemulihan Shamir (bawaan 3 dari 5)
+  ./spm.sh shares combine  → Susun ulang kunci vault dari share lalu set kata sandi utama baru
+  ./spm.sh shares status   → Set share yang tercatat pada vault ini
   ./spm.sh doctor          → Health / integrity check vault
   ./spm.sh doctor --json   → the same checks as JSON, for scripts
   ./spm.sh password-history <id> → previous passwords for one entry
@@ -7110,6 +7565,9 @@ Main commands (CLI):
                              → Import data (passwords/notes/passphrases/authenticators/backup codes) from csv/json and other supported formats
   ./spm.sh update          → Check & auto-install latest GitHub release
   ./spm.sh forgot          → Reset master password using the private key
+  ./spm.sh shares split    → Mint Shamir recovery shares (default 3 of 5)
+  ./spm.sh shares combine  → Rebuild the vault key from shares and reset the master password
+  ./spm.sh shares status   → What share set this vault records
   ./spm.sh doctor          → Vault health / integrity check
   ./spm.sh doctor --json   → the same checks as JSON, for scripts
   ./spm.sh password-history <id> → previous passwords for one entry
@@ -20886,6 +21344,7 @@ main() {
 		update)           cmd_update "$@" ;;
 		auto-update)      cmd_autoupdate "$@" ;;
 		forgot|forgotten) cmd_forgot "$@" ;;
+		shares)           cmd_shares "$@" ;;
 		doctor)           cmd_doctor "$@" ;;
 		password-history) cmd_password_history "$@" ;;
 		export)           cmd_export "$@" ;;

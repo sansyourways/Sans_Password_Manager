@@ -85,6 +85,7 @@ SPM may not be a good fit when you need:
 ## Features
 
 - Encrypted password vault with history, health checks, backups, and recovery.
+- Split recovery: Shamir t-of-n shares that reconstruct the vault key without the master password, and stay valid after it changes.
 - Interactive terminal interface plus a local web dashboard in twelve languages, including right-to-left Arabic.
 - Passphrases, backup codes, authenticator/TOTP entries, and biometric unlock where supported.
 - Import and export across common and advanced text formats.

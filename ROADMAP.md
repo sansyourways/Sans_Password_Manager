@@ -338,8 +338,24 @@ which is the whole point.
 - Hardware-backed key wrapping via FIDO2, TPM or a platform secure enclave.
   Distinct from the biometric unlock shipped in 2.11.0, which resumes a
   suspended dashboard session and never holds the vault key.
-- Split recovery — Shamir-style shares — so recovery does not depend on one
-  file and one private key remaining simultaneously available and secret.
+- ~~Split recovery — Shamir-style shares — so recovery does not depend on one
+  file and one private key remaining simultaneously available and secret.~~
+  **Shipped in 3.14.0.** `spm shares split` mints a t-of-n set over GF(2**8);
+  any `t` reconstruct the vault key and any `t - 1` reveal nothing.
+
+  Three decisions carry it. What is split is the *vault key*, not the RSA
+  private key, because the vault key is stable — `rewrap` changes only the
+  envelope around it — so shares written on paper keep working after any
+  number of master-password changes. Every share carries a checksum over its
+  own text, because Shamir has no integrity of its own and three shares with
+  one character wrong reconstruct a different key silently. And the share
+  format carries no digest of the secret: reconstruction is proved by opening
+  the vault, since a digest would be the one thing an attacker holding `t - 1`
+  shares could attack offline.
+
+  Minting is CLI-only. At threshold the shares are the vault, and rendering
+  them through a browser would put them in a page, a scrollback and possibly a
+  proxy log on the way to the person meant to write them down.
 - **A security-event log — shipped in 3.10.0.** Unlocks, writes and
   master-password changes are recorded so a user can notice what they did not
   do. `spm events` reads it and the dashboard shows it under Tools.

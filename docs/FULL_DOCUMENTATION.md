@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.13.0**
+Current release: **3.14.0**
 
 ---
 
@@ -45,6 +45,7 @@ Current release: **3.13.0**
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
   - [Doctor / Health Check](#doctor--health-check)
 - [Languages](#languages)
+- [Split recovery](#split-recovery)
 - [Password Strength Coaching](#password-strength-coaching)
 - [Clipboard Auto-Clean](#clipboard-auto-clean)
 - [Portable & Save Bundles](#portable--save-bundles)
@@ -81,7 +82,7 @@ attacker with root access.
 
 ## Product tour
 
-Every web capture below was taken from the 3.13.0 release candidate in Chromium
+Every web capture below was taken from the 3.14.0 release candidate in Chromium
 at 1440x900, against a disposable vault holding only synthetic documentation
 data. No personal vault, browser profile, real credential, or production
 hostname appears in these images. The locked-screen captures use Chromium
@@ -317,7 +318,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.13.0
+bash install.sh --version 3.14.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -352,7 +353,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v3.13.0.zip \
+gh attestation verify Sans_Password_Manager_v3.14.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -368,9 +369,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v3.13.0
+git checkout v3.14.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v3.13.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v3.14.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -383,7 +384,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=3.13.0
+version=3.14.0
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -400,7 +401,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.13.0/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.14.0/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -422,7 +423,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.13.0 at /home/you/.local/bin/spm
+Installed SPM 3.14.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -1143,6 +1144,75 @@ Process:
 
 ---
 
+## Split recovery
+
+The recovery file and its private key have to survive together and stay secret
+together. Lose the key and `<vault>.recovery` is inert; leak it while somebody
+holds the capsule and the vault is open. Split recovery replaces that pair with
+a threshold: any **t of n** shares reconstruct the vault key, and any **t-1**
+reveal nothing whatsoever.
+
+```bash
+spm shares split                          # 3 of 5, the default
+spm shares split --threshold 2 --shares 4
+spm shares status                         # what set this vault records
+spm shares combine                        # rebuild the key, set a new master password
+```
+
+A share is one line:
+
+```text
+SPMS1-3-2-F63BAE20-GMB67DZNN4YRGBINZPYFQWWWS4XV2ZXZ4T5GAFMULBTHHDD6WNUF6KETBVVCFFF3DVZY6TY-56C8
+```
+
+reading as: format, threshold, which share this is, which set it belongs to,
+the payload, and a checksum over the share's own text.
+
+### They stay valid
+
+What is split is the vault key, and the vault key does not change when the
+master password does — `spm change-master` and `spm shares combine` both rewrap
+the envelope around it and leave the key alone. Shares written on paper in 2026
+still work after any number of password changes. Nothing else about the vault
+needs to be kept in step with them.
+
+### What each guard is for
+
+**The checksum on every share** catches a transcription error at the moment the
+share is read. Shamir has no integrity of its own: combine three shares with
+one character wrong and you get a different key, silently, with nothing to say
+which share was at fault.
+
+**The set identifier** groups shares. Mixing one vault's shares with another's
+is refused before anything is combined.
+
+**Opening the vault** is what proves the reconstruction. The share format
+deliberately carries no digest of the secret, because that digest is the one
+thing an attacker holding `t-1` shares could attack offline.
+
+### What this does not do
+
+`t` shares are equivalent to the vault key: together they open the vault
+without the master password. That is the same power the recovery file and its
+private key already have as a pair — split recovery changes how many pieces
+must be gathered, not what they are worth once gathered. Distribute them
+accordingly.
+
+Minting a new set does **not** revoke an old one. The vault key is unchanged,
+so previously distributed shares keep working; `spm shares split` says so and
+asks before replacing the recorded set. Destroying the old shares is your job.
+
+The vault records that a set exists — its identifier, threshold, count and the
+date — and never a share. `spm doctor` reports it, and reports a failure when a
+vault has neither a usable recovery file nor a share set, which is the one
+state with no way back.
+
+Minting is deliberately CLI-only. At threshold the shares are the vault, and
+printing them through a browser would put them in a page, a scrollback and
+possibly a proxy log on the way to the person meant to write them down.
+
+---
+
 ## Doctor / Health Check
 
 ```bash
@@ -1325,7 +1395,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.13.0**
+Version: **3.14.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
