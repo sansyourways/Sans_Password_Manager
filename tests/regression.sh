@@ -2203,6 +2203,31 @@ else
 	printf '  packaging: formula pinned to one archive (.deb build not verified here)\n'
 fi
 
+printf 'Docs regression: every capture reaches the documentation\n'
+# A screenshot that is captured but never referenced is invisible: the release
+# carries the file, the documentation site never renders it, and nothing fails.
+# 3.12.4 shipped two such captures. The site is generated from the images this
+# document links, so being linked here is what publishes them.
+docs_src="$ROOT_DIR/docs/FULL_DOCUMENTATION.md"
+docs_orphans=0
+for docs_shot in "$ROOT_DIR"/docs/screenshots/*/*.png "$ROOT_DIR"/docs/screenshots/*/*.jpg; do
+	[ -e "$docs_shot" ] || continue
+	docs_name="${docs_shot#"$ROOT_DIR"/}"
+	grep -qF "($docs_name)" "$docs_src" || {
+		printf '  captured but never referenced: %s\n' "$docs_name" >&2
+		docs_orphans=$((docs_orphans + 1))
+	}
+done
+[ "$docs_orphans" -eq 0 ] || {
+	printf '%d capture(s) would ship without ever being published\n' "$docs_orphans" >&2
+	exit 1
+}
+grep -qF '(docs/product-demo.gif)' "$docs_src" || {
+	printf 'the product demo GIF is not referenced by the documentation\n' >&2; exit 1
+}
+docs_shot_count=$(ls "$ROOT_DIR"/docs/screenshots/*/*.png "$ROOT_DIR"/docs/screenshots/*/*.jpg 2>/dev/null | wc -l)
+printf '  docs: %s captures and the demo GIF all referenced\n' "$docs_shot_count"
+
 printf 'Install regression: build attestation verification\n'
 # The installer compares a checksum it fetched from the same host as the
 # archive. That proves the transfer was intact and nothing about where the file

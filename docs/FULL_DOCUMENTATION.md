@@ -124,7 +124,9 @@ Sundial, Console, Cyberpunk, and Edgerunner. The preference stays in this
 browser and also paints the sign-in and locked-vault screens. Master-password
 and biometric-unlock controls remain in the same Settings destination.
 
-![SPM Settings showing the four theme previews and unified vault settings](docs/screenshots/web-v2.13.0/28-master-password.png)
+| Settings and theme previews | The same theme on the locked screen |
+| --- | --- |
+| ![SPM Settings showing the four theme previews and unified vault settings](docs/screenshots/web-v2.13.0/28-master-password.png) | ![SPM Dashboard locked in the browser, offering unlock without exposing any record](docs/screenshots/web-v2.13.0/30-vault-locked.png) |
 
 ### Rotate the master password
 
@@ -950,6 +952,9 @@ WHEN (UTC)             EVENT    OUTCOME  DETAIL
 
 The dashboard shows the same log under **Tools → Security Events**, with failed
 attempts called out above the table.
+
+![SPM Security Events page listing unlock, write and rewrap entries with failed
+attempts called out above the table](docs/screenshots/web-v2.13.0/29-security-events.png)
 
 ### Two decisions worth knowing about
 
