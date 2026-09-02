@@ -2422,6 +2422,35 @@ grep -qF '(docs/product-demo.gif)' "$docs_src" || {
 docs_shot_count=$(ls "$ROOT_DIR"/docs/screenshots/*/*.png "$ROOT_DIR"/docs/screenshots/*/*.jpg 2>/dev/null | wc -l)
 printf '  docs: %s captures and the demo GIF all referenced\n' "$docs_shot_count"
 
+printf 'Release regression: the version is declared everywhere it is checked\n'
+# The release workflow verifies the changelog entry and the extension manifests
+# -- but only after the tag has been pushed, so a missing entry leaves a public
+# tag with no release behind it. 3.13.0 did exactly that. Checking here means
+# the same omission fails before anything is published.
+release_version="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' "$ROOT_DIR/spm.sh")"
+[ -n "$release_version" ] || {
+	printf 'no VERSION in spm.sh\n' >&2; exit 1
+}
+grep -q "^## \[$release_version\]" "$ROOT_DIR/CHANGELOG.md" || {
+	printf 'CHANGELOG.md has no "## [%s]" entry, which the release job only checks after the tag is public\n' \
+		"$release_version" >&2
+	exit 1
+}
+for release_manifest in browser-extension/manifest.json \
+	browser-extension-universal/manifest.chromium.json \
+	browser-extension-universal/manifest.firefox.json; do
+	grep -q '"version": "'"$release_version"'"' "$ROOT_DIR/$release_manifest" || {
+		printf '%s does not declare version %s\n' \
+			"$release_manifest" "$release_version" >&2
+		exit 1
+	}
+done
+[ -f "$ROOT_DIR/docs/releases/$release_version.md" ] || {
+	printf 'docs/releases/%s.md is missing\n' "$release_version" >&2; exit 1
+}
+printf '  release: %s declared in the changelog, 3 manifests and its notes\n' \
+	"$release_version"
+
 printf 'Install regression: build attestation verification\n'
 # The installer compares a checksum it fetched from the same host as the
 # archive. That proves the transfer was intact and nothing about where the file
