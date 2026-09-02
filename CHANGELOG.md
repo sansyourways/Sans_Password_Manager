@@ -30,6 +30,11 @@ Keep-a-Changelog style format.
   updated, so a transport that truncated or transcoded the vault is caught then
   rather than when the copy is needed.
 
+### Fixed
+- Probe rsync for `--chmod` rather than assuming it. Apple still ships rsync
+  2.6.9, which rejects the flag outright, so a push from macOS failed. Where
+  the flag exists the pushed vault still lands as `0600` on the far side.
+
 ### Security
 - Digests are measured locally over a fetched copy for every transport. A
   remote-side digest is a claim, not a measurement, and none is requested.

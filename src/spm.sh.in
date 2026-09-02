@@ -5172,6 +5172,23 @@ sync_rsync() {
 	fi
 }
 
+SPM_RSYNC_CHMOD=""
+SPM_RSYNC_CHMOD_CHECKED=""
+
+# --chmod is how the pushed vault lands as 0600 on the far side, and Apple
+# still ships rsync 2.6.9, which does not have it. Probed rather than assumed:
+# an rsync without the flag must still be able to sync, and one with it must
+# still set the mode. Asking the binary is the only way to tell them apart.
+sync_rsync_chmod_flag() {
+	if [ -z "$SPM_RSYNC_CHMOD_CHECKED" ]; then
+		SPM_RSYNC_CHMOD_CHECKED=1
+		if rsync --help 2>&1 | grep -q -- '--chmod'; then
+			SPM_RSYNC_CHMOD="--chmod=F600"
+		fi
+	fi
+	printf '%s' "$SPM_RSYNC_CHMOD"
+}
+
 sync_transport_names() {
 	printf 'dir rsync rclone'
 }
@@ -5246,7 +5263,7 @@ sync_transport_fetch() {
 # into place where the transport can do so, so a reader never sees a half-
 # written vault.
 sync_transport_publish() {
-	local transport="$1" remote="$2" src="$3" staged
+	local transport="$1" remote="$2" src="$3" staged rsync_mode
 	case "$transport" in
 		dir)
 			staged="$(mktemp "$(dirname "$remote")/.spm-sync.XXXXXX")" \
@@ -5259,8 +5276,14 @@ sync_transport_publish() {
 			# rsync writes to a temporary name on the receiving side and
 			# renames it into place, so a reader never sees a partial vault
 			# and no staging of our own is needed.
-			sync_rsync -q --chmod=F600 "$src" "$remote" \
-				|| die "Cannot write to the rsync target."
+			rsync_mode="$(sync_rsync_chmod_flag)"
+			if [ -n "$rsync_mode" ]; then
+				sync_rsync -q "$rsync_mode" "$src" "$remote" \
+					|| die "Cannot write to the rsync target."
+			else
+				sync_rsync -q "$src" "$remote" \
+					|| die "Cannot write to the rsync target."
+			fi
 			;;
 		rclone)
 			rclone copyto "$src" "$remote" >/dev/null 2>&1 \

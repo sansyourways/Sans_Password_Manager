@@ -4009,6 +4009,49 @@ for sync_t in $sync_available; do
 	) || exit 1
 done
 
+# Apple still ships rsync 2.6.9, which has no --chmod. A push must still work
+# there, and must still use the flag where it exists. CI on macOS found this
+# after the flag had been added unconditionally; a stub finds it here.
+if command -v rsync >/dev/null 2>&1; then
+	sync_old_bin="$sync_root/old-rsync"
+	mkdir -p "$sync_old_bin"
+	cat > "$sync_old_bin/rsync" <<'OLDRSYNC'
+#!/bin/sh
+# rsync 2.6.9 as Apple ships it: no --chmod, and it says so.
+if [ "$1" = "--help" ]; then
+	printf 'rsync version 2.6.9\n  --perms, -p    preserve permissions\n'
+	exit 0
+fi
+for arg in "$@"; do
+	case "$arg" in
+		--chmod*) printf 'rsync: %s: invalid argument\n' "$arg" >&2; exit 1 ;;
+	esac
+done
+exec /usr/bin/env -i PATH="$SPM_REAL_PATH" rsync "$@"
+OLDRSYNC
+	chmod +x "$sync_old_bin/rsync"
+	mkdir -p "$sync_root/oldrsync"
+	(
+		export SPM_REAL_PATH="$PATH"
+		export PATH="$sync_old_bin:$PATH"
+		export SPM_SYNC_RSYNC_SHELL="$sync_shim"
+		export SPM_CONFIG_DIR="$sync_root/cfg-oldrsync"
+		mkdir -p "$SPM_CONFIG_DIR"
+		rsync --help 2>&1 | grep -q -- '--chmod' && {
+			printf 'the stub still advertises --chmod\n' >&2; exit 1
+		}
+		cmd_sync push "fakehost:$sync_root/oldrsync" chan --transport rsync >/dev/null
+	) || { printf 'a push failed against an rsync without --chmod\n' >&2; exit 1; }
+	[ -f "$sync_root/oldrsync/spm-chan.gpg" ] || {
+		printf 'the push against an old rsync wrote nothing\n' >&2; exit 1
+	}
+	# And where the flag does exist it is still used, or the remote copy lands
+	# with whatever mode the far side's umask happens to give it.
+	grep -q 'chmod=F600' "$ROOT_DIR/spm.sh" || {
+		printf 'the rsync transport no longer sets a mode at all\n' >&2; exit 1
+	}
+fi
+
 # Unreachable must never read as empty: that is the state in which pushing over
 # a remote nobody could contact feels safe.
 for sync_t in $sync_available; do
