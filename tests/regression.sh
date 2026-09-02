@@ -398,60 +398,76 @@ grep -q 'self.auth_lock = threading.RLock()' "$web_script"
 # silently does nothing. That shipped, in every release that carried the
 # string, and no test noticed. This parses what the browser is actually
 # handed and checks the three languages against each other while it is there.
-PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$web_script" <<'I18NPY'
+# Catalogues now live in locales/*.json and are folded into the web script by
+# tools/build-locales.py. The lint is the contributor-facing check, so running
+# it here means the suite and the tool cannot disagree about what is valid.
+python3 "$ROOT_DIR/tools/i18n-lint.py"
+# A stale generated region would serve yesterday's words from today's JSON,
+# and nothing else would notice: the page still renders.
+python3 "$ROOT_DIR/tools/build-locales.py" --check
+
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$web_script" "$ROOT_DIR" <<'I18NPY'
 import ast
+import io
 import json
+import os
 import re
 import sys
 
-source = open(sys.argv[1], encoding="utf-8").read()
+source = io.open(sys.argv[1], encoding="utf-8").read()
+root = sys.argv[2]
 
-# The dictionaries live inside a Python string literal, so the file on disk is
-# one escaping level away from what the browser is handed: `\\"` in the source
-# is correct Python for an emitted `\"`. Decoding the literal first is the
-# whole point -- checking the raw source instead would pass the broken version
-# and fail the fixed one.
-literal = re.search(r'I18N_SCRIPT = (""".*?""")', source, re.S)
-if not literal:
-    sys.exit("I18N_SCRIPT literal was not found")
-emitted = ast.literal_eval(literal.group(1))
+# Read the catalogues the way the server does -- out of the generated region --
+# rather than out of locales/, so a region that was hand-edited away from the
+# JSON is caught here and not merely by the --check above.
+tree = ast.parse(source)
+generated = {}
+for node in tree.body:
+    if isinstance(node, ast.Assign):
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id in (
+                    "WEB_LOCALES", "WEB_CATALOGUES"):
+                generated[target.id] = ast.literal_eval(node.value)
+for name in ("WEB_LOCALES", "WEB_CATALOGUES"):
+    if name not in generated:
+        sys.exit("%s is missing from the generated region" % name)
 
-match = re.search(r"const DICT = (\{.*?\n  \});", emitted, re.S)
-if not match:
-    sys.exit("the dashboard's DICT literal was not found")
+locales = generated["WEB_LOCALES"]
+catalogues = generated["WEB_CATALOGUES"]
+if set(locales) != set(catalogues):
+    sys.exit("the locale table and the catalogues describe different languages")
 
-# The literal is JavaScript, and it uses trailing commas, which JSON rejects.
-# Dropping a comma only where the next line closes its object keeps this a
-# check on quoting and escaping rather than on punctuation style -- and it
-# cannot touch the inside of a value, because every value line ends `",`.
-lines = match.group(1).split("\n")
-for index in range(len(lines) - 1):
-    if lines[index].rstrip().endswith(",") and lines[index + 1].lstrip()[:1] in "}]":
-        lines[index] = lines[index].rstrip()[:-1]
-try:
-    dictionaries = json.loads("\n".join(lines))
-except ValueError as exc:
-    sys.exit("the dictionary the browser receives is not parseable: %s" % exc)
+on_disk = sorted(
+    name[:-5] for name in os.listdir(os.path.join(root, "locales"))
+    if name.endswith(".json"))
+if sorted(catalogues) != on_disk:
+    sys.exit("generated languages %s do not match locales/ %s"
+             % (sorted(catalogues), on_disk))
 
-missing = {"en", "id", "ja"} - set(dictionaries)
-if missing:
-    sys.exit("translation dictionary is missing %s" % ", ".join(sorted(missing)))
-
-english = set(dictionaries["en"])
-for language in ("id", "ja"):
-    absent = english - set(dictionaries[language])
-    extra = set(dictionaries[language]) - english
+english = set(catalogues["en"])
+for code in sorted(catalogues):
+    absent = english - set(catalogues[code])
+    extra = set(catalogues[code]) - english
     if absent:
         sys.exit("%s is missing %d key(s), e.g. %s"
-                 % (language, len(absent), sorted(absent)[0]))
+                 % (code, len(absent), sorted(absent)[0]))
     if extra:
         sys.exit("%s has %d key(s) English does not, e.g. %s"
-                 % (language, len(extra), sorted(extra)[0]))
+                 % (code, len(extra), sorted(extra)[0]))
+    meta = locales[code]
+    if meta["dir"] not in ("ltr", "rtl"):
+        sys.exit("%s declares direction %r" % (code, meta["dir"]))
+    if meta["review"] not in ("maintained", "unreviewed"):
+        sys.exit("%s declares review status %r" % (code, meta["review"]))
+    if code != code.lower():
+        sys.exit("%s is not lowercase; the server lowercases before matching"
+                 % code)
+
 # A key referenced from the markup but absent from every dictionary renders as
-# its English fallback forever, in all three languages. The parity check above
-# cannot see it: it compares the dictionaries to each other, and a key missing
-# from all three is perfectly consistent. This found four, three of them added
-# with the Bitwarden import UI, which shipped untranslated.
+# its English fallback forever, in every language. The parity check above
+# cannot see it: it compares the catalogues to each other, and a key missing
+# from all of them is perfectly consistent. This found four, three of them
+# added with the Bitwarden import UI, which shipped untranslated.
 referenced = {
     key for key in re.findall(
         r'data-i18n(?:-placeholder|-title|-label)?="([^"{}]+)"', source)
@@ -459,11 +475,29 @@ referenced = {
 }
 unknown = sorted(key for key in referenced if key not in english)
 if unknown:
-    sys.exit("%d key(s) used in the markup but in no dictionary: %s"
+    sys.exit("%d key(s) used in the markup but in no catalogue: %s"
              % (len(unknown), ", ".join(unknown)))
 
-print("  i18n: 3 languages, %d keys each, %d referenced from markup, all present"
-      % (len(english), len(referenced)))
+# An unreviewed translation that never says so is the one outcome this release
+# was supposed to rule out.
+if "lang.unreviewed" not in english:
+    sys.exit("the unreviewed-translation notice has no string")
+if 'id="lang-notice"' not in source:
+    sys.exit("no element carries the unreviewed-translation notice")
+# The notice ships hidden and is revealed by script. `display: block` on the
+# class outranks the user agent's [hidden] rule, so styling it at all makes it
+# visible on every page -- including the maintained languages, where it tells
+# a reader their own language is unreviewed. That shipped, and only a
+# screenshot showed it.
+style = source[source.index("DESIGN_CSS"):]
+if re.search(r"\.lang-notice\s*\{[^}]*\bdisplay\s*:", style) and not re.search(
+        r"\.lang-notice\[hidden\]\s*\{[^}]*display\s*:\s*none", style):
+    sys.exit("the notice sets display but never restates the hidden case, so "
+             "it renders on every language")
+
+rtl = sorted(code for code in locales if locales[code]["dir"] == "rtl")
+print("  i18n: %d languages (%d rtl), %d keys each, %d referenced from markup"
+      % (len(catalogues), len(rtl), len(english), len(referenced)))
 I18NPY
 
 # The hamburger exists at every width: under 900px it opens the drawer, above
@@ -505,6 +539,104 @@ grep -q 'Sans Password Manager' "$TEST_ROOT/login.html"
 grep -q '<body class="theme-console">' "$TEST_ROOT/login.html"
 grep -q 'localStorage.getItem("spm.theme")' "$TEST_ROOT/login.html"
 grep -q 'rel="apple-touch-icon"' "$TEST_ROOT/login.html"
+
+printf 'Web regression: the language a page is actually served in\n'
+# Shipping every catalogue to every page was affordable at three languages.
+# At twelve it is most of the payload, so a page now carries its own language
+# and English, and the rest arrive from /locale on demand. Asserted over real
+# HTTP, because the saving and the correctness both live in what is sent.
+grep -q 'lang="en" dir="ltr"' "$TEST_ROOT/login.html" || {
+	printf 'the English login page does not declare lang and dir\n' >&2; exit 1
+}
+# Read the DICT the browser is handed rather than grepping the page: the
+# direction and review maps legitimately name every language, so a substring
+# search would pass whatever the payload actually contained.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$TEST_ROOT/login.html" en <<'DICTPY'
+import json, re, sys
+page = open(sys.argv[1], encoding="utf-8").read()
+active = sys.argv[2]
+match = re.search(r"const DICT = (\{.*?\});\n", page, re.S)
+if not match:
+    sys.exit("the page carries no catalogue at all")
+shipped = json.loads(match.group(1))
+if active not in shipped:
+    sys.exit("the %s page does not carry the %s catalogue" % (active, active))
+if "en" not in shipped:
+    sys.exit("the page does not carry English, which every lookup falls back to")
+extra = sorted(set(shipped) - {active, "en"})
+if extra:
+    sys.exit("the %s page also ships %s, which it will never use"
+             % (active, ", ".join(extra)))
+DICTPY
+
+curl -fsS -o "$TEST_ROOT/login-ar.html" -H 'Cookie: spm_lang=ar' \
+	"http://127.0.0.1:$WEB_PORT/login"
+# Arabic is the one language whose layout is not merely a word swap. If dir
+# never reaches the document the page is legible and completely wrong.
+grep -q 'lang="ar" dir="rtl"' "$TEST_ROOT/login-ar.html" || {
+	printf 'the Arabic page is not marked right-to-left\n' >&2; exit 1
+}
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$TEST_ROOT/login-ar.html" <<'RTLCSSPY'
+import re, sys
+page = open(sys.argv[1], encoding="utf-8").read()
+# Arabic in a fixed-width face stops joining and reads as loose letters. The
+# rule that prevents it has to match the document as served -- a selector that
+# is merely present, narrowed to something no element carries, is inert, and a
+# substring search cannot tell the two apart.
+rule = re.search(
+    r'(?<![\w.#\[-]):root\[dir="rtl"\]\s+body\s*\{([^}]*)\}', page)
+if not rule:
+    sys.exit("no rule takes an RTL document out of the fixed-width stack")
+block = rule.group(1)
+for prop in ("--font", "--mono"):
+    if prop not in block:
+        sys.exit("the RTL rule does not override %s" % prop)
+if "monospace" in block.split("--mono")[1].split(";")[0]:
+    sys.exit("the RTL rule still resolves to a monospace family")
+RTLCSSPY
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$TEST_ROOT/login-ar.html" ar <<'DICTPY'
+import json, re, sys
+page = open(sys.argv[1], encoding="utf-8").read()
+active = sys.argv[2]
+match = re.search(r"const DICT = (\{.*?\});\n", page, re.S)
+if not match:
+    sys.exit("the page carries no catalogue at all")
+shipped = json.loads(match.group(1))
+if active not in shipped:
+    sys.exit("the %s page does not carry the %s catalogue" % (active, active))
+if "en" not in shipped:
+    sys.exit("the page does not carry English, which every lookup falls back to")
+extra = sorted(set(shipped) - {active, "en"})
+if extra:
+    sys.exit("the %s page also ships %s, which it will never use"
+             % (active, ", ".join(extra)))
+DICTPY
+grep -q 'id="lang-notice"' "$TEST_ROOT/login-ar.html" || {
+	printf 'an unreviewed language is served with no notice element\n' >&2; exit 1
+}
+
+# The picker names each language in its own script. Listing Arabic as "Arabic"
+# is no use to somebody who needs Arabic to read the page.
+grep -q 'value="ar" dir="rtl"' "$TEST_ROOT/login.html" || {
+	printf 'the picker does not carry per-option direction\n' >&2; exit 1
+}
+
+# The catalogues a page did not ship have to be reachable, and only the real
+# ones -- an unknown code must not fall back to English and look like success.
+curl -fsS -o "$TEST_ROOT/locale-ja.json" "http://127.0.0.1:$WEB_PORT/locale?lang=ja"
+python3 - "$TEST_ROOT/locale-ja.json" <<'LOCALEPY'
+import json, sys
+catalogue = json.load(open(sys.argv[1], encoding="utf-8"))
+if catalogue.get("login.unlock") in (None, "Unlock"):
+    sys.exit("/locale?lang=ja did not return the Japanese catalogue")
+LOCALEPY
+locale_code="$(curl -s -o /dev/null -w '%{http_code}' \
+	"http://127.0.0.1:$WEB_PORT/locale?lang=zz")"
+[ "$locale_code" = "404" ] || {
+	printf 'an unknown language returned %s rather than 404\n' "$locale_code" >&2
+	exit 1
+}
+printf '  language: per-page catalogue, rtl document, /locale on demand\n'
 
 # The icon routes are deliberately fetched with no session cookie. Unknown
 # paths fall through to the login gate, which answers HTTP 200 with the login
@@ -550,6 +682,68 @@ grep -q '<symbol id="i-brand"' "$TEST_ROOT/dashboard.html"
 grep -q 'rel="apple-touch-icon"' "$TEST_ROOT/dashboard.html"
 grep -q '<use href="#i-key"' "$TEST_ROOT/dashboard.html"
 grep -q '<use href="#i-shield"' "$TEST_ROOT/dashboard.html"
+
+# The sign-in page is one card; the dashboard is the sidebar, the topbar, the
+# tables and the nav rail. RTL either reaches all of that or it reaches none of
+# the app somebody actually uses, so assert it on the shell and not only on the
+# gate in front of it.
+curl -fsS -b "$TEST_ROOT/cookies" -c "$TEST_ROOT/cookies" -o /dev/null \
+	"http://127.0.0.1:$WEB_PORT/lang?lang=ar"
+curl -fsS -b "$TEST_ROOT/cookies" -c "$TEST_ROOT/cookies" \
+	-o "$TEST_ROOT/dashboard-ar.html" "http://127.0.0.1:$WEB_PORT/"
+grep -q 'lang="ar" dir="rtl"' "$TEST_ROOT/dashboard-ar.html" || {
+	printf 'the Arabic dashboard is not marked right-to-left\n' >&2; exit 1
+}
+# Physical margins and borders survive dir and would strand the nav marker,
+# the active-item bar and the topbar controls on the wrong side.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$web_script" <<'LOGICALPY'
+import re, sys
+source = open(sys.argv[1], encoding="utf-8").read()
+style = source[source.index("DESIGN_CSS"):]
+physical = re.findall(
+    r"(?<![\w-])(margin|padding|border)-(left|right)\s*:", style)
+# The sidebar's safe-area inset is physical on purpose: the notch sits where
+# the hardware puts it. Everything else must be logical or RTL is cosmetic.
+allowed = 1
+if len(physical) > allowed:
+    sys.exit("%d physical box properties remain in the stylesheet: %s"
+             % (len(physical), ", ".join("%s-%s" % p for p in physical[:6])))
+
+# A four-value shorthand is physical too, and it hides better than the
+# longhand: `padding: 0 12px 0 36px` reserves room for the search icon on the
+# left and keeps reserving it there under dir=rtl, so the icon lands on top of
+# the placeholder. Only the asymmetric ones matter -- a symmetric shorthand
+# mirrors onto itself.
+lopsided = []
+for match in re.finditer(
+        r"(?<![\w-])(padding|margin)\s*:\s*([^;{}]+);", style):
+    values = match.group(2).split()
+    if len(values) == 4 and values[1] != values[3]:
+        lopsided.append(match.group(0).strip())
+if lopsided:
+    sys.exit("%d box shorthand(s) differ left from right and will not mirror: %s"
+             % (len(lopsided), "; ".join(lopsided[:4])))
+LOGICALPY
+curl -fsS -b "$TEST_ROOT/cookies" -c "$TEST_ROOT/cookies" -o /dev/null \
+	"http://127.0.0.1:$WEB_PORT/lang?lang=en"
+# A password, a vault path and a Base32 secret are machine values. Laid out
+# right-to-left they are reordered around their own punctuation -- a path grows
+# a leading slash at its end -- and the caret lands on the wrong side. Caught
+# by screenshotting the Arabic dashboard; nothing else showed it.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$web_script" <<'LTRPY'
+import re, sys
+source = open(sys.argv[1], encoding="utf-8").read()
+rule = re.search(
+    r'((?:^:root\[dir="rtl"\][^,{]*,\s*)+^:root\[dir="rtl"\][^,{]*)\{\s*'
+    r'direction:\s*ltr', source, re.M)
+if not rule:
+    sys.exit("nothing pins machine values to left-to-right in an RTL page")
+selectors = rule.group(1)
+for needed in ('input[type="password"]', ".vault-chip .path", "code", "pre"):
+    if needed not in selectors:
+        sys.exit("%s is not pinned left-to-right" % needed)
+LTRPY
+printf '  rtl: the dashboard shell mirrors, not just the sign-in card\n'
 grep -q '<use href="#i-logout"' "$TEST_ROOT/dashboard.html"
 if grep -Eq '🔑|🗒|📝|⏱|🧯|✨|🗑|👁|📋' "$TEST_ROOT/dashboard.html"; then
 	printf 'legacy emoji icon found in generated SPM Dashboard dashboard\n' >&2

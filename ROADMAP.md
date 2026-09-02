@@ -132,8 +132,28 @@ co-owners of it. That review is a design concept, not a formal security audit.
   and a wait. Added in the same release.
 - Explore hardware-backed signing for release provenance. Hardware-backed
   protection of the vault itself is covered under Architecture below.
-- Add optional localization contributions beyond English, Indonesian, and
-  Japanese.
+- ~~Add optional localization contributions beyond English, Indonesian, and
+  Japanese.~~ Delivered in 3.13.0, though not the way the item was written.
+  The obstacle was never that translations were missing: it was that
+  contributing one meant hand-editing a JavaScript object literal inside a
+  Python string inside a generated shell script, and getting two levels of
+  escaping right. The regression suite carried a test whose only job was to
+  catch that escaping going wrong, which said plainly enough where the problem
+  was. Catalogues now live in `locales/<code>.json`, a generator folds them in,
+  and `tools/i18n-lint.py` is the check a contributor runs. Nine languages
+  followed, each marked unreviewed in the picker and in the docs, because none
+  has been read by a speaker and several strings warn about actions nothing can
+  undo.
+
+  Arabic forced the part that was actual engineering: right-to-left. Physical
+  margins, paddings and borders became logical properties, positioned
+  decorations became insets, and the fixed-width type the Console theme is
+  built on is dropped for cursive scripts. Two defects survived every
+  assertion and were found only by screenshotting the running app -- the
+  unreviewed notice rendered on maintained languages because a styled class
+  outranks `[hidden]`, and the search icon sat on top of its own placeholder
+  because a four-value `padding` shorthand does not mirror. Both now have
+  guards; neither would have been caught by reading the diff.
 
 ## Architecture — shrinking the trusted core
 
