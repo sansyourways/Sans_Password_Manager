@@ -91,6 +91,8 @@ SPM may not be a good fit when you need:
 - Import and export across common and advanced text formats.
 - Browser extensions for Chromium and Firefox with a local native host.
 - Portable and save bundles for user-controlled transfer and recovery.
+- Pluggable sync transports (directory, rsync, rclone) that move only encrypted bytes to infrastructure you already run.
+- Bulk tidy for imported vaults: folders read from notes, package identifiers renamed, reviewed before anything is written.
 - Optional breach review with privacy-preserving prefix queries.
 
 ## Supported platforms
@@ -217,7 +219,7 @@ SPM intentionally has no automatic “delete everything” command because vault
 - Native Windows is not supported; WSL operation is best effort.
 - Browser integration requires local native-host setup and is not available in Termux.
 - The dashboard binds locally by default. Remote exposure changes the threat model and requires correctly configured TLS, authentication, proxy, and firewall controls.
-- Sync transports can copy encrypted files but do not make an untrusted endpoint safe.
+- Sync transports can copy encrypted files but do not make an untrusted endpoint safe. SPM operates no service; every transport is infrastructure you already run.
 - Nine of the twelve interface languages are unreviewed translations. They are marked in the language picker, and the English text is authoritative wherever a warning matters.
 
 ## Documentation and project links

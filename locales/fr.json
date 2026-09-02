@@ -330,6 +330,22 @@
     "page.passphrases.desc": "Jetons d'API et phrases de récupération.",
     "page.authenticators.desc": "Codes à usage unique fondés sur le temps.",
     "page.backups.desc": "Codes de récupération à usage unique pour vos comptes.",
-    "lang.unreviewed": "Cette traduction n'a pas été relue par un locuteur. Lorsqu'un avertissement compte, c'est le texte anglais qui fait foi."
+    "lang.unreviewed": "Cette traduction n'a pas été relue par un locuteur. Lorsqu'un avertissement compte, c'est le texte anglais qui fait foi.",
+    "tidy.title": "Ranger les fiches importées",
+    "tidy.desc": "Rien n'a encore été modifié. Vérifiez chaque ligne, corrigez le nom si besoin, puis appliquez.",
+    "tidy.of": "sur",
+    "tidy.entries_affected": "fiches seraient modifiées",
+    "tidy.include": "Appliquer",
+    "tidy.name": "Nom",
+    "tidy.folder": "Dossier",
+    "tidy.apply": "Appliquer à la sélection",
+    "tidy.cancel": "Annuler",
+    "tidy.note": "L'identifiant d'origine est conservé dans les notes de la fiche. Le coffre est archivé avant toute écriture.",
+    "tidy.none_t": "Rien à ranger",
+    "tidy.none_d": "Aucune fiche ne porte de dossier dans ses notes ni de nom en forme d'identifiant de paquet.",
+    "tidy.offer_t": "Des fiches peuvent être rangées",
+    "tidy.offer_d": "fiches portent un dossier dans leurs notes ou un nom en forme d'identifiant de paquet. Vérifiez les modifications avant toute écriture.",
+    "tidy.review": "Vérifier les modifications",
+    "tidy.done": "fiches rangées."
   }
 }

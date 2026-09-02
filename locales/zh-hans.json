@@ -330,6 +330,22 @@
     "page.passphrases.desc": "API 令牌与恢复短语。",
     "page.authenticators.desc": "基于时间的一次性密码。",
     "page.backups.desc": "用于你各个账户的一次性恢复码。",
-    "lang.unreviewed": "此翻译尚未经母语者校对。当某条警告事关重大时，以英文原文为准。"
+    "lang.unreviewed": "此翻译尚未经母语者校对。当某条警告事关重大时，以英文原文为准。",
+    "tidy.title": "整理导入的条目",
+    "tidy.desc": "目前尚未做任何更改。请逐行查看，必要时修改名称，然后应用。",
+    "tidy.of": "/",
+    "tidy.entries_affected": "个条目将被更改",
+    "tidy.include": "应用",
+    "tidy.name": "名称",
+    "tidy.folder": "文件夹",
+    "tidy.apply": "应用于所选条目",
+    "tidy.cancel": "取消",
+    "tidy.note": "原始标识会保留在该条目的备注中。写入前会先归档密码库。",
+    "tidy.none_t": "没有需要整理的内容",
+    "tidy.none_d": "没有条目的备注中含有文件夹标记，也没有包名形式的名称。",
+    "tidy.offer_t": "有条目可以整理",
+    "tidy.offer_d": "个条目的备注中含有文件夹，或使用了包名形式的名称。写入前请先查看这些更改。",
+    "tidy.review": "查看更改",
+    "tidy.done": "个条目已整理。"
   }
 }

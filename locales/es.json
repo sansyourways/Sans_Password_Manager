@@ -330,6 +330,22 @@
     "page.passphrases.desc": "Tokens de API y frases de recuperación.",
     "page.authenticators.desc": "Códigos de un solo uso basados en el tiempo.",
     "page.backups.desc": "Códigos de recuperación de un solo uso para tus cuentas.",
-    "lang.unreviewed": "Esta traducción no ha sido revisada por un hablante. Cuando una advertencia sea importante, el texto en inglés es el que prevalece."
+    "lang.unreviewed": "Esta traducción no ha sido revisada por un hablante. Cuando una advertencia sea importante, el texto en inglés es el que prevalece.",
+    "tidy.title": "Ordenar las entradas importadas",
+    "tidy.desc": "Todavía no se ha cambiado nada. Revisa cada fila, corrige el nombre si hace falta y aplica.",
+    "tidy.of": "de",
+    "tidy.entries_affected": "entradas cambiarían",
+    "tidy.include": "Aplicar",
+    "tidy.name": "Nombre",
+    "tidy.folder": "Carpeta",
+    "tidy.apply": "Aplicar a lo seleccionado",
+    "tidy.cancel": "Cancelar",
+    "tidy.note": "El identificador original se conserva en las notas de la entrada. La caja fuerte se archiva antes de escribir nada.",
+    "tidy.none_t": "No hay nada que ordenar",
+    "tidy.none_d": "Ninguna entrada tiene una marca de carpeta en sus notas ni un nombre con forma de paquete.",
+    "tidy.offer_t": "Hay entradas que se pueden ordenar",
+    "tidy.offer_d": "entradas llevan una carpeta en sus notas o un nombre con forma de paquete. Revisa los cambios antes de escribir nada.",
+    "tidy.review": "Revisar los cambios",
+    "tidy.done": "entradas ordenadas."
   }
 }

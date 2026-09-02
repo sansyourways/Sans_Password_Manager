@@ -88,8 +88,21 @@ co-owners of it. That review is a design concept, not a formal security audit.
 - Continue the browser-extension work with an origin-isolated in-field picker.
   Written but not shipped, and not for want of effort — see *What is left, and
   what decides when* below.
-- Design pluggable, encrypted synchronization transports without introducing a
-  maintainer-operated cloud service.
+- ~~Design pluggable, encrypted synchronization transports without introducing a
+  maintainer-operated cloud service.~~ **Shipped in 3.15.0.** A transport
+  answers three questions -- can I reach this target, put the remote object in
+  this file, make this file the remote object -- and nothing else. Conflict
+  detection, digest verification, archiving before replacement and the refusal
+  to install a remote that will not decrypt all live above it, so a transport
+  added later cannot skip a safety check: it is never asked to perform one.
+  `dir`, `rsync` and `rclone` ship, none of them operated by this project.
+
+  Digests are measured locally over a fetched copy, because a remote-side
+  digest is a claim rather than a measurement. The genuinely new hazard was
+  that over a network "the remote file is not there" can also mean nothing was
+  reachable -- which is exactly the state in which pushing over someone else's
+  newer vault feels safe -- so every transport must prove it can reach the
+  target before any decision is taken.
 - **Machine-readable doctor output — shipped in 3.4.0**, corrected in 3.4.2.
   `spm doctor --json` emits the same checks as a document with stable ids and
   an exit status that follows the verdict. It shipped emitting a banner and a

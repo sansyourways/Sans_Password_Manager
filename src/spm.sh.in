@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.14.0"
+VERSION="3.15.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -5145,10 +5145,147 @@ cmd_webauthn_list() {
 	secure_wipe "$tmp"
 }
 
+# ----- sync transports -------------------------------------------------------
+# A transport answers three questions and nothing else: can I reach this target,
+# put the remote object in this file, make this file the remote object.
+#
+# Everything that decides anything -- conflict detection, digest verification,
+# archiving before replacement, refusing a remote that will not decrypt -- lives
+# above this line, in cmd_sync, and is therefore identical for every transport.
+# A transport added later cannot skip a safety check because it is never asked
+# to perform one.
+#
+# Digests are always computed here, locally, over a fetched copy. No transport
+# is asked to hash for us: a remote-side digest is a claim, not a measurement.
+#
+# Adding a transport means one branch in each of the three functions below, and
+# a line in sync_transport_names.
+
+# rsync's own -e: a non-default port, an identity file, a jump host.
+# SPM_SYNC_RSYNC_SHELL is passed as a single argument, because that is what -e
+# takes -- "ssh -p 2222" is one option value, not two words.
+sync_rsync() {
+	if [ -n "${SPM_SYNC_RSYNC_SHELL:-}" ]; then
+		rsync -e "$SPM_SYNC_RSYNC_SHELL" "$@"
+	else
+		rsync "$@"
+	fi
+}
+
+
+sync_transport_names() {
+	printf 'dir rsync rclone'
+}
+
+sync_known_transport() {
+	case " $(sync_transport_names) " in
+		*" $1 "*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+# Does the target exist and can we talk to it? Called before any decision, so
+# that an unreachable remote fails here rather than being mistaken further down
+# for a remote that is merely empty.
+sync_transport_probe() {
+	local transport="$1" target="$2"
+	case "$transport" in
+		dir)
+			mkdir -p "$target" 2>/dev/null || die "Cannot create sync target '$target'."
+			[ -d "$target" ] || die "Sync target '$target' is not a directory."
+			;;
+		rsync)
+			require_cmd rsync
+			case "$target" in
+				*:*) ;;
+				*) die "An rsync target looks like [user@]host:/path." ;;
+			esac
+			# A listing proves the path is reachable and readable. Without it a
+			# host that is merely down would present as an empty remote.
+			sync_rsync --list-only "$target/" >/dev/null 2>&1 \
+				|| die "Cannot reach rsync target '$target'."
+			;;
+		rclone)
+			require_cmd rclone
+			case "$target" in
+				*:*) ;;
+				*) die "An rclone target looks like remote:path." ;;
+			esac
+			rclone lsf "$target" >/dev/null 2>&1 \
+				|| die "Cannot reach rclone target '$target'. Is the remote configured?"
+			;;
+		*) die "Unknown sync transport: $transport" ;;
+	esac
+}
+
+# Fetch the remote object into "$3". 0 fetched, 1 definitely absent. Anything
+# else is fatal and must not be reported as absence -- see the comment above.
+sync_transport_fetch() {
+	local transport="$1" remote="$2" dest="$3"
+	case "$transport" in
+		dir)
+			[ -f "$remote" ] || return 1
+			cp "$remote" "$dest" || die "Cannot read the remote vault."
+			;;
+		rsync)
+			sync_rsync --list-only "$remote" >/dev/null 2>&1 || return 1
+			sync_rsync -q "$remote" "$dest" \
+				|| die "Cannot read the remote vault."
+			;;
+		rclone)
+			rclone lsf "$remote" >/dev/null 2>&1 || return 1
+			rclone copyto "$remote" "$dest" >/dev/null 2>&1 \
+				|| die "Cannot read the remote vault."
+			;;
+		*) die "Unknown sync transport: $transport" ;;
+	esac
+	chmod 600 "$dest" 2>/dev/null || true
+	return 0
+}
+
+# Publish "$3" as the remote object. Staged under a temporary name and moved
+# into place where the transport can do so, so a reader never sees a half-
+# written vault.
+sync_transport_publish() {
+	local transport="$1" remote="$2" src="$3" staged
+	case "$transport" in
+		dir)
+			staged="$(mktemp "$(dirname "$remote")/.spm-sync.XXXXXX")" \
+				|| die "Cannot stage sync push."
+			cp "$src" "$staged" || { rm -f "$staged"; die "Cannot stage sync push."; }
+			chmod 600 "$staged"
+			mv -f "$staged" "$remote" || { rm -f "$staged"; die "Cannot install sync push."; }
+			;;
+		rsync)
+			# rsync writes to a temporary name on the receiving side and
+			# renames it into place, so a reader never sees a partial vault
+			# and no staging of our own is needed.
+			# -p rather than --chmod=F600. rsync 2.6.9, which Apple still
+			# ships, has --chmod but rejects the F and D class prefixes that
+			# make it mean "files only" -- so the flag was accepted and the
+			# value was not. Preserving the mode of a copy whose mode we set
+			# ourselves needs nothing newer than -p.
+			staged="$(make_tmp)"
+			cp "$src" "$staged" || die "Cannot stage the sync push."
+			chmod 600 "$staged"
+			sync_rsync -q -p "$staged" "$remote" \
+				|| die "Cannot write to the rsync target."
+			;;
+		rclone)
+			rclone copyto "$src" "$remote" >/dev/null 2>&1 \
+				|| die "Cannot write to the rclone target."
+			;;
+		*) die "Unknown sync transport: $transport" ;;
+	esac
+}
+
 sync_paths() {
-	local target="$1" channel="$2" target_id
+	local transport="$1" target="$2" channel="$3" target_id
 	printf '%s' "$channel" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' || die "Invalid sync channel."
-	target_id="$(printf '%s\t%s' "$target" "$channel" | sha256sum | awk '{print substr($1,1,16)}')"
+	# The transport is part of the identity: the same path reached two ways is
+	# still one remote, but "myremote:spm" over rclone and a directory of that
+	# name are not, and must not share a base digest.
+	target_id="$(printf '%s\t%s\t%s' "$transport" "$target" "$channel" | sha256sum | awk '{print substr($1,1,16)}')"
 	mkdir -p "$SPM_CONFIG_DIR"; chmod 700 "$SPM_CONFIG_DIR" 2>/dev/null || true
 	SYNC_REMOTE="$target/spm-$channel.gpg"; SYNC_STATE="$SPM_CONFIG_DIR/sync-$target_id.base-sha256"
 }
@@ -5160,34 +5297,128 @@ write_sync_state() {
 	mv -f "$staged_state" "$SYNC_STATE" || { rm -f "$staged_state"; die "Cannot install sync state."; }
 }
 
+sync_usage() {
+	printf 'Usage: %s sync status|push|pull <target> [channel] [--transport %s]\n' \
+		"$0" "$(sync_transport_names | tr ' ' '|')"
+}
+
 cmd_sync() {
-	local action="${1:-status}" target="${2:-}" channel="${3:-default}" local_sha remote_sha base_sha staged tmp
-	[ -n "$target" ] || die "Usage: $0 sync status|push|pull <directory> [channel]"
-	mkdir -p "$target" || die "Cannot create sync target."; target="$(canon_path "$target")"; sync_paths "$target" "$channel"
-	local_sha=""; remote_sha=""; base_sha=""
-	if [ -f "$VAULT_FILE" ]; then local_sha="$(sha256sum "$VAULT_FILE" | awk '{print $1}')"; fi
-	if [ -f "$SYNC_REMOTE" ]; then remote_sha="$(sha256sum "$SYNC_REMOTE" | awk '{print $1}')"; fi
-	if [ -f "$SYNC_STATE" ]; then base_sha="$(sed -n '1p' "$SYNC_STATE")"; fi
+	local action="" target="" channel="default" transport="dir"
+	local positional=0 local_sha remote_sha base_sha staged tmp fetched rc
+
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--transport)
+				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --transport."; }
+				transport="$2"; shift 2 ;;
+			--transport=*) transport="${1#--transport=}"; shift ;;
+			-h|--help) sync_usage; return ;;
+			-*) sync_usage >&2; die "Unknown option: $1" ;;
+			*)
+				case "$positional" in
+					0) action="$1" ;;
+					1) target="$1" ;;
+					2) channel="$1" ;;
+					*) sync_usage >&2; die "Unexpected argument: $1" ;;
+				esac
+				positional=$((positional + 1)); shift ;;
+		esac
+	done
+
+	[ -n "$action" ] || { sync_usage >&2; return 1; }
+	sync_known_transport "$transport" \
+		|| { sync_usage >&2; die "Unknown sync transport: $transport"; }
 	case "$action" in
-		status) printf 'local=%s\nremote=%s\nbase=%s\n' "${local_sha:-missing}" "${remote_sha:-missing}" "${base_sha:-none}" ;;
+		status|push|pull) ;;
+		*) sync_usage >&2; die "Unknown sync action: $action" ;;
+	esac
+	[ -n "$target" ] || { sync_usage >&2; die "A sync target is required."; }
+
+	# `dir` is the only transport whose target is a local path, and the only one
+	# that can be canonicalised or created.
+	if [ "$transport" = "dir" ]; then
+		mkdir -p "$target" || die "Cannot create sync target."
+		target="$(canon_path "$target")"
+	fi
+	# Before any decision. An unreachable target must fail here; further down it
+	# would be indistinguishable from a remote that is merely empty, which is
+	# exactly the state in which pushing over it feels safe.
+	sync_transport_probe "$transport" "$target"
+	sync_paths "$transport" "$target" "$channel"
+
+	local_sha=""; remote_sha=""; base_sha=""
+	[ -f "$VAULT_FILE" ] && local_sha="$(sha256sum "$VAULT_FILE" | awk '{print $1}')"
+	[ -f "$SYNC_STATE" ] && base_sha="$(sed -n '1p' "$SYNC_STATE")"
+
+	# The remote digest is measured here, over a copy we fetched, for every
+	# transport alike. Nothing remote is asked what it holds.
+	fetched="$(make_tmp)"
+	set +o errexit
+	sync_transport_fetch "$transport" "$SYNC_REMOTE" "$fetched"
+	rc=$?
+	set -o errexit
+	if [ "$rc" -eq 0 ]; then
+		remote_sha="$(sha256sum "$fetched" | awk '{print $1}')"
+	else
+		secure_wipe "$fetched"; fetched=""
+	fi
+
+	case "$action" in
+		status)
+			printf 'transport=%s\ntarget=%s\nchannel=%s\nlocal=%s\nremote=%s\nbase=%s\n' \
+				"$transport" "$target" "$channel" \
+				"${local_sha:-missing}" "${remote_sha:-missing}" "${base_sha:-none}"
+			;;
 		push)
 			[ -n "$local_sha" ] || die "Local vault missing."
-			if [ -n "$remote_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then die "Initial sync conflict: remote differs; pull or set SPM_SYNC_FORCE_INITIAL=1 after verification."; fi
-			if [ -n "$remote_sha" ] && [ -n "$base_sha" ] && [ "$remote_sha" != "$base_sha" ] && [ "$local_sha" != "$base_sha" ]; then die "Sync conflict: local and remote both changed."; fi
-			staged="$(mktemp "$target/.spm-sync.XXXXXX")"; cp "$VAULT_FILE" "$staged" || { rm -f "$staged"; die "Cannot stage sync push."; }; chmod 600 "$staged"
-			[ "$(sha256sum "$staged" | awk '{print $1}')" = "$local_sha" ] || { secure_wipe "$staged"; die "Staged sync push failed verification."; }
-			mv -f "$staged" "$SYNC_REMOTE"; write_sync_state "$local_sha"; printf 'Encrypted vault pushed.\n' ;;
+			if [ -n "$remote_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then
+				die "Initial sync conflict: remote differs; pull or set SPM_SYNC_FORCE_INITIAL=1 after verification."
+			fi
+			if [ -n "$remote_sha" ] && [ -n "$base_sha" ] && [ "$remote_sha" != "$base_sha" ] && [ "$local_sha" != "$base_sha" ]; then
+				die "Sync conflict: local and remote both changed."
+			fi
+			sync_transport_publish "$transport" "$SYNC_REMOTE" "$VAULT_FILE"
+			# Read it back rather than trust the write. A transport that
+			# truncated or transcoded the file is caught here, before the base
+			# digest records a state that never existed.
+			staged="$(make_tmp)"
+			sync_transport_fetch "$transport" "$SYNC_REMOTE" "$staged" \
+				|| { secure_wipe "$staged"; die "The pushed vault could not be read back."; }
+			if [ "$(sha256sum "$staged" | awk '{print $1}')" != "$local_sha" ]; then
+				secure_wipe "$staged"; die "The pushed vault does not match what was sent."
+			fi
+			secure_wipe "$staged"
+			write_sync_state "$local_sha"
+			printf 'Encrypted vault pushed over %s.\n' "$transport"
+			;;
 		pull)
 			[ -n "$remote_sha" ] || die "Remote vault missing."
-			if [ -n "$local_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then die "Initial sync conflict: local differs; set SPM_SYNC_FORCE_INITIAL=1 only after verification."; fi
-			if [ -n "$local_sha" ] && [ -n "$base_sha" ] && [ "$local_sha" != "$base_sha" ] && [ "$remote_sha" != "$base_sha" ]; then die "Sync conflict: local and remote both changed."; fi
+			if [ -n "$local_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then
+				die "Initial sync conflict: local differs; set SPM_SYNC_FORCE_INITIAL=1 only after verification."
+			fi
+			if [ -n "$local_sha" ] && [ -n "$base_sha" ] && [ "$local_sha" != "$base_sha" ] && [ "$remote_sha" != "$base_sha" ]; then
+				die "Sync conflict: local and remote both changed."
+			fi
 			tmp="$(make_tmp)"; ensure_master_password_loaded
-			decrypt_vault_container "$SYNC_REMOTE" "$tmp" "$MASTER_PW" || { secure_wipe "$tmp"; die "Remote vault cannot be decrypted with this master password."; }
-			secure_wipe "$tmp"; archive_current_vault; staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm-sync.XXXXXX")"; cp "$SYNC_REMOTE" "$staged" || { rm -f "$staged"; die "Cannot stage sync pull."; }; chmod 600 "$staged"
-			[ "$(sha256sum "$staged" | awk '{print $1}')" = "$remote_sha" ] || { secure_wipe "$staged"; die "Staged sync pull failed verification."; }
-			mv -f "$staged" "$VAULT_FILE"; write_sync_state "$remote_sha"; printf 'Encrypted vault pulled.\n' ;;
-		*) die "Usage: $0 sync status|push|pull <directory> [channel]" ;;
+			# Prove the fetched vault opens before the local one is touched.
+			# A remote that cannot be decrypted is not a vault this user can
+			# use, whatever the transport thinks it delivered.
+			decrypt_vault_container "$fetched" "$tmp" "$MASTER_PW" \
+				|| { secure_wipe "$tmp"; die "Remote vault cannot be decrypted with this master password."; }
+			secure_wipe "$tmp"
+			archive_current_vault
+			staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm-sync.XXXXXX")"
+			cp "$fetched" "$staged" || { rm -f "$staged"; die "Cannot stage sync pull."; }
+			chmod 600 "$staged"
+			[ "$(sha256sum "$staged" | awk '{print $1}')" = "$remote_sha" ] \
+				|| { secure_wipe "$staged"; die "Staged sync pull failed verification."; }
+			mv -f "$staged" "$VAULT_FILE"
+			write_sync_state "$remote_sha"
+			printf 'Encrypted vault pulled over %s.\n' "$transport"
+			;;
 	esac
+	[ -n "$fetched" ] && secure_wipe "$fetched"
+	return 0
 }
 
 cmd_emergency_create() {

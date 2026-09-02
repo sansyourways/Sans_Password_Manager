@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="3.14.0"
+VERSION="3.15.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -1474,6 +1474,215 @@ def stage_recovery(vault_path, plaintext, vault_key):
             os.remove(pub_file)
         if staged and os.path.exists(staged):
             os.remove(staged)
+
+
+# ----- tidying imported entries ----------------------------------------------
+# A vault filled by importing from a phone arrives in two states worth fixing in
+# bulk. Its notes carry the folder the entry belonged to, as text, because the
+# exporting app had folders and the export format did not. And its service names
+# are Android package identifiers -- com.duolingo, id.go.kemensos.pelaporan --
+# which are what the phone knew the app by and not what its owner does.
+#
+# Both are proposals, never edits. `tidy_proposals` computes what would change
+# and touches nothing; `apply_tidy` performs exactly the changes it was handed.
+# Nothing here guesses in place: with hundreds of records the difference between
+# a preview and a surprise is the whole feature.
+
+TIDY_ORIGINAL_PREFIX = "app:"
+_TIDY_FOLDER_RE = re.compile(r"(?i)\bfolder\s*:\s*(.*)$")
+# A later "word:" ends the folder value. Notes are stored with their line breaks
+# collapsed to spaces, so "folder: Work url: https://..." is one string and the
+# folder is not the rest of it.
+_TIDY_MARKER_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9_-]{0,20}\s*:")
+
+# The first label of a reverse-DNS package identifier. A name whose *first*
+# segment is one of these reads backwards -- com.duolingo -- where a name whose
+# *last* segment is one reads forwards, as duolingo.com does.
+_TIDY_TLDS = frozenset("""
+com net org edu gov mil int io co me app dev xyz info biz online site
+id uk de fr jp cn au ca in br ru it es nl se no fi dk pl ch at be cz gr pt
+ro hu tr kr tw hk sg my th vn ph nz za mx ar cl pe ve ir sa ae il eg ng ke
+""".split())
+# Second-level labels that are part of the suffix rather than the name, so
+# example.co.uk yields "Example" and not "Co".
+_TIDY_SECOND_LEVEL = frozenset(("co", "com", "net", "org", "ac", "gov", "edu",
+                                "go", "or", "ne", "sch", "mil"))
+# Trailing segments that name the platform rather than the app, so
+# com.example.android resolves to "Example".
+_TIDY_GENERIC_TAIL = frozenset(("android", "app", "apps", "mobile", "client",
+                                "application", "main", "prod", "release",
+                                "free", "pro", "lite", "beta"))
+
+
+def _tidy_titlecase(word):
+    parts = [p for p in re.split(r"[_\-\s]+", word) if p]
+    out = []
+    for part in parts:
+        # Something already capitalised the way a brand is stays as it is:
+        # "eBay" and "PayPal" must not become "Ebay" and "Paypal".
+        out.append(part if any(c.isupper() for c in part) else part.capitalize())
+    return " ".join(out)
+
+
+def derive_app_name(label):
+    """A human name for a package identifier or domain, or "" to leave it be.
+
+    Deliberately conservative: anything that does not clearly read as a package
+    identifier or a hostname is returned unchanged, because a label somebody
+    typed themselves is not this function's business.
+    """
+    text = (label or "").strip()
+    if not text or " " in text or "/" in text:
+        return ""
+    parts = [p for p in text.split(".") if p]
+    if len(parts) < 2 or len(parts) != text.count(".") + 1:
+        return ""
+    if not all(re.fullmatch(r"[A-Za-z0-9_-]+", p) for p in parts):
+        return ""
+
+    head, tail = parts[0].lower(), parts[-1].lower()
+    if head in _TIDY_TLDS and tail not in _TIDY_TLDS:
+        # Reverse-DNS: com.duolingo, id.go.kemensos.pelaporan.
+        chosen = parts[-1]
+        if chosen.lower() in _TIDY_GENERIC_TAIL and len(parts) > 2:
+            chosen = parts[-2]
+    elif tail in _TIDY_TLDS:
+        # Forward hostname: mail.google.com, example.co.uk.
+        index = -2
+        if len(parts) >= 3 and parts[-2].lower() in _TIDY_SECOND_LEVEL:
+            index = -3
+        chosen = parts[index]
+    else:
+        return ""
+
+    if chosen.lower() in _TIDY_TLDS or chosen.lower() in _TIDY_SECOND_LEVEL:
+        return ""
+    name = _tidy_titlecase(chosen)
+    if not name or name == text:
+        return ""
+    return name
+
+
+def folder_from_notes(notes):
+    """The folder a note names, or "" when it names none."""
+    match = _TIDY_FOLDER_RE.search(notes or "")
+    if not match:
+        return ""
+    value = match.group(1)
+    following = _TIDY_MARKER_RE.search(value)
+    if following:
+        value = value[:following.start()]
+    value = " ".join(value.split())
+    if not value or len(value) > ATTRS_FOLDER_MAX:
+        return ""
+    return value
+
+
+def _tidy_note_with_original(notes, original):
+    """Keep the identifier the phone knew, once, and only if it is not there."""
+    text = notes or ""
+    marker = "%s %s" % (TIDY_ORIGINAL_PREFIX, original)
+    if original in text:
+        return text
+    return ("%s %s" % (text.strip(), marker)).strip() if text.strip() else marker
+
+
+def tidy_proposals(plaintext):
+    """What a tidy would change, as data. Changes nothing.
+
+    Each proposal names the record, what is proposed for it, and the before and
+    after of every field involved, so a caller can render it for review without
+    knowing any of the rules above.
+    """
+    proposals = []
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if not parts or not parts[0].isdigit() or len(parts) < 6:
+            continue
+        record_id, label = parts[0], parts[1]
+        notes = parts[4] if len(parts) > 4 else ""
+        attrs = parts[7] if len(parts) > 7 else ""
+        folder, fields = decode_attrs(attrs)
+
+        changes = {}
+        proposed_folder = folder_from_notes(notes)
+        if proposed_folder and proposed_folder != folder:
+            changes["folder"] = {"from": folder, "to": proposed_folder}
+
+        new_notes = notes
+        proposed_label = derive_app_name(label)
+        if proposed_label and proposed_label != label:
+            changes["label"] = {"from": label, "to": proposed_label}
+            new_notes = _tidy_note_with_original(notes, label)
+            if new_notes != notes:
+                changes["notes"] = {"from": notes, "to": new_notes}
+
+        if changes:
+            proposals.append({"id": record_id, "label": label,
+                              "changes": changes})
+    return proposals
+
+
+TIDY_LABEL_MAX = 200
+
+
+def apply_tidy(plaintext, selections):
+    """Apply reviewed changes. `selections` maps record id -> {"label": str}.
+
+    No rule here decides anything. The guess `tidy_proposals` made is only a
+    guess -- no heuristic gets both com.lsdroid.cerberuss and com.spotify.music
+    right -- so what gets written is what came back from the review, and this
+    function's job is to refuse anything that review should not be able to say.
+
+    A record may only be touched if it had a proposal: a stale preview, or a
+    request naming a record that has since changed, must not be able to write
+    something the vault was never asked about. The folder is taken from the
+    record's own notes rather than from the request, because that one is not a
+    guess and there is nothing to review.
+    """
+    proposals = {p["id"]: p for p in tidy_proposals(plaintext)}
+    chosen = {}
+    for record_id, values in (selections or {}).items():
+        key = str(record_id)
+        if key not in proposals:
+            continue
+        chosen[key] = values or {}
+    if not chosen:
+        return plaintext, 0
+
+    out, changed = [], 0
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        record_id = parts[0] if parts else ""
+        if not record_id.isdigit() or record_id not in chosen:
+            out.append(line)
+            continue
+        while len(parts) < 8:
+            parts.append("")
+        proposal = proposals[record_id]
+        changes = proposal["changes"]
+        touched = False
+
+        if "label" in changes:
+            label = str(chosen[record_id].get("label") or "").strip()
+            if not label:
+                label = changes["label"]["to"]
+            label = " ".join(label.split())[:TIDY_LABEL_MAX]
+            if label and label != parts[1]:
+                original = parts[1]
+                parts[1] = label
+                parts[4] = _tidy_note_with_original(parts[4], original)
+                touched = True
+
+        if "folder" in changes:
+            _, fields = decode_attrs(parts[7])
+            parts[7] = encode_attrs(changes["folder"]["to"], fields)
+            touched = True
+
+        out.append("\t".join(parts))
+        if touched:
+            changed += 1
+    return "\n".join(out) + ("\n" if (plaintext or "").endswith("\n") else ""), changed
 
 
 # ----- split recovery --------------------------------------------------------
@@ -7237,10 +7446,147 @@ cmd_webauthn_list() {
 	secure_wipe "$tmp"
 }
 
+# ----- sync transports -------------------------------------------------------
+# A transport answers three questions and nothing else: can I reach this target,
+# put the remote object in this file, make this file the remote object.
+#
+# Everything that decides anything -- conflict detection, digest verification,
+# archiving before replacement, refusing a remote that will not decrypt -- lives
+# above this line, in cmd_sync, and is therefore identical for every transport.
+# A transport added later cannot skip a safety check because it is never asked
+# to perform one.
+#
+# Digests are always computed here, locally, over a fetched copy. No transport
+# is asked to hash for us: a remote-side digest is a claim, not a measurement.
+#
+# Adding a transport means one branch in each of the three functions below, and
+# a line in sync_transport_names.
+
+# rsync's own -e: a non-default port, an identity file, a jump host.
+# SPM_SYNC_RSYNC_SHELL is passed as a single argument, because that is what -e
+# takes -- "ssh -p 2222" is one option value, not two words.
+sync_rsync() {
+	if [ -n "${SPM_SYNC_RSYNC_SHELL:-}" ]; then
+		rsync -e "$SPM_SYNC_RSYNC_SHELL" "$@"
+	else
+		rsync "$@"
+	fi
+}
+
+
+sync_transport_names() {
+	printf 'dir rsync rclone'
+}
+
+sync_known_transport() {
+	case " $(sync_transport_names) " in
+		*" $1 "*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+# Does the target exist and can we talk to it? Called before any decision, so
+# that an unreachable remote fails here rather than being mistaken further down
+# for a remote that is merely empty.
+sync_transport_probe() {
+	local transport="$1" target="$2"
+	case "$transport" in
+		dir)
+			mkdir -p "$target" 2>/dev/null || die "Cannot create sync target '$target'."
+			[ -d "$target" ] || die "Sync target '$target' is not a directory."
+			;;
+		rsync)
+			require_cmd rsync
+			case "$target" in
+				*:*) ;;
+				*) die "An rsync target looks like [user@]host:/path." ;;
+			esac
+			# A listing proves the path is reachable and readable. Without it a
+			# host that is merely down would present as an empty remote.
+			sync_rsync --list-only "$target/" >/dev/null 2>&1 \
+				|| die "Cannot reach rsync target '$target'."
+			;;
+		rclone)
+			require_cmd rclone
+			case "$target" in
+				*:*) ;;
+				*) die "An rclone target looks like remote:path." ;;
+			esac
+			rclone lsf "$target" >/dev/null 2>&1 \
+				|| die "Cannot reach rclone target '$target'. Is the remote configured?"
+			;;
+		*) die "Unknown sync transport: $transport" ;;
+	esac
+}
+
+# Fetch the remote object into "$3". 0 fetched, 1 definitely absent. Anything
+# else is fatal and must not be reported as absence -- see the comment above.
+sync_transport_fetch() {
+	local transport="$1" remote="$2" dest="$3"
+	case "$transport" in
+		dir)
+			[ -f "$remote" ] || return 1
+			cp "$remote" "$dest" || die "Cannot read the remote vault."
+			;;
+		rsync)
+			sync_rsync --list-only "$remote" >/dev/null 2>&1 || return 1
+			sync_rsync -q "$remote" "$dest" \
+				|| die "Cannot read the remote vault."
+			;;
+		rclone)
+			rclone lsf "$remote" >/dev/null 2>&1 || return 1
+			rclone copyto "$remote" "$dest" >/dev/null 2>&1 \
+				|| die "Cannot read the remote vault."
+			;;
+		*) die "Unknown sync transport: $transport" ;;
+	esac
+	chmod 600 "$dest" 2>/dev/null || true
+	return 0
+}
+
+# Publish "$3" as the remote object. Staged under a temporary name and moved
+# into place where the transport can do so, so a reader never sees a half-
+# written vault.
+sync_transport_publish() {
+	local transport="$1" remote="$2" src="$3" staged
+	case "$transport" in
+		dir)
+			staged="$(mktemp "$(dirname "$remote")/.spm-sync.XXXXXX")" \
+				|| die "Cannot stage sync push."
+			cp "$src" "$staged" || { rm -f "$staged"; die "Cannot stage sync push."; }
+			chmod 600 "$staged"
+			mv -f "$staged" "$remote" || { rm -f "$staged"; die "Cannot install sync push."; }
+			;;
+		rsync)
+			# rsync writes to a temporary name on the receiving side and
+			# renames it into place, so a reader never sees a partial vault
+			# and no staging of our own is needed.
+			# -p rather than --chmod=F600. rsync 2.6.9, which Apple still
+			# ships, has --chmod but rejects the F and D class prefixes that
+			# make it mean "files only" -- so the flag was accepted and the
+			# value was not. Preserving the mode of a copy whose mode we set
+			# ourselves needs nothing newer than -p.
+			staged="$(make_tmp)"
+			cp "$src" "$staged" || die "Cannot stage the sync push."
+			chmod 600 "$staged"
+			sync_rsync -q -p "$staged" "$remote" \
+				|| die "Cannot write to the rsync target."
+			;;
+		rclone)
+			rclone copyto "$src" "$remote" >/dev/null 2>&1 \
+				|| die "Cannot write to the rclone target."
+			;;
+		*) die "Unknown sync transport: $transport" ;;
+	esac
+}
+
 sync_paths() {
-	local target="$1" channel="$2" target_id
+	local transport="$1" target="$2" channel="$3" target_id
 	printf '%s' "$channel" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' || die "Invalid sync channel."
-	target_id="$(printf '%s\t%s' "$target" "$channel" | sha256sum | awk '{print substr($1,1,16)}')"
+	# The transport is part of the identity: the same path reached two ways is
+	# still one remote, but "myremote:spm" over rclone and a directory of that
+	# name are not, and must not share a base digest.
+	target_id="$(printf '%s\t%s\t%s' "$transport" "$target" "$channel" | sha256sum | awk '{print substr($1,1,16)}')"
 	mkdir -p "$SPM_CONFIG_DIR"; chmod 700 "$SPM_CONFIG_DIR" 2>/dev/null || true
 	SYNC_REMOTE="$target/spm-$channel.gpg"; SYNC_STATE="$SPM_CONFIG_DIR/sync-$target_id.base-sha256"
 }
@@ -7252,34 +7598,128 @@ write_sync_state() {
 	mv -f "$staged_state" "$SYNC_STATE" || { rm -f "$staged_state"; die "Cannot install sync state."; }
 }
 
+sync_usage() {
+	printf 'Usage: %s sync status|push|pull <target> [channel] [--transport %s]\n' \
+		"$0" "$(sync_transport_names | tr ' ' '|')"
+}
+
 cmd_sync() {
-	local action="${1:-status}" target="${2:-}" channel="${3:-default}" local_sha remote_sha base_sha staged tmp
-	[ -n "$target" ] || die "Usage: $0 sync status|push|pull <directory> [channel]"
-	mkdir -p "$target" || die "Cannot create sync target."; target="$(canon_path "$target")"; sync_paths "$target" "$channel"
-	local_sha=""; remote_sha=""; base_sha=""
-	if [ -f "$VAULT_FILE" ]; then local_sha="$(sha256sum "$VAULT_FILE" | awk '{print $1}')"; fi
-	if [ -f "$SYNC_REMOTE" ]; then remote_sha="$(sha256sum "$SYNC_REMOTE" | awk '{print $1}')"; fi
-	if [ -f "$SYNC_STATE" ]; then base_sha="$(sed -n '1p' "$SYNC_STATE")"; fi
+	local action="" target="" channel="default" transport="dir"
+	local positional=0 local_sha remote_sha base_sha staged tmp fetched rc
+
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--transport)
+				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --transport."; }
+				transport="$2"; shift 2 ;;
+			--transport=*) transport="${1#--transport=}"; shift ;;
+			-h|--help) sync_usage; return ;;
+			-*) sync_usage >&2; die "Unknown option: $1" ;;
+			*)
+				case "$positional" in
+					0) action="$1" ;;
+					1) target="$1" ;;
+					2) channel="$1" ;;
+					*) sync_usage >&2; die "Unexpected argument: $1" ;;
+				esac
+				positional=$((positional + 1)); shift ;;
+		esac
+	done
+
+	[ -n "$action" ] || { sync_usage >&2; return 1; }
+	sync_known_transport "$transport" \
+		|| { sync_usage >&2; die "Unknown sync transport: $transport"; }
 	case "$action" in
-		status) printf 'local=%s\nremote=%s\nbase=%s\n' "${local_sha:-missing}" "${remote_sha:-missing}" "${base_sha:-none}" ;;
+		status|push|pull) ;;
+		*) sync_usage >&2; die "Unknown sync action: $action" ;;
+	esac
+	[ -n "$target" ] || { sync_usage >&2; die "A sync target is required."; }
+
+	# `dir` is the only transport whose target is a local path, and the only one
+	# that can be canonicalised or created.
+	if [ "$transport" = "dir" ]; then
+		mkdir -p "$target" || die "Cannot create sync target."
+		target="$(canon_path "$target")"
+	fi
+	# Before any decision. An unreachable target must fail here; further down it
+	# would be indistinguishable from a remote that is merely empty, which is
+	# exactly the state in which pushing over it feels safe.
+	sync_transport_probe "$transport" "$target"
+	sync_paths "$transport" "$target" "$channel"
+
+	local_sha=""; remote_sha=""; base_sha=""
+	[ -f "$VAULT_FILE" ] && local_sha="$(sha256sum "$VAULT_FILE" | awk '{print $1}')"
+	[ -f "$SYNC_STATE" ] && base_sha="$(sed -n '1p' "$SYNC_STATE")"
+
+	# The remote digest is measured here, over a copy we fetched, for every
+	# transport alike. Nothing remote is asked what it holds.
+	fetched="$(make_tmp)"
+	set +o errexit
+	sync_transport_fetch "$transport" "$SYNC_REMOTE" "$fetched"
+	rc=$?
+	set -o errexit
+	if [ "$rc" -eq 0 ]; then
+		remote_sha="$(sha256sum "$fetched" | awk '{print $1}')"
+	else
+		secure_wipe "$fetched"; fetched=""
+	fi
+
+	case "$action" in
+		status)
+			printf 'transport=%s\ntarget=%s\nchannel=%s\nlocal=%s\nremote=%s\nbase=%s\n' \
+				"$transport" "$target" "$channel" \
+				"${local_sha:-missing}" "${remote_sha:-missing}" "${base_sha:-none}"
+			;;
 		push)
 			[ -n "$local_sha" ] || die "Local vault missing."
-			if [ -n "$remote_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then die "Initial sync conflict: remote differs; pull or set SPM_SYNC_FORCE_INITIAL=1 after verification."; fi
-			if [ -n "$remote_sha" ] && [ -n "$base_sha" ] && [ "$remote_sha" != "$base_sha" ] && [ "$local_sha" != "$base_sha" ]; then die "Sync conflict: local and remote both changed."; fi
-			staged="$(mktemp "$target/.spm-sync.XXXXXX")"; cp "$VAULT_FILE" "$staged" || { rm -f "$staged"; die "Cannot stage sync push."; }; chmod 600 "$staged"
-			[ "$(sha256sum "$staged" | awk '{print $1}')" = "$local_sha" ] || { secure_wipe "$staged"; die "Staged sync push failed verification."; }
-			mv -f "$staged" "$SYNC_REMOTE"; write_sync_state "$local_sha"; printf 'Encrypted vault pushed.\n' ;;
+			if [ -n "$remote_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then
+				die "Initial sync conflict: remote differs; pull or set SPM_SYNC_FORCE_INITIAL=1 after verification."
+			fi
+			if [ -n "$remote_sha" ] && [ -n "$base_sha" ] && [ "$remote_sha" != "$base_sha" ] && [ "$local_sha" != "$base_sha" ]; then
+				die "Sync conflict: local and remote both changed."
+			fi
+			sync_transport_publish "$transport" "$SYNC_REMOTE" "$VAULT_FILE"
+			# Read it back rather than trust the write. A transport that
+			# truncated or transcoded the file is caught here, before the base
+			# digest records a state that never existed.
+			staged="$(make_tmp)"
+			sync_transport_fetch "$transport" "$SYNC_REMOTE" "$staged" \
+				|| { secure_wipe "$staged"; die "The pushed vault could not be read back."; }
+			if [ "$(sha256sum "$staged" | awk '{print $1}')" != "$local_sha" ]; then
+				secure_wipe "$staged"; die "The pushed vault does not match what was sent."
+			fi
+			secure_wipe "$staged"
+			write_sync_state "$local_sha"
+			printf 'Encrypted vault pushed over %s.\n' "$transport"
+			;;
 		pull)
 			[ -n "$remote_sha" ] || die "Remote vault missing."
-			if [ -n "$local_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then die "Initial sync conflict: local differs; set SPM_SYNC_FORCE_INITIAL=1 only after verification."; fi
-			if [ -n "$local_sha" ] && [ -n "$base_sha" ] && [ "$local_sha" != "$base_sha" ] && [ "$remote_sha" != "$base_sha" ]; then die "Sync conflict: local and remote both changed."; fi
+			if [ -n "$local_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then
+				die "Initial sync conflict: local differs; set SPM_SYNC_FORCE_INITIAL=1 only after verification."
+			fi
+			if [ -n "$local_sha" ] && [ -n "$base_sha" ] && [ "$local_sha" != "$base_sha" ] && [ "$remote_sha" != "$base_sha" ]; then
+				die "Sync conflict: local and remote both changed."
+			fi
 			tmp="$(make_tmp)"; ensure_master_password_loaded
-			decrypt_vault_container "$SYNC_REMOTE" "$tmp" "$MASTER_PW" || { secure_wipe "$tmp"; die "Remote vault cannot be decrypted with this master password."; }
-			secure_wipe "$tmp"; archive_current_vault; staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm-sync.XXXXXX")"; cp "$SYNC_REMOTE" "$staged" || { rm -f "$staged"; die "Cannot stage sync pull."; }; chmod 600 "$staged"
-			[ "$(sha256sum "$staged" | awk '{print $1}')" = "$remote_sha" ] || { secure_wipe "$staged"; die "Staged sync pull failed verification."; }
-			mv -f "$staged" "$VAULT_FILE"; write_sync_state "$remote_sha"; printf 'Encrypted vault pulled.\n' ;;
-		*) die "Usage: $0 sync status|push|pull <directory> [channel]" ;;
+			# Prove the fetched vault opens before the local one is touched.
+			# A remote that cannot be decrypted is not a vault this user can
+			# use, whatever the transport thinks it delivered.
+			decrypt_vault_container "$fetched" "$tmp" "$MASTER_PW" \
+				|| { secure_wipe "$tmp"; die "Remote vault cannot be decrypted with this master password."; }
+			secure_wipe "$tmp"
+			archive_current_vault
+			staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm-sync.XXXXXX")"
+			cp "$fetched" "$staged" || { rm -f "$staged"; die "Cannot stage sync pull."; }
+			chmod 600 "$staged"
+			[ "$(sha256sum "$staged" | awk '{print $1}')" = "$remote_sha" ] \
+				|| { secure_wipe "$staged"; die "Staged sync pull failed verification."; }
+			mv -f "$staged" "$VAULT_FILE"
+			write_sync_state "$remote_sha"
+			printf 'Encrypted vault pulled over %s.\n' "$transport"
+			;;
 	esac
+	[ -n "$fetched" ] && secure_wipe "$fetched"
+	return 0
 }
 
 cmd_emergency_create() {
@@ -9281,6 +9721,22 @@ WEB_CATALOGUES = {
         "page.authenticators.desc": "Time-based one-time password codes.",
         "page.backups.desc": "One-time recovery codes for your accounts.",
         "lang.unreviewed": "This translation has not been reviewed by a speaker. Where a warning matters, the English text is authoritative.",
+        "tidy.title": "Tidy imported entries",
+        "tidy.desc": "Nothing has been changed yet. Review every row, correct any name, and apply.",
+        "tidy.of": "of",
+        "tidy.entries_affected": "entries would change",
+        "tidy.include": "Apply",
+        "tidy.name": "Name",
+        "tidy.folder": "Folder",
+        "tidy.apply": "Apply to selected",
+        "tidy.cancel": "Cancel",
+        "tidy.note": "The original identifier is kept in the entry's notes. The vault is archived before anything is written.",
+        "tidy.none_t": "Nothing to tidy",
+        "tidy.none_d": "No entry has a folder marker in its notes or a package-style name.",
+        "tidy.offer_t": "Some entries can be tidied",
+        "tidy.offer_d": "entries carry a folder in their notes or a package-style name. Review the changes before anything is written.",
+        "tidy.review": "Review changes",
+        "tidy.done": "entries tidied.",
     },
     "ar": {
         "nav.security": "\u0627\u0644\u0623\u0645\u0627\u0646",
@@ -9607,6 +10063,22 @@ WEB_CATALOGUES = {
         "page.authenticators.desc": "\u0631\u0645\u0648\u0632 \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0644\u0645\u0631\u0629 \u0648\u0627\u062d\u062f\u0629 \u0645\u0628\u0646\u064a\u0629 \u0639\u0644\u0649 \u0627\u0644\u0648\u0642\u062a.",
         "page.backups.desc": "\u0631\u0645\u0648\u0632 \u0627\u0633\u062a\u0631\u062f\u0627\u062f \u0630\u0627\u062a \u0627\u0633\u062a\u062e\u062f\u0627\u0645 \u0648\u0627\u062d\u062f \u0644\u062d\u0633\u0627\u0628\u0627\u062a\u0643.",
         "lang.unreviewed": "\u0644\u0645 \u062a\u0631\u0627\u062c\u064e\u0639 \u0647\u0630\u0647 \u0627\u0644\u062a\u0631\u062c\u0645\u0629 \u0645\u0646 \u0645\u062a\u062d\u062f\u062b \u0628\u0627\u0644\u0639\u0631\u0628\u064a\u0629. \u0648\u062d\u064a\u062b\u0645\u0627 \u0643\u0627\u0646 \u0627\u0644\u062a\u062d\u0630\u064a\u0631 \u0645\u0647\u0645\u064b\u0627\u060c \u0641\u0627\u0644\u0646\u0635 \u0627\u0644\u0625\u0646\u062c\u0644\u064a\u0632\u064a \u0647\u0648 \u0627\u0644\u0645\u0631\u062c\u0639.",
+        "tidy.title": "\u062a\u0631\u062a\u064a\u0628 \u0627\u0644\u0645\u062f\u062e\u0644\u0627\u062a \u0627\u0644\u0645\u0633\u062a\u0648\u0631\u062f\u0629",
+        "tidy.desc": "\u0644\u0645 \u064a\u062a\u063a\u064a\u0651\u0631 \u0634\u064a\u0621 \u0628\u0639\u062f. \u0631\u0627\u062c\u0639 \u0643\u0644 \u0635\u0641\u060c \u0635\u062d\u0651\u062d \u0627\u0644\u0627\u0633\u0645 \u0625\u0646 \u0644\u0632\u0645\u060c \u062b\u0645 \u0637\u0628\u0651\u0642.",
+        "tidy.of": "\u0645\u0646",
+        "tidy.entries_affected": "\u0645\u062f\u062e\u0644\u064b\u0627 \u0633\u064a\u062a\u063a\u064a\u0651\u0631",
+        "tidy.include": "\u062a\u0637\u0628\u064a\u0642",
+        "tidy.name": "\u0627\u0644\u0627\u0633\u0645",
+        "tidy.folder": "\u0645\u062c\u0644\u062f",
+        "tidy.apply": "\u0637\u0628\u0651\u0642 \u0639\u0644\u0649 \u0627\u0644\u0645\u062d\u062f\u062f",
+        "tidy.cancel": "\u0625\u0644\u063a\u0627\u0621",
+        "tidy.note": "\u064a\u0628\u0642\u0649 \u0627\u0644\u0645\u0639\u0631\u0651\u0641 \u0627\u0644\u0623\u0635\u0644\u064a \u0641\u064a \u0645\u0644\u0627\u062d\u0638\u0627\u062a \u0627\u0644\u0645\u062f\u062e\u0644. \u0648\u062a\u064f\u0624\u0631\u0634\u064e\u0641 \u0627\u0644\u062e\u0632\u0646\u0629 \u0642\u0628\u0644 \u0643\u062a\u0627\u0628\u0629 \u0623\u064a \u0634\u064a\u0621.",
+        "tidy.none_t": "\u0644\u0627 \u0634\u064a\u0621 \u0644\u062a\u0631\u062a\u064a\u0628\u0647",
+        "tidy.none_d": "\u0644\u0627 \u064a\u0648\u062c\u062f \u0645\u062f\u062e\u0644 \u064a\u062d\u0645\u0644 \u0639\u0644\u0627\u0645\u0629 \u0645\u062c\u0644\u062f \u0641\u064a \u0645\u0644\u0627\u062d\u0638\u0627\u062a\u0647 \u0648\u0644\u0627 \u0627\u0633\u0645\u064b\u0627 \u0639\u0644\u0649 \u0647\u064a\u0626\u0629 \u062d\u0632\u0645\u0629 \u062a\u0637\u0628\u064a\u0642.",
+        "tidy.offer_t": "\u0628\u0639\u0636 \u0627\u0644\u0645\u062f\u062e\u0644\u0627\u062a \u064a\u0645\u0643\u0646 \u062a\u0631\u062a\u064a\u0628\u0647\u0627",
+        "tidy.offer_d": "\u0645\u062f\u062e\u0644\u064b\u0627 \u064a\u062d\u0645\u0644 \u0645\u062c\u0644\u062f\u064b\u0627 \u0641\u064a \u0645\u0644\u0627\u062d\u0638\u0627\u062a\u0647 \u0623\u0648 \u0627\u0633\u0645\u064b\u0627 \u0639\u0644\u0649 \u0647\u064a\u0626\u0629 \u062d\u0632\u0645\u0629 \u062a\u0637\u0628\u064a\u0642. \u0631\u0627\u062c\u0639 \u0627\u0644\u062a\u063a\u064a\u064a\u0631\u0627\u062a \u0642\u0628\u0644 \u0643\u062a\u0627\u0628\u0629 \u0623\u064a \u0634\u064a\u0621.",
+        "tidy.review": "\u0631\u0627\u062c\u0639 \u0627\u0644\u062a\u063a\u064a\u064a\u0631\u0627\u062a",
+        "tidy.done": "\u0645\u062f\u062e\u0644\u064b\u0627 \u062c\u0631\u0649 \u062a\u0631\u062a\u064a\u0628\u0647.",
     },
     "de": {
         "nav.security": "Sicherheit",
@@ -9933,6 +10405,22 @@ WEB_CATALOGUES = {
         "page.authenticators.desc": "Zeitbasierte Einmalpasswort-Codes.",
         "page.backups.desc": "Einmalige Wiederherstellungscodes f\u00fcr deine Konten.",
         "lang.unreviewed": "Diese \u00dcbersetzung wurde nicht von einer sprechenden Person gepr\u00fcft. Wo eine Warnung z\u00e4hlt, ist der englische Text ma\u00dfgeblich.",
+        "tidy.title": "Importierte Eintr\u00e4ge aufr\u00e4umen",
+        "tidy.desc": "Noch wurde nichts ge\u00e4ndert. Pr\u00fcfe jede Zeile, korrigiere den Namen falls n\u00f6tig, und wende es an.",
+        "tidy.of": "von",
+        "tidy.entries_affected": "Eintr\u00e4ge w\u00fcrden sich \u00e4ndern",
+        "tidy.include": "Anwenden",
+        "tidy.name": "Name",
+        "tidy.folder": "Ordner",
+        "tidy.apply": "Auf Auswahl anwenden",
+        "tidy.cancel": "Abbrechen",
+        "tidy.note": "Die urspr\u00fcngliche Kennung bleibt in den Notizen des Eintrags. Der Tresor wird archiviert, bevor irgendetwas geschrieben wird.",
+        "tidy.none_t": "Nichts aufzur\u00e4umen",
+        "tidy.none_d": "Kein Eintrag tr\u00e4gt eine Ordnermarkierung in seinen Notizen oder einen Namen in Paketform.",
+        "tidy.offer_t": "Einige Eintr\u00e4ge lassen sich aufr\u00e4umen",
+        "tidy.offer_d": "Eintr\u00e4ge tragen einen Ordner in ihren Notizen oder einen Namen in Paketform. Pr\u00fcfe die \u00c4nderungen, bevor etwas geschrieben wird.",
+        "tidy.review": "\u00c4nderungen pr\u00fcfen",
+        "tidy.done": "Eintr\u00e4ge aufger\u00e4umt.",
     },
     "es": {
         "nav.security": "Seguridad",
@@ -10259,6 +10747,22 @@ WEB_CATALOGUES = {
         "page.authenticators.desc": "C\u00f3digos de un solo uso basados en el tiempo.",
         "page.backups.desc": "C\u00f3digos de recuperaci\u00f3n de un solo uso para tus cuentas.",
         "lang.unreviewed": "Esta traducci\u00f3n no ha sido revisada por un hablante. Cuando una advertencia sea importante, el texto en ingl\u00e9s es el que prevalece.",
+        "tidy.title": "Ordenar las entradas importadas",
+        "tidy.desc": "Todav\u00eda no se ha cambiado nada. Revisa cada fila, corrige el nombre si hace falta y aplica.",
+        "tidy.of": "de",
+        "tidy.entries_affected": "entradas cambiar\u00edan",
+        "tidy.include": "Aplicar",
+        "tidy.name": "Nombre",
+        "tidy.folder": "Carpeta",
+        "tidy.apply": "Aplicar a lo seleccionado",
+        "tidy.cancel": "Cancelar",
+        "tidy.note": "El identificador original se conserva en las notas de la entrada. La caja fuerte se archiva antes de escribir nada.",
+        "tidy.none_t": "No hay nada que ordenar",
+        "tidy.none_d": "Ninguna entrada tiene una marca de carpeta en sus notas ni un nombre con forma de paquete.",
+        "tidy.offer_t": "Hay entradas que se pueden ordenar",
+        "tidy.offer_d": "entradas llevan una carpeta en sus notas o un nombre con forma de paquete. Revisa los cambios antes de escribir nada.",
+        "tidy.review": "Revisar los cambios",
+        "tidy.done": "entradas ordenadas.",
     },
     "fr": {
         "nav.security": "S\u00e9curit\u00e9",
@@ -10585,6 +11089,22 @@ WEB_CATALOGUES = {
         "page.authenticators.desc": "Codes \u00e0 usage unique fond\u00e9s sur le temps.",
         "page.backups.desc": "Codes de r\u00e9cup\u00e9ration \u00e0 usage unique pour vos comptes.",
         "lang.unreviewed": "Cette traduction n'a pas \u00e9t\u00e9 relue par un locuteur. Lorsqu'un avertissement compte, c'est le texte anglais qui fait foi.",
+        "tidy.title": "Ranger les fiches import\u00e9es",
+        "tidy.desc": "Rien n'a encore \u00e9t\u00e9 modifi\u00e9. V\u00e9rifiez chaque ligne, corrigez le nom si besoin, puis appliquez.",
+        "tidy.of": "sur",
+        "tidy.entries_affected": "fiches seraient modifi\u00e9es",
+        "tidy.include": "Appliquer",
+        "tidy.name": "Nom",
+        "tidy.folder": "Dossier",
+        "tidy.apply": "Appliquer \u00e0 la s\u00e9lection",
+        "tidy.cancel": "Annuler",
+        "tidy.note": "L'identifiant d'origine est conserv\u00e9 dans les notes de la fiche. Le coffre est archiv\u00e9 avant toute \u00e9criture.",
+        "tidy.none_t": "Rien \u00e0 ranger",
+        "tidy.none_d": "Aucune fiche ne porte de dossier dans ses notes ni de nom en forme d'identifiant de paquet.",
+        "tidy.offer_t": "Des fiches peuvent \u00eatre rang\u00e9es",
+        "tidy.offer_d": "fiches portent un dossier dans leurs notes ou un nom en forme d'identifiant de paquet. V\u00e9rifiez les modifications avant toute \u00e9criture.",
+        "tidy.review": "V\u00e9rifier les modifications",
+        "tidy.done": "fiches rang\u00e9es.",
     },
     "hi": {
         "nav.security": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e",
@@ -10911,6 +11431,22 @@ WEB_CATALOGUES = {
         "page.authenticators.desc": "\u0938\u092e\u092f \u092a\u0930 \u0906\u0927\u093e\u0930\u093f\u0924 \u090f\u0915-\u092c\u093e\u0930 \u0915\u0947 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0915\u094b\u0921\u0964",
         "page.backups.desc": "\u0906\u092a\u0915\u0947 \u0916\u093e\u0924\u094b\u0902 \u0915\u0947 \u0932\u093f\u090f \u090f\u0915 \u092c\u093e\u0930 \u0915\u093e\u092e \u0906\u0928\u0947 \u0935\u093e\u0932\u0947 \u0930\u093f\u0915\u0935\u0930\u0940 \u0915\u094b\u0921\u0964",
         "lang.unreviewed": "\u0907\u0938 \u0905\u0928\u0941\u0935\u093e\u0926 \u0915\u0940 \u091c\u093e\u0901\u091a \u0915\u093f\u0938\u0940 \u092d\u093e\u0937\u093e-\u092d\u093e\u0937\u0940 \u0928\u0947 \u0928\u0939\u0940\u0902 \u0915\u0940 \u0939\u0948\u0964 \u091c\u0939\u093e\u0901 \u091a\u0947\u0924\u093e\u0935\u0928\u0940 \u0905\u0939\u092e \u0939\u094b, \u0935\u0939\u093e\u0901 \u0905\u0902\u0917\u094d\u0930\u0947\u091c\u093c\u0940 \u092a\u093e\u0920 \u0939\u0940 \u092e\u093e\u0928\u094d\u092f \u0939\u0948\u0964",
+        "tidy.title": "\u0906\u092f\u093e\u0924 \u0915\u0940 \u0917\u0908 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u0935\u094d\u092f\u0935\u0938\u094d\u0925\u093f\u0924 \u0915\u0930\u0947\u0902",
+        "tidy.desc": "\u0905\u092d\u0940 \u0915\u0941\u091b \u092d\u0940 \u0928\u0939\u0940\u0902 \u092c\u0926\u0932\u093e \u0917\u092f\u093e \u0939\u0948\u0964 \u0939\u0930 \u092a\u0902\u0915\u094d\u0924\u093f \u0926\u0947\u0916\u0947\u0902, \u091c\u093c\u0930\u0942\u0930\u0924 \u0939\u094b \u0924\u094b \u0928\u093e\u092e \u0920\u0940\u0915 \u0915\u0930\u0947\u0902, \u092b\u093f\u0930 \u0932\u093e\u0917\u0942 \u0915\u0930\u0947\u0902\u0964",
+        "tidy.of": "\u092e\u0947\u0902 \u0938\u0947",
+        "tidy.entries_affected": "\u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u092c\u0926\u0932\u0947\u0902\u0917\u0940",
+        "tidy.include": "\u0932\u093e\u0917\u0942 \u0915\u0930\u0947\u0902",
+        "tidy.name": "\u0928\u093e\u092e",
+        "tidy.folder": "\u092b\u093c\u094b\u0932\u094d\u0921\u0930",
+        "tidy.apply": "\u091a\u0941\u0928\u0940 \u0917\u0908 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u094b\u0902 \u092a\u0930 \u0932\u093e\u0917\u0942 \u0915\u0930\u0947\u0902",
+        "tidy.cancel": "\u0930\u0926\u094d\u0926 \u0915\u0930\u0947\u0902",
+        "tidy.note": "\u092e\u0942\u0932 \u092a\u0939\u091a\u093e\u0928\u0915\u0930\u094d\u0924\u093e \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0915\u0947 \u0928\u094b\u091f \u092e\u0947\u0902 \u0930\u0916\u093e \u091c\u093e\u0924\u093e \u0939\u0948\u0964 \u0915\u0941\u091b \u092d\u0940 \u0932\u093f\u0916\u0928\u0947 \u0938\u0947 \u092a\u0939\u0932\u0947 \u0924\u093f\u091c\u094b\u0930\u0940 \u0938\u0902\u0917\u094d\u0930\u0939 \u0915\u0930 \u0932\u0940 \u091c\u093e\u0924\u0940 \u0939\u0948\u0964",
+        "tidy.none_t": "\u0935\u094d\u092f\u0935\u0938\u094d\u0925\u093f\u0924 \u0915\u0930\u0928\u0947 \u0915\u094b \u0915\u0941\u091b \u0928\u0939\u0940\u0902",
+        "tidy.none_d": "\u0915\u093f\u0938\u0940 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0915\u0947 \u0928\u094b\u091f \u092e\u0947\u0902 \u092b\u093c\u094b\u0932\u094d\u0921\u0930 \u0915\u093e \u091a\u093f\u0939\u094d\u0928 \u0928\u0939\u0940\u0902 \u0939\u0948 \u0914\u0930 \u0928 \u0939\u0940 \u0915\u094b\u0908 \u0928\u093e\u092e \u092a\u0948\u0915\u0947\u091c \u0936\u0948\u0932\u0940 \u0915\u093e \u0939\u0948\u0964",
+        "tidy.offer_t": "\u0915\u0941\u091b \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u0935\u094d\u092f\u0935\u0938\u094d\u0925\u093f\u0924 \u0915\u0940 \u091c\u093e \u0938\u0915\u0924\u0940 \u0939\u0948\u0902",
+        "tidy.offer_d": "\u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u094b\u0902 \u0915\u0947 \u0928\u094b\u091f \u092e\u0947\u0902 \u092b\u093c\u094b\u0932\u094d\u0921\u0930 \u0939\u0948 \u092f\u093e \u0909\u0928\u0915\u093e \u0928\u093e\u092e \u092a\u0948\u0915\u0947\u091c \u0936\u0948\u0932\u0940 \u0915\u093e \u0939\u0948\u0964 \u0915\u0941\u091b \u092d\u0940 \u0932\u093f\u0916\u0928\u0947 \u0938\u0947 \u092a\u0939\u0932\u0947 \u092c\u0926\u0932\u093e\u0935 \u0926\u0947\u0916 \u0932\u0947\u0902\u0964",
+        "tidy.review": "\u092c\u0926\u0932\u093e\u0935 \u0926\u0947\u0916\u0947\u0902",
+        "tidy.done": "\u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u0935\u094d\u092f\u0935\u0938\u094d\u0925\u093f\u0924 \u0939\u0941\u0908\u0902\u0964",
     },
     "id": {
         "nav.security": "Keamanan",
@@ -11237,6 +11773,22 @@ WEB_CATALOGUES = {
         "page.authenticators.desc": "Kode sekali pakai berbasis waktu.",
         "page.backups.desc": "Kode pemulihan sekali pakai untuk akun Anda.",
         "lang.unreviewed": "Terjemahan ini belum ditinjau oleh penutur aslinya. Jika sebuah peringatan penting, teks bahasa Inggris yang berlaku.",
+        "tidy.title": "Rapikan entri hasil impor",
+        "tidy.desc": "Belum ada yang diubah. Periksa setiap baris, perbaiki namanya bila perlu, lalu terapkan.",
+        "tidy.of": "dari",
+        "tidy.entries_affected": "entri akan berubah",
+        "tidy.include": "Terapkan",
+        "tidy.name": "Nama",
+        "tidy.folder": "Folder",
+        "tidy.apply": "Terapkan pada yang dipilih",
+        "tidy.cancel": "Batal",
+        "tidy.note": "Identitas aslinya tetap disimpan di catatan entri. Vault diarsipkan sebelum apa pun ditulis.",
+        "tidy.none_t": "Tidak ada yang perlu dirapikan",
+        "tidy.none_d": "Tidak ada entri yang memuat penanda folder di catatannya atau bernama gaya paket aplikasi.",
+        "tidy.offer_t": "Ada entri yang bisa dirapikan",
+        "tidy.offer_d": "entri memuat folder di catatannya atau bernama gaya paket aplikasi. Periksa perubahannya sebelum apa pun ditulis.",
+        "tidy.review": "Periksa perubahan",
+        "tidy.done": "entri dirapikan.",
     },
     "ja": {
         "nav.security": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3",
@@ -11563,6 +12115,22 @@ WEB_CATALOGUES = {
         "page.authenticators.desc": "\u6642\u523b\u30d9\u30fc\u30b9\u306e\u30ef\u30f3\u30bf\u30a4\u30e0\u30d1\u30b9\u30ef\u30fc\u30c9\u30b3\u30fc\u30c9\u3002",
         "page.backups.desc": "\u30a2\u30ab\u30a6\u30f3\u30c8\u7528\u306e\u4f7f\u3044\u6368\u3066\u5fa9\u65e7\u30b3\u30fc\u30c9\u3002",
         "lang.unreviewed": "\u3053\u306e\u7ffb\u8a33\u306f\u8a71\u8005\u306b\u3088\u308b\u78ba\u8a8d\u3092\u53d7\u3051\u3066\u3044\u307e\u305b\u3093\u3002\u8b66\u544a\u304c\u91cd\u8981\u306a\u5834\u5408\u306f\u3001\u82f1\u8a9e\u306e\u672c\u6587\u304c\u6b63\u3068\u306a\u308a\u307e\u3059\u3002",
+        "tidy.title": "\u30a4\u30f3\u30dd\u30fc\u30c8\u3057\u305f\u9805\u76ee\u3092\u6574\u7406",
+        "tidy.desc": "\u307e\u3060\u4f55\u3082\u5909\u66f4\u3057\u3066\u3044\u307e\u305b\u3093\u3002\u5404\u884c\u3092\u78ba\u8a8d\u3057\u3001\u5fc5\u8981\u306a\u3089\u540d\u524d\u3092\u76f4\u3057\u3066\u304b\u3089\u9069\u7528\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
+        "tidy.of": "/",
+        "tidy.entries_affected": "\u4ef6\u306e\u9805\u76ee\u304c\u5909\u66f4\u3055\u308c\u307e\u3059",
+        "tidy.include": "\u9069\u7528",
+        "tidy.name": "\u540d\u524d",
+        "tidy.folder": "\u30d5\u30a9\u30eb\u30c0\u30fc",
+        "tidy.apply": "\u9078\u629e\u3057\u305f\u9805\u76ee\u306b\u9069\u7528",
+        "tidy.cancel": "\u30ad\u30e3\u30f3\u30bb\u30eb",
+        "tidy.note": "\u5143\u306e\u8b58\u5225\u5b50\u306f\u9805\u76ee\u306e\u30e1\u30e2\u306b\u6b8b\u308a\u307e\u3059\u3002\u66f8\u304d\u8fbc\u3080\u524d\u306b\u4fdd\u7ba1\u5eab\u306f\u30a2\u30fc\u30ab\u30a4\u30d6\u3055\u308c\u307e\u3059\u3002",
+        "tidy.none_t": "\u6574\u7406\u3059\u308b\u3082\u306e\u306f\u3042\u308a\u307e\u305b\u3093",
+        "tidy.none_d": "\u30e1\u30e2\u306b\u30d5\u30a9\u30eb\u30c0\u30fc\u6307\u5b9a\u304c\u3042\u308b\u9805\u76ee\u3082\u3001\u30d1\u30c3\u30b1\u30fc\u30b8\u540d\u5f62\u5f0f\u306e\u9805\u76ee\u3082\u3042\u308a\u307e\u305b\u3093\u3002",
+        "tidy.offer_t": "\u6574\u7406\u3067\u304d\u308b\u9805\u76ee\u304c\u3042\u308a\u307e\u3059",
+        "tidy.offer_d": "\u4ef6\u306e\u9805\u76ee\u304c\u30e1\u30e2\u306b\u30d5\u30a9\u30eb\u30c0\u30fc\u3092\u6301\u3064\u304b\u3001\u30d1\u30c3\u30b1\u30fc\u30b8\u540d\u5f62\u5f0f\u3067\u3059\u3002\u66f8\u304d\u8fbc\u3080\u524d\u306b\u5909\u66f4\u5185\u5bb9\u3092\u78ba\u8a8d\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
+        "tidy.review": "\u5909\u66f4\u3092\u78ba\u8a8d",
+        "tidy.done": "\u4ef6\u306e\u9805\u76ee\u3092\u6574\u7406\u3057\u307e\u3057\u305f\u3002",
     },
     "ko": {
         "nav.security": "\ubcf4\uc548",
@@ -11889,6 +12457,22 @@ WEB_CATALOGUES = {
         "page.authenticators.desc": "\uc2dc\uac04 \uae30\ubc18 \uc77c\ud68c\uc6a9 \ube44\ubc00\ubc88\ud638\uc785\ub2c8\ub2e4.",
         "page.backups.desc": "\uc5ec\ub7ec \uacc4\uc815\uc744 \uc704\ud55c \uc77c\ud68c\uc6a9 \ubcf5\uad6c \ucf54\ub4dc\uc785\ub2c8\ub2e4.",
         "lang.unreviewed": "\uc774 \ubc88\uc5ed\uc740 \uc0ac\uc6a9\uc790\uc758 \uac80\uc218\ub97c \uac70\uce58\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4. \uacbd\uace0\uac00 \uc911\uc694\ud55c \ub300\ubaa9\uc5d0\uc11c\ub294 \uc601\uc5b4 \uc6d0\ubb38\uc774 \uae30\uc900\uc785\ub2c8\ub2e4.",
+        "tidy.title": "\uac00\uc838\uc628 \ud56d\ubaa9 \uc815\ub9ac",
+        "tidy.desc": "\uc544\uc9c1 \uc544\ubb34\uac83\ub3c4 \ubc14\ub00c\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4. \uac01 \uc904\uc744 \ud655\uc778\ud558\uace0 \ud544\uc694\ud558\uba74 \uc774\ub984\uc744 \uace0\uce5c \ub4a4 \uc801\uc6a9\ud558\uc138\uc694.",
+        "tidy.of": "/",
+        "tidy.entries_affected": "\uac1c \ud56d\ubaa9\uc774 \ubc14\ub01d\ub2c8\ub2e4",
+        "tidy.include": "\uc801\uc6a9",
+        "tidy.name": "\uc774\ub984",
+        "tidy.folder": "\ud3f4\ub354",
+        "tidy.apply": "\uc120\ud0dd\ud55c \ud56d\ubaa9\uc5d0 \uc801\uc6a9",
+        "tidy.cancel": "\ucde8\uc18c",
+        "tidy.note": "\uc6d0\ub798 \uc2dd\ubcc4\uc790\ub294 \ud56d\ubaa9\uc758 \uba54\ubaa8\uc5d0 \ub0a8\uc2b5\ub2c8\ub2e4. \ubb34\uc5b8\uac00 \uae30\ub85d\ub418\uae30 \uc804\uc5d0 \uae08\uace0\uac00 \uba3c\uc800 \ubcf4\uad00\ub429\ub2c8\ub2e4.",
+        "tidy.none_t": "\uc815\ub9ac\ud560 \uac83\uc774 \uc5c6\uc2b5\ub2c8\ub2e4",
+        "tidy.none_d": "\uba54\ubaa8\uc5d0 \ud3f4\ub354 \ud45c\uc2dc\uac00 \uc788\ub294 \ud56d\ubaa9\ub3c4, \ud328\ud0a4\uc9c0 \uc774\ub984 \ud615\uc2dd\uc758 \ud56d\ubaa9\ub3c4 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "tidy.offer_t": "\uc815\ub9ac\ud560 \uc218 \uc788\ub294 \ud56d\ubaa9\uc774 \uc788\uc2b5\ub2c8\ub2e4",
+        "tidy.offer_d": "\uac1c \ud56d\ubaa9\uc774 \uba54\ubaa8\uc5d0 \ud3f4\ub354\ub97c \ub2f4\uace0 \uc788\uac70\ub098 \ud328\ud0a4\uc9c0 \uc774\ub984 \ud615\uc2dd\uc785\ub2c8\ub2e4. \uae30\ub85d\ud558\uae30 \uc804\uc5d0 \ubcc0\uacbd \ub0b4\uc6a9\uc744 \ud655\uc778\ud558\uc138\uc694.",
+        "tidy.review": "\ubcc0\uacbd \ub0b4\uc6a9 \ud655\uc778",
+        "tidy.done": "\uac1c \ud56d\ubaa9\uc744 \uc815\ub9ac\ud588\uc2b5\ub2c8\ub2e4.",
     },
     "pt-br": {
         "nav.security": "Seguran\u00e7a",
@@ -12215,6 +12799,22 @@ WEB_CATALOGUES = {
         "page.authenticators.desc": "C\u00f3digos de senha de uso \u00fanico baseados em tempo.",
         "page.backups.desc": "C\u00f3digos de recupera\u00e7\u00e3o de uso \u00fanico para suas contas.",
         "lang.unreviewed": "Esta tradu\u00e7\u00e3o n\u00e3o foi revisada por um falante. Onde um aviso importa, o texto em ingl\u00eas \u00e9 o que vale.",
+        "tidy.title": "Organizar entradas importadas",
+        "tidy.desc": "Nada foi alterado ainda. Revise cada linha, corrija o nome se precisar, e aplique.",
+        "tidy.of": "de",
+        "tidy.entries_affected": "entradas mudariam",
+        "tidy.include": "Aplicar",
+        "tidy.name": "Nome",
+        "tidy.folder": "Pasta",
+        "tidy.apply": "Aplicar aos selecionados",
+        "tidy.cancel": "Cancelar",
+        "tidy.note": "O identificador original fica guardado nas notas da entrada. O cofre \u00e9 arquivado antes de qualquer grava\u00e7\u00e3o.",
+        "tidy.none_t": "Nada a organizar",
+        "tidy.none_d": "Nenhuma entrada tem marca de pasta nas notas nem nome em formato de pacote.",
+        "tidy.offer_t": "Algumas entradas podem ser organizadas",
+        "tidy.offer_d": "entradas trazem uma pasta nas notas ou um nome em formato de pacote. Revise as mudan\u00e7as antes de qualquer grava\u00e7\u00e3o.",
+        "tidy.review": "Revisar mudan\u00e7as",
+        "tidy.done": "entradas organizadas.",
     },
     "ru": {
         "nav.security": "\u0411\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c",
@@ -12541,6 +13141,22 @@ WEB_CATALOGUES = {
         "page.authenticators.desc": "\u041e\u0434\u043d\u043e\u0440\u0430\u0437\u043e\u0432\u044b\u0435 \u043a\u043e\u0434\u044b \u043d\u0430 \u043e\u0441\u043d\u043e\u0432\u0435 \u0432\u0440\u0435\u043c\u0435\u043d\u0438.",
         "page.backups.desc": "\u041e\u0434\u043d\u043e\u0440\u0430\u0437\u043e\u0432\u044b\u0435 \u043a\u043e\u0434\u044b \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f \u0434\u043b\u044f \u0432\u0430\u0448\u0438\u0445 \u0443\u0447\u0451\u0442\u043d\u044b\u0445 \u0437\u0430\u043f\u0438\u0441\u0435\u0439.",
         "lang.unreviewed": "\u042d\u0442\u043e\u0442 \u043f\u0435\u0440\u0435\u0432\u043e\u0434 \u043d\u0435 \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u043b\u0441\u044f \u043d\u043e\u0441\u0438\u0442\u0435\u043b\u0435\u043c \u044f\u0437\u044b\u043a\u0430. \u0422\u0430\u043c, \u0433\u0434\u0435 \u0432\u0430\u0436\u043d\u043e \u043f\u0440\u0435\u0434\u0443\u043f\u0440\u0435\u0436\u0434\u0435\u043d\u0438\u0435, \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u044f\u044e\u0449\u0438\u043c \u044f\u0432\u043b\u044f\u0435\u0442\u0441\u044f \u0430\u043d\u0433\u043b\u0438\u0439\u0441\u043a\u0438\u0439 \u0442\u0435\u043a\u0441\u0442.",
+        "tidy.title": "\u041f\u0440\u0438\u0432\u0435\u0441\u0442\u0438 \u0438\u043c\u043f\u043e\u0440\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u0432 \u043f\u043e\u0440\u044f\u0434\u043e\u043a",
+        "tidy.desc": "\u041f\u043e\u043a\u0430 \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u043e. \u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0438\u0442\u0435 \u043a\u0430\u0436\u0434\u0443\u044e \u0441\u0442\u0440\u043e\u043a\u0443, \u043f\u0440\u0438 \u043d\u0435\u043e\u0431\u0445\u043e\u0434\u0438\u043c\u043e\u0441\u0442\u0438 \u0438\u0441\u043f\u0440\u0430\u0432\u044c\u0442\u0435 \u0438\u043c\u044f \u0438 \u043f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u0435.",
+        "tidy.of": "\u0438\u0437",
+        "tidy.entries_affected": "\u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u0431\u0443\u0434\u0435\u0442 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u043e",
+        "tidy.include": "\u041f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c",
+        "tidy.name": "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435",
+        "tidy.folder": "\u041f\u0430\u043f\u043a\u0430",
+        "tidy.apply": "\u041f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c \u043a \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u043c",
+        "tidy.cancel": "\u041e\u0442\u043c\u0435\u043d\u0430",
+        "tidy.note": "\u0418\u0441\u0445\u043e\u0434\u043d\u044b\u0439 \u0438\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u0432 \u0437\u0430\u043c\u0435\u0442\u043a\u0430\u0445 \u0437\u0430\u043f\u0438\u0441\u0438. \u041f\u0435\u0440\u0435\u0434 \u043b\u044e\u0431\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u044c\u044e \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u0430\u0440\u0445\u0438\u0432\u0438\u0440\u0443\u0435\u0442\u0441\u044f.",
+        "tidy.none_t": "\u041f\u0440\u0438\u0432\u043e\u0434\u0438\u0442\u044c \u0432 \u043f\u043e\u0440\u044f\u0434\u043e\u043a \u043d\u0435\u0447\u0435\u0433\u043e",
+        "tidy.none_d": "\u041d\u0438 \u0432 \u043e\u0434\u043d\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u0438 \u043d\u0435\u0442 \u043f\u043e\u043c\u0435\u0442\u043a\u0438 \u043f\u0430\u043f\u043a\u0438 \u0432 \u0437\u0430\u043c\u0435\u0442\u043a\u0430\u0445 \u0438 \u043d\u0438 \u043e\u0434\u043d\u0430 \u043d\u0435 \u043d\u0430\u0437\u0432\u0430\u043d\u0430 \u043a\u0430\u043a \u043f\u0430\u043a\u0435\u0442 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f.",
+        "tidy.offer_t": "\u041d\u0435\u043a\u043e\u0442\u043e\u0440\u044b\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u043c\u043e\u0436\u043d\u043e \u043f\u0440\u0438\u0432\u0435\u0441\u0442\u0438 \u0432 \u043f\u043e\u0440\u044f\u0434\u043e\u043a",
+        "tidy.offer_d": "\u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u0441\u043e\u0434\u0435\u0440\u0436\u0430\u0442 \u043f\u0430\u043f\u043a\u0443 \u0432 \u0437\u0430\u043c\u0435\u0442\u043a\u0430\u0445 \u0438\u043b\u0438 \u043d\u0430\u0437\u0432\u0430\u043d\u044b \u043a\u0430\u043a \u043f\u0430\u043a\u0435\u0442 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f. \u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0438\u0442\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f, \u043f\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043c \u0447\u0442\u043e-\u043b\u0438\u0431\u043e \u0431\u0443\u0434\u0435\u0442 \u0437\u0430\u043f\u0438\u0441\u0430\u043d\u043e.",
+        "tidy.review": "\u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0435\u0442\u044c \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f",
+        "tidy.done": "\u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u043f\u0440\u0438\u0432\u0435\u0434\u0435\u043d\u043e \u0432 \u043f\u043e\u0440\u044f\u0434\u043e\u043a.",
     },
     "zh-hans": {
         "nav.security": "\u5b89\u5168",
@@ -12867,6 +13483,22 @@ WEB_CATALOGUES = {
         "page.authenticators.desc": "\u57fa\u4e8e\u65f6\u95f4\u7684\u4e00\u6b21\u6027\u5bc6\u7801\u3002",
         "page.backups.desc": "\u7528\u4e8e\u4f60\u5404\u4e2a\u8d26\u6237\u7684\u4e00\u6b21\u6027\u6062\u590d\u7801\u3002",
         "lang.unreviewed": "\u6b64\u7ffb\u8bd1\u5c1a\u672a\u7ecf\u6bcd\u8bed\u8005\u6821\u5bf9\u3002\u5f53\u67d0\u6761\u8b66\u544a\u4e8b\u5173\u91cd\u5927\u65f6\uff0c\u4ee5\u82f1\u6587\u539f\u6587\u4e3a\u51c6\u3002",
+        "tidy.title": "\u6574\u7406\u5bfc\u5165\u7684\u6761\u76ee",
+        "tidy.desc": "\u76ee\u524d\u5c1a\u672a\u505a\u4efb\u4f55\u66f4\u6539\u3002\u8bf7\u9010\u884c\u67e5\u770b\uff0c\u5fc5\u8981\u65f6\u4fee\u6539\u540d\u79f0\uff0c\u7136\u540e\u5e94\u7528\u3002",
+        "tidy.of": "/",
+        "tidy.entries_affected": "\u4e2a\u6761\u76ee\u5c06\u88ab\u66f4\u6539",
+        "tidy.include": "\u5e94\u7528",
+        "tidy.name": "\u540d\u79f0",
+        "tidy.folder": "\u6587\u4ef6\u5939",
+        "tidy.apply": "\u5e94\u7528\u4e8e\u6240\u9009\u6761\u76ee",
+        "tidy.cancel": "\u53d6\u6d88",
+        "tidy.note": "\u539f\u59cb\u6807\u8bc6\u4f1a\u4fdd\u7559\u5728\u8be5\u6761\u76ee\u7684\u5907\u6ce8\u4e2d\u3002\u5199\u5165\u524d\u4f1a\u5148\u5f52\u6863\u5bc6\u7801\u5e93\u3002",
+        "tidy.none_t": "\u6ca1\u6709\u9700\u8981\u6574\u7406\u7684\u5185\u5bb9",
+        "tidy.none_d": "\u6ca1\u6709\u6761\u76ee\u7684\u5907\u6ce8\u4e2d\u542b\u6709\u6587\u4ef6\u5939\u6807\u8bb0\uff0c\u4e5f\u6ca1\u6709\u5305\u540d\u5f62\u5f0f\u7684\u540d\u79f0\u3002",
+        "tidy.offer_t": "\u6709\u6761\u76ee\u53ef\u4ee5\u6574\u7406",
+        "tidy.offer_d": "\u4e2a\u6761\u76ee\u7684\u5907\u6ce8\u4e2d\u542b\u6709\u6587\u4ef6\u5939\uff0c\u6216\u4f7f\u7528\u4e86\u5305\u540d\u5f62\u5f0f\u7684\u540d\u79f0\u3002\u5199\u5165\u524d\u8bf7\u5148\u67e5\u770b\u8fd9\u4e9b\u66f4\u6539\u3002",
+        "tidy.review": "\u67e5\u770b\u66f4\u6539",
+        "tidy.done": "\u4e2a\u6761\u76ee\u5df2\u6574\u7406\u3002",
     },
 }
 # --- END GENERATED LOCALES ---
@@ -14789,6 +15421,82 @@ def _actions(view_href, edit_href, delete_action, item_id, confirm_key, confirm_
 # --------------------------------------------------------------------------
 # Row builders  (each row carries data-row for the instant client-side filter)
 # --------------------------------------------------------------------------
+def tidy_page(proposals, total):
+    """Review what a bulk tidy would do, one row at a time.
+
+    Every proposed name is an input rather than a fact. No rule gets both
+    com.lsdroid.cerberuss and com.spotify.music right, so the guess is offered
+    for correction rather than applied on the strength of being plausible.
+    The folder is shown but not editable: it is read from the record's own
+    notes, which is not a guess.
+    """
+    rows = []
+    for item in proposals:
+        changes = item["changes"]
+        label = changes.get("label")
+        folder = changes.get("folder")
+        record_id = _esc(item["id"])
+        if label:
+            name_cell = (
+                '<div class="faint mono">%s</div>'
+                '<input class="input" name="label_%s" value="%s" maxlength="200" '
+                'aria-label="New name for record %s">'
+                % (_esc(label["from"]), record_id, _esc(label["to"]), record_id))
+        else:
+            name_cell = '<span class="faint">%s</span>' % _esc(item["label"])
+        folder_cell = ('<span class="chip">%s</span>' % _esc(folder["to"])
+                       if folder else '<span class="faint">&mdash;</span>')
+        rows.append(
+            '<tr data-row><td class="num">%s</td>'
+            '<td><label class="sr-only" for="pick_%s">Include</label>'
+            '<input type="checkbox" id="pick_%s" name="pick" value="%s" checked></td>'
+            '<td>%s</td><td>%s</td></tr>'
+            % (record_id, record_id, record_id, record_id, name_cell, folder_cell))
+
+    return """
+<div class="page-head">
+  <div>
+    <h2 class="page-title" data-i18n="tidy.title">Tidy imported entries</h2>
+    <div class="page-sub" data-i18n="tidy.desc">Nothing has been changed yet. Review every row, correct any name, and apply.</div>
+  </div>
+</div>
+<form method="post" action="/tidy">
+<div class="card">
+  <div class="card-head">
+    <strong><span>%d</span> <span data-i18n="tidy.of">of</span> <span>%d</span> <span data-i18n="tidy.entries_affected">entries would change</span></strong>
+  </div>
+  <div class="table-wrap"><table class="t">
+    <thead><tr>
+      <th scope="col" class="num" data-i18n="table.id">ID</th>
+      <th scope="col" data-i18n="tidy.include">Apply</th>
+      <th scope="col" data-i18n="tidy.name">Name</th>
+      <th scope="col" data-i18n="tidy.folder">Folder</th>
+    </tr></thead>
+    <tbody>%s</tbody>
+  </table></div>
+  <div class="card-foot">
+    <button class="btn btn-primary" type="submit" data-i18n="tidy.apply">Apply to selected</button>
+    <a class="btn btn-ghost" href="/passwords" data-i18n="tidy.cancel">Cancel</a>
+    <span class="faint" data-i18n="tidy.note">The original identifier is kept in the entry's notes. The vault is archived before anything is written.</span>
+  </div>
+</div>
+</form>""" % (len(proposals), total, "".join(rows))
+
+
+def tidy_empty_page():
+    return """
+<div class="page-head">
+  <div>
+    <h2 class="page-title" data-i18n="tidy.title">Tidy imported entries</h2>
+  </div>
+</div>
+<div class="card"><div class="empty">
+  <div class="empty-t" data-i18n="tidy.none_t">Nothing to tidy</div>
+  <div class="empty-d" data-i18n="tidy.none_d">No entry has a folder marker in its notes or a package-style name.</div>
+  <a class="btn btn-primary" href="/passwords" data-i18n="form.back_list">&larr; Back to list</a>
+</div></div>"""
+
+
 def build_rows_html(entries, filtered=False):
     if not entries:
         if filtered:
@@ -19063,9 +19771,46 @@ class Handler(http.server.BaseHTTPRequestHandler):
             }[path]
             content = list_page(spec[0], spec[1], spec[2], spec[3], spec[4], spec[5], spec[6], spec[7], spec[8])
             if path == "/passwords":
-                content = password_filters + content
+                tidy_banner = ""
+                pending_tidy = core.tidy_proposals(plaintext)
+                if pending_tidy:
+                    tidy_banner = (
+                        '<section class="card tidy-offer">'
+                        '<div class="card-head">'
+                        '<div><strong data-i18n="tidy.offer_t">Some entries can be tidied</strong>'
+                        '<p class="faint"><span>%d</span> '
+                        '<span data-i18n="tidy.offer_d">entries carry a folder in their notes or a '
+                        'package-style name. Review the changes before anything is written.</span></p></div>'
+                        '<a class="btn btn-primary card-head-action" href="/tidy" '
+                        'data-i18n="tidy.review">Review changes</a>'
+                        '</div></section>' % len(pending_tidy))
+                content = tidy_banner + password_filters + content
             self._send_html(200, render_shell(content, spec[9], VERSION, VAULT_PATH,
                                               title=spec[1], counts=counts, searchable=True))
+            return
+
+        if path == "/tidy":
+            plaintext = load_vault(master, self._session_rec)
+            proposals = core.tidy_proposals(plaintext)
+            _, tidy_entries = parse_entries(plaintext)
+            _, tidy_notes = parse_notes(plaintext)
+            _, tidy_passphrases = parse_passphrases(plaintext)
+            _, tidy_backups = parse_backup_codes(plaintext)
+            _, tidy_auths = parse_authenticators(plaintext)
+            tidy_counts = {
+                "passwords": len(tidy_entries), "notes": len(tidy_notes),
+                "passphrases": len(tidy_passphrases),
+                "backups": len(tidy_backups),
+                "authenticators": len(tidy_auths),
+            }
+            if proposals:
+                content = tidy_page(proposals, len(tidy_entries))
+            else:
+                content = tidy_empty_page()
+            self._send_html(200, render_shell(content, "passwords", VERSION,
+                                              VAULT_PATH, title="Tidy entries",
+                                              counts=tidy_counts,
+                                              searchable=False))
             return
 
         if path == "/generator":
@@ -19621,6 +20366,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             self.send_response(302)
             self.send_header("Location", "/settings?msg=changed")
+            self.end_headers()
+            return
+
+        if path == "/tidy":
+            plaintext = load_vault(master, self._session_rec)
+            # Only the rows that were ticked, and for each of them only the
+            # name that came back from the form. A record with no proposal is
+            # refused by the core regardless of what the request asks for.
+            picked = data.get("pick") or []
+            selections = {}
+            for record_id in picked:
+                key = str(record_id).strip()
+                if not key.isdigit():
+                    continue
+                selections[key] = {
+                    "label": (data.get("label_" + key) or [""])[0]}
+            updated, changed = core.apply_tidy(plaintext, selections)
+            if changed:
+                save_vault(master, updated, self._session_rec)
+            self.send_response(303)
+            self.send_header("Location", "/passwords?tidied=%d" % changed)
             self.end_headers()
             return
 

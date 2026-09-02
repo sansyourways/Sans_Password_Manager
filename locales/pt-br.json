@@ -330,6 +330,22 @@
     "page.passphrases.desc": "Tokens de API e frases de recuperação.",
     "page.authenticators.desc": "Códigos de senha de uso único baseados em tempo.",
     "page.backups.desc": "Códigos de recuperação de uso único para suas contas.",
-    "lang.unreviewed": "Esta tradução não foi revisada por um falante. Onde um aviso importa, o texto em inglês é o que vale."
+    "lang.unreviewed": "Esta tradução não foi revisada por um falante. Onde um aviso importa, o texto em inglês é o que vale.",
+    "tidy.title": "Organizar entradas importadas",
+    "tidy.desc": "Nada foi alterado ainda. Revise cada linha, corrija o nome se precisar, e aplique.",
+    "tidy.of": "de",
+    "tidy.entries_affected": "entradas mudariam",
+    "tidy.include": "Aplicar",
+    "tidy.name": "Nome",
+    "tidy.folder": "Pasta",
+    "tidy.apply": "Aplicar aos selecionados",
+    "tidy.cancel": "Cancelar",
+    "tidy.note": "O identificador original fica guardado nas notas da entrada. O cofre é arquivado antes de qualquer gravação.",
+    "tidy.none_t": "Nada a organizar",
+    "tidy.none_d": "Nenhuma entrada tem marca de pasta nas notas nem nome em formato de pacote.",
+    "tidy.offer_t": "Algumas entradas podem ser organizadas",
+    "tidy.offer_d": "entradas trazem uma pasta nas notas ou um nome em formato de pacote. Revise as mudanças antes de qualquer gravação.",
+    "tidy.review": "Revisar mudanças",
+    "tidy.done": "entradas organizadas."
   }
 }
