@@ -7,6 +7,51 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.13.0] - 2026-09-02
+
+### Added
+- Added nine Dashboard languages: Arabic, German, Spanish, French, Hindi,
+  Korean, Brazilian Portuguese, Russian, and Simplified Chinese. None has been
+  reviewed by a speaker, so each is marked `(β)` in the language picker and the
+  interface states, while one is active, that the English text is authoritative
+  where a warning matters.
+- Added right-to-left support, proven with Arabic. Physical margins, paddings,
+  and borders became logical properties and positioned decorations became
+  insets, so the sidebar, navigation rail, and table columns mirror. Cursive
+  scripts drop the fixed-width type the Console theme is built on, and machine
+  values — passwords, URLs, Base32 secrets, and the vault path — keep
+  left-to-right order inside the mirrored layout.
+- Added `locales/<code>.json` as the source of truth for every catalogue, with
+  `tools/build-locales.py` to fold them into the web server and
+  `tools/i18n-lint.py` to check key parity, markup, and placeholder drift
+  before a contribution is opened.
+- Added `GET /locale?lang=<code>`, which serves a single catalogue so a page
+  can ship only the language it is in.
+
+### Changed
+- Moved the translation catalogues out of a JavaScript object literal embedded
+  in a Python string. Contributing a language previously meant editing that
+  literal and getting two levels of escaping right; it is now a JSON file and
+  no code. The generated region is committed and `./build.sh --check` verifies
+  it matches `locales/`.
+- Reduced page weight: a page carries only its own language plus English, with
+  the rest fetched on switch. The catalogue is emitted with `json.dumps`
+  instead of a hand-typed literal, removing the escaping hazard the regression
+  suite previously had a test to detect.
+- Derived the language picker, `<html lang>`, and `<html dir>` from catalogue
+  metadata, retiring the hardcoded `en`/`id`/`ja` lists.
+- Updated the Dashboard, browser-extension manifests, documentation, captures,
+  and release metadata to version 3.13.0.
+
+### Fixed
+- Fixed the unreviewed-translation notice rendering on every language,
+  including the maintained ones. It ships with `hidden` and is revealed by
+  script, but styling the class with `display` outranks the user agent's
+  `[hidden]` rule, so it was never hidden.
+- Fixed the search icon overlapping its own placeholder in right-to-left
+  layouts. The input reserved room with a four-value `padding` shorthand, which
+  is physical and does not mirror.
+
 ## [3.12.4] - 2026-09-02
 
 ### Added
