@@ -7,6 +7,40 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [3.15.0] - 2026-09-02
+
+### Added
+- Added pluggable sync transports. `spm sync` takes `--transport dir|rsync|rclone`;
+  `dir` remains the default, so existing invocations are unchanged. A transport
+  answers only three questions — reach, fetch, publish — while conflict
+  detection, digest verification, archiving before replacement and the refusal
+  to install a remote that will not decrypt stay above it and are identical for
+  every transport.
+- Added `SPM_SYNC_RSYNC_SHELL`, passed to rsync as `-e`, for a non-default port,
+  an identity file or a jump host.
+- Added bulk tidying for imported vaults. When entries carry a folder in their
+  notes or an Android package identifier as their name, the Passwords page
+  offers to tidy them: the folder is filed from the notes, the entry is renamed,
+  and the original identifier is kept in the notes exactly once.
+
+### Changed
+- Sync status now reports the transport, target and channel alongside the local,
+  remote and base digests.
+- A push is read back from the remote and compared before the base digest is
+  updated, so a transport that truncated or transcoded the vault is caught then
+  rather than when the copy is needed.
+
+### Security
+- Digests are measured locally over a fetched copy for every transport. A
+  remote-side digest is a claim, not a measurement, and none is requested.
+- An unreachable target is fatal and never reads as an empty one — that
+  conflation would turn a network outage into "no remote version exists", which
+  is the state in which pushing over a newer remote vault feels safe.
+- Tidying is a review: every proposed name is editable, unticked rows are not
+  touched, and a record with no proposal cannot be written by the request that
+  applies one. Names arriving from the form have all whitespace collapsed, so a
+  tab or a line separator cannot split a record and orphan the fields after it.
+
 ## [3.14.0] - 2026-09-02
 
 ### Added

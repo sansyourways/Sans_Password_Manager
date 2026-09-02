@@ -1309,6 +1309,156 @@ def t_doctor_reports_split_recovery():
     assert entry["status"] == "ok", entry
 
 
+# ----- tidying imported entries ----------------------------------------------
+
+
+def t_derive_app_name_reads_identifiers_and_leaves_prose_alone():
+    for label, expected in (
+            ("com.duolingo", "Duolingo"),
+            ("com.lsdroid.cerberuss", "Cerberuss"),
+            ("id.go.kemensos.pelaporan", "Pelaporan"),
+            ("com.example.android", "Example"),
+            ("com.ebay.mobile", "Ebay"),
+            ("mail.google.com", "Google"),
+            ("duolingo.com", "Duolingo"),
+            ("example.co.uk", "Example"),
+            ("shopee.co.id", "Shopee"),
+    ):
+        assert core.derive_app_name(label) == expected, \
+            "%s gave %r" % (label, core.derive_app_name(label))
+    # Anything a person plausibly typed is not this function's business, and
+    # neither is a bare suffix with no name in it.
+    for label in ("My Bank", "Netflix", "", "user@example.com", "192.168.1.1",
+                  "co.uk", "com", "a b.c", "https://x.invalid"):
+        assert core.derive_app_name(label) == "", \
+            "%r was rewritten to %r" % (label, core.derive_app_name(label))
+
+
+def t_derive_app_name_keeps_existing_capitalisation():
+    # A brand that capitalises itself must survive: eBay must not become Ebay.
+    assert core.derive_app_name("com.eBay") == "eBay"
+    assert core.derive_app_name("com.PayPal") == "PayPal"
+
+
+def t_folder_from_notes_stops_at_the_next_marker():
+    # Notes are stored with their line breaks collapsed to spaces, so the
+    # folder is not "the rest of the note".
+    assert core.folder_from_notes("folder: Main Database") == "Main Database"
+    assert core.folder_from_notes("anti theft folder: Security") == "Security"
+    assert core.folder_from_notes(
+        "folder: Government url: https://x.invalid") == "Government"
+    assert core.folder_from_notes("Folder:   Work  ") == "Work"
+    for notes in ("", "nothing here", "folder:", "folder:    "):
+        assert core.folder_from_notes(notes) == "", notes
+    # Longer than a folder name may be is not a folder name.
+    assert core.folder_from_notes("folder: " + "x" * 500) == ""
+
+
+def t_tidy_proposes_without_changing_anything():
+    plaintext = core.stamp_version(
+        "1\tcom.duolingo\tu@x.invalid\tpw\tfolder: Main\t2025-01-01T00:00:00Z\t\t\n"
+        "2\tMy Bank\tu@x.invalid\tpw\tnothing\t2025-01-01T00:00:00Z\t\t\n")
+    before = plaintext
+    proposals = core.tidy_proposals(plaintext)
+    assert plaintext == before, "tidy_proposals modified the vault"
+    assert [p["id"] for p in proposals] == ["1"]
+    changes = proposals[0]["changes"]
+    assert changes["label"] == {"from": "com.duolingo", "to": "Duolingo"}
+    assert changes["folder"] == {"from": "", "to": "Main"}
+    assert "com.duolingo" in changes["notes"]["to"]
+
+
+def t_apply_tidy_writes_the_reviewed_name_not_the_guess():
+    """The guess is a guess. No rule gets com.lsdroid.cerberuss and
+    com.spotify.music both right, so what review said is what is written."""
+    plaintext = core.stamp_version(
+        "1\tcom.lsdroid.cerberuss\tu@x.invalid\tpw\tfolder: Security\t2025-01-01T00:00:00Z\t\t\n")
+    updated, changed = core.apply_tidy(plaintext, {"1": {"label": "Cerberus"}})
+    assert changed == 1
+    row = [l for l in updated.splitlines() if l.startswith("1\t")][0].split("\t")
+    assert row[1] == "Cerberus", row[1]
+    folder, _ = core.decode_attrs(row[7])
+    assert folder == "Security"
+    assert "com.lsdroid.cerberuss" in row[4], "the original was not kept"
+
+
+def t_apply_tidy_only_touches_what_was_selected():
+    plaintext = core.stamp_version(
+        "1\tcom.duolingo\tu@x.invalid\tpw\tfolder: A\t2025-01-01T00:00:00Z\t\t\n"
+        "2\tcom.spotify.music\tu@x.invalid\tpw\tfolder: B\t2025-01-01T00:00:00Z\t\t\n")
+    updated, changed = core.apply_tidy(plaintext, {"1": {"label": "Duolingo"}})
+    assert changed == 1
+    rows = {l.split("\t")[0]: l.split("\t") for l in updated.splitlines()
+            if l[:1].isdigit()}
+    assert rows["1"][1] == "Duolingo"
+    assert rows["2"][1] == "com.spotify.music", "an unselected record changed"
+    assert core.decode_attrs(rows["2"][7])[0] == "", "an unselected record got a folder"
+
+
+def t_apply_tidy_refuses_a_record_it_never_proposed():
+    """A stale preview, or a request naming a record that has since changed,
+    must not be able to write something the vault was never asked about."""
+    plaintext = core.stamp_version(
+        "1\tMy Bank\tu@x.invalid\tpw\tnothing\t2025-01-01T00:00:00Z\t\t\n")
+    updated, changed = core.apply_tidy(plaintext, {"1": {"label": "Anything"}})
+    assert changed == 0
+    assert updated == plaintext, "a record with no proposal was rewritten"
+
+
+def t_apply_tidy_sanitises_a_reviewed_name():
+    # The name comes from a form. A tab or a newline in it would split the
+    # record and take the rest of the vault with it.
+    plaintext = core.stamp_version(
+        "1\tcom.duolingo\tu@x.invalid\tpw\tfolder: A\t2025-01-01T00:00:00Z\t\t\n")
+    for hostile in ("Duo\tlingo\nEvil\t9\tx",
+                    "Duo\u2028lingo", "Duo\u2029lingo", "Duo\x85lingo",
+                    "Duo\rlingo"):
+        updated, changed = core.apply_tidy(plaintext, {"1": {"label": hostile}})
+        assert changed == 1, hostile
+        lines = [l for l in updated.splitlines() if l[:1].isdigit()]
+        assert len(lines) == 1, \
+            "%r split the record into %d lines" % (hostile, len(lines))
+        assert len(lines[0].split("\t")) == 8, \
+            "%r produced %d columns" % (hostile, len(lines[0].split("\t")))
+        assert "\t" not in lines[0].split("\t")[1]
+    updated, _ = core.apply_tidy(
+        plaintext, {"1": {"label": "Duo\tlingo\nEvil\t9\tx"}})
+    row = [l for l in updated.splitlines() if l[:1].isdigit()][0]
+    assert row.split("\t")[1] == "Duo lingo Evil 9 x"
+
+
+def t_the_original_identifier_is_recorded_once():
+    assert core._tidy_note_with_original("", "com.duolingo") == "app: com.duolingo"
+    assert core._tidy_note_with_original("memo", "com.duolingo") == \
+        "memo app: com.duolingo"
+    # Already there, however it got there: do not say it twice.
+    already = "installed from com.duolingo on the phone"
+    assert core._tidy_note_with_original(already, "com.duolingo") == already
+    assert core._tidy_note_with_original(
+        "app: com.duolingo", "com.duolingo") == "app: com.duolingo"
+
+    # And the proposal itself must not offer to add a second copy.
+    plaintext = core.stamp_version(
+        "1\tcom.duolingo\tu@x.invalid\tpw\tsaved from com.duolingo folder: Main"
+        "\t2025-01-01T00:00:00Z\t\t\n")
+    changes = core.tidy_proposals(plaintext)[0]["changes"]
+    assert "notes" not in changes, \
+        "offered to record an identifier the note already carries: %r" % (changes,)
+    updated, _ = core.apply_tidy(plaintext, {"1": {"label": "Duolingo"}})
+    assert updated.count("com.duolingo") == 1, updated
+
+
+def t_tidy_is_idempotent():
+    plaintext = core.stamp_version(
+        "1\tcom.duolingo\tu@x.invalid\tpw\tfolder: Main\t2025-01-01T00:00:00Z\t\t\n")
+    once, _ = core.apply_tidy(plaintext, {"1": {"label": "Duolingo"}})
+    assert core.tidy_proposals(once) == [], "a second pass would change it again"
+    twice, changed = core.apply_tidy(once, {"1": {"label": "Duolingo"}})
+    assert changed == 0 and twice == once
+    # And the original is recorded once, not once per run.
+    assert once.count("com.duolingo") == 1
+
+
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):
         check(name[2:], fn)

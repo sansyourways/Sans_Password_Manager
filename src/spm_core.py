@@ -682,6 +682,215 @@ def stage_recovery(vault_path, plaintext, vault_key):
             os.remove(staged)
 
 
+# ----- tidying imported entries ----------------------------------------------
+# A vault filled by importing from a phone arrives in two states worth fixing in
+# bulk. Its notes carry the folder the entry belonged to, as text, because the
+# exporting app had folders and the export format did not. And its service names
+# are Android package identifiers -- com.duolingo, id.go.kemensos.pelaporan --
+# which are what the phone knew the app by and not what its owner does.
+#
+# Both are proposals, never edits. `tidy_proposals` computes what would change
+# and touches nothing; `apply_tidy` performs exactly the changes it was handed.
+# Nothing here guesses in place: with hundreds of records the difference between
+# a preview and a surprise is the whole feature.
+
+TIDY_ORIGINAL_PREFIX = "app:"
+_TIDY_FOLDER_RE = re.compile(r"(?i)\bfolder\s*:\s*(.*)$")
+# A later "word:" ends the folder value. Notes are stored with their line breaks
+# collapsed to spaces, so "folder: Work url: https://..." is one string and the
+# folder is not the rest of it.
+_TIDY_MARKER_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9_-]{0,20}\s*:")
+
+# The first label of a reverse-DNS package identifier. A name whose *first*
+# segment is one of these reads backwards -- com.duolingo -- where a name whose
+# *last* segment is one reads forwards, as duolingo.com does.
+_TIDY_TLDS = frozenset("""
+com net org edu gov mil int io co me app dev xyz info biz online site
+id uk de fr jp cn au ca in br ru it es nl se no fi dk pl ch at be cz gr pt
+ro hu tr kr tw hk sg my th vn ph nz za mx ar cl pe ve ir sa ae il eg ng ke
+""".split())
+# Second-level labels that are part of the suffix rather than the name, so
+# example.co.uk yields "Example" and not "Co".
+_TIDY_SECOND_LEVEL = frozenset(("co", "com", "net", "org", "ac", "gov", "edu",
+                                "go", "or", "ne", "sch", "mil"))
+# Trailing segments that name the platform rather than the app, so
+# com.example.android resolves to "Example".
+_TIDY_GENERIC_TAIL = frozenset(("android", "app", "apps", "mobile", "client",
+                                "application", "main", "prod", "release",
+                                "free", "pro", "lite", "beta"))
+
+
+def _tidy_titlecase(word):
+    parts = [p for p in re.split(r"[_\-\s]+", word) if p]
+    out = []
+    for part in parts:
+        # Something already capitalised the way a brand is stays as it is:
+        # "eBay" and "PayPal" must not become "Ebay" and "Paypal".
+        out.append(part if any(c.isupper() for c in part) else part.capitalize())
+    return " ".join(out)
+
+
+def derive_app_name(label):
+    """A human name for a package identifier or domain, or "" to leave it be.
+
+    Deliberately conservative: anything that does not clearly read as a package
+    identifier or a hostname is returned unchanged, because a label somebody
+    typed themselves is not this function's business.
+    """
+    text = (label or "").strip()
+    if not text or " " in text or "/" in text:
+        return ""
+    parts = [p for p in text.split(".") if p]
+    if len(parts) < 2 or len(parts) != text.count(".") + 1:
+        return ""
+    if not all(re.fullmatch(r"[A-Za-z0-9_-]+", p) for p in parts):
+        return ""
+
+    head, tail = parts[0].lower(), parts[-1].lower()
+    if head in _TIDY_TLDS and tail not in _TIDY_TLDS:
+        # Reverse-DNS: com.duolingo, id.go.kemensos.pelaporan.
+        chosen = parts[-1]
+        if chosen.lower() in _TIDY_GENERIC_TAIL and len(parts) > 2:
+            chosen = parts[-2]
+    elif tail in _TIDY_TLDS:
+        # Forward hostname: mail.google.com, example.co.uk.
+        index = -2
+        if len(parts) >= 3 and parts[-2].lower() in _TIDY_SECOND_LEVEL:
+            index = -3
+        chosen = parts[index]
+    else:
+        return ""
+
+    if chosen.lower() in _TIDY_TLDS or chosen.lower() in _TIDY_SECOND_LEVEL:
+        return ""
+    name = _tidy_titlecase(chosen)
+    if not name or name == text:
+        return ""
+    return name
+
+
+def folder_from_notes(notes):
+    """The folder a note names, or "" when it names none."""
+    match = _TIDY_FOLDER_RE.search(notes or "")
+    if not match:
+        return ""
+    value = match.group(1)
+    following = _TIDY_MARKER_RE.search(value)
+    if following:
+        value = value[:following.start()]
+    value = " ".join(value.split())
+    if not value or len(value) > ATTRS_FOLDER_MAX:
+        return ""
+    return value
+
+
+def _tidy_note_with_original(notes, original):
+    """Keep the identifier the phone knew, once, and only if it is not there."""
+    text = notes or ""
+    marker = "%s %s" % (TIDY_ORIGINAL_PREFIX, original)
+    if original in text:
+        return text
+    return ("%s %s" % (text.strip(), marker)).strip() if text.strip() else marker
+
+
+def tidy_proposals(plaintext):
+    """What a tidy would change, as data. Changes nothing.
+
+    Each proposal names the record, what is proposed for it, and the before and
+    after of every field involved, so a caller can render it for review without
+    knowing any of the rules above.
+    """
+    proposals = []
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if not parts or not parts[0].isdigit() or len(parts) < 6:
+            continue
+        record_id, label = parts[0], parts[1]
+        notes = parts[4] if len(parts) > 4 else ""
+        attrs = parts[7] if len(parts) > 7 else ""
+        folder, fields = decode_attrs(attrs)
+
+        changes = {}
+        proposed_folder = folder_from_notes(notes)
+        if proposed_folder and proposed_folder != folder:
+            changes["folder"] = {"from": folder, "to": proposed_folder}
+
+        new_notes = notes
+        proposed_label = derive_app_name(label)
+        if proposed_label and proposed_label != label:
+            changes["label"] = {"from": label, "to": proposed_label}
+            new_notes = _tidy_note_with_original(notes, label)
+            if new_notes != notes:
+                changes["notes"] = {"from": notes, "to": new_notes}
+
+        if changes:
+            proposals.append({"id": record_id, "label": label,
+                              "changes": changes})
+    return proposals
+
+
+TIDY_LABEL_MAX = 200
+
+
+def apply_tidy(plaintext, selections):
+    """Apply reviewed changes. `selections` maps record id -> {"label": str}.
+
+    No rule here decides anything. The guess `tidy_proposals` made is only a
+    guess -- no heuristic gets both com.lsdroid.cerberuss and com.spotify.music
+    right -- so what gets written is what came back from the review, and this
+    function's job is to refuse anything that review should not be able to say.
+
+    A record may only be touched if it had a proposal: a stale preview, or a
+    request naming a record that has since changed, must not be able to write
+    something the vault was never asked about. The folder is taken from the
+    record's own notes rather than from the request, because that one is not a
+    guess and there is nothing to review.
+    """
+    proposals = {p["id"]: p for p in tidy_proposals(plaintext)}
+    chosen = {}
+    for record_id, values in (selections or {}).items():
+        key = str(record_id)
+        if key not in proposals:
+            continue
+        chosen[key] = values or {}
+    if not chosen:
+        return plaintext, 0
+
+    out, changed = [], 0
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        record_id = parts[0] if parts else ""
+        if not record_id.isdigit() or record_id not in chosen:
+            out.append(line)
+            continue
+        while len(parts) < 8:
+            parts.append("")
+        proposal = proposals[record_id]
+        changes = proposal["changes"]
+        touched = False
+
+        if "label" in changes:
+            label = str(chosen[record_id].get("label") or "").strip()
+            if not label:
+                label = changes["label"]["to"]
+            label = " ".join(label.split())[:TIDY_LABEL_MAX]
+            if label and label != parts[1]:
+                original = parts[1]
+                parts[1] = label
+                parts[4] = _tidy_note_with_original(parts[4], original)
+                touched = True
+
+        if "folder" in changes:
+            _, fields = decode_attrs(parts[7])
+            parts[7] = encode_attrs(changes["folder"]["to"], fields)
+            touched = True
+
+        out.append("\t".join(parts))
+        if touched:
+            changed += 1
+    return "\n".join(out) + ("\n" if (plaintext or "").endswith("\n") else ""), changed
+
+
 # ----- split recovery --------------------------------------------------------
 # The recovery file and its private key have to survive together: lose the PEM
 # and the capsule is inert, leak the PEM while somebody holds the capsule and

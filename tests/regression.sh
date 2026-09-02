@@ -3759,6 +3759,279 @@ fi
 # change rewraps a small envelope and leaves the vault ciphertext, every .bak,
 # every history snapshot and the recovery file untouched. These assert that
 # property directly rather than only that the new password works.
+printf 'Web regression: tidying imported entries\n'
+# A vault filled by importing from a phone carries its folders as text in the
+# notes and its service names as Android package identifiers. Tidying that is a
+# bulk edit of hundreds of records, so the whole feature is a review: the guess
+# is offered, the person corrects it, and only then is anything written.
+tidy_root="$TEST_ROOT/tidy"
+mkdir -p "$tidy_root"
+tidy_vault="$tidy_root/vault.gpg"
+tidy_plain="$tidy_root/plain"
+tidy_master="Tidy-Regression-Master-1"
+{
+	printf 'META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n' "$TEST_RECOVERY_B64"
+	printf '1\tcom.duolingo\tu@example.invalid\tpw1\tfolder: Main Database\t2025-01-01T00:00:00Z\t\t\n'
+	printf '2\tcom.lsdroid.cerberuss\tu@example.invalid\tpw2\tanti theft folder: Security\t2025-01-02T00:00:00Z\t\t\n'
+	printf '3\tid.go.kemensos.pelaporan\tu@example.invalid\tpw3\tfolder: Government url: https://k.invalid\t2025-01-03T00:00:00Z\t\t\n'
+	printf '4\tMy Bank\tu@example.invalid\tpw4\tnothing special\t2025-01-04T00:00:00Z\t\t\n'
+} > "$tidy_plain"
+printf '%s' "$tidy_master" | core write "$tidy_vault" "$tidy_plain" >/dev/null
+
+TIDY_PORT="$((WEB_PORT + 4))"
+SPM_VAULT_PATH="$tidy_vault" SPM_WEB_BIND=127.0.0.1 \
+	SPM_WEB_PORT="$TIDY_PORT" SPM_VERSION="$VERSION" \
+	SPM_WEB_RP_ID=localhost python3 "$web_script" \
+	>"$TEST_ROOT/tidy-web.log" 2>&1 &
+TIDY_PID="$!"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+	curl -fsS -o /dev/null "http://127.0.0.1:$TIDY_PORT/login" 2>/dev/null && break
+	sleep 0.25
+done
+curl -fsS -c "$tidy_root/cookies" -o /dev/null -X POST \
+	--data-urlencode "password=$tidy_master" "http://127.0.0.1:$TIDY_PORT/login"
+
+# The offer only appears when there is something to accept.
+curl -fsS -b "$tidy_root/cookies" -o "$tidy_root/passwords.html" \
+	"http://127.0.0.1:$TIDY_PORT/passwords"
+grep -q 'data-i18n="tidy.review"' "$tidy_root/passwords.html" || {
+	printf 'the passwords page does not offer to tidy a vault that needs it\n' >&2
+	kill "$TIDY_PID" 2>/dev/null; exit 1
+}
+
+curl -fsS -b "$tidy_root/cookies" -o "$tidy_root/review.html" \
+	"http://127.0.0.1:$TIDY_PORT/tidy"
+tidy_csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' \
+	"$tidy_root/review.html" | head -n1)"
+[ -n "$tidy_csrf" ] || {
+	printf 'the review form carries no CSRF token\n' >&2
+	kill "$TIDY_PID" 2>/dev/null; exit 1
+}
+# Reviewing must change nothing. It is the whole promise of the page.
+[ "$(sha256sum "$tidy_vault" | awk '{print $1}')" = \
+  "$(printf '%s' "$tidy_master" | core read "$tidy_vault" /dev/null >/dev/null; \
+     sha256sum "$tidy_vault" | awk '{print $1}')" ] || true
+tidy_before="$(sha256sum "$tidy_vault" | awk '{print $1}')"
+grep -q 'name="label_1" value="Duolingo"' "$tidy_root/review.html" || {
+	printf 'the review does not propose a name for a package identifier\n' >&2
+	kill "$TIDY_PID" 2>/dev/null; exit 1
+}
+grep -q 'value="Cerberuss"' "$tidy_root/review.html" || {
+	printf 'the review does not propose a name for a three-part identifier\n' >&2
+	kill "$TIDY_PID" 2>/dev/null; exit 1
+}
+grep -q '>Main Database<' "$tidy_root/review.html" || {
+	printf 'the review does not show the folder read from the notes\n' >&2
+	kill "$TIDY_PID" 2>/dev/null; exit 1
+}
+grep -q 'com.duolingo' "$tidy_root/review.html" || {
+	printf 'the review does not show the identifier being replaced\n' >&2
+	kill "$TIDY_PID" 2>/dev/null; exit 1
+}
+[ "$(sha256sum "$tidy_vault" | awk '{print $1}')" = "$tidy_before" ] || {
+	printf 'merely reviewing changed the vault\n' >&2
+	kill "$TIDY_PID" 2>/dev/null; exit 1
+}
+
+# Apply: one name corrected by hand, one accepted, one row left out entirely.
+curl -fsS -b "$tidy_root/cookies" -o /dev/null \
+	-w '%{http_code} %{redirect_url}\n' -X POST \
+	--data-urlencode "csrf=$tidy_csrf" \
+	--data-urlencode "pick=1" --data-urlencode "label_1=Duolingo" \
+	--data-urlencode "pick=2" --data-urlencode "label_2=Cerberus" \
+	"http://127.0.0.1:$TIDY_PORT/tidy" > "$tidy_root/apply.txt"
+grep -q '^303 .*tidied=2' "$tidy_root/apply.txt" || {
+	printf 'applying did not report two tidied entries: %s\n' \
+		"$(cat "$tidy_root/apply.txt")" >&2
+	kill "$TIDY_PID" 2>/dev/null; exit 1
+}
+
+printf '%s' "$tidy_master" | core read "$tidy_vault" "$tidy_root/after" >/dev/null
+kill "$TIDY_PID" 2>/dev/null || true
+wait "$TIDY_PID" 2>/dev/null || true
+
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$tidy_root/after" "$ROOT_DIR" <<'TIDYPY'
+import importlib.util, sys
+after, root = sys.argv[1], sys.argv[2]
+spec = importlib.util.spec_from_file_location(
+    "spm_core", root + "/src/spm_core.py")
+core = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(core)
+
+rows = {}
+for line in open(after, encoding="utf-8"):
+    parts = line.rstrip("\n").split("\t")
+    if parts and parts[0].isdigit():
+        rows[parts[0]] = parts
+
+if rows["1"][1] != "Duolingo":
+    sys.exit("record 1 was not renamed: %r" % rows["1"][1])
+# The corrected name, not the guess. This is the point of reviewing.
+if rows["2"][1] != "Cerberus":
+    sys.exit("the reviewed name was ignored; got %r" % rows["2"][1])
+if rows["3"][1] != "id.go.kemensos.pelaporan":
+    sys.exit("an unselected record was changed: %r" % rows["3"][1])
+if rows["4"][1] != "My Bank":
+    sys.exit("a record with nothing to tidy was changed: %r" % rows["4"][1])
+
+for record_id, folder in (("1", "Main Database"), ("2", "Security")):
+    got, _ = core.decode_attrs(rows[record_id][7] if len(rows[record_id]) > 7 else "")
+    if got != folder:
+        sys.exit("record %s went to folder %r, expected %r"
+                 % (record_id, got, folder))
+if core.decode_attrs(rows["3"][7] if len(rows["3"]) > 7 else "")[0]:
+    sys.exit("an unselected record was filed anyway")
+
+# The identifier the phone knew is kept, exactly once.
+for record_id, original in (("1", "com.duolingo"), ("2", "com.lsdroid.cerberuss")):
+    if original not in rows[record_id][4]:
+        sys.exit("record %s lost its original identifier" % record_id)
+    if rows[record_id][4].count(original) != 1:
+        sys.exit("record %s records its identifier twice" % record_id)
+
+# Every row still has its columns: a name arrives from a form, and a tab in one
+# would split the record and orphan everything after it.
+for record_id, parts in rows.items():
+    if len(parts) != 8:
+        sys.exit("record %s has %d columns" % (record_id, len(parts)))
+print("  tidy: reviewed, corrected, applied to 2 of 4; folders filed, "
+      "identifiers kept, unselected rows untouched")
+TIDYPY
+
+printf 'Sync regression: pluggable transports\n'
+# The conflict model, the digest verification, the archive-before-replace and
+# the refusal to install a remote that will not decrypt all live above the
+# transport, so they are identical for every one of them. That is the claim
+# this block exists to check -- per transport, not just for a directory.
+sync_root="$TEST_ROOT/transports"
+mkdir -p "$sync_root"
+sync_vault_sha="$(sha256sum "$PASSWORD_VAULT" | awk '{print $1}')"
+
+# A remote shell that drops the host and runs the command here. As far as
+# rsync's wire protocol is concerned this is a remote host, which is what makes
+# the transport testable without a server or an ssh key.
+sync_shim="$sync_root/remote-shell.sh"
+printf '#!/bin/sh\nshift\nexec "$@"\n' > "$sync_shim"
+chmod +x "$sync_shim"
+
+sync_available=""
+for sync_t in $(sync_transport_names); do
+	case "$sync_t" in
+		dir) sync_available="$sync_available dir" ;;
+		rsync)
+			if command -v rsync >/dev/null 2>&1; then
+				sync_available="$sync_available rsync"
+			fi
+			;;
+		rclone)
+			if command -v rclone >/dev/null 2>&1; then
+				sync_available="$sync_available rclone"
+			fi
+			;;
+	esac
+done
+
+sync_target_for() {
+	case "$1" in
+		dir) printf '%s' "$sync_root/dir" ;;
+		rsync) printf 'fakehost:%s' "$sync_root/rsync" ;;
+		rclone) printf ':local:%s' "$sync_root/rclone" ;;
+	esac
+}
+
+for sync_t in $sync_available; do
+	mkdir -p "$sync_root/$sync_t"
+	sync_target="$(sync_target_for "$sync_t")"
+	(
+		export SPM_SYNC_RSYNC_SHELL="$sync_shim"
+		export SPM_CONFIG_DIR="$sync_root/cfg-$sync_t"
+		mkdir -p "$SPM_CONFIG_DIR"
+
+		cmd_sync push "$sync_target" chan --transport "$sync_t" >/dev/null
+
+		# Only ciphertext leaves, and it leaves unaltered. A transport that
+		# transcoded or truncated would be caught here rather than at the
+		# moment somebody needed the remote copy.
+		pushed="$sync_root/pushed-$sync_t"
+		sync_transport_fetch "$sync_t" "$sync_target/spm-chan.gpg" "$pushed" \
+			|| { printf '%s: the pushed vault could not be read back\n' "$sync_t" >&2; exit 1; }
+		[ "$(sha256sum "$pushed" | awk '{print $1}')" = "$sync_vault_sha" ] || {
+			printf '%s: the pushed vault is not the local vault\n' "$sync_t" >&2; exit 1
+		}
+		if grep -q 'META_RECOVERY_PUBKEY' "$pushed"; then
+			printf '%s: the vault crossed the transport as plaintext\n' "$sync_t" >&2
+			exit 1
+		fi
+
+		cmd_sync status "$sync_target" chan --transport "$sync_t" \
+			> "$sync_root/status-$sync_t"
+		grep -q "^transport=$sync_t$" "$sync_root/status-$sync_t" || {
+			printf '%s: status does not name its transport\n' "$sync_t" >&2; exit 1
+		}
+		grep -q "^remote=$sync_vault_sha$" "$sync_root/status-$sync_t" || {
+			printf '%s: status reports the wrong remote digest\n' "$sync_t" >&2; exit 1
+		}
+
+		# Both sides move after the base was recorded. Every transport must
+		# refuse rather than pick a winner.
+		sync_conflict="$sync_root/conflict-$sync_t"
+		sync_transport_fetch "$sync_t" "$sync_target/spm-chan.gpg" "$sync_conflict" >/dev/null
+		printf 'drift' >> "$sync_conflict"
+		sync_transport_publish "$sync_t" "$sync_target/spm-chan.gpg" "$sync_conflict"
+		sync_local_backup="$sync_root/local-$sync_t"
+		cp "$PASSWORD_VAULT" "$sync_local_backup"
+		printf 'drift' >> "$PASSWORD_VAULT"
+		if ( cmd_sync push "$sync_target" chan --transport "$sync_t" ) >/dev/null 2>&1; then
+			printf '%s: a divergent push was allowed\n' "$sync_t" >&2; exit 1
+		fi
+		if ( cmd_sync pull "$sync_target" chan --transport "$sync_t" ) >/dev/null 2>&1; then
+			printf '%s: a divergent pull was allowed\n' "$sync_t" >&2; exit 1
+		fi
+		cp "$sync_local_backup" "$PASSWORD_VAULT"
+
+		# A remote that does not decrypt must never reach the vault file, and
+		# the local copy must survive the refusal untouched.
+		mkdir -p "$sync_root/$sync_t-bad"
+		sync_bad_target="$(sync_target_for "$sync_t" | sed "s|$sync_root/$sync_t|$sync_root/$sync_t-bad|")"
+		sync_junk="$sync_root/junk-$sync_t"
+		head -c 512 /dev/urandom > "$sync_junk"
+		sync_transport_publish "$sync_t" "$sync_bad_target/spm-bad.gpg" "$sync_junk"
+		sync_before="$(sha256sum "$PASSWORD_VAULT" | awk '{print $1}')"
+		if ( SPM_SYNC_FORCE_INITIAL=1 cmd_sync pull "$sync_bad_target" bad \
+			--transport "$sync_t" ) >/dev/null 2>&1; then
+			printf '%s: an undecryptable remote was installed\n' "$sync_t" >&2; exit 1
+		fi
+		[ "$(sha256sum "$PASSWORD_VAULT" | awk '{print $1}')" = "$sync_before" ] || {
+			printf '%s: the vault was replaced by a remote that does not decrypt\n' \
+				"$sync_t" >&2
+			exit 1
+		}
+	) || exit 1
+done
+
+# Unreachable must never read as empty: that is the state in which pushing over
+# a remote nobody could contact feels safe.
+for sync_t in $sync_available; do
+	case "$sync_t" in
+		rsync) sync_dead="nosuchhost.invalid:/nowhere" ;;
+		rclone) sync_dead="nosuchremote:path" ;;
+		*) continue ;;
+	esac
+	if ( export SPM_SYNC_RSYNC_SHELL=""
+		cmd_sync status "$sync_dead" chan --transport "$sync_t" ) >/dev/null 2>&1; then
+		printf '%s: an unreachable target was reported rather than refused\n' \
+			"$sync_t" >&2
+		exit 1
+	fi
+done
+
+if ( cmd_sync status "$sync_root/dir" chan --transport carrierpigeon ) >/dev/null 2>&1; then
+	printf 'an unknown transport was accepted\n' >&2; exit 1
+fi
+
+printf '  sync: %s verified for round-trip, conflict, undecryptable remote and unreachable target\n' \
+	"$(printf '%s' "$sync_available" | sed 's/^ //' | tr ' ' ',')"
+
 printf 'Recovery regression: Shamir split recovery\n'
 # The recovery file and its private key have to survive together and stay
 # secret together. Shares replace that pair with a threshold. What has to hold:

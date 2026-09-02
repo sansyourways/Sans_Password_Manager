@@ -330,6 +330,22 @@
     "page.passphrases.desc": "API-Token und Wiederherstellungsphrasen.",
     "page.authenticators.desc": "Zeitbasierte Einmalpasswort-Codes.",
     "page.backups.desc": "Einmalige Wiederherstellungscodes für deine Konten.",
-    "lang.unreviewed": "Diese Übersetzung wurde nicht von einer sprechenden Person geprüft. Wo eine Warnung zählt, ist der englische Text maßgeblich."
+    "lang.unreviewed": "Diese Übersetzung wurde nicht von einer sprechenden Person geprüft. Wo eine Warnung zählt, ist der englische Text maßgeblich.",
+    "tidy.title": "Importierte Einträge aufräumen",
+    "tidy.desc": "Noch wurde nichts geändert. Prüfe jede Zeile, korrigiere den Namen falls nötig, und wende es an.",
+    "tidy.of": "von",
+    "tidy.entries_affected": "Einträge würden sich ändern",
+    "tidy.include": "Anwenden",
+    "tidy.name": "Name",
+    "tidy.folder": "Ordner",
+    "tidy.apply": "Auf Auswahl anwenden",
+    "tidy.cancel": "Abbrechen",
+    "tidy.note": "Die ursprüngliche Kennung bleibt in den Notizen des Eintrags. Der Tresor wird archiviert, bevor irgendetwas geschrieben wird.",
+    "tidy.none_t": "Nichts aufzuräumen",
+    "tidy.none_d": "Kein Eintrag trägt eine Ordnermarkierung in seinen Notizen oder einen Namen in Paketform.",
+    "tidy.offer_t": "Einige Einträge lassen sich aufräumen",
+    "tidy.offer_d": "Einträge tragen einen Ordner in ihren Notizen oder einen Namen in Paketform. Prüfe die Änderungen, bevor etwas geschrieben wird.",
+    "tidy.review": "Änderungen prüfen",
+    "tidy.done": "Einträge aufgeräumt."
   }
 }

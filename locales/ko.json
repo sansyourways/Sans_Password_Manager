@@ -330,6 +330,22 @@
     "page.passphrases.desc": "API 토큰과 복구 문구입니다.",
     "page.authenticators.desc": "시간 기반 일회용 비밀번호입니다.",
     "page.backups.desc": "여러 계정을 위한 일회용 복구 코드입니다.",
-    "lang.unreviewed": "이 번역은 사용자의 검수를 거치지 않았습니다. 경고가 중요한 대목에서는 영어 원문이 기준입니다."
+    "lang.unreviewed": "이 번역은 사용자의 검수를 거치지 않았습니다. 경고가 중요한 대목에서는 영어 원문이 기준입니다.",
+    "tidy.title": "가져온 항목 정리",
+    "tidy.desc": "아직 아무것도 바뀌지 않았습니다. 각 줄을 확인하고 필요하면 이름을 고친 뒤 적용하세요.",
+    "tidy.of": "/",
+    "tidy.entries_affected": "개 항목이 바뀝니다",
+    "tidy.include": "적용",
+    "tidy.name": "이름",
+    "tidy.folder": "폴더",
+    "tidy.apply": "선택한 항목에 적용",
+    "tidy.cancel": "취소",
+    "tidy.note": "원래 식별자는 항목의 메모에 남습니다. 무언가 기록되기 전에 금고가 먼저 보관됩니다.",
+    "tidy.none_t": "정리할 것이 없습니다",
+    "tidy.none_d": "메모에 폴더 표시가 있는 항목도, 패키지 이름 형식의 항목도 없습니다.",
+    "tidy.offer_t": "정리할 수 있는 항목이 있습니다",
+    "tidy.offer_d": "개 항목이 메모에 폴더를 담고 있거나 패키지 이름 형식입니다. 기록하기 전에 변경 내용을 확인하세요.",
+    "tidy.review": "변경 내용 확인",
+    "tidy.done": "개 항목을 정리했습니다."
   }
 }

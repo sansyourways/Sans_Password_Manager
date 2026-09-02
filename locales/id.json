@@ -330,6 +330,22 @@
     "page.passphrases.desc": "Token API dan frasa pemulihan.",
     "page.authenticators.desc": "Kode sekali pakai berbasis waktu.",
     "page.backups.desc": "Kode pemulihan sekali pakai untuk akun Anda.",
-    "lang.unreviewed": "Terjemahan ini belum ditinjau oleh penutur aslinya. Jika sebuah peringatan penting, teks bahasa Inggris yang berlaku."
+    "lang.unreviewed": "Terjemahan ini belum ditinjau oleh penutur aslinya. Jika sebuah peringatan penting, teks bahasa Inggris yang berlaku.",
+    "tidy.title": "Rapikan entri hasil impor",
+    "tidy.desc": "Belum ada yang diubah. Periksa setiap baris, perbaiki namanya bila perlu, lalu terapkan.",
+    "tidy.of": "dari",
+    "tidy.entries_affected": "entri akan berubah",
+    "tidy.include": "Terapkan",
+    "tidy.name": "Nama",
+    "tidy.folder": "Folder",
+    "tidy.apply": "Terapkan pada yang dipilih",
+    "tidy.cancel": "Batal",
+    "tidy.note": "Identitas aslinya tetap disimpan di catatan entri. Vault diarsipkan sebelum apa pun ditulis.",
+    "tidy.none_t": "Tidak ada yang perlu dirapikan",
+    "tidy.none_d": "Tidak ada entri yang memuat penanda folder di catatannya atau bernama gaya paket aplikasi.",
+    "tidy.offer_t": "Ada entri yang bisa dirapikan",
+    "tidy.offer_d": "entri memuat folder di catatannya atau bernama gaya paket aplikasi. Periksa perubahannya sebelum apa pun ditulis.",
+    "tidy.review": "Periksa perubahan",
+    "tidy.done": "entri dirapikan."
   }
 }

@@ -330,6 +330,22 @@
     "page.passphrases.desc": "API tokens and recovery phrases.",
     "page.authenticators.desc": "Time-based one-time password codes.",
     "page.backups.desc": "One-time recovery codes for your accounts.",
-    "lang.unreviewed": "This translation has not been reviewed by a speaker. Where a warning matters, the English text is authoritative."
+    "lang.unreviewed": "This translation has not been reviewed by a speaker. Where a warning matters, the English text is authoritative.",
+    "tidy.title": "Tidy imported entries",
+    "tidy.desc": "Nothing has been changed yet. Review every row, correct any name, and apply.",
+    "tidy.of": "of",
+    "tidy.entries_affected": "entries would change",
+    "tidy.include": "Apply",
+    "tidy.name": "Name",
+    "tidy.folder": "Folder",
+    "tidy.apply": "Apply to selected",
+    "tidy.cancel": "Cancel",
+    "tidy.note": "The original identifier is kept in the entry's notes. The vault is archived before anything is written.",
+    "tidy.none_t": "Nothing to tidy",
+    "tidy.none_d": "No entry has a folder marker in its notes or a package-style name.",
+    "tidy.offer_t": "Some entries can be tidied",
+    "tidy.offer_d": "entries carry a folder in their notes or a package-style name. Review the changes before anything is written.",
+    "tidy.review": "Review changes",
+    "tidy.done": "entries tidied."
   }
 }

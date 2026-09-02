@@ -20,7 +20,7 @@ interface for automation and administration, plus an optional local web
 interface for everyday browsing. There are no accounts, hosted APIs,
 subscriptions, analytics, or vendor-operated recovery services.
 
-Current release: **3.14.0**
+Current release: **3.15.0**
 
 ---
 
@@ -46,6 +46,8 @@ Current release: **3.14.0**
   - [Doctor / Health Check](#doctor--health-check)
 - [Languages](#languages)
 - [Split recovery](#split-recovery)
+- [Sync transports](#sync-transports)
+- [Tidying imported entries](#tidying-imported-entries)
 - [Password Strength Coaching](#password-strength-coaching)
 - [Clipboard Auto-Clean](#clipboard-auto-clean)
 - [Portable & Save Bundles](#portable--save-bundles)
@@ -82,7 +84,7 @@ attacker with root access.
 
 ## Product tour
 
-Every web capture below was taken from the 3.14.0 release candidate in Chromium
+Every web capture below was taken from the 3.15.0 release candidate in Chromium
 at 1440x900, against a disposable vault holding only synthetic documentation
 data. No personal vault, browser profile, real credential, or production
 hostname appears in these images. The locked-screen captures use Chromium
@@ -318,7 +320,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 3.14.0
+bash install.sh --version 3.15.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -353,7 +355,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v3.14.0.zip \
+gh attestation verify Sans_Password_Manager_v3.15.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -369,9 +371,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v3.14.0
+git checkout v3.15.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v3.14.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v3.15.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -384,7 +386,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=3.14.0
+version=3.15.0
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -401,7 +403,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.14.0/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v3.15.0/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -423,7 +425,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 3.14.0 at /home/you/.local/bin/spm
+Installed SPM 3.15.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -1213,6 +1215,111 @@ possibly a proxy log on the way to the person meant to write them down.
 
 ---
 
+## Sync transports
+
+Sync copies the encrypted vault between your own devices. There is no service
+operated by this project, and there will not be: a transport is something you
+already run.
+
+```bash
+spm sync push  ~/Dropbox/spm                                  # a directory
+spm sync pull  backup@nas.local:/vaults      --transport rsync
+spm sync status gdrive:spm                   --transport rclone
+```
+
+| Transport | Target looks like | Needs |
+| --- | --- | --- |
+| `dir` (default) | `/media/usb/spm` | nothing |
+| `rsync` | `[user@]host:/path` | `rsync`, and SSH access you already have |
+| `rclone` | `remote:path` | `rclone`, and a remote you have already configured |
+
+Set `SPM_SYNC_RSYNC_SHELL` to pass rsync a different remote shell — a
+non-default port, an identity file, a jump host:
+
+```bash
+SPM_SYNC_RSYNC_SHELL="ssh -p 2222 -i ~/.ssh/vault" spm sync push host:/vaults --transport rsync
+```
+
+### What is the same for every transport
+
+A transport answers three questions and nothing else: can I reach this target,
+put the remote object in this file, make this file the remote object. Every
+decision is taken above it and is therefore identical whichever one you use:
+
+- **Only ciphertext moves.** What is pushed is the vault file, byte for byte.
+- **Digests are measured here.** The remote copy is fetched and hashed locally.
+  A remote-side digest is a claim, not a measurement, so none is asked for.
+- **A push is read back.** If what landed is not what was sent, the base digest
+  is not updated and the push fails.
+- **A pull must decrypt first.** The fetched vault is opened with your master
+  password before the local one is touched, and the local vault is archived
+  before it is replaced.
+- **Divergence is refused, not resolved.** If both sides changed since the last
+  sync, SPM stops. It never picks a winner.
+
+### Unreachable is not empty
+
+On a filesystem, "the remote file is not there" is a fact. Over a network it can
+also mean nothing could be reached — and treating that as "no remote version
+exists" is exactly the state in which pushing over someone else's newer vault
+feels safe. Every transport therefore proves it can reach the target before any
+decision is taken, and a fetch that fails for any reason other than a definite
+absence is fatal.
+
+### Adding one
+
+One branch in each of `sync_transport_probe`, `sync_transport_fetch` and
+`sync_transport_publish`, plus a name in `sync_transport_names`. A transport is
+never asked to perform a safety check, so it cannot skip one.
+
+---
+
+## Tidying imported entries
+
+A vault filled by importing from a phone arrives in two states worth fixing in
+bulk:
+
+- its notes carry the folder the entry belonged to, as text — `folder: Main
+  Database` — because the exporting app had folders and the export format did
+  not;
+- its service names are Android package identifiers — `com.duolingo`,
+  `com.lsdroid.cerberuss`, `id.go.kemensos.pelaporan` — which are what the phone
+  knew the app by and not what its owner does.
+
+When any entry looks like this, the Passwords page offers to tidy them. The
+offer only appears when there is something to accept.
+
+### It is a review, not a rewrite
+
+Nothing is written until you say so. Every proposed name is a text box, not a
+verdict, because **no rule gets this right in general**: the last segment of
+`com.lsdroid.cerberuss` is the app, and the last segment of `com.spotify.music`
+is not. SPM proposes its best guess and you correct the ones it got wrong.
+
+The folder is shown but not editable: it is read from the entry's own notes,
+which is not a guess.
+
+Each row has a checkbox. Unticked rows are not touched.
+
+![The SPM tidy review listing two imported entries, each showing its Android
+package identifier above an editable name box and the folder read from its
+notes, with a checkbox per row and nothing yet
+applied](docs/screenshots/web-v2.13.0/33-tidy-review.png)
+
+### What applying does
+
+- Sets the entry's folder from the marker in its notes, creating the folder if
+  it is new.
+- Renames the entry to the name shown in the box.
+- Keeps the original identifier in the entry's notes, once, as
+  `app: com.duolingo`, so nothing is lost and a second run has nothing to add.
+- Archives the vault first, as every write does.
+
+Running it again proposes nothing, because a tidied entry no longer looks like
+one that needs tidying.
+
+---
+
 ## Doctor / Health Check
 
 ```bash
@@ -1395,7 +1502,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **3.14.0**
+Version: **3.15.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
@@ -1457,15 +1564,15 @@ spm attachment-list
 spm attachment-extract <id> [output]
 spm passkey-add <rp-id> <account> <credential-id> [notes]
 spm passkey-list
-spm sync status|push|pull <directory> [channel]
+spm sync status|push|pull <target> [channel] [--transport dir|rsync|rclone]
 spm emergency-create <password-id> <recipient-public.pem> <YYYY-MM-DD> [archive]
 spm emergency-open <archive> <recipient-private.pem> [output.json]
 ```
 
 Automatic backups are opportunistic: SPM checks the configured interval after
-successful vault writes. Filesystem sync stores only encrypted vault bytes and
-refuses two-sided or mismatched first-time changes instead of selecting a last
-writer. Use the same optional channel name on every device. Emergency dates
+successful vault writes. Sync stores only encrypted vault bytes and refuses
+two-sided or mismatched first-time changes instead of selecting a last
+writer. See [Sync transports](#sync-transports). Use the same optional channel name on every device. Emergency dates
 are enforced by `spm emergency-open` but remain advisory because a recipient
 holding the private key can use lower-level cryptographic tools. Passkey private
 keys remain non-exportable in the operating-system or hardware authenticator;
