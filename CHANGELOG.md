@@ -31,9 +31,11 @@ Keep-a-Changelog style format.
   rather than when the copy is needed.
 
 ### Fixed
-- Probe rsync for `--chmod` rather than assuming it. Apple still ships rsync
-  2.6.9, which rejects the flag outright, so a push from macOS failed. Where
-  the flag exists the pushed vault still lands as `0600` on the far side.
+- Use `rsync -p` over a staged `0600` copy rather than `--chmod=F600`. Apple
+  still ships rsync 2.6.9, which has `--chmod` but rejects the `F` and `D`
+  class prefixes, so a push from macOS failed with "invalid argument". `-p`
+  predates every rsync anyone still runs, and preserving the mode of a copy SPM
+  sets itself needs nothing newer.
 
 ### Security
 - Digests are measured locally over a fetched copy for every transport. A

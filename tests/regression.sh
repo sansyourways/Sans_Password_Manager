@@ -4031,6 +4031,9 @@ exec /usr/bin/env -i PATH="$SPM_REAL_PATH" rsync "$@"
 OLDRSYNC
 	chmod +x "$sync_old_bin/rsync"
 	mkdir -p "$sync_root/oldrsync"
+	cp "$PASSWORD_VAULT" "$sync_root/oldrsync/spm-chan.gpg"
+	touch -r "$PASSWORD_VAULT" "$sync_root/oldrsync/spm-chan.gpg"
+	chmod 644 "$sync_root/oldrsync/spm-chan.gpg"
 	(
 		export SPM_REAL_PATH="$PATH"
 		export PATH="$sync_old_bin:$PATH"
@@ -4045,10 +4048,12 @@ OLDRSYNC
 	[ -f "$sync_root/oldrsync/spm-chan.gpg" ] || {
 		printf 'the push against an old rsync wrote nothing\n' >&2; exit 1
 	}
-	# And where the flag does exist it is still used, or the remote copy lands
-	# with whatever mode the far side's umask happens to give it.
-	grep -q 'chmod=F600' "$ROOT_DIR/spm.sh" || {
-		printf 'the rsync transport no longer sets a mode at all\n' >&2; exit 1
+	# The mode still has to travel, or the remote copy lands with whatever the
+	# far side's umask gives it.
+	[ "$(file_mode "$sync_root/oldrsync/spm-chan.gpg")" = "600" ] || {
+		printf 'the pushed vault landed as %s, not 0600\n' \
+			"$(file_mode "$sync_root/oldrsync/spm-chan.gpg")" >&2
+		exit 1
 	}
 fi
 
