@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="4.3.0"
+VERSION="4.3.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -10333,7 +10333,7 @@ WEB_CATALOGUES = {
         "table.label": "Label",
         "table.every": "Every",
         "table.algo": "Algo",
-        "passwords.footer": "Passwords are never sent anywhere else \u2013 all crypto stays on this host with GnuPG.",
+        "passwords.footer": "Passwords are never sent anywhere else \u2013 all crypto stays on this host.",
         "section.secure_notes": "Secure Notes",
         "section.secure_notes_desc": "Encrypted notes stored inside the same vault.",
         "btn.add_note": "+ Add Note",
@@ -10530,7 +10530,7 @@ WEB_CATALOGUES = {
         "login.sub": "Unlock your encrypted vault to continue.",
         "login.master": "Master password",
         "login.unlock": "Unlock",
-        "login.note": "All decryption happens locally with GnuPG. Nothing leaves this host.",
+        "login.note": "All decryption happens on this host. Nothing leaves it.",
         "empty.vault.t": "Your vault is empty",
         "empty.vault.d": "Add your first password to get started.",
         "empty.passwords.t": "No passwords yet",
@@ -10706,7 +10706,7 @@ WEB_CATALOGUES = {
         "table.label": "\u0627\u0644\u062a\u0633\u0645\u064a\u0629",
         "table.every": "\u0643\u0644",
         "table.algo": "\u0627\u0644\u062e\u0648\u0627\u0631\u0632\u0645\u064a\u0629",
-        "passwords.footer": "\u0644\u0627 \u062a\u064f\u0631\u0633\u064e\u0644 \u0643\u0644\u0645\u0627\u062a \u0627\u0644\u0645\u0631\u0648\u0631 \u0625\u0644\u0649 \u0623\u064a \u0645\u0643\u0627\u0646 \u0622\u062e\u0631 \u2014 \u062a\u0628\u0642\u0649 \u0643\u0644 \u0639\u0645\u0644\u064a\u0627\u062a \u0627\u0644\u062a\u0639\u0645\u064a\u0629 \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0645\u0636\u064a\u0641 \u0645\u0639 GnuPG.",
+        "passwords.footer": "\u0644\u0627 \u062a\u064f\u0631\u0633\u0644 \u0643\u0644\u0645\u0627\u062a \u0627\u0644\u0645\u0631\u0648\u0631 \u0625\u0644\u0649 \u0623\u064a \u0645\u0643\u0627\u0646 \u0622\u062e\u0631 \u2013 \u064a\u0628\u0642\u0649 \u0627\u0644\u062a\u0634\u0641\u064a\u0631 \u0643\u0644\u0647 \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0645\u0636\u064a\u0641.",
         "section.secure_notes": "\u0645\u0644\u0627\u062d\u0638\u0627\u062a \u0622\u0645\u0646\u0629",
         "section.secure_notes_desc": "\u0645\u0644\u0627\u062d\u0638\u0627\u062a \u0645\u0634\u0641\u0651\u0631\u0629 \u0645\u062d\u0641\u0648\u0638\u0629 \u062f\u0627\u062e\u0644 \u0627\u0644\u062e\u0632\u0646\u0629 \u0646\u0641\u0633\u0647\u0627.",
         "btn.add_note": "+ \u0625\u0636\u0627\u0641\u0629 \u0645\u0644\u0627\u062d\u0638\u0629",
@@ -10903,7 +10903,7 @@ WEB_CATALOGUES = {
         "login.sub": "\u0627\u0641\u062a\u062d \u0642\u0641\u0644 \u062e\u0632\u0646\u062a\u0643 \u0627\u0644\u0645\u0634\u0641\u0651\u0631\u0629 \u0644\u0644\u0645\u062a\u0627\u0628\u0639\u0629.",
         "login.master": "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629",
         "login.unlock": "\u0627\u0641\u062a\u062d \u0627\u0644\u0642\u0641\u0644",
-        "login.note": "\u064a\u062c\u0631\u064a \u0641\u0643 \u0627\u0644\u062a\u0634\u0641\u064a\u0631 \u0643\u0644\u0647 \u0645\u062d\u0644\u064a\u064b\u0627 \u0628\u0627\u0633\u062a\u062e\u062f\u0627\u0645 GnuPG. \u0644\u0627 \u0634\u064a\u0621 \u064a\u063a\u0627\u062f\u0631 \u0647\u0630\u0627 \u0627\u0644\u0645\u0636\u064a\u0641.",
+        "login.note": "\u064a\u062c\u0631\u064a \u0641\u0643 \u0627\u0644\u062a\u0634\u0641\u064a\u0631 \u0643\u0644\u0647 \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0645\u0636\u064a\u0641. \u0644\u0627 \u0634\u064a\u0621 \u064a\u063a\u0627\u062f\u0631\u0647.",
         "empty.vault.t": "\u062e\u0632\u0646\u062a\u0643 \u0641\u0627\u0631\u063a\u0629",
         "empty.vault.d": "\u0623\u0636\u0641 \u0623\u0648\u0644 \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0644\u062a\u0628\u062f\u0623.",
         "empty.passwords.t": "\u0644\u0627 \u062a\u0648\u062c\u062f \u0643\u0644\u0645\u0627\u062a \u0645\u0631\u0648\u0631 \u0628\u0639\u062f",
@@ -11079,7 +11079,7 @@ WEB_CATALOGUES = {
         "table.label": "Bezeichnung",
         "table.every": "Alle",
         "table.algo": "Algo",
-        "passwords.footer": "Passw\u00f6rter werden nirgendwo anders hingeschickt \u2013 die gesamte Kryptografie bleibt mit GnuPG auf diesem Rechner.",
+        "passwords.footer": "Passw\u00f6rter werden nirgendwo hingesendet \u2013 die gesamte Kryptografie bleibt auf diesem Host.",
         "section.secure_notes": "Sichere Notizen",
         "section.secure_notes_desc": "Verschl\u00fcsselte Notizen im selben Tresor.",
         "btn.add_note": "+ Notiz hinzuf\u00fcgen",
@@ -11276,7 +11276,7 @@ WEB_CATALOGUES = {
         "login.sub": "Entsperre deinen verschl\u00fcsselten Tresor, um fortzufahren.",
         "login.master": "Hauptpasswort",
         "login.unlock": "Entsperren",
-        "login.note": "Alles Entschl\u00fcsseln geschieht lokal mit GnuPG. Nichts verl\u00e4sst diesen Rechner.",
+        "login.note": "Alles wird auf diesem Host entschl\u00fcsselt. Nichts verl\u00e4sst ihn.",
         "empty.vault.t": "Dein Tresor ist leer",
         "empty.vault.d": "F\u00fcge dein erstes Passwort hinzu, um loszulegen.",
         "empty.passwords.t": "Noch keine Passw\u00f6rter",
@@ -11452,7 +11452,7 @@ WEB_CATALOGUES = {
         "table.label": "Etiqueta",
         "table.every": "Cada",
         "table.algo": "Algoritmo",
-        "passwords.footer": "Las contrase\u00f1as nunca se env\u00edan a ning\u00fan otro sitio: toda la criptograf\u00eda se queda en este equipo con GnuPG.",
+        "passwords.footer": "Las contrase\u00f1as nunca se env\u00edan a ninguna parte: toda la criptograf\u00eda se queda en este host.",
         "section.secure_notes": "Notas seguras",
         "section.secure_notes_desc": "Notas cifradas guardadas dentro de la misma caja fuerte.",
         "btn.add_note": "+ A\u00f1adir nota",
@@ -11649,7 +11649,7 @@ WEB_CATALOGUES = {
         "login.sub": "Desbloquea tu caja fuerte cifrada para continuar.",
         "login.master": "Contrase\u00f1a maestra",
         "login.unlock": "Desbloquear",
-        "login.note": "Todo el descifrado ocurre localmente con GnuPG. Nada sale de este equipo.",
+        "login.note": "Todo el descifrado ocurre en este host. Nada sale de \u00e9l.",
         "empty.vault.t": "Tu caja fuerte est\u00e1 vac\u00eda",
         "empty.vault.d": "A\u00f1ade tu primera contrase\u00f1a para empezar.",
         "empty.passwords.t": "A\u00fan no hay contrase\u00f1as",
@@ -11825,7 +11825,7 @@ WEB_CATALOGUES = {
         "table.label": "Libell\u00e9",
         "table.every": "Toutes les",
         "table.algo": "Algo",
-        "passwords.footer": "Les mots de passe ne sont jamais envoy\u00e9s ailleurs : toute la cryptographie reste sur cet h\u00f4te, avec GnuPG.",
+        "passwords.footer": "Les mots de passe ne sont envoy\u00e9s nulle part \u2013 toute la cryptographie reste sur cet h\u00f4te.",
         "section.secure_notes": "Notes s\u00e9curis\u00e9es",
         "section.secure_notes_desc": "Notes chiffr\u00e9es conserv\u00e9es dans le m\u00eame coffre.",
         "btn.add_note": "+ Ajouter une note",
@@ -12022,7 +12022,7 @@ WEB_CATALOGUES = {
         "login.sub": "D\u00e9verrouillez votre coffre chiffr\u00e9 pour continuer.",
         "login.master": "Mot de passe ma\u00eetre",
         "login.unlock": "D\u00e9verrouiller",
-        "login.note": "Tout le d\u00e9chiffrement se fait localement avec GnuPG. Rien ne quitte cet h\u00f4te.",
+        "login.note": "Tout le d\u00e9chiffrement a lieu sur cet h\u00f4te. Rien n'en sort.",
         "empty.vault.t": "Votre coffre est vide",
         "empty.vault.d": "Ajoutez votre premier mot de passe pour commencer.",
         "empty.passwords.t": "Aucun mot de passe pour l'instant",
@@ -12198,7 +12198,7 @@ WEB_CATALOGUES = {
         "table.label": "\u0932\u0947\u092c\u0932",
         "table.every": "\u0939\u0930",
         "table.algo": "\u090f\u0932\u094d\u0917\u094b",
-        "passwords.footer": "\u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0915\u0939\u0940\u0902 \u0914\u0930 \u0928\u0939\u0940\u0902 \u092d\u0947\u091c\u0947 \u091c\u093e\u0924\u0947 \u2014 \u0938\u093e\u0930\u093e \u0915\u094d\u0930\u093f\u092a\u094d\u091f\u094b\u0917\u094d\u0930\u093e\u092b\u093c\u093f\u0915 \u0915\u093e\u092e GnuPG \u0915\u0947 \u0938\u093e\u0925 \u0907\u0938\u0940 \u0939\u094b\u0938\u094d\u091f \u092a\u0930 \u0930\u0939\u0924\u093e \u0939\u0948\u0964",
+        "passwords.footer": "\u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0915\u0939\u0940\u0902 \u0928\u0939\u0940\u0902 \u092d\u0947\u091c\u0947 \u091c\u093e\u0924\u0947 \u2013 \u0938\u093e\u0930\u0940 \u0915\u094d\u0930\u093f\u092a\u094d\u091f\u094b\u0917\u094d\u0930\u093e\u092b\u093c\u0940 \u0907\u0938\u0940 \u0939\u094b\u0938\u094d\u091f \u092a\u0930 \u0930\u0939\u0924\u0940 \u0939\u0948\u0964",
         "section.secure_notes": "\u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0928\u094b\u091f",
         "section.secure_notes_desc": "\u0909\u0938\u0940 \u0924\u093f\u091c\u094b\u0930\u0940 \u092e\u0947\u0902 \u0930\u0916\u0947 \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u0928\u094b\u091f\u0964",
         "btn.add_note": "+ \u0928\u094b\u091f \u091c\u094b\u0921\u093c\u0947\u0902",
@@ -12395,7 +12395,7 @@ WEB_CATALOGUES = {
         "login.sub": "\u091c\u093e\u0930\u0940 \u0930\u0916\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u0905\u092a\u0928\u0940 \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u0924\u093f\u091c\u094b\u0930\u0940 \u0905\u0928\u0932\u0949\u0915 \u0915\u0930\u0947\u0902\u0964",
         "login.master": "\u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921",
         "login.unlock": "\u0905\u0928\u0932\u0949\u0915 \u0915\u0930\u0947\u0902",
-        "login.note": "\u0938\u093e\u0930\u093e \u0921\u093f\u0915\u094d\u0930\u093f\u092a\u094d\u0936\u0928 GnuPG \u0915\u0947 \u0938\u093e\u0925 \u0907\u0938\u0940 \u092e\u0936\u0940\u0928 \u092a\u0930 \u0939\u094b\u0924\u093e \u0939\u0948\u0964 \u0915\u0941\u091b \u092d\u0940 \u0907\u0938 \u0939\u094b\u0938\u094d\u091f \u0938\u0947 \u092c\u093e\u0939\u0930 \u0928\u0939\u0940\u0902 \u091c\u093e\u0924\u093e\u0964",
+        "login.note": "\u0938\u093e\u0930\u093e \u0921\u093f\u0915\u094d\u0930\u093f\u092a\u094d\u0936\u0928 \u0907\u0938\u0940 \u0939\u094b\u0938\u094d\u091f \u092a\u0930 \u0939\u094b\u0924\u093e \u0939\u0948\u0964 \u0915\u0941\u091b \u092d\u0940 \u092c\u093e\u0939\u0930 \u0928\u0939\u0940\u0902 \u091c\u093e\u0924\u093e\u0964",
         "empty.vault.t": "\u0906\u092a\u0915\u0940 \u0924\u093f\u091c\u094b\u0930\u0940 \u0916\u093e\u0932\u0940 \u0939\u0948",
         "empty.vault.d": "\u0936\u0941\u0930\u0942 \u0915\u0930\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u0905\u092a\u0928\u093e \u092a\u0939\u0932\u093e \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u091c\u094b\u0921\u093c\u0947\u0902\u0964",
         "empty.passwords.t": "\u0905\u092d\u0940 \u0915\u094b\u0908 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0928\u0939\u0940\u0902",
@@ -12571,7 +12571,7 @@ WEB_CATALOGUES = {
         "table.label": "Label",
         "table.every": "Interval",
         "table.algo": "Algo",
-        "passwords.footer": "Kata sandi tidak pernah dikirim ke mana pun \u2014 seluruh kripto tetap di host ini dengan GnuPG.",
+        "passwords.footer": "Kata sandi tidak pernah dikirim ke mana pun \u2013 semua kriptografi tetap di host ini.",
         "section.secure_notes": "Catatan Aman",
         "section.secure_notes_desc": "Catatan terenkripsi di dalam brankas yang sama.",
         "btn.add_note": "+ Tambah Catatan",
@@ -12768,7 +12768,7 @@ WEB_CATALOGUES = {
         "login.sub": "Buka brankas terenkripsi Anda untuk melanjutkan.",
         "login.master": "Kata sandi utama",
         "login.unlock": "Buka",
-        "login.note": "Semua dekripsi dilakukan lokal dengan GnuPG. Tidak ada data yang keluar dari host ini.",
+        "login.note": "Semua dekripsi terjadi di host ini. Tidak ada yang keluar.",
         "empty.vault.t": "Brankas Anda kosong",
         "empty.vault.d": "Tambahkan kata sandi pertama untuk memulai.",
         "empty.passwords.t": "Belum ada kata sandi",
@@ -12944,7 +12944,7 @@ WEB_CATALOGUES = {
         "table.label": "\u30e9\u30d9\u30eb",
         "table.every": "\u5468\u671f",
         "table.algo": "\u65b9\u5f0f",
-        "passwords.footer": "\u30d1\u30b9\u30ef\u30fc\u30c9\u306f\u3069\u3053\u306b\u3082\u9001\u4fe1\u3055\u308c\u307e\u305b\u3093\u3002\u6697\u53f7\u5316\u306f\u3059\u3079\u3066\u3053\u306e\u30db\u30b9\u30c8\u4e0a\u3067\u5b8c\u7d50\u3057\u307e\u3059\u3002",
+        "passwords.footer": "\u30d1\u30b9\u30ef\u30fc\u30c9\u306f\u3069\u3053\u306b\u3082\u9001\u4fe1\u3055\u308c\u307e\u305b\u3093\u3002\u6697\u53f7\u51e6\u7406\u306f\u3059\u3079\u3066\u3053\u306e\u30db\u30b9\u30c8\u4e0a\u306b\u7559\u307e\u308a\u307e\u3059\u3002",
         "section.secure_notes": "\u30bb\u30ad\u30e5\u30a2\u30ce\u30fc\u30c8",
         "section.secure_notes_desc": "\u540c\u3058\u30dc\u30fc\u30eb\u30c8\u5185\u306b\u6697\u53f7\u5316\u3057\u3066\u4fdd\u5b58\u3055\u308c\u307e\u3059\u3002",
         "btn.add_note": "+ \u30ce\u30fc\u30c8\u8ffd\u52a0",
@@ -13141,7 +13141,7 @@ WEB_CATALOGUES = {
         "login.sub": "\u7d9a\u884c\u3059\u308b\u306b\u306f\u4fdd\u7ba1\u5eab\u306e\u30ed\u30c3\u30af\u3092\u89e3\u9664\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
         "login.master": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
         "login.unlock": "\u30ed\u30c3\u30af\u89e3\u9664",
-        "login.note": "\u5fa9\u53f7\u306f\u3059\u3079\u3066 GnuPG \u306b\u3088\u308a\u30ed\u30fc\u30ab\u30eb\u3067\u884c\u308f\u308c\u3001\u30c7\u30fc\u30bf\u304c\u30db\u30b9\u30c8\u5916\u3078\u51fa\u308b\u3053\u3068\u306f\u3042\u308a\u307e\u305b\u3093\u3002",
+        "login.note": "\u5fa9\u53f7\u306f\u3059\u3079\u3066\u3053\u306e\u30db\u30b9\u30c8\u4e0a\u3067\u884c\u308f\u308c\u307e\u3059\u3002\u5916\u90e8\u306b\u306f\u4f55\u3082\u51fa\u307e\u305b\u3093\u3002",
         "empty.vault.t": "\u4fdd\u7ba1\u5eab\u306f\u7a7a\u3067\u3059",
         "empty.vault.d": "\u6700\u521d\u306e\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u8ffd\u52a0\u3057\u3066\u59cb\u3081\u307e\u3057\u3087\u3046\u3002",
         "empty.passwords.t": "\u30d1\u30b9\u30ef\u30fc\u30c9\u304c\u3042\u308a\u307e\u305b\u3093",
@@ -13317,7 +13317,7 @@ WEB_CATALOGUES = {
         "table.label": "\uc774\ub984\ud45c",
         "table.every": "\uc8fc\uae30",
         "table.algo": "\uc54c\uace0\ub9ac\uc998",
-        "passwords.footer": "\ube44\ubc00\ubc88\ud638\ub294 \ub2e4\ub978 \uc5b4\ub514\ub85c\ub3c4 \uc804\uc1a1\ub418\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. \ubaa8\ub4e0 \uc554\ud638 \uc5f0\uc0b0\uc740 GnuPG\ub85c \uc774 \ud638\uc2a4\ud2b8 \uc548\uc5d0 \uba38\ubb34\ub985\ub2c8\ub2e4.",
+        "passwords.footer": "\ube44\ubc00\ubc88\ud638\ub294 \uc5b4\ub514\ub85c\ub3c4 \uc804\uc1a1\ub418\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4 \u2013 \ubaa8\ub4e0 \uc554\ud638 \ucc98\ub9ac\uac00 \uc774 \ud638\uc2a4\ud2b8\uc5d0 \uba38\ubb45\ub2c8\ub2e4.",
         "section.secure_notes": "\ubcf4\uc548 \uba54\ubaa8",
         "section.secure_notes_desc": "\uac19\uc740 \uae08\uace0 \uc548\uc5d0 \uc800\uc7a5\ub418\ub294 \uc554\ud638\ud654\ub41c \uba54\ubaa8\uc785\ub2c8\ub2e4.",
         "btn.add_note": "+ \uba54\ubaa8 \ucd94\uac00",
@@ -13514,7 +13514,7 @@ WEB_CATALOGUES = {
         "login.sub": "\uacc4\uc18d\ud558\ub824\uba74 \uc554\ud638\ud654\ub41c \uae08\uace0\ub97c \uc7a0\uae08 \ud574\uc81c\ud558\uc138\uc694.",
         "login.master": "\ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638",
         "login.unlock": "\uc7a0\uae08 \ud574\uc81c",
-        "login.note": "\ubaa8\ub4e0 \ubcf5\ud638\ud654\ub294 GnuPG\ub85c \ub85c\uceec\uc5d0\uc11c \uc774\ub8e8\uc5b4\uc9d1\ub2c8\ub2e4. \uc774 \ud638\uc2a4\ud2b8\ub97c \ubc97\uc5b4\ub098\ub294 \uac83\uc740 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "login.note": "\ubaa8\ub4e0 \ubcf5\ud638\ud654\ub294 \uc774 \ud638\uc2a4\ud2b8\uc5d0\uc11c \uc774\ub8e8\uc5b4\uc9d1\ub2c8\ub2e4. \ubc16\uc73c\ub85c \ub098\uac00\ub294 \uac83\uc740 \uc5c6\uc2b5\ub2c8\ub2e4.",
         "empty.vault.t": "\uae08\uace0\uac00 \ube44\uc5b4 \uc788\uc2b5\ub2c8\ub2e4",
         "empty.vault.d": "\uccab \ube44\ubc00\ubc88\ud638\ub97c \ucd94\uac00\ud574 \uc2dc\uc791\ud558\uc138\uc694.",
         "empty.passwords.t": "\uc544\uc9c1 \ube44\ubc00\ubc88\ud638\uac00 \uc5c6\uc2b5\ub2c8\ub2e4",
@@ -13690,7 +13690,7 @@ WEB_CATALOGUES = {
         "table.label": "R\u00f3tulo",
         "table.every": "A cada",
         "table.algo": "Algoritmo",
-        "passwords.footer": "As senhas nunca s\u00e3o enviadas para lugar nenhum \u2014 toda a criptografia fica neste host, com o GnuPG.",
+        "passwords.footer": "As senhas nunca s\u00e3o enviadas para lugar algum \u2013 toda a criptografia fica neste host.",
         "section.secure_notes": "Notas seguras",
         "section.secure_notes_desc": "Notas criptografadas guardadas dentro do mesmo cofre.",
         "btn.add_note": "+ Adicionar nota",
@@ -13887,7 +13887,7 @@ WEB_CATALOGUES = {
         "login.sub": "Desbloqueie seu cofre criptografado para continuar.",
         "login.master": "Senha mestra",
         "login.unlock": "Desbloquear",
-        "login.note": "Toda a descriptografia acontece localmente com o GnuPG. Nada sai deste host.",
+        "login.note": "Toda a descriptografia acontece neste host. Nada sai dele.",
         "empty.vault.t": "Seu cofre est\u00e1 vazio",
         "empty.vault.d": "Adicione sua primeira senha para come\u00e7ar.",
         "empty.passwords.t": "Nenhuma senha ainda",
@@ -14063,7 +14063,7 @@ WEB_CATALOGUES = {
         "table.label": "\u041c\u0435\u0442\u043a\u0430",
         "table.every": "\u041a\u0430\u0436\u0434\u044b\u0435",
         "table.algo": "\u0410\u043b\u0433\u043e\u0440\u0438\u0442\u043c",
-        "passwords.footer": "\u041f\u0430\u0440\u043e\u043b\u0438 \u043d\u0438\u043a\u0443\u0434\u0430 \u043d\u0435 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u044e\u0442\u0441\u044f \u2014 \u0432\u0441\u044f \u043a\u0440\u0438\u043f\u0442\u043e\u0433\u0440\u0430\u0444\u0438\u044f \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u043d\u0430 \u044d\u0442\u043e\u043c \u0445\u043e\u0441\u0442\u0435, \u0432 GnuPG.",
+        "passwords.footer": "\u041f\u0430\u0440\u043e\u043b\u0438 \u043d\u0438\u043a\u0443\u0434\u0430 \u043d\u0435 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u044e\u0442\u0441\u044f \u2014 \u0432\u0441\u044f \u043a\u0440\u0438\u043f\u0442\u043e\u0433\u0440\u0430\u0444\u0438\u044f \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u043d\u0430 \u044d\u0442\u043e\u043c \u0445\u043e\u0441\u0442\u0435.",
         "section.secure_notes": "\u0417\u0430\u0449\u0438\u0449\u0451\u043d\u043d\u044b\u0435 \u0437\u0430\u043c\u0435\u0442\u043a\u0438",
         "section.secure_notes_desc": "\u0417\u0430\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0435 \u0437\u0430\u043c\u0435\u0442\u043a\u0438 \u0432 \u0442\u043e\u043c \u0436\u0435 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435.",
         "btn.add_note": "+ \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0437\u0430\u043c\u0435\u0442\u043a\u0443",
@@ -14260,7 +14260,7 @@ WEB_CATALOGUES = {
         "login.sub": "\u0420\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u0443\u0439\u0442\u0435 \u0437\u0430\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0435 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435, \u0447\u0442\u043e\u0431\u044b \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c.",
         "login.master": "\u041c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044c",
         "login.unlock": "\u0420\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u0442\u044c",
-        "login.note": "\u0412\u0441\u0451 \u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043e\u0432\u044b\u0432\u0430\u043d\u0438\u0435 \u043f\u0440\u043e\u0438\u0441\u0445\u043e\u0434\u0438\u0442 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u043e, \u0441\u0440\u0435\u0434\u0441\u0442\u0432\u0430\u043c\u0438 GnuPG. \u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043f\u043e\u043a\u0438\u0434\u0430\u0435\u0442 \u044d\u0442\u043e\u0442 \u0445\u043e\u0441\u0442.",
+        "login.note": "\u0412\u0441\u044f \u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043e\u0432\u043a\u0430 \u043f\u0440\u043e\u0438\u0441\u0445\u043e\u0434\u0438\u0442 \u043d\u0430 \u044d\u0442\u043e\u043c \u0445\u043e\u0441\u0442\u0435. \u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043f\u043e\u043a\u0438\u0434\u0430\u0435\u0442 \u0435\u0433\u043e.",
         "empty.vault.t": "\u0412\u0430\u0448\u0435 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u043f\u0443\u0441\u0442\u043e",
         "empty.vault.d": "\u0414\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u043f\u0435\u0440\u0432\u044b\u0439 \u043f\u0430\u0440\u043e\u043b\u044c, \u0447\u0442\u043e\u0431\u044b \u043d\u0430\u0447\u0430\u0442\u044c.",
         "empty.passwords.t": "\u041f\u0430\u0440\u043e\u043b\u0435\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442",
@@ -14436,7 +14436,7 @@ WEB_CATALOGUES = {
         "table.label": "\u6807\u7b7e",
         "table.every": "\u6bcf",
         "table.algo": "\u7b97\u6cd5",
-        "passwords.footer": "\u5bc6\u7801\u7edd\u4e0d\u4f1a\u88ab\u53d1\u9001\u5230\u522b\u5904\u2014\u2014\u6240\u6709\u52a0\u5bc6\u8fd0\u7b97\u90fd\u901a\u8fc7 GnuPG \u7559\u5728\u8fd9\u53f0\u4e3b\u673a\u4e0a\u3002",
+        "passwords.footer": "\u5bc6\u7801\u4e0d\u4f1a\u88ab\u53d1\u9001\u5230\u4efb\u4f55\u5730\u65b9\u2014\u2014\u6240\u6709\u52a0\u5bc6\u8fd0\u7b97\u90fd\u7559\u5728\u672c\u673a\u3002",
         "section.secure_notes": "\u5b89\u5168\u7b14\u8bb0",
         "section.secure_notes_desc": "\u4fdd\u5b58\u5728\u540c\u4e00\u5bc6\u7801\u5e93\u4e2d\u7684\u52a0\u5bc6\u7b14\u8bb0\u3002",
         "btn.add_note": "+ \u6dfb\u52a0\u7b14\u8bb0",
@@ -14633,7 +14633,7 @@ WEB_CATALOGUES = {
         "login.sub": "\u89e3\u9501\u4f60\u7684\u52a0\u5bc6\u5bc6\u7801\u5e93\u4ee5\u7ee7\u7eed\u3002",
         "login.master": "\u4e3b\u5bc6\u7801",
         "login.unlock": "\u89e3\u9501",
-        "login.note": "\u6240\u6709\u89e3\u5bc6\u90fd\u901a\u8fc7 GnuPG \u5728\u672c\u5730\u5b8c\u6210\u3002\u6ca1\u6709\u4efb\u4f55\u5185\u5bb9\u79bb\u5f00\u8fd9\u53f0\u4e3b\u673a\u3002",
+        "login.note": "\u6240\u6709\u89e3\u5bc6\u90fd\u5728\u672c\u673a\u5b8c\u6210\uff0c\u6ca1\u6709\u4efb\u4f55\u5185\u5bb9\u79bb\u5f00\u8fd9\u53f0\u4e3b\u673a\u3002",
         "empty.vault.t": "\u4f60\u7684\u5bc6\u7801\u5e93\u662f\u7a7a\u7684",
         "empty.vault.d": "\u6dfb\u52a0\u7b2c\u4e00\u4e2a\u5bc6\u7801\u5373\u53ef\u5f00\u59cb\u3002",
         "empty.passwords.t": "\u5c1a\u65e0\u5bc6\u7801",
@@ -17388,7 +17388,7 @@ def overview_page(counts, recent):
 {recent_html}
 <div class="card" style="margin-top:var(--sp-4)">
   <div class="card-foot" style="border-top:none">
-    <span data-i18n="passwords.footer">Passwords are never sent anywhere else - all crypto stays on this host with GnuPG.</span>
+    <span data-i18n="passwords.footer">Passwords are never sent anywhere else - all crypto stays on this host.</span>
   </div>
 </div>"""
 
@@ -17935,7 +17935,7 @@ def login_page(version, message=""):
       </form>
     </div>
     <div class="card-foot">
-      <span data-i18n="login.note">All decryption happens locally with GnuPG. Nothing leaves this host.</span>
+      <span data-i18n="login.note">All decryption happens on this host. Nothing leaves it.</span>
     </div></div>
     <div style="text-align:center;margin-top:var(--sp-4)">
       <select class="select" id="lang-picker" aria-label="Language">

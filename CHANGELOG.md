@@ -7,6 +7,21 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.3.1] - 2026-09-03
+
+### Fixed
+- The login page said "All decryption happens locally with GnuPG" and the
+  password list said "all crypto stays on this host with GnuPG". Neither has
+  been true of a current vault since 4.0.0, which seals with AES-256-CTR and
+  uses gpg only to read vaults written before it. 4.0.0 corrected the same
+  claim on the overview console and missed these two, which sit on the two
+  most-seen pages.
+
+  Both are now tool-neutral — "All decryption happens on this host. Nothing
+  leaves it." Naming the cipher is what made them go stale when the backend
+  changed; the claim that actually matters is true of every vault format and
+  cannot rot the next time it changes.
+
 ## [4.3.0] - 2026-09-03
 
 ### Added
