@@ -26,10 +26,29 @@ co-owners of it. That review is a design concept, not a formal security audit.
   already used, so the two genuinely exclude each other. `mkdir` was the
   obvious answer and the wrong one: it would have needed stale-lock detection,
   and an advisory lock the kernel drops when its holder dies needs none.
-- Fault injection around restore failures, interrupted writes and concurrent
+- ~~Fault injection around restore failures, interrupted writes and concurrent
   mutations — disk-full, process killed mid-write, corrupted vault, competing
-  writers — **shipped in 3.4.0** for the write path and the lock. What remains
-  is restore and import.
+  writers.~~ **Shipped in 3.4.0** for the write path and the lock, and
+  completed in **4.0.1** for restore and import.
+
+  What the restore half found was worse than the coverage gap that prompted
+  it. `spm restore` was the one write in SPM that could not be undone: it
+  copied whatever the bundle held over the live vault with no archive, no
+  `.bak` and no check that the bundle even opened, so restoring a truncated
+  copy destroyed a working vault and reported success. It also held the
+  *bundle's* advisory lock while overwriting the destination, and consumed the
+  bundle before the recovery file was installed.
+
+  `restore`, `history-restore` and `sync pull` now share one install path in
+  the trusted core — archive, `.bak`, optional digest check, fsync, atomic
+  rename, fsync the directory — where each previously carried its own
+  `cp`/`chmod`/`mv` and none of them fsynced.
+
+  The import half was smaller and the same shape: a web import cleared the
+  reviewed rows before writing the vault, so a failed write cost the user the
+  whole upload for a failure that had nothing to do with the confirmation
+  token. Consumption moved after the write; replay, guessing and expiry are
+  refused exactly as before.
 - **Dashboard accessibility — shipped in 3.6.0.** Fifty-two issues across the
   eleven pages, found through the browser's real accessibility tree rather than
   by reading source: 22 inputs whose labels were attached to nothing, 19

@@ -1384,6 +1384,65 @@ def stamp_shares_meta(plaintext, set_id, threshold, count, minted):
     return "\n".join(rows) + ("\n" if plaintext.endswith("\n") else "")
 
 
+def install_vault_file(source, dest, archive=True, expect_sha256=""):
+    """Put `source` at `dest` durably, keeping what was there recoverable.
+
+    The shell carried three separate copies of cp-chmod-mv for this -- bundle
+    restore, history restore, sync install -- and none of them fsynced, so a
+    crash immediately after any of them could leave the new name over blocks
+    that were never written. Worse, bundle restore overwrote a live vault with
+    no archive and no .bak at all, which is the one write in SPM that could not
+    be undone.
+
+    Ordering matches write_vault: the previous generation is archived and
+    copied to .bak BEFORE the rename, because after it there is nothing left to
+    copy. Returns True when something was replaced.
+
+    `expect_sha256` is checked against the staged copy, before the rename and
+    after the bytes have been written -- so a copy that silently lost or
+    changed bytes is caught while the destination is still intact. Sync pull
+    already did this by hand; every caller gets it by asking for it.
+    """
+    dest_dir = os.path.dirname(os.path.abspath(dest)) or "."
+    dest_name = os.path.basename(dest)
+    replaced = os.path.exists(dest)
+
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix="." + dest_name + ".install.",
+                                        dir=dest_dir)
+    os.close(tmp_fd)
+    try:
+        shutil.copyfile(source, tmp_path)
+        os.chmod(tmp_path, 0o600)
+        if expect_sha256:
+            digest = hashlib.sha256()
+            with open(tmp_path, "rb") as handle:
+                for chunk in iter(lambda: handle.read(1 << 20), b""):
+                    digest.update(chunk)
+            if not hmac.compare_digest(digest.hexdigest(), expect_sha256.lower()):
+                raise VaultError(
+                    "the staged copy does not match the digest it was promised; "
+                    "%s was left untouched" % dest)
+        if replaced:
+            # .bak always, archiving only when asked. A recovery file has no
+            # history directory of its own -- archiving one would file it under
+            # a scope derived from its own path -- but it is still the only
+            # wrapper around the previous vault key, so it gets a .bak like
+            # everything else.
+            if archive:
+                archive_generation(dest)
+            shutil.copy2(dest, dest + ".bak")
+            os.chmod(dest + ".bak", 0o600)
+        _fsync_path(tmp_path)
+        os.replace(tmp_path, dest)
+        tmp_path = ""
+        os.chmod(dest, 0o600)
+        _fsync_dir(dest_dir)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    return replaced
+
+
 def install_recovery(vault_path, staged):
     target = recovery_path(vault_path)
     os.replace(staged, target)
@@ -2666,6 +2725,17 @@ def main(argv):
             sys.stdout.write(history_dir(argv[2]) + "\n")
         elif command == "archive":
             archive_generation(argv[2])
+        elif command == "install-file":
+            # stdout: "replaced" or "created", so the caller can say which.
+            # install-file <source> <dest> [--no-archive] [--sha256 <hex>]
+            options = argv[4:]
+            expect = ""
+            if "--sha256" in options:
+                expect = options[options.index("--sha256") + 1]
+            replaced = install_vault_file(
+                argv[2], argv[3], archive="--no-archive" not in options,
+                expect_sha256=expect)
+            sys.stdout.write("replaced\n" if replaced else "created\n")
         elif command == "record-history":
             # record-history <previous plainfile> <new plainfile> <out>
             # Writes <new> plus a history row for every password that changed.

@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="4.0.0"
+VERSION="4.0.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -2178,6 +2178,65 @@ def stamp_shares_meta(plaintext, set_id, threshold, count, minted):
     return "\n".join(rows) + ("\n" if plaintext.endswith("\n") else "")
 
 
+def install_vault_file(source, dest, archive=True, expect_sha256=""):
+    """Put `source` at `dest` durably, keeping what was there recoverable.
+
+    The shell carried three separate copies of cp-chmod-mv for this -- bundle
+    restore, history restore, sync install -- and none of them fsynced, so a
+    crash immediately after any of them could leave the new name over blocks
+    that were never written. Worse, bundle restore overwrote a live vault with
+    no archive and no .bak at all, which is the one write in SPM that could not
+    be undone.
+
+    Ordering matches write_vault: the previous generation is archived and
+    copied to .bak BEFORE the rename, because after it there is nothing left to
+    copy. Returns True when something was replaced.
+
+    `expect_sha256` is checked against the staged copy, before the rename and
+    after the bytes have been written -- so a copy that silently lost or
+    changed bytes is caught while the destination is still intact. Sync pull
+    already did this by hand; every caller gets it by asking for it.
+    """
+    dest_dir = os.path.dirname(os.path.abspath(dest)) or "."
+    dest_name = os.path.basename(dest)
+    replaced = os.path.exists(dest)
+
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix="." + dest_name + ".install.",
+                                        dir=dest_dir)
+    os.close(tmp_fd)
+    try:
+        shutil.copyfile(source, tmp_path)
+        os.chmod(tmp_path, 0o600)
+        if expect_sha256:
+            digest = hashlib.sha256()
+            with open(tmp_path, "rb") as handle:
+                for chunk in iter(lambda: handle.read(1 << 20), b""):
+                    digest.update(chunk)
+            if not hmac.compare_digest(digest.hexdigest(), expect_sha256.lower()):
+                raise VaultError(
+                    "the staged copy does not match the digest it was promised; "
+                    "%s was left untouched" % dest)
+        if replaced:
+            # .bak always, archiving only when asked. A recovery file has no
+            # history directory of its own -- archiving one would file it under
+            # a scope derived from its own path -- but it is still the only
+            # wrapper around the previous vault key, so it gets a .bak like
+            # everything else.
+            if archive:
+                archive_generation(dest)
+            shutil.copy2(dest, dest + ".bak")
+            os.chmod(dest + ".bak", 0o600)
+        _fsync_path(tmp_path)
+        os.replace(tmp_path, dest)
+        tmp_path = ""
+        os.chmod(dest, 0o600)
+        _fsync_dir(dest_dir)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    return replaced
+
+
 def install_recovery(vault_path, staged):
     target = recovery_path(vault_path)
     os.replace(staged, target)
@@ -3460,6 +3519,17 @@ def main(argv):
             sys.stdout.write(history_dir(argv[2]) + "\n")
         elif command == "archive":
             archive_generation(argv[2])
+        elif command == "install-file":
+            # stdout: "replaced" or "created", so the caller can say which.
+            # install-file <source> <dest> [--no-archive] [--sha256 <hex>]
+            options = argv[4:]
+            expect = ""
+            if "--sha256" in options:
+                expect = options[options.index("--sha256") + 1]
+            replaced = install_vault_file(
+                argv[2], argv[3], archive="--no-archive" not in options,
+                expect_sha256=expect)
+            sys.stdout.write("replaced\n" if replaced else "created\n")
         elif command == "record-history":
             # record-history <previous plainfile> <new plainfile> <out>
             # Writes <new> plus a history row for every password that changed.
@@ -3644,6 +3714,24 @@ vault_lock_hold_fd9() {
 		return $?
 	fi
 	python3 -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX)' 2>/dev/null
+}
+
+# Restore is the one command whose target is not VAULT_FILE, so it needs a
+# second lock on a second descriptor. Held until the process exits, which is
+# the whole of the restore.
+acquire_restore_lock() {
+	local target="$1"
+	if ! command -v flock >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
+		return 0
+	fi
+	exec 8>"${target}.lock" || die "Cannot open the destination vault lock file."
+	chmod 600 "${target}.lock" 2>/dev/null || true
+	if command -v flock >/dev/null 2>&1; then
+		flock -x 8 || die "Cannot lock the destination vault."
+	else
+		python3 -c 'import fcntl; fcntl.flock(8, fcntl.LOCK_EX)' 2>/dev/null \
+			|| die "Cannot lock the destination vault."
+	fi
 }
 
 acquire_cli_vault_lock() {
@@ -5854,7 +5942,7 @@ cmd_restore() {
 	local bundle_recovery="./spm_vault.gpg.recovery"
 	local dest_vault="$HOME/.spm_vault.gpg"
 	local dest_recovery="${dest_vault}.recovery"
-	local restore_tmp=""
+	local verify_tmp=""
 
 	if [ "$VAULT_FILE" != "$bundle_vault" ] || [ ! -f "$bundle_vault" ]; then
 		if [ "$SPM_LANG" = "id" ]; then
@@ -5881,11 +5969,38 @@ cmd_restore() {
 
 	mkdir -p "$(dirname "$dest_vault")" || die "Failed to create destination directory."
 
-	restore_tmp="$(mktemp "$(dirname "$dest_vault")/.spm_restore.XXXXXX")" || die "Failed to create restore staging file."
-	cp "$bundle_vault" "$restore_tmp" || { rm -f "$restore_tmp"; die "Failed to stage vault restore."; }
-	chmod 600 "$restore_tmp" 2>/dev/null || true
-	mv -f "$restore_tmp" "$dest_vault" || { rm -f "$restore_tmp"; die "Failed to install restored vault."; }
-	rm -f "$bundle_vault"
+	# Lock the DESTINATION. main() already holds a lock, but during restore
+	# VAULT_FILE is the bundle, so that lock protects the file being read and
+	# not the one being replaced -- a dashboard writing the real vault was free
+	# to interleave with the rename that overwrote it.
+	acquire_restore_lock "$dest_vault"
+
+	if [ -f "$dest_vault" ]; then
+		# Prove the bundle opens before replacing a vault that already does.
+		# `sync pull` refuses to install a remote it cannot decrypt; restore
+		# installed whatever the bundle held and only found out afterwards, by
+		# which point the vault it replaced was gone.
+		#
+		# Asked only when there is something to lose. Restoring onto a machine
+		# with no vault risks nothing, and demanding a password there would
+		# break staging a bundle for someone else to open later.
+		ensure_master_password_loaded
+		verify_tmp="$(make_tmp)"
+		if ! decrypt_vault_container "$bundle_vault" "$verify_tmp" "$MASTER_PW"; then
+			secure_wipe "$verify_tmp"
+			if [ "$SPM_LANG" = "id" ]; then
+				die "Vault bundle tidak terbuka dengan kata sandi itu, jadi vault yang ada dibiarkan utuh."
+			else
+				die "The bundle vault did not open with that master password, so the vault already at $dest_vault was left untouched."
+			fi
+		fi
+		secure_wipe "$verify_tmp"
+	fi
+
+	# Archived and copied to .bak before the rename, the way every other write
+	# in SPM is. This was the one write that could not be undone.
+	core install-file "$bundle_vault" "$dest_vault" >/dev/null \
+		|| die "Failed to install the restored vault."
 
 	if [ -f "$bundle_recovery" ]; then
 		if [ -f "$dest_recovery" ]; then
@@ -5902,12 +6017,23 @@ cmd_restore() {
 			esac
 		fi
 		if [ -n "$bundle_recovery" ] && [ -f "./spm_vault.gpg.recovery" ]; then
-			restore_tmp="$(mktemp "$(dirname "$dest_recovery")/.spm_recovery_restore.XXXXXX")" || die "Failed to create recovery staging file."
-			cp "./spm_vault.gpg.recovery" "$restore_tmp" || { rm -f "$restore_tmp"; die "Failed to stage recovery file."; }
-			chmod 600 "$restore_tmp" 2>/dev/null || true
-			mv -f "$restore_tmp" "$dest_recovery" || { rm -f "$restore_tmp"; die "Failed to install recovery file."; }
-			rm -f "./spm_vault.gpg.recovery"
+			# Reported, not fatal. The vault is already installed and opens
+			# under its own master password; dying here would suggest the
+			# restore failed when what is actually stale is the recovery file.
+			if ! core install-file "./spm_vault.gpg.recovery" "$dest_recovery" --no-archive >/dev/null; then
+				printf 'warning: the vault was restored but its recovery file was not; %s still names the previous vault\n' \
+					"$dest_recovery" >&2
+				bundle_recovery=""
+			fi
 		fi
+	fi
+
+	# The bundle is consumed last. Removing the vault from it first left a
+	# bundle holding a recovery file and no vault whenever anything after that
+	# point failed.
+	rm -f "$bundle_vault"
+	if [ -n "$bundle_recovery" ] && [ -f "./spm_vault.gpg.recovery" ]; then
+		rm -f "./spm_vault.gpg.recovery"
 	fi
 
 	VAULT_FILE="$dest_vault"
@@ -7749,7 +7875,7 @@ cmd_history_list() {
 }
 
 cmd_history_restore() {
-	local name="${1:-}" dir source answer staged verify_tmp
+	local name="${1:-}" dir source answer verify_tmp
 	[ -n "$name" ] || die "Usage: $0 history-restore <snapshot-name>"
 	case "$name" in */*|*\\*|.|..) die "Invalid snapshot name." ;; esac
 	dir="$(history_dir)"; source="$dir/$name"
@@ -7762,11 +7888,8 @@ cmd_history_restore() {
 	decrypt_vault_container "$source" "$verify_tmp" "$MASTER_PW" \
 		|| { secure_wipe "$verify_tmp"; die "History snapshot failed authentication or uses a different master password."; }
 	secure_wipe "$verify_tmp"
-	staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm_history_restore.XXXXXX")"
-	cp "$source" "$staged" || { rm -f "$staged"; die "Failed to stage history snapshot."; }
-	chmod 600 "$staged" 2>/dev/null || true
-	archive_current_vault
-	mv -f "$staged" "$VAULT_FILE" || { rm -f "$staged"; die "Failed to restore history snapshot."; }
+	core install-file "$source" "$VAULT_FILE" >/dev/null \
+		|| die "Failed to restore history snapshot."
 	printf 'History snapshot restored.\n'
 }
 
@@ -8056,7 +8179,7 @@ sync_usage() {
 
 cmd_sync() {
 	local action="" target="" channel="default" transport="dir"
-	local positional=0 local_sha remote_sha base_sha staged tmp fetched rc
+	local positional=0 local_sha remote_sha base_sha tmp fetched rc
 
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
@@ -8158,13 +8281,11 @@ cmd_sync() {
 			decrypt_vault_container "$fetched" "$tmp" "$MASTER_PW" \
 				|| { secure_wipe "$tmp"; die "Remote vault cannot be decrypted with this master password."; }
 			secure_wipe "$tmp"
-			archive_current_vault
-			staged="$(mktemp "$(dirname "$VAULT_FILE")/.spm-sync.XXXXXX")"
-			cp "$fetched" "$staged" || { rm -f "$staged"; die "Cannot stage sync pull."; }
-			chmod 600 "$staged"
-			[ "$(sha256sum "$staged" | awk '{print $1}')" = "$remote_sha" ] \
-				|| { secure_wipe "$staged"; die "Staged sync pull failed verification."; }
-			mv -f "$staged" "$VAULT_FILE"
+			# One install path for every command that replaces the vault
+			# file: archived, copied to .bak, digest-checked while the
+			# destination is still intact, fsynced, then renamed.
+			core install-file "$fetched" "$VAULT_FILE" --sha256 "$remote_sha" \
+				>/dev/null || die "Staged sync pull failed verification."
 			write_sync_state "$remote_sha"
 			printf 'Encrypted vault pulled over %s.\n' "$transport"
 			;;
@@ -18741,18 +18862,34 @@ def stash_pending_import(session, classified, stats, skipped):
 
 
 def take_pending_import(session, token):
-    """The held import, consumed. Raises if it is absent, stale or unmatched."""
+    """The held import, validated but NOT consumed.
+
+    It used to be cleared before the vault was written, on the reasoning that a
+    token which failed to match must not get a second attempt and a successful
+    one must not be replayable. Both of those still hold and are enforced
+    below. What that ordering also did, though, was throw the review away when
+    the *write* failed -- a full disk or a locked vault cost the user the whole
+    upload and review, for a failure that had nothing to do with the token.
+
+    So consumption moved to the caller, after the write returns. The two cases
+    the clearing exists for still clear here; the third one no longer does.
+    """
     pending = session.get("pending_import")
-    # Cleared whatever happens next: a token that failed to match must not get
-    # a second attempt, and a successful one must not be replayable.
-    session["pending_import"] = None
     if not pending:
         raise ValueError("Nothing to confirm. Upload the file again.")
     if time.time() - pending["at"] > PENDING_IMPORT_TTL:
+        session["pending_import"] = None
         raise ValueError("That preview expired. Upload the file again.")
     if not hmac.compare_digest(pending["token"], str(token or "")):
+        # A guess gets one attempt, not a series against a live review.
+        session["pending_import"] = None
         raise ValueError("That confirmation did not match the preview.")
     return pending["classified"]
+
+
+def consume_pending_import(session):
+    """Retire a review once its rows have actually reached the vault."""
+    session["pending_import"] = None
 
 
 def _apply_import(fmt: str, content: str, plaintext: str, export_password: str = ""):
@@ -21410,6 +21547,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     plaintext = load_vault(master, self._session_rec)
                     new_plain, stats = apply_import_rows(classified, plaintext)
                     save_vault(master, new_plain, self._session_rec)
+                    # After the write, never before: until this line the review
+                    # is still the user's only copy of what they approved.
+                    consume_pending_import(self._session_rec)
                     sys.stderr.write(f"[import] Vault successfully updated ({stats}).\n")
                     summary = ", ".join(f"{v} {k}" for k, v in stats.items() if v)
                     respond_success(f"Import complete: {summary}.")

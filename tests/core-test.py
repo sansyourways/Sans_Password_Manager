@@ -649,6 +649,111 @@ def t_fault_disk_full_while_staging():
     _no_stage_files(path, "a failed staged write")
 
 
+def _no_install_files(path, when):
+    leftovers = [n for n in _vault_dir_entries(path) if ".install." in n]
+    if leftovers:
+        raise AssertionError("%s left staging files behind: %r" % (when, leftovers))
+
+
+def t_install_file_creates_then_replaces():
+    """The install every command that replaces a vault file now goes through.
+
+    Restore, history restore and sync pull each carried their own
+    cp/chmod/mv, and only two of the three archived anything.
+    """
+    path = fresh("install")
+    source = os.path.join(os.path.dirname(path), "incoming")
+    core.write_vault(source, MASTER, sample(), core.new_vault_key())
+
+    eq(core.install_vault_file(source, path), False, "a first install replaces nothing")
+    eq(open(path, "rb").read(), open(source, "rb").read())
+    eq(oct(os.stat(path).st_mode & 0o777), "0o600", "an installed vault must be 0600")
+    assert not os.path.exists(path + ".bak"), "nothing was replaced, so nothing to back up"
+
+    first = open(path, "rb").read()
+    core.write_vault(source, MASTER, sample() + "2\tB\tc\td\te\tf\n",
+                     core.new_vault_key())
+    eq(core.install_vault_file(source, path), True, "replacing must say so")
+    eq(open(path, "rb").read(), open(source, "rb").read())
+    eq(open(path + ".bak", "rb").read(), first,
+       "the replaced vault must survive as .bak")
+    eq(oct(os.stat(path + ".bak").st_mode & 0o777), "0o600")
+    snapshots = os.listdir(core.history_dir(path))
+    assert snapshots, "the replaced generation was not archived"
+    _no_install_files(path, "a successful install")
+
+
+def t_install_file_can_skip_the_archive_but_never_the_backup():
+    """A recovery file has no history directory of its own, but it is still the
+    only wrapper around the previous vault key."""
+    path = fresh("install-noarchive")
+    dest = path + ".recovery"
+    with open(dest, "wb") as handle:
+        handle.write(b"previous recovery capsule")
+    source = os.path.join(os.path.dirname(path), "incoming.recovery")
+    with open(source, "wb") as handle:
+        handle.write(b"incoming recovery capsule")
+
+    core.install_vault_file(source, dest, archive=False)
+    eq(open(dest, "rb").read(), b"incoming recovery capsule")
+    eq(open(dest + ".bak", "rb").read(), b"previous recovery capsule",
+       "skipping the archive must not skip the backup")
+
+
+def t_install_file_refuses_a_copy_that_lost_bytes():
+    """The digest is checked while the destination is still intact.
+
+    Sync pull did this by hand and the other two install paths did not, so a
+    transport that truncated a vault was caught in one place out of three.
+    """
+    path = fresh("install-digest")
+    source = os.path.join(os.path.dirname(path), "incoming")
+    core.write_vault(path, MASTER, sample(), core.new_vault_key())
+    core.write_vault(source, MASTER, sample() + "2\tB\tc\td\te\tf\n",
+                     core.new_vault_key())
+    before = open(path, "rb").read()
+
+    raises(core.VaultError,
+           lambda: core.install_vault_file(source, path, expect_sha256="00" * 32),
+           "a digest that does not match must refuse")
+    eq(open(path, "rb").read(), before, "the destination changed despite a refusal")
+    assert not os.path.exists(path + ".bak"), \
+        "a refused install must not leave a .bak of a vault it did not replace"
+    _no_install_files(path, "a refused install")
+
+    real = hashlib.sha256(open(source, "rb").read()).hexdigest()
+    core.install_vault_file(source, path, expect_sha256=real.upper())
+    eq(open(path, "rb").read(), open(source, "rb").read(),
+       "the digest check must accept the digest it was given, in either case")
+
+
+def t_install_file_survives_a_full_disk():
+    path = fresh("install-enospc")
+    source = os.path.join(os.path.dirname(path), "incoming")
+    core.write_vault(path, MASTER, sample(), core.new_vault_key())
+    core.write_vault(source, MASTER, sample() + "2\tB\tc\td\te\tf\n",
+                     core.new_vault_key())
+    before = open(path, "rb").read()
+
+    real_copyfile = shutil.copyfile
+
+    def full_disk(src, dst, *args, **kwargs):
+        if ".install." in str(dst):
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_copyfile(src, dst, *args, **kwargs)
+
+    shutil.copyfile = full_disk
+    try:
+        raises(OSError, lambda: core.install_vault_file(source, path),
+               "a full disk must not be swallowed")
+    finally:
+        shutil.copyfile = real_copyfile
+
+    eq(open(path, "rb").read(), before, "the destination changed despite a failed copy")
+    assert core.read_vault(path, MASTER)[0]
+    _no_install_files(path, "a failed install")
+
+
 def t_fault_encryption_failure_leaves_nothing_behind():
     """A refusal from the cipher must leave neither a changed vault nor a
     stage file."""

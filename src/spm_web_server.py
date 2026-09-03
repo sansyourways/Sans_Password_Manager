@@ -9008,18 +9008,34 @@ def stash_pending_import(session, classified, stats, skipped):
 
 
 def take_pending_import(session, token):
-    """The held import, consumed. Raises if it is absent, stale or unmatched."""
+    """The held import, validated but NOT consumed.
+
+    It used to be cleared before the vault was written, on the reasoning that a
+    token which failed to match must not get a second attempt and a successful
+    one must not be replayable. Both of those still hold and are enforced
+    below. What that ordering also did, though, was throw the review away when
+    the *write* failed -- a full disk or a locked vault cost the user the whole
+    upload and review, for a failure that had nothing to do with the token.
+
+    So consumption moved to the caller, after the write returns. The two cases
+    the clearing exists for still clear here; the third one no longer does.
+    """
     pending = session.get("pending_import")
-    # Cleared whatever happens next: a token that failed to match must not get
-    # a second attempt, and a successful one must not be replayable.
-    session["pending_import"] = None
     if not pending:
         raise ValueError("Nothing to confirm. Upload the file again.")
     if time.time() - pending["at"] > PENDING_IMPORT_TTL:
+        session["pending_import"] = None
         raise ValueError("That preview expired. Upload the file again.")
     if not hmac.compare_digest(pending["token"], str(token or "")):
+        # A guess gets one attempt, not a series against a live review.
+        session["pending_import"] = None
         raise ValueError("That confirmation did not match the preview.")
     return pending["classified"]
+
+
+def consume_pending_import(session):
+    """Retire a review once its rows have actually reached the vault."""
+    session["pending_import"] = None
 
 
 def _apply_import(fmt: str, content: str, plaintext: str, export_password: str = ""):
@@ -11677,6 +11693,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     plaintext = load_vault(master, self._session_rec)
                     new_plain, stats = apply_import_rows(classified, plaintext)
                     save_vault(master, new_plain, self._session_rec)
+                    # After the write, never before: until this line the review
+                    # is still the user's only copy of what they approved.
+                    consume_pending_import(self._session_rec)
                     sys.stderr.write(f"[import] Vault successfully updated ({stats}).\n")
                     summary = ", ".join(f"{v} {k}" for k, v in stats.items() if v)
                     respond_success(f"Import complete: {summary}.")

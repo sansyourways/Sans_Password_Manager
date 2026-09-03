@@ -4619,5 +4619,206 @@ vk_new_legacy_vault() {
 
 printf '  vault key stability, migration ordering and recovery verified\n'
 
+printf 'Import regression: a review outlives a failed write\n'
+# The reviewed rows were cleared before the vault was written, so a full disk
+# or a locked vault cost the user the entire upload and review -- for a failure
+# that had nothing to do with the confirmation token. Replay and guessing are
+# still refused; only the write-failure case changed.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" SPM_VAULT_PATH="$PASSWORD_VAULT" \
+	XDG_CONFIG_HOME="$TEST_ROOT/config" python3 - "$web_script" <<'IMPORTPY'
+import importlib.util, sys, time
+
+spec = importlib.util.spec_from_file_location("spm_web_import", sys.argv[1])
+web = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(web)
+
+rows = [("password", ["1", "Example", "user", "secret", "", "", ""])]
+session = {}
+token = web.stash_pending_import(session, rows, {"passwords": 1}, [])
+
+# A write that fails leaves the review confirmable again.
+if web.take_pending_import(session, token) != rows:
+    sys.exit("the review did not survive validation")
+if web.take_pending_import(session, token) != rows:
+    sys.exit("a failed write threw the review away")
+
+# A wrong token still gets exactly one attempt.
+try:
+    web.take_pending_import(session, "0" * 32)
+except ValueError:
+    pass
+else:
+    sys.exit("a mismatched token was accepted")
+try:
+    web.take_pending_import(session, token)
+except ValueError:
+    pass
+else:
+    sys.exit("a review survived a guess at its token")
+
+# A completed import is not replayable.
+session = {}
+token = web.stash_pending_import(session, rows, {"passwords": 1}, [])
+web.take_pending_import(session, token)
+web.consume_pending_import(session)
+try:
+    web.take_pending_import(session, token)
+except ValueError:
+    pass
+else:
+    sys.exit("a consumed review was replayable")
+
+# And an expired one is gone whatever happens.
+session = {}
+token = web.stash_pending_import(session, rows, {"passwords": 1}, [])
+session["pending_import"]["at"] = time.time() - web.PENDING_IMPORT_TTL - 1
+try:
+    web.take_pending_import(session, token)
+except ValueError:
+    pass
+else:
+    sys.exit("an expired review was still confirmable")
+if session["pending_import"] is not None:
+    sys.exit("an expired review was left in the session")
+print("  import: a review survives a failed write, and still refuses replay, "
+      "guessing and expiry")
+IMPORTPY
+
+printf 'Restore regression: replacing a vault is verified and undoable\n'
+# Bundle restore was the one write in SPM that could not be undone. It copied
+# whatever the bundle held over the live vault with no archive, no .bak and no
+# check that the bundle even opened -- so restoring a truncated USB copy
+# destroyed a working vault and produced one that opened nothing. It also held
+# the bundle's lock rather than the destination's, leaving the file it was
+# about to overwrite unprotected against a concurrent dashboard write.
+RESTORE_ROOT="$TEST_ROOT/restore"
+mkdir -p "$RESTORE_ROOT/home" "$RESTORE_ROOT/bundle" "$RESTORE_ROOT/empty-home"
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - \
+	"$ROOT_DIR/src/spm_core.py" "$RESTORE_ROOT" "$TEST_RECOVERY_B64" <<'RESTOREPY'
+import importlib.util, os, sys
+
+spec = importlib.util.spec_from_file_location("spm_core_restore", sys.argv[1])
+core = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(core)
+root, pub = sys.argv[2], sys.argv[3]
+
+def build(path, master, marker):
+    core.write_vault(path, master, (
+        "META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n"
+        "1\t%s\tuser\tsecret-%s\t-\t2025-01-01T00:00:00Z\n") % (pub, marker, marker))
+
+build(os.path.join(root, "home", ".spm_vault.gpg"), "LiveMaster-Restore!", "LIVE")
+build(os.path.join(root, "bundle", "spm_vault.gpg"), "BundleMaster-Restore!", "BUNDLE")
+RESTOREPY
+
+restore_drive() {
+	# Sourced in a subshell with HOME pointed at the destination, which is what
+	# cmd_restore reads to find the vault it replaces.
+	(
+		set -o errexit -o nounset -o pipefail
+		export HOME="$1"; shift
+		export SPM_LANG=en
+		cd "$RESTORE_ROOT/bundle"
+		VAULT_FILE="./spm_vault.gpg"
+		RECOVERY_FILE="./spm_vault.gpg.recovery"
+		MASTER_PW=""
+		cmd_restore
+	)
+}
+
+cp "$RESTORE_ROOT/bundle/spm_vault.gpg" "$RESTORE_ROOT/bundle-vault.keep"
+cp "$RESTORE_ROOT/bundle/spm_vault.gpg.recovery" "$RESTORE_ROOT/bundle-recovery.keep"
+restore_live_before="$(sha256sum "$RESTORE_ROOT/home/.spm_vault.gpg" | awk '{print $1}')"
+
+# --- a bundle that does not open must not replace one that does -------------
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - \
+	"$RESTORE_ROOT/bundle/spm_vault.gpg" <<'CORRUPTPY'
+import base64, sys
+raw = open(sys.argv[1], "rb").read()
+head, data = raw.split(b"\nDATA\n", 1)
+blob = bytearray(base64.b64decode(data))
+blob[40] ^= 1
+open(sys.argv[1], "wb").write(head + b"\nDATA\n" + base64.b64encode(bytes(blob)) + b"\n")
+CORRUPTPY
+if printf 'yes\nBundleMaster-Restore!\n' \
+	| restore_drive "$RESTORE_ROOT/home" >"$TEST_ROOT/restore-refused.txt" 2>&1; then
+	printf 'restore installed a bundle that does not open\n' >&2; exit 1
+fi
+grep -q 'left untouched' "$TEST_ROOT/restore-refused.txt" || {
+	printf 'a refused restore did not say the existing vault was kept:\n' >&2
+	sed 's/^/    /' "$TEST_ROOT/restore-refused.txt" >&2; exit 1
+}
+[ "$(sha256sum "$RESTORE_ROOT/home/.spm_vault.gpg" | awk '{print $1}')" = "$restore_live_before" ] || {
+	printf 'a refused restore still replaced the live vault\n' >&2; exit 1
+}
+[ -f "$RESTORE_ROOT/bundle/spm_vault.gpg" ] || {
+	printf 'a refused restore consumed the bundle anyway\n' >&2; exit 1
+}
+[ ! -e "$RESTORE_ROOT/home/.spm_vault.gpg.bak" ] || {
+	printf 'a refused restore left a .bak of a vault it never replaced\n' >&2; exit 1
+}
+
+# --- a good bundle replaces it, and the replaced vault stays recoverable -----
+cp "$RESTORE_ROOT/bundle-vault.keep" "$RESTORE_ROOT/bundle/spm_vault.gpg"
+restore_bundle_sha="$(sha256sum "$RESTORE_ROOT/bundle/spm_vault.gpg" | awk '{print $1}')"
+printf 'yes\nBundleMaster-Restore!\nyes\n' \
+	| restore_drive "$RESTORE_ROOT/home" >"$TEST_ROOT/restore-ok.txt" 2>&1
+[ "$(sha256sum "$RESTORE_ROOT/home/.spm_vault.gpg" | awk '{print $1}')" = "$restore_bundle_sha" ] || {
+	printf 'the bundle vault was not installed\n' >&2; exit 1
+}
+[ "$(sha256sum "$RESTORE_ROOT/home/.spm_vault.gpg.bak" | awk '{print $1}')" = "$restore_live_before" ] || {
+	printf 'the replaced vault was not kept as .bak\n' >&2; exit 1
+}
+[ -f "$RESTORE_ROOT/home/.spm_vault.gpg.recovery.bak" ] || {
+	printf 'the replaced recovery file was not kept as .bak\n' >&2; exit 1
+}
+# Asked of the core rather than guessed at: where a snapshot lands depends on
+# SPM_DATA_DIR and XDG_DATA_HOME, and a hardcoded path passes by being wrong in
+# the same direction as the bug it is meant to catch.
+restore_history="$(HOME="$RESTORE_ROOT/home" python3 "$ROOT_DIR/src/spm_core.py" \
+	history-dir "$RESTORE_ROOT/home/.spm_vault.gpg")"
+[ -n "$(find "$restore_history" -name '*.gpg' -print 2>/dev/null | head -n1)" ] || {
+	printf 'the replaced generation was not archived (looked in %s)\n' \
+		"$restore_history" >&2
+	exit 1
+}
+[ ! -f "$RESTORE_ROOT/bundle/spm_vault.gpg" ] || {
+	printf 'a completed restore left the vault in the bundle\n' >&2; exit 1
+}
+# The installed vault opens under the bundle's password, not the one it replaced.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - \
+	"$ROOT_DIR/src/spm_core.py" "$RESTORE_ROOT/home/.spm_vault.gpg" <<'OPENPY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("spm_core_open", sys.argv[1])
+core = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(core)
+text, _ = core.read_vault(sys.argv[2], "BundleMaster-Restore!")
+if "secret-BUNDLE" not in text:
+    sys.exit("the restored vault is not the one from the bundle")
+try:
+    core.read_vault(sys.argv[2], "LiveMaster-Restore!")
+except core.VaultSecretError:
+    pass
+else:
+    sys.exit("the replaced vault's password still opens what replaced it")
+OPENPY
+
+# --- with nothing at the destination, no password is demanded ---------------
+# The check exists to protect a vault that is already there. Onto an empty
+# machine it protects nothing, and demanding a password would break staging a
+# bundle for someone else to open later.
+cp "$RESTORE_ROOT/bundle-vault.keep" "$RESTORE_ROOT/bundle/spm_vault.gpg"
+cp "$RESTORE_ROOT/bundle-recovery.keep" "$RESTORE_ROOT/bundle/spm_vault.gpg.recovery"
+restore_drive "$RESTORE_ROOT/empty-home" </dev/null >"$TEST_ROOT/restore-empty.txt" 2>&1
+[ "$(sha256sum "$RESTORE_ROOT/empty-home/.spm_vault.gpg" | awk '{print $1}')" = "$restore_bundle_sha" ] || {
+	printf 'restoring onto an empty destination did not install the vault\n' >&2; exit 1
+}
+# `if`, never `... && { exit 1; }`: the latter makes the whole compound return
+# 1 on the passing path, which errexit turns into a suite abort.
+if grep -qi 'master password' "$TEST_ROOT/restore-empty.txt"; then
+	printf 'restoring onto an empty destination asked for a password\n' >&2; exit 1
+fi
+printf '  restore: a bundle that will not open is refused; the replaced vault survives as .bak and a snapshot\n'
+
 printf 'SPM regression suite passed (%s formats plus web and advanced features).\n' \
 	"$(printf '%s\n' "$formats" | awk '{ print NF }')"
