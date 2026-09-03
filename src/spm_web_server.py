@@ -8654,8 +8654,7 @@ def _export_rows(plaintext: str):
 def export_content(fmt: str, plaintext: str):
     import csv, json, html as htmlmod, io
     rows = _export_rows(plaintext)
-    fieldnames = ["type","id","label","username","secret","notes","created","extra","url",
-                  "folder","fields"]
+    fieldnames = list(core.EXPORT_FIELDNAMES)
     fmt = fmt.lower()
     if fmt == "json":
         return json.dumps(rows, ensure_ascii=False, indent=2)
@@ -8727,11 +8726,18 @@ def export_content(fmt: str, plaintext: str):
         out.append("</data>")
         return "\n".join(out)
     if fmt == "sql":
-        out=["CREATE TABLE spm_export(type TEXT,id TEXT,label TEXT,username TEXT,secret TEXT,notes TEXT,created TEXT,extra TEXT);"]
+        # Built from fieldnames rather than written out. The two drifted: the
+        # column list stopped at `extra` while every row already carried `url`,
+        # `folder` and `fields`, so each INSERT said "11 values for 8 columns"
+        # and sqlite refused the file outright. SPM's own reader parsed the
+        # tuple positionally and never noticed.
+        out=["CREATE TABLE spm_export(%s);"
+             % ",".join("%s TEXT" % name for name in fieldnames)]
         for r in rows:
             vals=[str(r.get(k,"") or "") for k in fieldnames]
             safe=[v.replace("'", "''") for v in vals]
-            out.append("INSERT INTO spm_export(type,id,label,username,secret,notes,created,extra) VALUES ('%s');" % ("','".join(safe)))
+            out.append("INSERT INTO spm_export(%s) VALUES ('%s');"
+                       % (",".join(fieldnames), "','".join(safe)))
         return "\n".join(out) + "\n"
     if fmt == "ini":
         out=[]
@@ -8810,8 +8816,15 @@ def _parse_import_rows(fmt: str, content: str):
         root=ET.fromstring(content)
         return [{child.tag: (child.text or "") for child in item} for item in root.findall("item")]
     if fmt == "sql":
-        rows=[]; fields=["type","id","label","username","secret","notes","created","extra","url"]
-        for values in re.findall(r"INSERT\s+INTO\s+spm_export\s*\([^)]*\)\s*VALUES\s*\((.*?)\)\s*;", content, re.I | re.S):
+        # Names taken from the statement, not from a list kept here: a
+        # hardcoded list is what let the exporter grow columns the reader
+        # silently mapped onto the wrong names.
+        rows=[]
+        default=list(core.EXPORT_FIELDNAMES)
+        for names, values in re.findall(
+                r"INSERT\s+INTO\s+spm_export\s*\(([^)]*)\)\s*VALUES\s*\((.*?)\)\s*;",
+                content, re.I | re.S):
+            fields=[n.strip().strip('"`[]') for n in names.split(",") if n.strip()] or default
             parsed=next(csv.reader([values], delimiter=",", quotechar="'", doublequote=True, skipinitialspace=True))
             rows.append(dict(zip(fields, parsed)))
         return rows
@@ -8827,18 +8840,11 @@ def _parse_import_rows(fmt: str, content: str):
         # StringIO, not splitlines(): csv needs the embedded newlines intact
         # to reassemble quoted multi-line fields into a single row.
         reader = csv.reader(io.StringIO(content), delimiter=delim)
+        # Mapped against the core's column order rather than a copy of it. The
+        # copy that used to live here stopped at `url`, so a headerless export
+        # lost its folder and custom fields on the way back in.
         for row in reader:
-            rows.append({
-                "type": row[0] if len(row)>0 else "",
-                "id": row[1] if len(row)>1 else "",
-                "label": row[2] if len(row)>2 else "",
-                "username": row[3] if len(row)>3 else "",
-                "secret": row[4] if len(row)>4 else "",
-                "notes": row[5] if len(row)>5 else "",
-                "created": row[6] if len(row)>6 else "",
-                "extra": row[7] if len(row)>7 else "",
-                "url": row[8] if len(row)>8 else "",
-            })
+            rows.append(core.export_row_from_values(row))
         return rows
     reader = csv.DictReader(io.StringIO(content), delimiter=delim)
     return list(reader)
@@ -9047,52 +9053,11 @@ def _apply_import(fmt: str, content: str, plaintext: str, export_password: str =
     return apply_import_rows(classified, plaintext)
 
 
-def _row_attrs_columns(column):
-    """The folder and fields columns an export carries for one record.
-
-    Exported as their own columns rather than as the stored base64 blob: an
-    export is meant to be readable, and a column of opaque base64 is neither
-    readable nor editable by whatever the user opens it with.
-    """
-    folder, fields = core.decode_attrs(column)
-    return {
-        "folder": folder,
-        "fields": jsonlib.dumps(
-            [{"name": n, "value": v} for n, v in fields],
-            separators=(",", ":"), ensure_ascii=False) if fields else "",
-    }
-
-
-def _attrs_from_row(row):
-    """The attributes column for an imported row.
-
-    Tolerant on purpose: an import is the one place rows arrive from software
-    that never heard of this format. A folder or a fields list that does not
-    parse is dropped rather than failing the import, because losing one
-    optional column is better than refusing a file of real passwords.
-    """
-    folder = str(row.get("folder", "") or "")
-    fields = []
-    raw = row.get("fields", "")
-    if isinstance(raw, list):
-        candidates = raw
-    elif isinstance(raw, str) and raw.strip():
-        try:
-            candidates = jsonlib.loads(raw)
-        except Exception:
-            candidates = []
-    else:
-        candidates = []
-    if isinstance(candidates, list):
-        for item in candidates:
-            if isinstance(item, dict):
-                name, value = item.get("name"), item.get("value")
-                if isinstance(name, str) and name.strip():
-                    fields.append((name, str(value if value is not None else "")))
-    try:
-        return core.encode_attrs(folder, fields)
-    except Exception:
-        return ""
+# Both directions moved into the trusted core in 4.1.0, so the CLI and the
+# dashboard cannot disagree about what a folder column means. These names are
+# kept as the local spelling of the same function.
+_row_attrs_columns = core.attrs_export_columns
+_attrs_from_row = core.attrs_from_export_row
 
 
 def apply_import_rows(classified, plaintext: str):

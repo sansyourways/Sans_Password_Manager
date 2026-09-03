@@ -56,10 +56,26 @@ co-owners of it. That review is a design concept, not a formal security audit.
   cells. The focus ring was the worst of them — present in the DOM at 1.15:1
   against the field it surrounded, where WCAG 1.4.11 asks 3.0:1. Now 9.7:1,
   with the suite failing if it drops again.
-- Keep import/export fixtures synchronized across every documented format.
-  Twenty of them round-trip against their own exports; the Bitwarden readers
-  added in 3.4.3 have fixtures but no round trip, because SPM does not export
-  to Bitwarden and never will.
+- ~~Keep import/export fixtures synchronized across every documented format.~~
+  **Shipped in 4.1.0.** The Bitwarden readers added in 3.4.3 still have
+  fixtures but no round trip, because SPM does not export to Bitwarden and
+  never will.
+
+  The item read as nearly done: twenty formats already round-tripped against
+  their own exports. What they round-tripped was the record *count*. Compared
+  field by field, all twenty lost the folder and the custom fields, because the
+  CLI export never wrote those columns and its import never read them -- while
+  the dashboard did both. Two surfaces, two answers about the same file.
+
+  `spm export sql` was worse: the column list named eight columns while each
+  row wrote nine, so sqlite refused every statement it produced. SPM's own
+  reader parses the tuple positionally and ignores the column list, so the
+  round trip passed -- SPM read back exactly what SPM wrote, and only SPM
+  could. The suite now loads that export with a real SQL parser.
+
+  Five places each kept their own copy of the column order and each stopped
+  somewhere different. There is now one ordered definition in the core, and the
+  exported header is asserted against it.
 
 ## Shipped integrations
 

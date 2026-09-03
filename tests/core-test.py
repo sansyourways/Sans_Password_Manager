@@ -419,6 +419,35 @@ def t_command_interface_answers_for_both_backends():
     run(["seal-info", os.path.join(ROOT, "no-such-vault")], "", expect=1)
 
 
+def t_a_file_that_was_never_encrypted_is_not_a_vault():
+    """gpg exits 0 on things it never decrypted, and the callers care.
+
+    An unencrypted OpenPGP literal-data packet is parsed and emitted as-is,
+    with a zero exit. Measured: gpg does this for about 1.1% of random
+    512-byte blobs, because byte 0 is read as a packet header. Every caller of
+    the verifying read is about to replace a live vault with the file in
+    question, so exit status alone is too weak a thing to stake that on.
+    """
+    assert core.looks_like_vault("META_VAULT_VERSION\t4\t-\t-\t-\t-\n")
+    assert core.looks_like_vault("1\tLabel\tuser\tsecret\t-\t2025-01-01T00:00:00Z\n")
+    assert core.looks_like_vault("NOTE\t1\tMemo\tYm9keQ==\t2025-01-01T00:00:00Z\t-\n")
+    assert not core.looks_like_vault("not a vault at all\n")
+    assert not core.looks_like_vault("")
+    # Generous on purpose: this rejects files that are not vaults, and must
+    # never start rejecting odd but genuine ones.
+    assert core.looks_like_vault("junk first line\nMETA_VAULT_VERSION\t4\t-\t-\t-\t-\n")
+
+    path = fresh("literal-packet")
+    payload = b"not a vault at all\n"
+    with open(path, "wb") as handle:
+        handle.write(bytes([0xAC, len(payload) + 6, ord("b"), 0, 0, 0, 0, 0]) + payload)
+    out = os.path.join(os.path.dirname(path), "plain")
+    # The plain read still succeeds -- gpg really did exit 0 -- which is
+    # exactly why the flag exists rather than the check being unconditional.
+    run(["read", path, out], MASTER)
+    run(["read", path, out, "--require-vault"], MASTER, expect=1)
+
+
 def t_command_interface_reports_refusals():
     path = fresh("cli-refuse")
     legacy_vault(path, MASTER)

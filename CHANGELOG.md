@@ -7,6 +7,54 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-09-03
+
+Closes the roadmap's last open "Now" item: import/export fixtures synchronized
+across every documented format. Checking that properly found that they were
+not.
+
+### Fixed
+- The CLI export never wrote the `folder` and `fields` columns and the CLI
+  import never read them, while the Dashboard did both. A vault exported and
+  re-imported through `spm export` / `spm import` came back with **every folder
+  and every custom field silently gone**, on all twenty formats. Exports taken
+  with 4.0.1 or earlier do not contain those columns; re-export to get them.
+- `spm export sql` produced SQL no other tool could load. The column list named
+  eight columns while each row wrote nine, so sqlite refused every statement
+  with "9 values for 8 columns". SPM's own reader parsed the tuple positionally
+  and never noticed, which is why a round trip that only SPM performed had
+  always passed. The Dashboard's SQL export had the same defect at eleven
+  values.
+- The headerless CSV readers on both surfaces mapped columns positionally
+  against a list that stopped at `url`, so a headerless export lost its folder
+  and custom fields on the way back in.
+
+### Changed
+- `EXPORT_FIELDNAMES` in the trusted core is now the single ordered definition
+  of an export's columns. Every writer and every positional reader derives from
+  it, on both surfaces — previously five places each kept their own copy and
+  each stopped at a different column.
+- `attrs_export_columns` and `attrs_from_export_row` moved from the dashboard
+  into the trusted core, so a folder column means the same thing whichever
+  surface reads the file.
+- The format round trip in the regression suite compares every field of every
+  record on all twenty formats, and loads the SQL export with sqlite rather
+  than with SPM's own reader. It previously counted records, which is why a
+  format could drop a column and still pass.
+
+### Security
+- A file that was never encrypted could satisfy the "prove it decrypts" check
+  that guards bundle restore, history restore and sync pull. gpg exits 0 on
+  inputs it never decrypted — an unencrypted OpenPGP literal-data packet is
+  parsed and emitted as-is — so exit status alone was not evidence that the
+  replacement was a vault. Those three callers now require the decrypted bytes
+  to look like a vault.
+- The same measurement explained a long-standing intermittent CI failure: the
+  sync suite published 512 random bytes as its "undecryptable" remote, and gpg
+  accepts about 1.1% of such blobs. Three transports per run made that a ~3%
+  chance of a spurious failure. The fixture is now deterministic and asserts
+  its own undecryptability before relying on it.
+
 ## [4.0.1] - 2026-09-03
 
 Fault tolerance for the two paths the roadmap still listed as uncovered:

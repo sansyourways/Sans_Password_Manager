@@ -658,6 +658,77 @@ def decode_attrs(column):
     return folder[:ATTRS_FOLDER_MAX], fields
 
 
+# The column order every export writes and every headerless or positional
+# reader maps against. One ordered definition, because the places that had
+# their own each stopped at a different column: the SQL writer named eight
+# while writing eleven, the SQL reader named nine, and the headerless CSV
+# readers stopped at `url`. None of them failed a test, because SPM was
+# reading back exactly what SPM wrote.
+EXPORT_FIELDNAMES = ("type", "id", "label", "username", "secret", "notes",
+                     "created", "extra", "url", "folder", "fields")
+
+
+def export_row_from_values(values):
+    """A row dict from a positional record, for headerless and SQL readers."""
+    return {name: (values[index] if index < len(values) else "")
+            for index, name in enumerate(EXPORT_FIELDNAMES)}
+
+
+# ----- attributes across an export -------------------------------------------
+# A folder and its custom fields cross an export as their own readable columns
+# rather than as the stored base64 blob: an export is meant to be opened in a
+# spreadsheet, and a column of opaque base64 is neither readable nor editable
+# by whatever the user opens it with.
+#
+# Both directions live here because both surfaces need them and only one of
+# them had them. Until 4.1.0 these were private to the dashboard, so a vault
+# exported and re-imported through the CLI lost every folder and every custom
+# field, on all twenty formats, silently -- which is exactly the disagreement
+# between two surfaces that a shared core exists to make impossible.
+
+def attrs_export_columns(column):
+    """The folder and fields columns an export carries for one record."""
+    folder, fields = decode_attrs(column)
+    return {
+        "folder": folder,
+        "fields": json.dumps(
+            [{"name": n, "value": v} for n, v in fields],
+            separators=(",", ":"), ensure_ascii=False) if fields else "",
+    }
+
+
+def attrs_from_export_row(row):
+    """The attributes column for an imported row.
+
+    Tolerant on purpose: an import is the one place rows arrive from software
+    that never heard of this format. A folder or a fields list that does not
+    parse is dropped rather than failing the import, because losing one
+    optional column is better than refusing a file of real passwords.
+    """
+    folder = str(row.get("folder", "") or "")
+    fields = []
+    raw = row.get("fields", "")
+    if isinstance(raw, list):
+        candidates = raw
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            candidates = json.loads(raw)
+        except Exception:
+            candidates = []
+    else:
+        candidates = []
+    if isinstance(candidates, list):
+        for item in candidates:
+            if isinstance(item, dict):
+                name, value = item.get("name"), item.get("value")
+                if isinstance(name, str) and name.strip():
+                    fields.append((name, str(value if value is not None else "")))
+    try:
+        return encode_attrs(folder, fields)
+    except Exception:
+        return ""
+
+
 def record_folders(plaintext):
     """Every folder in use, sorted, without duplicates differing only in case."""
     seen = {}
@@ -2324,6 +2395,28 @@ def scan_broken_records(plaintext):
     return broken, orphans
 
 
+def looks_like_vault(plaintext):
+    """Whether decrypted bytes are plausibly a vault rather than any old file.
+
+    "The command exited zero" is not the same as "this decrypted". gpg exits 0
+    on inputs it never decrypted at all -- an unencrypted OpenPGP literal-data
+    packet is parsed and emitted as-is -- and it does so for roughly 1.1% of
+    random 512-byte blobs, because byte 0 is read as a packet header and a few
+    tags are processed without a key. Every caller of this is about to replace
+    a live vault with the file in question, so exit status alone is too weak a
+    thing to stake that on.
+
+    Deliberately generous: any META_ row or any record line. A vault SPM wrote
+    always carries META_VAULT_VERSION, and this must not start refusing odd but
+    genuine vaults -- it exists to reject files that are not vaults at all.
+    """
+    for line in plaintext.split("\n"):
+        tag = line.split("\t", 1)[0]
+        if tag.startswith("META_") or tag in _RECORD_TAGS or tag.isdigit():
+            return True
+    return False
+
+
 def vault_counts(plaintext):
     """Record counts, duplicate password ids and empty password fields."""
     counts = {"passwords": 0, "notes": 0, "passphrases": 0,
@@ -2522,10 +2615,18 @@ def main(argv):
     command = argv[1]
     try:
         if command == "read":
-            # read <vault> <out> ; stdin: master ; stdout: vault key (may be empty)
+            # read <vault> <out> [--require-vault]
+            # stdin: master ; stdout: vault key (may be empty)
+            #
+            # --require-vault is for the callers that are about to overwrite a
+            # live vault with this file. They need "this decrypted" and not
+            # merely "the command exited zero"; see looks_like_vault.
             vault, out = argv[2], argv[3]
             (master,) = _secrets(1)
             plaintext, key = read_vault(vault, master)
+            if "--require-vault" in argv[4:] and not looks_like_vault(plaintext):
+                raise VaultError(
+                    "%s decrypted to something that is not a vault" % vault)
             write_plaintext(out, plaintext)
             sys.stdout.write(key or "")
         elif command == "write":
