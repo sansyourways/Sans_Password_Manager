@@ -1006,6 +1006,10 @@ A **Hidden** option appears beside the folder filters once anything is hidden;
 selecting it lists those entries in full. Revealing them is then a deliberate
 act, which is the point.
 
+![The SPM password list with one entry redacted: its service name and username
+replaced by dots, a dashed "hidden" chip beside its folder, and a Hidden option
+among the folder filters](docs/screenshots/web-v2.13.0/35-hidden-entries.png)
+
 ### What it is, and is not
 
 **This is protection against a glance at your screen, not access control.** The
