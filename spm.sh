@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="4.2.0"
+VERSION="4.2.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -10265,12 +10265,12 @@ WEB_CATALOGUES = {
         "register.waiting": "Waiting for the authenticator...",
         "register.failed": "Registration failed.",
         "security.sub": "What is pulling your vault score down.",
-        "security.scope": "Only password entries are scored. IDs are shown; secrets never are.",
+        "security.scope": "Only password entries are scored. Names are shown, hidden entries stay redacted, and secrets never appear.",
         "security.none": "Nothing to fix here.",
         "security.weak": "Weak passwords",
         "security.weak_d": "Shorter than 12 characters, or using fewer than three character classes.",
         "security.reused": "Reused passwords",
-        "security.reused_d": "Each row below is one group of entries sharing a password.",
+        "security.reused_d": "Each group below shares one password. Changing all but one clears the finding.",
         "security.aging": "Due for rotation",
         "security.aging_d": "Older than the rotation threshold:",
         "security.incomplete": "Missing details",
@@ -10586,6 +10586,19 @@ WEB_CATALOGUES = {
         "settings.hosts.note": "One per line or separated by commas. SPM ships no list of its own. This one is stored inside your encrypted vault, not in a settings file, because a list of sites you would rather not name is itself worth protecting. It only ever suggests \u2014 every entry keeps whichever switch you set on it.",
         "settings.hosts.apply": "Save host list",
         "settings.hosts.saved": "Host list saved.",
+        "security.entries_one": "entry",
+        "security.entries_many": "entries",
+        "security.reused_group": "entries share this password",
+        "security.act_change": "Change password",
+        "security.act_complete": "Add the details",
+        "security.act_fix": "Fix this entry",
+        "security.sightings": "sightings",
+        "security.tally_weak": "weak",
+        "security.tally_reused": "reused",
+        "security.tally_old": "aging",
+        "security.tally_incomplete": "incomplete",
+        "security.tally_malformed": "malformed",
+        "security.tally_clean": "Nothing is pulling this score down.",
     },
     "ar": {
         "nav.security": "\u0627\u0644\u0623\u0645\u0627\u0646",
@@ -10625,12 +10638,12 @@ WEB_CATALOGUES = {
         "register.waiting": "\u0628\u0627\u0646\u062a\u0638\u0627\u0631 \u0623\u062f\u0627\u0629 \u0627\u0644\u0645\u0635\u0627\u062f\u0642\u0629...",
         "register.failed": "\u062a\u0639\u0630\u0651\u0631 \u0627\u0644\u062a\u0633\u062c\u064a\u0644.",
         "security.sub": "\u0645\u0627 \u0627\u0644\u0630\u064a \u064a\u062e\u0641\u0636 \u062a\u0642\u064a\u064a\u0645 \u062e\u0632\u0646\u062a\u0643.",
-        "security.scope": "\u062a\u064f\u0642\u064a\u064e\u0651\u0645 \u0645\u062f\u062e\u0644\u0627\u062a \u0643\u0644\u0645\u0627\u062a \u0627\u0644\u0645\u0631\u0648\u0631 \u0641\u0642\u0637. \u062a\u064f\u0639\u0631\u0636 \u0627\u0644\u0645\u0639\u0631\u0651\u0641\u0627\u062a\u060c \u0648\u0644\u0627 \u062a\u064f\u0639\u0631\u0636 \u0627\u0644\u0623\u0633\u0631\u0627\u0631 \u0623\u0628\u062f\u064b\u0627.",
+        "security.scope": "\u062a\u064f\u0642\u064a\u064e\u0651\u0645 \u0645\u062f\u062e\u0644\u0627\u062a \u0643\u0644\u0645\u0627\u062a \u0627\u0644\u0645\u0631\u0648\u0631 \u0641\u0642\u0637. \u062a\u064f\u0639\u0631\u0636 \u0627\u0644\u0623\u0633\u0645\u0627\u0621\u060c \u0648\u062a\u0628\u0642\u0649 \u0627\u0644\u0645\u062f\u062e\u0644\u0627\u062a \u0627\u0644\u0645\u062e\u0641\u064a\u0629 \u0645\u062d\u062c\u0648\u0628\u0629\u060c \u0648\u0644\u0627 \u062a\u0638\u0647\u0631 \u0627\u0644\u0623\u0633\u0631\u0627\u0631 \u0623\u0628\u062f\u064b\u0627.",
         "security.none": "\u0644\u0627 \u0634\u064a\u0621 \u0647\u0646\u0627 \u064a\u062d\u062a\u0627\u062c \u0625\u0644\u0649 \u0625\u0635\u0644\u0627\u062d.",
         "security.weak": "\u0643\u0644\u0645\u0627\u062a \u0645\u0631\u0648\u0631 \u0636\u0639\u064a\u0641\u0629",
         "security.weak_d": "\u0623\u0642\u0635\u0631 \u0645\u0646 12 \u062d\u0631\u0641\u064b\u0627\u060c \u0623\u0648 \u062a\u0633\u062a\u062e\u062f\u0645 \u0623\u0642\u0644 \u0645\u0646 \u062b\u0644\u0627\u062b \u0641\u0626\u0627\u062a \u0645\u0646 \u0627\u0644\u0645\u062d\u0627\u0631\u0641.",
         "security.reused": "\u0643\u0644\u0645\u0627\u062a \u0645\u0631\u0648\u0631 \u0645\u064f\u0639\u0627\u062f \u0627\u0633\u062a\u062e\u062f\u0627\u0645\u0647\u0627",
-        "security.reused_d": "\u0643\u0644 \u0633\u0637\u0631 \u0641\u064a \u0627\u0644\u0623\u0633\u0641\u0644 \u0647\u0648 \u0645\u062c\u0645\u0648\u0639\u0629 \u0645\u0646 \u0627\u0644\u0645\u062f\u062e\u0644\u0627\u062a \u062a\u062a\u0634\u0627\u0631\u0643 \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0648\u0627\u062d\u062f\u0629.",
+        "security.reused_d": "\u0643\u0644 \u0645\u062c\u0645\u0648\u0639\u0629 \u0623\u062f\u0646\u0627\u0647 \u062a\u062a\u0634\u0627\u0631\u0643 \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0648\u0627\u062d\u062f\u0629. \u062a\u063a\u064a\u064a\u0631 \u0627\u0644\u062c\u0645\u064a\u0639 \u0639\u062f\u0627 \u0648\u0627\u062d\u062f\u0629 \u064a\u064f\u0646\u0647\u064a \u0647\u0630\u0647 \u0627\u0644\u0645\u0644\u0627\u062d\u0638\u0629.",
         "security.aging": "\u062d\u0627\u0646 \u0648\u0642\u062a \u0627\u0644\u062a\u063a\u064a\u064a\u0631",
         "security.aging_d": "\u0623\u0642\u062f\u0645 \u0645\u0646 \u0645\u062f\u0629 \u0627\u0644\u062a\u063a\u064a\u064a\u0631 \u0627\u0644\u0645\u062d\u062f\u062f\u0629:",
         "security.incomplete": "\u0628\u064a\u0627\u0646\u0627\u062a \u0646\u0627\u0642\u0635\u0629",
@@ -10946,6 +10959,19 @@ WEB_CATALOGUES = {
         "settings.hosts.note": "\u0648\u0627\u062d\u062f \u0641\u064a \u0643\u0644 \u0633\u0637\u0631 \u0623\u0648 \u0645\u0641\u0635\u0648\u0644\u0629 \u0628\u0641\u0648\u0627\u0635\u0644. \u0644\u0627 \u064a\u0623\u062a\u064a SPM \u0628\u0623\u064a \u0642\u0627\u0626\u0645\u0629 \u062e\u0627\u0635\u0629 \u0628\u0647. \u062a\u064f\u062e\u0632\u064e\u0651\u0646 \u0647\u0630\u0647 \u0627\u0644\u0642\u0627\u0626\u0645\u0629 \u062f\u0627\u062e\u0644 \u062e\u0632\u0646\u062a\u0643 \u0627\u0644\u0645\u0634\u0641\u0651\u0631\u0629 \u0644\u0627 \u0641\u064a \u0645\u0644\u0641 \u0625\u0639\u062f\u0627\u062f\u0627\u062a\u060c \u0644\u0623\u0646 \u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0645\u0648\u0627\u0642\u0639 \u0627\u0644\u062a\u064a \u062a\u0641\u0636\u0651\u0644 \u0639\u062f\u0645 \u062a\u0633\u0645\u064a\u062a\u0647\u0627 \u062a\u0633\u062a\u062d\u0642 \u0627\u0644\u062d\u0645\u0627\u064a\u0629 \u0628\u0646\u0641\u0633\u0647\u0627. \u0648\u0647\u064a \u062a\u0642\u062a\u0631\u062d \u0641\u0642\u0637 \u2014 \u0643\u0644 \u0645\u062f\u062e\u0644 \u064a\u062d\u062a\u0641\u0638 \u0628\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0630\u064a \u0636\u0628\u0637\u062a\u0647 \u0644\u0647.",
         "settings.hosts.apply": "\u0627\u062d\u0641\u0638 \u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0645\u0636\u064a\u0641\u064a\u0646",
         "settings.hosts.saved": "\u062a\u0645 \u062d\u0641\u0638 \u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0645\u0636\u064a\u0641\u064a\u0646.",
+        "security.entries_one": "\u0645\u062f\u062e\u0644",
+        "security.entries_many": "\u0645\u062f\u062e\u0644\u0627\u062a",
+        "security.reused_group": "\u0645\u062f\u062e\u0644\u0627\u062a \u062a\u062a\u0634\u0627\u0631\u0643 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0647\u0630\u0647",
+        "security.act_change": "\u063a\u064a\u0651\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631",
+        "security.act_complete": "\u0623\u0636\u0641 \u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644",
+        "security.act_fix": "\u0623\u0635\u0644\u062d \u0647\u0630\u0627 \u0627\u0644\u0645\u062f\u062e\u0644",
+        "security.sightings": "\u0638\u0647\u0648\u0631",
+        "security.tally_weak": "\u0636\u0639\u064a\u0641\u0629",
+        "security.tally_reused": "\u0645\u064f\u0639\u0627\u062f\u0629",
+        "security.tally_old": "\u0642\u062f\u064a\u0645\u0629",
+        "security.tally_incomplete": "\u0646\u0627\u0642\u0635\u0629",
+        "security.tally_malformed": "\u062a\u0627\u0644\u0641\u0629",
+        "security.tally_clean": "\u0644\u0627 \u0634\u064a\u0621 \u064a\u062e\u0641\u0636 \u0647\u0630\u0647 \u0627\u0644\u062f\u0631\u062c\u0629.",
     },
     "de": {
         "nav.security": "Sicherheit",
@@ -10985,12 +11011,12 @@ WEB_CATALOGUES = {
         "register.waiting": "Warte auf den Authentifikator...",
         "register.failed": "Registrierung fehlgeschlagen.",
         "security.sub": "Was die Bewertung deines Tresors nach unten zieht.",
-        "security.scope": "Bewertet werden nur Passworteintr\u00e4ge. IDs werden angezeigt, Geheimnisse niemals.",
+        "security.scope": "Bewertet werden nur Passworteintr\u00e4ge. Namen werden angezeigt, verborgene Eintr\u00e4ge bleiben unkenntlich, und Geheimnisse erscheinen nie.",
         "security.none": "Hier gibt es nichts zu beheben.",
         "security.weak": "Schwache Passw\u00f6rter",
         "security.weak_d": "K\u00fcrzer als 12 Zeichen oder mit weniger als drei Zeichenklassen.",
         "security.reused": "Mehrfach verwendete Passw\u00f6rter",
-        "security.reused_d": "Jede Zeile unten ist eine Gruppe von Eintr\u00e4gen, die sich ein Passwort teilen.",
+        "security.reused_d": "Jede Gruppe unten teilt sich ein Passwort. Alle bis auf eines zu \u00e4ndern behebt den Befund.",
         "security.aging": "Wechsel f\u00e4llig",
         "security.aging_d": "\u00c4lter als die Wechselfrist:",
         "security.incomplete": "Fehlende Angaben",
@@ -11306,6 +11332,19 @@ WEB_CATALOGUES = {
         "settings.hosts.note": "Einer pro Zeile oder durch Kommas getrennt. SPM bringt keine eigene Liste mit. Diese liegt in deinem verschl\u00fcsselten Tresor und nicht in einer Einstellungsdatei, denn eine Liste von Seiten, die man lieber nicht benennt, ist selbst sch\u00fctzenswert. Sie schl\u00e4gt nur vor \u2014 jeder Eintrag beh\u00e4lt den Schalter, den du gesetzt hast.",
         "settings.hosts.apply": "Hostliste speichern",
         "settings.hosts.saved": "Hostliste gespeichert.",
+        "security.entries_one": "Eintrag",
+        "security.entries_many": "Eintr\u00e4ge",
+        "security.reused_group": "Eintr\u00e4ge teilen dieses Passwort",
+        "security.act_change": "Passwort \u00e4ndern",
+        "security.act_complete": "Angaben erg\u00e4nzen",
+        "security.act_fix": "Eintrag korrigieren",
+        "security.sightings": "Fundstellen",
+        "security.tally_weak": "schwach",
+        "security.tally_reused": "wiederverwendet",
+        "security.tally_old": "veraltet",
+        "security.tally_incomplete": "unvollst\u00e4ndig",
+        "security.tally_malformed": "fehlerhaft",
+        "security.tally_clean": "Nichts dr\u00fcckt diese Bewertung.",
     },
     "es": {
         "nav.security": "Seguridad",
@@ -11345,12 +11384,12 @@ WEB_CATALOGUES = {
         "register.waiting": "Esperando al autenticador...",
         "register.failed": "El registro ha fallado.",
         "security.sub": "Lo que est\u00e1 bajando la puntuaci\u00f3n de tu caja fuerte.",
-        "security.scope": "Solo se punt\u00faan las contrase\u00f1as. Se muestran los ID; los secretos nunca.",
+        "security.scope": "Solo se punt\u00faan las entradas de contrase\u00f1a. Se muestran los nombres, las entradas ocultas siguen tachadas y los secretos no aparecen nunca.",
         "security.none": "Aqu\u00ed no hay nada que corregir.",
         "security.weak": "Contrase\u00f1as d\u00e9biles",
         "security.weak_d": "De menos de 12 caracteres, o con menos de tres tipos de car\u00e1cter.",
         "security.reused": "Contrase\u00f1as reutilizadas",
-        "security.reused_d": "Cada fila de abajo es un grupo de entradas que comparten una contrase\u00f1a.",
+        "security.reused_d": "Cada grupo comparte una contrase\u00f1a. Cambiar todas menos una resuelve el hallazgo.",
         "security.aging": "Toca renovarlas",
         "security.aging_d": "M\u00e1s antiguas que el umbral de rotaci\u00f3n:",
         "security.incomplete": "Faltan datos",
@@ -11666,6 +11705,19 @@ WEB_CATALOGUES = {
         "settings.hosts.note": "Uno por l\u00ednea o separados por comas. SPM no incluye ninguna lista propia. Esta se guarda dentro de tu b\u00f3veda cifrada y no en un archivo de configuraci\u00f3n, porque una lista de sitios que preferir\u00edas no nombrar merece protecci\u00f3n por s\u00ed misma. Solo sugiere: cada entrada conserva el interruptor que le pusiste.",
         "settings.hosts.apply": "Guardar lista de hosts",
         "settings.hosts.saved": "Lista de hosts guardada.",
+        "security.entries_one": "entrada",
+        "security.entries_many": "entradas",
+        "security.reused_group": "entradas comparten esta contrase\u00f1a",
+        "security.act_change": "Cambiar contrase\u00f1a",
+        "security.act_complete": "A\u00f1adir los datos",
+        "security.act_fix": "Corregir esta entrada",
+        "security.sightings": "apariciones",
+        "security.tally_weak": "d\u00e9biles",
+        "security.tally_reused": "reutilizadas",
+        "security.tally_old": "antiguas",
+        "security.tally_incomplete": "incompletas",
+        "security.tally_malformed": "mal formados",
+        "security.tally_clean": "Nada est\u00e1 bajando esta puntuaci\u00f3n.",
     },
     "fr": {
         "nav.security": "S\u00e9curit\u00e9",
@@ -11705,12 +11757,12 @@ WEB_CATALOGUES = {
         "register.waiting": "En attente de l'authentificateur...",
         "register.failed": "L'enregistrement a \u00e9chou\u00e9.",
         "security.sub": "Ce qui fait baisser le score de votre coffre.",
-        "security.scope": "Seuls les mots de passe sont not\u00e9s. Les identifiants de fiche sont affich\u00e9s ; jamais les secrets.",
+        "security.scope": "Seules les entr\u00e9es de mot de passe sont not\u00e9es. Les noms sont affich\u00e9s, les entr\u00e9es masqu\u00e9es restent caviard\u00e9es, et les secrets n'apparaissent jamais.",
         "security.none": "Rien \u00e0 corriger ici.",
         "security.weak": "Mots de passe faibles",
         "security.weak_d": "Moins de 12 caract\u00e8res, ou moins de trois classes de caract\u00e8res.",
         "security.reused": "Mots de passe r\u00e9utilis\u00e9s",
-        "security.reused_d": "Chaque ligne ci-dessous est un groupe de fiches partageant un mot de passe.",
+        "security.reused_d": "Chaque groupe ci-dessous partage un mot de passe. En changer toutes sauf une r\u00e9sout le constat.",
         "security.aging": "\u00c0 renouveler",
         "security.aging_d": "Plus anciens que le seuil de rotation :",
         "security.incomplete": "Informations manquantes",
@@ -12026,6 +12078,19 @@ WEB_CATALOGUES = {
         "settings.hosts.note": "Un par ligne ou s\u00e9par\u00e9s par des virgules. SPM ne fournit aucune liste. Celle-ci est stock\u00e9e dans votre coffre chiffr\u00e9 et non dans un fichier de configuration, car une liste de sites que l'on pr\u00e9f\u00e8re ne pas nommer m\u00e9rite elle-m\u00eame d'\u00eatre prot\u00e9g\u00e9e. Elle ne fait que sugg\u00e9rer : chaque entr\u00e9e garde l'interrupteur que vous lui avez donn\u00e9.",
         "settings.hosts.apply": "Enregistrer la liste",
         "settings.hosts.saved": "Liste d'h\u00f4tes enregistr\u00e9e.",
+        "security.entries_one": "entr\u00e9e",
+        "security.entries_many": "entr\u00e9es",
+        "security.reused_group": "entr\u00e9es partagent ce mot de passe",
+        "security.act_change": "Changer le mot de passe",
+        "security.act_complete": "Compl\u00e9ter les informations",
+        "security.act_fix": "Corriger cette entr\u00e9e",
+        "security.sightings": "occurrences",
+        "security.tally_weak": "faibles",
+        "security.tally_reused": "r\u00e9utilis\u00e9s",
+        "security.tally_old": "anciens",
+        "security.tally_incomplete": "incomplets",
+        "security.tally_malformed": "invalides",
+        "security.tally_clean": "Rien ne fait baisser cette note.",
     },
     "hi": {
         "nav.security": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e",
@@ -12065,12 +12130,12 @@ WEB_CATALOGUES = {
         "register.waiting": "\u092a\u094d\u0930\u092e\u093e\u0923\u0915 \u0915\u0940 \u092a\u094d\u0930\u0924\u0940\u0915\u094d\u0937\u093e \u0939\u0948...",
         "register.failed": "\u092a\u0902\u091c\u0940\u0915\u0930\u0923 \u0928\u0939\u0940\u0902 \u0939\u094b \u0938\u0915\u093e\u0964",
         "security.sub": "\u0906\u092a\u0915\u0940 \u0924\u093f\u091c\u094b\u0930\u0940 \u0915\u093e \u0938\u094d\u0915\u094b\u0930 \u0915\u093f\u0928 \u0915\u093e\u0930\u0923\u094b\u0902 \u0938\u0947 \u0928\u0940\u091a\u0947 \u0939\u0948\u0964",
-        "security.scope": "\u0915\u0947\u0935\u0932 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u094b\u0902 \u0915\u093e \u0938\u094d\u0915\u094b\u0930 \u092c\u0928\u0924\u093e \u0939\u0948\u0964 ID \u0926\u093f\u0916\u093e\u090f \u091c\u093e\u0924\u0947 \u0939\u0948\u0902; \u0917\u094b\u092a\u0928\u0940\u092f \u092e\u093e\u0928 \u0915\u092d\u0940 \u0928\u0939\u0940\u0902\u0964",
+        "security.scope": "\u0915\u0947\u0935\u0932 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u0905\u0902\u0915\u093f\u0924 \u0939\u094b\u0924\u0940 \u0939\u0948\u0902\u0964 \u0928\u093e\u092e \u0926\u093f\u0916\u093e\u090f \u091c\u093e\u0924\u0947 \u0939\u0948\u0902, \u091b\u093f\u092a\u0940 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u0922\u0915\u0940 \u0930\u0939\u0924\u0940 \u0939\u0948\u0902, \u0914\u0930 \u0930\u0939\u0938\u094d\u092f \u0915\u092d\u0940 \u0928\u0939\u0940\u0902 \u0926\u093f\u0916\u0924\u0947\u0964",
         "security.none": "\u092f\u0939\u093e\u0901 \u0920\u0940\u0915 \u0915\u0930\u0928\u0947 \u0932\u093e\u092f\u0915 \u0915\u0941\u091b \u0928\u0939\u0940\u0902 \u0939\u0948\u0964",
         "security.weak": "\u0915\u092e\u091c\u093c\u094b\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921",
         "security.weak_d": "12 \u0905\u0915\u094d\u0937\u0930\u094b\u0902 \u0938\u0947 \u091b\u094b\u091f\u0947, \u092f\u093e \u0924\u0940\u0928 \u0938\u0947 \u0915\u092e \u092a\u094d\u0930\u0915\u093e\u0930 \u0915\u0947 \u0905\u0915\u094d\u0937\u0930\u094b\u0902 \u0935\u093e\u0932\u0947\u0964",
         "security.reused": "\u0926\u094b\u0939\u0930\u093e\u090f \u0917\u090f \u092a\u093e\u0938\u0935\u0930\u094d\u0921",
-        "security.reused_d": "\u0928\u0940\u091a\u0947 \u0915\u0940 \u0939\u0930 \u092a\u0902\u0915\u094d\u0924\u093f \u0909\u0928 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u094b\u0902 \u0915\u093e \u0938\u092e\u0942\u0939 \u0939\u0948 \u091c\u094b \u090f\u0915 \u0939\u0940 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0938\u093e\u091d\u093e \u0915\u0930\u0924\u0940 \u0939\u0948\u0902\u0964",
+        "security.reused_d": "\u0928\u0940\u091a\u0947 \u0915\u093e \u0939\u0930 \u0938\u092e\u0942\u0939 \u090f\u0915 \u0939\u0940 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0938\u093e\u091d\u093e \u0915\u0930\u0924\u093e \u0939\u0948\u0964 \u090f\u0915 \u0915\u094b \u091b\u094b\u0921\u093c\u0915\u0930 \u092c\u093e\u0915\u0940 \u092c\u0926\u0932\u0928\u0947 \u0938\u0947 \u092f\u0939 \u0928\u093f\u0937\u094d\u0915\u0930\u094d\u0937 \u0939\u091f \u091c\u093e\u0924\u093e \u0939\u0948\u0964",
         "security.aging": "\u092c\u0926\u0932\u0928\u0947 \u0915\u093e \u0938\u092e\u092f",
         "security.aging_d": "\u092c\u0926\u0932\u0928\u0947 \u0915\u0940 \u0924\u092f \u0905\u0935\u0927\u093f \u0938\u0947 \u092a\u0941\u0930\u093e\u0928\u0947:",
         "security.incomplete": "\u091c\u093e\u0928\u0915\u093e\u0930\u0940 \u0905\u0927\u0942\u0930\u0940",
@@ -12386,6 +12451,19 @@ WEB_CATALOGUES = {
         "settings.hosts.note": "\u092a\u094d\u0930\u0924\u093f \u092a\u0902\u0915\u094d\u0924\u093f \u090f\u0915 \u092f\u093e \u0905\u0932\u094d\u092a\u0935\u093f\u0930\u093e\u092e \u0938\u0947 \u0905\u0932\u0917\u0964 SPM \u0905\u092a\u0928\u0940 \u0915\u094b\u0908 \u0938\u0942\u091a\u0940 \u0928\u0939\u0940\u0902 \u0926\u0947\u0924\u093e\u0964 \u092f\u0939 \u0906\u092a\u0915\u0940 \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u0935\u0949\u0932\u094d\u091f \u0915\u0947 \u092d\u0940\u0924\u0930 \u0930\u0916\u0940 \u091c\u093e\u0924\u0940 \u0939\u0948, \u0938\u0947\u091f\u093f\u0902\u0917\u094d\u0938 \u092b\u093c\u093e\u0907\u0932 \u092e\u0947\u0902 \u0928\u0939\u0940\u0902, \u0915\u094d\u092f\u094b\u0902\u0915\u093f \u091c\u093f\u0928 \u0938\u093e\u0907\u091f\u094b\u0902 \u0915\u093e \u0928\u093e\u092e \u0906\u092a \u0928\u0939\u0940\u0902 \u0932\u0947\u0928\u093e \u091a\u093e\u0939\u0924\u0947 \u0909\u0928\u0915\u0940 \u0938\u0942\u091a\u0940 \u0938\u094d\u0935\u092f\u0902 \u0938\u0941\u0930\u0915\u094d\u0937\u093e \u092f\u094b\u0917\u094d\u092f \u0939\u0948\u0964 \u092f\u0939 \u0915\u0947\u0935\u0932 \u0938\u0941\u091d\u093e\u0935 \u0926\u0947\u0924\u0940 \u0939\u0948 \u2014 \u0939\u0930 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0935\u0939\u0940 \u0938\u094d\u0935\u093f\u091a \u0930\u0916\u0924\u0940 \u0939\u0948 \u091c\u094b \u0906\u092a\u0928\u0947 \u0938\u0947\u091f \u0915\u093f\u092f\u093e\u0964",
         "settings.hosts.apply": "\u0939\u094b\u0938\u094d\u091f \u0938\u0942\u091a\u0940 \u0938\u0939\u0947\u091c\u0947\u0902",
         "settings.hosts.saved": "\u0939\u094b\u0938\u094d\u091f \u0938\u0942\u091a\u0940 \u0938\u0939\u0947\u091c\u0940 \u0917\u0908\u0964",
+        "security.entries_one": "\u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f",
+        "security.entries_many": "\u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901",
+        "security.reused_group": "\u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u092f\u0939 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0938\u093e\u091d\u093e \u0915\u0930\u0924\u0940 \u0939\u0948\u0902",
+        "security.act_change": "\u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u092c\u0926\u0932\u0947\u0902",
+        "security.act_complete": "\u0935\u093f\u0935\u0930\u0923 \u091c\u094b\u0921\u093c\u0947\u0902",
+        "security.act_fix": "\u092f\u0939 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0920\u0940\u0915 \u0915\u0930\u0947\u0902",
+        "security.sightings": "\u092c\u093e\u0930 \u092e\u093f\u0932\u093e",
+        "security.tally_weak": "\u0915\u092e\u091c\u093c\u094b\u0930",
+        "security.tally_reused": "\u0926\u094b\u0939\u0930\u093e\u090f \u0917\u090f",
+        "security.tally_old": "\u092a\u0941\u0930\u093e\u0928\u0947",
+        "security.tally_incomplete": "\u0905\u0927\u0942\u0930\u0947",
+        "security.tally_malformed": "\u0924\u094d\u0930\u0941\u091f\u093f\u092a\u0942\u0930\u094d\u0923",
+        "security.tally_clean": "\u0907\u0938 \u0938\u094d\u0915\u094b\u0930 \u0915\u094b \u0915\u0941\u091b \u092d\u0940 \u0928\u0940\u091a\u0947 \u0928\u0939\u0940\u0902 \u0932\u093e \u0930\u0939\u093e\u0964",
     },
     "id": {
         "nav.security": "Keamanan",
@@ -12425,12 +12503,12 @@ WEB_CATALOGUES = {
         "register.waiting": "Menunggu autentikator...",
         "register.failed": "Pendaftaran gagal.",
         "security.sub": "Hal yang menurunkan skor brankas Anda.",
-        "security.scope": "Hanya entry password yang dinilai. ID ditampilkan; rahasia tidak pernah.",
+        "security.scope": "Hanya entri kata sandi yang dinilai. Nama ditampilkan, entri tersembunyi tetap disamarkan, dan rahasia tidak pernah muncul.",
         "security.none": "Tidak ada yang perlu diperbaiki.",
         "security.weak": "Password lemah",
         "security.weak_d": "Kurang dari 12 karakter, atau kurang dari tiga jenis karakter.",
         "security.reused": "Password dipakai ulang",
-        "security.reused_d": "Tiap baris di bawah adalah satu grup entry dengan password sama.",
+        "security.reused_d": "Setiap grup di bawah memakai satu kata sandi yang sama. Mengubah semuanya kecuali satu menuntaskan temuan ini.",
         "security.aging": "Saatnya diganti",
         "security.aging_d": "Lebih tua dari ambang rotasi:",
         "security.incomplete": "Detail belum lengkap",
@@ -12746,6 +12824,19 @@ WEB_CATALOGUES = {
         "settings.hosts.note": "Satu per baris atau dipisah koma. SPM tidak membawa daftar apa pun. Daftar ini disimpan di dalam vault terenkripsimu, bukan di berkas pengaturan, karena daftar situs yang tidak ingin kamu sebutkan itu sendiri layak dilindungi. Ini hanya mengusulkan \u2014 setiap entri tetap memakai sakelar yang kamu atur.",
         "settings.hosts.apply": "Simpan daftar host",
         "settings.hosts.saved": "Daftar host disimpan.",
+        "security.entries_one": "entri",
+        "security.entries_many": "entri",
+        "security.reused_group": "entri memakai kata sandi ini",
+        "security.act_change": "Ubah kata sandi",
+        "security.act_complete": "Lengkapi detailnya",
+        "security.act_fix": "Perbaiki entri ini",
+        "security.sightings": "kemunculan",
+        "security.tally_weak": "lemah",
+        "security.tally_reused": "terpakai ulang",
+        "security.tally_old": "menua",
+        "security.tally_incomplete": "tak lengkap",
+        "security.tally_malformed": "rusak",
+        "security.tally_clean": "Tidak ada yang menurunkan skor ini.",
     },
     "ja": {
         "nav.security": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3",
@@ -12785,12 +12876,12 @@ WEB_CATALOGUES = {
         "register.waiting": "\u8a8d\u8a3c\u5668\u3092\u5f85\u3063\u3066\u3044\u307e\u3059...",
         "register.failed": "\u767b\u9332\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002",
         "security.sub": "\u30dc\u30fc\u30eb\u30c8\u306e\u30b9\u30b3\u30a2\u3092\u4e0b\u3052\u3066\u3044\u308b\u9805\u76ee\u3002",
-        "security.scope": "\u8a55\u4fa1\u5bfe\u8c61\u306f\u30d1\u30b9\u30ef\u30fc\u30c9\u306e\u307f\u3002ID\u306e\u307f\u8868\u793a\u3057\u3001\u30b7\u30fc\u30af\u30ec\u30c3\u30c8\u306f\u8868\u793a\u3057\u307e\u305b\u3093\u3002",
+        "security.scope": "\u63a1\u70b9\u5bfe\u8c61\u306f\u30d1\u30b9\u30ef\u30fc\u30c9\u306e\u30a8\u30f3\u30c8\u30ea\u30fc\u3060\u3051\u3067\u3059\u3002\u540d\u524d\u306f\u8868\u793a\u3055\u308c\u3001\u975e\u8868\u793a\u306e\u30a8\u30f3\u30c8\u30ea\u30fc\u306f\u4f0f\u305b\u3089\u308c\u305f\u307e\u307e\u3001\u79d8\u5bc6\u306f\u6c7a\u3057\u3066\u8868\u793a\u3055\u308c\u307e\u305b\u3093\u3002",
         "security.none": "\u4fee\u6b63\u3059\u3079\u304d\u9805\u76ee\u306f\u3042\u308a\u307e\u305b\u3093\u3002",
         "security.weak": "\u5f31\u3044\u30d1\u30b9\u30ef\u30fc\u30c9",
         "security.weak_d": "12\u6587\u5b57\u672a\u6e80\u3001\u307e\u305f\u306f\u6587\u5b57\u7a2e\u304c3\u7a2e\u985e\u672a\u6e80\u3002",
         "security.reused": "\u4f7f\u3044\u56de\u3057\u30d1\u30b9\u30ef\u30fc\u30c9",
-        "security.reused_d": "\u4ee5\u4e0b\u306e\u5404\u884c\u306f\u540c\u3058\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5171\u6709\u3059\u308b\u30b0\u30eb\u30fc\u30d7\u3067\u3059\u3002",
+        "security.reused_d": "\u4ee5\u4e0b\u306e\u5404\u30b0\u30eb\u30fc\u30d7\u306f\u540c\u3058\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5171\u6709\u3057\u3066\u3044\u307e\u3059\u30021 \u3064\u3092\u6b8b\u3057\u3066\u5909\u66f4\u3059\u308c\u3070\u89e3\u6d88\u3055\u308c\u307e\u3059\u3002",
         "security.aging": "\u66f4\u65b0\u304c\u5fc5\u8981",
         "security.aging_d": "\u30ed\u30fc\u30c6\u30fc\u30b7\u30e7\u30f3\u671f\u9650\u3092\u8d85\u904e:",
         "security.incomplete": "\u60c5\u5831\u304c\u4e0d\u8db3",
@@ -13106,6 +13197,19 @@ WEB_CATALOGUES = {
         "settings.hosts.note": "1\u884c\u306b1\u3064\u3001\u307e\u305f\u306f\u30ab\u30f3\u30de\u533a\u5207\u308a\u3067\u3002SPM \u306f\u72ec\u81ea\u306e\u4e00\u89a7\u3092\u540c\u68b1\u3057\u307e\u305b\u3093\u3002\u3053\u306e\u4e00\u89a7\u306f\u8a2d\u5b9a\u30d5\u30a1\u30a4\u30eb\u3067\u306f\u306a\u304f\u6697\u53f7\u5316\u3055\u308c\u305f\u4fdd\u7ba1\u5eab\u306e\u4e2d\u306b\u4fdd\u5b58\u3055\u308c\u307e\u3059\u3002\u540d\u524d\u3092\u51fa\u3057\u305f\u304f\u306a\u3044\u30b5\u30a4\u30c8\u306e\u4e00\u89a7\u305d\u306e\u3082\u306e\u304c\u5b88\u308b\u4fa1\u5024\u306e\u3042\u308b\u3082\u306e\u3060\u304b\u3089\u3067\u3059\u3002\u3042\u304f\u307e\u3067\u63d0\u6848\u3067\u3001\u5404\u30a8\u30f3\u30c8\u30ea\u30fc\u306f\u3042\u306a\u305f\u304c\u8a2d\u5b9a\u3057\u305f\u30b9\u30a4\u30c3\u30c1\u306e\u307e\u307e\u3067\u3059\u3002",
         "settings.hosts.apply": "\u30db\u30b9\u30c8\u4e00\u89a7\u3092\u4fdd\u5b58",
         "settings.hosts.saved": "\u30db\u30b9\u30c8\u4e00\u89a7\u3092\u4fdd\u5b58\u3057\u307e\u3057\u305f\u3002",
+        "security.entries_one": "\u4ef6",
+        "security.entries_many": "\u4ef6",
+        "security.reused_group": "\u4ef6\u304c\u3053\u306e\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5171\u6709\u3057\u3066\u3044\u307e\u3059",
+        "security.act_change": "\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5909\u66f4",
+        "security.act_complete": "\u4e0d\u8db3\u3092\u88dc\u3046",
+        "security.act_fix": "\u3053\u306e\u30a8\u30f3\u30c8\u30ea\u30fc\u3092\u4fee\u6b63",
+        "security.sightings": "\u4ef6\u306e\u51fa\u73fe",
+        "security.tally_weak": "\u4ef6 \u5f31\u3044",
+        "security.tally_reused": "\u4ef6 \u4f7f\u3044\u56de\u3057",
+        "security.tally_old": "\u4ef6 \u671f\u9650\u8d85\u904e",
+        "security.tally_incomplete": "\u4ef6 \u60c5\u5831\u4e0d\u8db3",
+        "security.tally_malformed": "\u4ef6 \u4e0d\u6b63",
+        "security.tally_clean": "\u3053\u306e\u70b9\u6570\u3092\u4e0b\u3052\u3066\u3044\u308b\u3082\u306e\u306f\u3042\u308a\u307e\u305b\u3093\u3002",
     },
     "ko": {
         "nav.security": "\ubcf4\uc548",
@@ -13145,12 +13249,12 @@ WEB_CATALOGUES = {
         "register.waiting": "\uc778\uc99d\uae30\ub97c \uae30\ub2e4\ub9ac\ub294 \uc911...",
         "register.failed": "\ub4f1\ub85d\uc5d0 \uc2e4\ud328\ud588\uc2b5\ub2c8\ub2e4.",
         "security.sub": "\uae08\uace0 \uc810\uc218\ub97c \ub5a8\uc5b4\ub728\ub9ac\uace0 \uc788\ub294 \ud56d\ubaa9\uc785\ub2c8\ub2e4.",
-        "security.scope": "\ube44\ubc00\ubc88\ud638 \ud56d\ubaa9\ub9cc \uc810\uc218\uc5d0 \ubc18\uc601\ub429\ub2c8\ub2e4. ID\ub294 \ud45c\uc2dc\ub418\uc9c0\ub9cc \ube44\ubc00 \uac12\uc740 \uc808\ub300 \ud45c\uc2dc\ub418\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
+        "security.scope": "\ube44\ubc00\ubc88\ud638 \ud56d\ubaa9\ub9cc \uc810\uc218\uc5d0 \ubc18\uc601\ub429\ub2c8\ub2e4. \uc774\ub984\uc740 \ud45c\uc2dc\ub418\uace0, \uc228\uae34 \ud56d\ubaa9\uc740 \uac00\ub824\uc9c4 \ucc44\ub85c \uc720\uc9c0\ub418\uba70, \ube44\ubc00\uc740 \uc808\ub300 \ub098\ud0c0\ub098\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
         "security.none": "\uc5ec\uae30\uc5d0\ub294 \uace0\uce60 \uac83\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.",
         "security.weak": "\ucde8\uc57d\ud55c \ube44\ubc00\ubc88\ud638",
         "security.weak_d": "12\uc790 \ubbf8\ub9cc\uc774\uac70\ub098, \uc0ac\uc6a9\ud55c \ubb38\uc790 \uc885\ub958\uac00 \uc138 \uac00\uc9c0 \ubbf8\ub9cc\uc785\ub2c8\ub2e4.",
         "security.reused": "\uc7ac\uc0ac\uc6a9\ub41c \ube44\ubc00\ubc88\ud638",
-        "security.reused_d": "\uc544\ub798 \uac01 \ud589\uc740 \uac19\uc740 \ube44\ubc00\ubc88\ud638\ub97c \ud568\uaed8 \uc4f0\ub294 \ud56d\ubaa9 \ubb36\uc74c\uc785\ub2c8\ub2e4.",
+        "security.reused_d": "\uc544\ub798 \uac01 \uadf8\ub8f9\uc740 \uac19\uc740 \ube44\ubc00\ubc88\ud638\ub97c \uacf5\uc720\ud569\ub2c8\ub2e4. \ud558\ub098\ub9cc \ub0a8\uae30\uace0 \ubc14\uafb8\uba74 \ud574\uacb0\ub429\ub2c8\ub2e4.",
         "security.aging": "\uad50\uccb4\ud560 \ub54c\uac00 \ub428",
         "security.aging_d": "\uad50\uccb4 \uae30\uc900\ubcf4\ub2e4 \uc624\ub798\ub428:",
         "security.incomplete": "\uc815\ubcf4 \ub204\ub77d",
@@ -13466,6 +13570,19 @@ WEB_CATALOGUES = {
         "settings.hosts.note": "\ud55c \uc904\uc5d0 \ud558\ub098\uc529 \ub610\ub294 \uc27c\ud45c\ub85c \uad6c\ubd84\ud558\uc138\uc694. SPM\uc740 \uc790\uccb4 \ubaa9\ub85d\uc744 \uc81c\uacf5\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. \uc774 \ubaa9\ub85d\uc740 \uc124\uc815 \ud30c\uc77c\uc774 \uc544\ub2c8\ub77c \uc554\ud638\ud654\ub41c \ubcf4\uad00\ud568 \uc548\uc5d0 \uc800\uc7a5\ub429\ub2c8\ub2e4. \uc774\ub984\uc744 \ub4dc\ub7ec\ub0b4\uace0 \uc2f6\uc9c0 \uc54a\uc740 \uc0ac\uc774\ud2b8\uc758 \ubaa9\ub85d \uc790\uccb4\uac00 \ubcf4\ud638\ud560 \uac00\uce58\uac00 \uc788\uae30 \ub54c\ubb38\uc785\ub2c8\ub2e4. \uc81c\uc548\ub9cc \ud560 \ubfd0, \uac01 \ud56d\ubaa9\uc740 \uc5ec\ub7ec\ubd84\uc774 \uc124\uc815\ud55c \uc2a4\uc704\uce58\ub97c \uadf8\ub300\ub85c \uc720\uc9c0\ud569\ub2c8\ub2e4.",
         "settings.hosts.apply": "\ud638\uc2a4\ud2b8 \ubaa9\ub85d \uc800\uc7a5",
         "settings.hosts.saved": "\ud638\uc2a4\ud2b8 \ubaa9\ub85d\uc744 \uc800\uc7a5\ud588\uc2b5\ub2c8\ub2e4.",
+        "security.entries_one": "\uac1c \ud56d\ubaa9",
+        "security.entries_many": "\uac1c \ud56d\ubaa9",
+        "security.reused_group": "\uac1c \ud56d\ubaa9\uc774 \uc774 \ube44\ubc00\ubc88\ud638\ub97c \uacf5\uc720\ud569\ub2c8\ub2e4",
+        "security.act_change": "\ube44\ubc00\ubc88\ud638 \ubcc0\uacbd",
+        "security.act_complete": "\uc138\ubd80 \uc815\ubcf4 \ucd94\uac00",
+        "security.act_fix": "\uc774 \ud56d\ubaa9 \uc218\uc815",
+        "security.sightings": "\ud68c \ubc1c\uacac",
+        "security.tally_weak": "\uac1c \ucde8\uc57d",
+        "security.tally_reused": "\uac1c \uc7ac\uc0ac\uc6a9",
+        "security.tally_old": "\uac1c \ub178\ud6c4",
+        "security.tally_incomplete": "\uac1c \ubbf8\uc644\uc131",
+        "security.tally_malformed": "\uac1c \uc624\ub958",
+        "security.tally_clean": "\uc774 \uc810\uc218\ub97c \ub5a8\uc5b4\ub728\ub9ac\ub294 \uac83\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.",
     },
     "pt-br": {
         "nav.security": "Seguran\u00e7a",
@@ -13505,12 +13622,12 @@ WEB_CATALOGUES = {
         "register.waiting": "Aguardando o autenticador...",
         "register.failed": "O registro falhou.",
         "security.sub": "O que est\u00e1 puxando a pontua\u00e7\u00e3o do seu cofre para baixo.",
-        "security.scope": "Somente senhas s\u00e3o pontuadas. Os IDs aparecem; os segredos, nunca.",
+        "security.scope": "Apenas entradas de senha s\u00e3o pontuadas. Os nomes aparecem, as entradas ocultas continuam tarjadas e os segredos nunca aparecem.",
         "security.none": "Nada a corrigir aqui.",
         "security.weak": "Senhas fracas",
         "security.weak_d": "Com menos de 12 caracteres, ou usando menos de tr\u00eas classes de caractere.",
         "security.reused": "Senhas reutilizadas",
-        "security.reused_d": "Cada linha abaixo \u00e9 um grupo de registros que compartilham uma senha.",
+        "security.reused_d": "Cada grupo abaixo compartilha uma senha. Alterar todas menos uma resolve o achado.",
         "security.aging": "Na hora de trocar",
         "security.aging_d": "Mais antigas que o limite de rota\u00e7\u00e3o:",
         "security.incomplete": "Faltam informa\u00e7\u00f5es",
@@ -13826,6 +13943,19 @@ WEB_CATALOGUES = {
         "settings.hosts.note": "Um por linha ou separados por v\u00edrgulas. O SPM n\u00e3o traz lista alguma. Esta fica dentro do seu cofre criptografado, n\u00e3o em um arquivo de configura\u00e7\u00e3o, porque uma lista de sites que voc\u00ea prefere n\u00e3o nomear j\u00e1 merece prote\u00e7\u00e3o. Ela apenas sugere \u2014 cada entrada mant\u00e9m o interruptor que voc\u00ea definiu.",
         "settings.hosts.apply": "Salvar lista de hosts",
         "settings.hosts.saved": "Lista de hosts salva.",
+        "security.entries_one": "entrada",
+        "security.entries_many": "entradas",
+        "security.reused_group": "entradas compartilham esta senha",
+        "security.act_change": "Alterar senha",
+        "security.act_complete": "Adicionar os dados",
+        "security.act_fix": "Corrigir esta entrada",
+        "security.sightings": "apari\u00e7\u00f5es",
+        "security.tally_weak": "fracas",
+        "security.tally_reused": "reutilizadas",
+        "security.tally_old": "antigas",
+        "security.tally_incomplete": "incompletas",
+        "security.tally_malformed": "malformados",
+        "security.tally_clean": "Nada est\u00e1 reduzindo esta pontua\u00e7\u00e3o.",
     },
     "ru": {
         "nav.security": "\u0411\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c",
@@ -13865,12 +13995,12 @@ WEB_CATALOGUES = {
         "register.waiting": "\u041e\u0436\u0438\u0434\u0430\u043d\u0438\u0435 \u0430\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440\u0430...",
         "register.failed": "\u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c.",
         "security.sub": "\u0427\u0442\u043e \u0441\u043d\u0438\u0436\u0430\u0435\u0442 \u043e\u0446\u0435\u043d\u043a\u0443 \u0432\u0430\u0448\u0435\u0433\u043e \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0430.",
-        "security.scope": "\u041e\u0446\u0435\u043d\u0438\u0432\u0430\u044e\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u043f\u0430\u0440\u043e\u043b\u0438. \u0418\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440\u044b \u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u044e\u0442\u0441\u044f, \u0441\u0435\u043a\u0440\u0435\u0442\u044b \u2014 \u043d\u0438\u043a\u043e\u0433\u0434\u0430.",
+        "security.scope": "\u041e\u0446\u0435\u043d\u0438\u0432\u0430\u044e\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u0437\u0430\u043f\u0438\u0441\u0438 \u043f\u0430\u0440\u043e\u043b\u0435\u0439. \u0418\u043c\u0435\u043d\u0430 \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u044e\u0442\u0441\u044f, \u0441\u043a\u0440\u044b\u0442\u044b\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u043e\u0441\u0442\u0430\u044e\u0442\u0441\u044f \u0437\u0430\u043a\u0440\u044b\u0442\u044b\u043c\u0438, \u0430 \u0441\u0435\u043a\u0440\u0435\u0442\u044b \u043d\u0435 \u043e\u0442\u043e\u0431\u0440\u0430\u0436\u0430\u044e\u0442\u0441\u044f \u043d\u0438\u043a\u043e\u0433\u0434\u0430.",
         "security.none": "\u0417\u0434\u0435\u0441\u044c \u043d\u0435\u0447\u0435\u0433\u043e \u0438\u0441\u043f\u0440\u0430\u0432\u043b\u044f\u0442\u044c.",
         "security.weak": "\u0421\u043b\u0430\u0431\u044b\u0435 \u043f\u0430\u0440\u043e\u043b\u0438",
         "security.weak_d": "\u041a\u043e\u0440\u043e\u0447\u0435 12 \u0441\u0438\u043c\u0432\u043e\u043b\u043e\u0432 \u0438\u043b\u0438 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u044e\u0442 \u043c\u0435\u043d\u044c\u0448\u0435 \u0442\u0440\u0451\u0445 \u043a\u043b\u0430\u0441\u0441\u043e\u0432 \u0441\u0438\u043c\u0432\u043e\u043b\u043e\u0432.",
         "security.reused": "\u041f\u043e\u0432\u0442\u043e\u0440\u043d\u043e \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u043d\u044b\u0435 \u043f\u0430\u0440\u043e\u043b\u0438",
-        "security.reused_d": "\u041a\u0430\u0436\u0434\u0430\u044f \u0441\u0442\u0440\u043e\u043a\u0430 \u043d\u0438\u0436\u0435 \u2014 \u044d\u0442\u043e \u0433\u0440\u0443\u043f\u043f\u0430 \u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u0441 \u043e\u0431\u0449\u0438\u043c \u043f\u0430\u0440\u043e\u043b\u0435\u043c.",
+        "security.reused_d": "\u041a\u0430\u0436\u0434\u0430\u044f \u0433\u0440\u0443\u043f\u043f\u0430 \u043d\u0438\u0436\u0435 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442 \u043e\u0434\u0438\u043d \u043f\u0430\u0440\u043e\u043b\u044c. \u0421\u043c\u0435\u043d\u0438\u0442\u0435 \u0432\u0441\u0435, \u043a\u0440\u043e\u043c\u0435 \u043e\u0434\u043d\u043e\u0439, \u0438 \u0437\u0430\u043c\u0435\u0447\u0430\u043d\u0438\u0435 \u0441\u043d\u0438\u043c\u0435\u0442\u0441\u044f.",
         "security.aging": "\u041f\u043e\u0440\u0430 \u043c\u0435\u043d\u044f\u0442\u044c",
         "security.aging_d": "\u0421\u0442\u0430\u0440\u0448\u0435 \u043f\u043e\u0440\u043e\u0433\u0430 \u0441\u043c\u0435\u043d\u044b:",
         "security.incomplete": "\u041d\u0435 \u0445\u0432\u0430\u0442\u0430\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445",
@@ -14186,6 +14316,19 @@ WEB_CATALOGUES = {
         "settings.hosts.note": "\u041f\u043e \u043e\u0434\u043d\u043e\u043c\u0443 \u0432 \u0441\u0442\u0440\u043e\u043a\u0435 \u0438\u043b\u0438 \u0447\u0435\u0440\u0435\u0437 \u0437\u0430\u043f\u044f\u0442\u0443\u044e. SPM \u043d\u0435 \u043f\u043e\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u0442 \u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u043e\u0433\u043e \u0441\u043f\u0438\u0441\u043a\u0430. \u042d\u0442\u043e\u0442 \u0445\u0440\u0430\u043d\u0438\u0442\u0441\u044f \u0432\u043d\u0443\u0442\u0440\u0438 \u0432\u0430\u0448\u0435\u0433\u043e \u0437\u0430\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0433\u043e \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0430, \u0430 \u043d\u0435 \u0432 \u0444\u0430\u0439\u043b\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043a, \u043f\u043e\u0442\u043e\u043c\u0443 \u0447\u0442\u043e \u0441\u043f\u0438\u0441\u043e\u043a \u0441\u0430\u0439\u0442\u043e\u0432, \u043a\u043e\u0442\u043e\u0440\u044b\u0435 \u0432\u044b \u043f\u0440\u0435\u0434\u043f\u043e\u0447\u043b\u0438 \u0431\u044b \u043d\u0435 \u043d\u0430\u0437\u044b\u0432\u0430\u0442\u044c, \u0441\u0430\u043c \u0437\u0430\u0441\u043b\u0443\u0436\u0438\u0432\u0430\u0435\u0442 \u0437\u0430\u0449\u0438\u0442\u044b. \u041e\u043d \u0442\u043e\u043b\u044c\u043a\u043e \u043f\u0440\u0435\u0434\u043b\u0430\u0433\u0430\u0435\u0442 \u2014 \u0443 \u043a\u0430\u0436\u0434\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u0438 \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u0442\u043e\u0442 \u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0430\u0442\u0435\u043b\u044c, \u043a\u043e\u0442\u043e\u0440\u044b\u0439 \u0432\u044b \u0437\u0430\u0434\u0430\u043b\u0438.",
         "settings.hosts.apply": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0441\u043f\u0438\u0441\u043e\u043a \u0445\u043e\u0441\u0442\u043e\u0432",
         "settings.hosts.saved": "\u0421\u043f\u0438\u0441\u043e\u043a \u0445\u043e\u0441\u0442\u043e\u0432 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d.",
+        "security.entries_one": "\u0437\u0430\u043f\u0438\u0441\u044c",
+        "security.entries_many": "\u0437\u0430\u043f\u0438\u0441\u0435\u0439",
+        "security.reused_group": "\u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u044e\u0442 \u044d\u0442\u043e\u0442 \u043f\u0430\u0440\u043e\u043b\u044c",
+        "security.act_change": "\u0421\u043c\u0435\u043d\u0438\u0442\u044c \u043f\u0430\u0440\u043e\u043b\u044c",
+        "security.act_complete": "\u0414\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u044c \u0434\u0430\u043d\u043d\u044b\u0435",
+        "security.act_fix": "\u0418\u0441\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u044c",
+        "security.sightings": "\u0443\u043f\u043e\u043c\u0438\u043d\u0430\u043d\u0438\u0439",
+        "security.tally_weak": "\u0441\u043b\u0430\u0431\u044b\u0445",
+        "security.tally_reused": "\u043f\u043e\u0432\u0442\u043e\u0440\u044f\u044e\u0442\u0441\u044f",
+        "security.tally_old": "\u0443\u0441\u0442\u0430\u0440\u0435\u043b\u0438",
+        "security.tally_incomplete": "\u043d\u0435\u043f\u043e\u043b\u043d\u044b\u0445",
+        "security.tally_malformed": "\u043d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0445",
+        "security.tally_clean": "\u041d\u0438\u0447\u0442\u043e \u043d\u0435 \u0441\u043d\u0438\u0436\u0430\u0435\u0442 \u044d\u0442\u0443 \u043e\u0446\u0435\u043d\u043a\u0443.",
     },
     "zh-hans": {
         "nav.security": "\u5b89\u5168",
@@ -14225,12 +14368,12 @@ WEB_CATALOGUES = {
         "register.waiting": "\u6b63\u5728\u7b49\u5f85\u9a8c\u8bc1\u5668\u2026\u2026",
         "register.failed": "\u6ce8\u518c\u5931\u8d25\u3002",
         "security.sub": "\u662f\u4ec0\u4e48\u62c9\u4f4e\u4e86\u4f60\u7684\u5bc6\u7801\u5e93\u8bc4\u5206\u3002",
-        "security.scope": "\u53ea\u5bf9\u5bc6\u7801\u6761\u76ee\u8bc4\u5206\u3002\u4f1a\u663e\u793a ID\uff0c\u7edd\u4e0d\u663e\u793a\u673a\u5bc6\u5185\u5bb9\u3002",
+        "security.scope": "\u53ea\u6709\u5bc6\u7801\u6761\u76ee\u53c2\u4e0e\u8bc4\u5206\u3002\u540d\u79f0\u4f1a\u663e\u793a\uff0c\u9690\u85cf\u6761\u76ee\u4ecd\u4fdd\u6301\u906e\u853d\uff0c\u5bc6\u6587\u6c38\u4e0d\u51fa\u73b0\u3002",
         "security.none": "\u8fd9\u91cc\u6ca1\u6709\u9700\u8981\u4fee\u590d\u7684\u95ee\u9898\u3002",
         "security.weak": "\u5f31\u5bc6\u7801",
         "security.weak_d": "\u77ed\u4e8e 12 \u4e2a\u5b57\u7b26\uff0c\u6216\u4f7f\u7528\u7684\u5b57\u7b26\u7c7b\u522b\u5c11\u4e8e\u4e09\u79cd\u3002",
         "security.reused": "\u91cd\u590d\u4f7f\u7528\u7684\u5bc6\u7801",
-        "security.reused_d": "\u4e0b\u9762\u6bcf\u4e00\u884c\u90fd\u662f\u5171\u7528\u540c\u4e00\u4e2a\u5bc6\u7801\u7684\u4e00\u7ec4\u6761\u76ee\u3002",
+        "security.reused_d": "\u4e0b\u9762\u6bcf\u4e00\u7ec4\u5171\u7528\u540c\u4e00\u4e2a\u5bc6\u7801\u3002\u9664\u4fdd\u7559\u4e00\u4e2a\u5916\u5168\u90e8\u66f4\u6539\u5373\u53ef\u6d88\u9664\u8be5\u95ee\u9898\u3002",
         "security.aging": "\u8be5\u8f6e\u6362\u4e86",
         "security.aging_d": "\u65e9\u4e8e\u8f6e\u6362\u671f\u9650\uff1a",
         "security.incomplete": "\u4fe1\u606f\u4e0d\u5b8c\u6574",
@@ -14546,6 +14689,19 @@ WEB_CATALOGUES = {
         "settings.hosts.note": "\u6bcf\u884c\u4e00\u4e2a\uff0c\u6216\u7528\u9017\u53f7\u5206\u9694\u3002SPM \u4e0d\u9644\u5e26\u4efb\u4f55\u81ea\u5e26\u5217\u8868\u3002\u8be5\u5217\u8868\u4fdd\u5b58\u5728\u4f60\u7684\u52a0\u5bc6\u4fdd\u9669\u5e93\u5185\uff0c\u800c\u4e0d\u662f\u8bbe\u7f6e\u6587\u4ef6\u91cc\uff0c\u56e0\u4e3a\u4e00\u4efd\u4f60\u4e0d\u613f\u8bf4\u51fa\u540d\u5b57\u7684\u7ad9\u70b9\u6e05\u5355\u672c\u8eab\u5c31\u503c\u5f97\u4fdd\u62a4\u3002\u5b83\u53ea\u4f5c\u5efa\u8bae\u2014\u2014\u6bcf\u4e2a\u6761\u76ee\u90fd\u4fdd\u7559\u4f60\u4e3a\u5b83\u8bbe\u7f6e\u7684\u5f00\u5173\u3002",
         "settings.hosts.apply": "\u4fdd\u5b58\u4e3b\u673a\u5217\u8868",
         "settings.hosts.saved": "\u4e3b\u673a\u5217\u8868\u5df2\u4fdd\u5b58\u3002",
+        "security.entries_one": "\u4e2a\u6761\u76ee",
+        "security.entries_many": "\u4e2a\u6761\u76ee",
+        "security.reused_group": "\u4e2a\u6761\u76ee\u5171\u7528\u6b64\u5bc6\u7801",
+        "security.act_change": "\u66f4\u6539\u5bc6\u7801",
+        "security.act_complete": "\u8865\u5168\u4fe1\u606f",
+        "security.act_fix": "\u4fee\u590d\u6b64\u6761\u76ee",
+        "security.sightings": "\u6b21\u51fa\u73b0",
+        "security.tally_weak": "\u4e2a\u5f31\u5bc6\u7801",
+        "security.tally_reused": "\u4e2a\u91cd\u590d\u4f7f\u7528",
+        "security.tally_old": "\u4e2a\u5df2\u8fc7\u671f",
+        "security.tally_incomplete": "\u4e2a\u4e0d\u5b8c\u6574",
+        "security.tally_malformed": "\u4e2a\u5f02\u5e38",
+        "security.tally_clean": "\u6ca1\u6709\u4efb\u4f55\u56e0\u7d20\u62c9\u4f4e\u6b64\u5206\u6570\u3002",
     },
 }
 # --- END GENERATED LOCALES ---
@@ -15613,6 +15769,8 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .chip-on { background: var(--accent); color: var(--bg); border-color: transparent; }
 .chip-warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .chip-hidden { background: var(--surface-2); color: var(--text-dim); border-style: dashed; }
+.tally { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--border); }
+.tally:hover, .tally:focus-visible { color: var(--accent); border-bottom-color: var(--accent); }
 /* A checkbox and its words as one target: the label is the hit area, so the
    words are clickable rather than decorative, which is what a switch has to be
    on a phone. */
@@ -16874,49 +17032,128 @@ def list_page(title_key, title, desc_key, desc, add_href, add_key, add_label, he
 </div>"""
 
 
-def _id_links(ids, key, label, hint_key, hint, suffix=""):
-    """One security finding rendered as links into the offending entries.
+def _finding_lookup(entries):
+    """id -> (name, username, hidden) for rendering a security finding.
 
-    `suffix` carries values that must survive translation -- data-i18n replaces
-    an element's whole text, so an interpolated number has to sit outside the
-    translated node or switching language would silently drop it.
+    A finding used to be a bare record id, on the reasoning that the page must
+    be safe to open in public. Half of that reasoning holds and half does not:
+    a *secret* must never appear here, but a service name is on every other
+    page of the dashboard, and a column of numbers meant nobody could tell what
+    the report was about without looking up thirty entries by hand.
+
+    Hidden entries keep their redaction. Otherwise this page would be a way
+    around it -- the one place a hidden name could be read.
     """
+    lookup = {}
+    for _, parts in entries:
+        folder_hidden = core.decode_attrs(parts[7] if len(parts) > 7 else "")[2]
+        name = REDACTED if folder_hidden else _esc(parts[1])
+        user = REDACTED if folder_hidden else _esc(parts[2])
+        lookup[parts[0]] = (name or "&mdash;", user or "&mdash;", folder_hidden)
+    return lookup
+
+
+def _finding_rows(ids, lookup, action_key, action_label):
+    """The offending entries as rows that can be acted on, not as numbers."""
+    rows = []
+    for rid in ids:
+        name, user, _ = lookup.get(rid, ("&mdash;", "&mdash;", False))
+        rows.append(
+            f'<tr><td class="num">{_esc(rid)}</td>'
+            f'<td class="strong">{name}</td>'
+            f'<td class="muted">{user}</td>'
+            f'<td class="actions">'
+            f'<a class="btn btn-ghost btn-sm" href="/view?id={_esc(rid)}" '
+            f'data-i18n="btn.view">View</a> '
+            f'<a class="btn btn-primary btn-sm" href="/edit?id={_esc(rid)}" '
+            f'data-i18n="{action_key}">{action_label}</a></td></tr>')
+    return ('<div class="table-wrap"><table class="t"><tbody>'
+            + "".join(rows) + '</tbody></table></div>')
+
+
+def _finding(ids, lookup, key, label, hint_key, hint, action_key,
+             action_label, suffix="", anchor=""):
+    """One finding: what it is, why it fired, and what to do about each entry."""
+    at = f' id="finding-{anchor}"' if anchor else ""
+    head = (f'<div class="field"{at}><label data-i18n="{key}">{label}</label>'
+            f'<div class="hint"><span data-i18n="{hint_key}">{hint}</span>'
+            + (f' <span>{_esc(suffix)}</span>' if suffix else "") + '</div>')
     if not ids:
-        return (f'<div class="field"><label data-i18n="{key}">{label}</label>'
-                f'<div class="hint" data-i18n="security.none">Nothing to fix here.</div></div>')
-    links = " ".join(
-        f'<a class="btn btn-ghost btn-sm" href="/view?id={_esc(rid)}">{_esc(rid)}</a>'
-        for rid in ids)
-    tail = f' <span class="hint" style="display:inline">{_esc(suffix)}</span>' if suffix else ""
-    return (f'<div class="field"><label data-i18n="{key}">{label}</label>'
-            f'<div class="hint"><span data-i18n="{hint_key}">{hint}</span>{tail}</div>'
-            f'<div class="actions" style="justify-content:flex-start;flex-wrap:wrap;gap:6px">{links}</div></div>')
+        return (head + '<div class="hint" data-i18n="security.none">'
+                'Nothing to fix here.</div></div>')
+    # Two keys rather than one with an "(s)": a language that pluralises
+    # differently cannot be served by appending a letter, and "1 entries" is
+    # the kind of small wrongness that makes a page feel unmaintained.
+    plural_key = "security.entries_one" if len(ids) == 1 else "security.entries_many"
+    plural_text = "entry" if len(ids) == 1 else "entries"
+    count = (f'<div class="hint"><b>{len(ids)}</b> '
+             f'<span data-i18n="{plural_key}">{plural_text}</span></div>')
+    return head + count + _finding_rows(ids, lookup, action_key, action_label) + '</div>'
 
 
-def security_page(audit):
+def security_page(audit, entries):
     """The findings behind the overview's security score.
 
-    Only IDs are rendered. The CLI dashboard states that secrets and
-    fingerprints are never printed; this page holds the same line, so it stays
-    safe to open on a phone in public.
+    Every finding names the entry and offers the one action that clears it, so
+    the page can be acted on rather than merely read. Secrets never appear, and
+    a hidden entry stays redacted here as it is everywhere else.
     """
+    lookup = _finding_lookup(entries)
     score = audit["score"]
     tone = "ok" if score >= 80 else ("warn" if score >= 50 else "bad")
-    reused_html = "".join(
-        f'<div class="actions" style="justify-content:flex-start;flex-wrap:wrap;gap:6px">'
-        + " ".join(f'<a class="btn btn-ghost btn-sm" href="/view?id={_esc(rid)}">{_esc(rid)}</a>' for rid in group)
-        + '</div>'
-        for group in audit["reused"])
+
+    # What the number is made of. A bare red 0 says something is wrong and
+    # nothing about what -- and 0 is the floor, because the penalty is capped,
+    # so one weak password too many and a hundred of them look identical. The
+    # counts do not have that problem.
+    # Count-neutral words, and one key each. A singular/plural pair chosen in
+    # Python is dead code here: data-i18n replaces the element's whole text
+    # from the catalogue, so whichever form the catalogue holds is the one that
+    # renders at every count -- which is how "1 missing details" reached the
+    # page. The sections below carry the full names.
+    #
+    # Each is a link to the section it counts, so the number is the way in
+    # rather than something to scroll past.
+    tally = []
+    for count, key, word, anchor in (
+            (len(audit["weak"]), "security.tally_weak", "weak", "weak"),
+            (len(audit["reused_flat"]), "security.tally_reused", "reused", "reused"),
+            (len(audit["old"]), "security.tally_old", "aging", "aging"),
+            (len(audit["incomplete"]), "security.tally_incomplete", "incomplete", "incomplete"),
+            (len(audit["malformed"]), "security.tally_malformed", "malformed", "malformed")):
+        if count:
+            tally.append('<a class="tally" href="#finding-%s"><b>%d</b> '
+                         '<span data-i18n="%s">%s</span></a>'
+                         % (anchor, count, key, word))
+    tally_html = (" &middot; ".join(tally) if tally
+                  else '<span data-i18n="security.tally_clean">Nothing is pulling '
+                       'this score down.</span>')
+
+    reused_html = ""
+    for group in audit["reused"]:
+        reused_html += (
+            '<div class="hint" style="margin-top:var(--sp-3)"><b>%d</b> '
+            '<span data-i18n="security.reused_group">entries share this password</span></div>'
+            % len(group)
+            + _finding_rows(group, lookup, "security.act_change", "Change password"))
     if not reused_html:
-        reused_html = ('<div class="hint" data-i18n="security.none">Nothing to fix here.</div>')
+        reused_html = '<div class="hint" data-i18n="security.none">Nothing to fix here.</div>'
+
     breach_status = audit.get("breach_status", "not_checked")
     if breach_status == "checked":
         breached = audit.get("breached", [])
         if breached:
-            breach_html = " ".join(
-                f'<a class="btn btn-ghost btn-sm" href="/view?id={_esc(item["id"])}">'
-                f'{_esc(item["id"])} · {_esc(item["count"])} sightings</a>'
-                for item in breached)
+            rows = ""
+            for item in breached:
+                name, user, _ = lookup.get(item["id"], ("&mdash;", "&mdash;", False))
+                rows += (
+                    '<tr><td class="num">%s</td><td class="strong">%s</td>'
+                    '<td class="muted">%s <span data-i18n="security.sightings">sightings</span></td>'
+                    '<td class="actions"><a class="btn btn-primary btn-sm" href="/edit?id=%s" '
+                    'data-i18n="security.act_change">Change password</a></td></tr>'
+                    % (_esc(item["id"]), name, _esc(item["count"]), _esc(item["id"])))
+            breach_html = ('<div class="table-wrap"><table class="t"><tbody>'
+                           + rows + '</tbody></table></div>')
         else:
             breach_html = ('<div class="hint" data-i18n="security.none">'
                            'Nothing to fix here.</div>')
@@ -16941,29 +17178,35 @@ def security_page(audit):
   <div class="card-body">
     <div class="stat" style="pointer-events:none">
       <span class="stat-ico" aria-hidden="true">{_icon("shield")}</span>
-      <span><span class="stat-n score-{tone}">{score}</span>
+      <span><span class="stat-n score-{tone}">{score}<span class="faint" style="font-size:.45em">&thinsp;/&thinsp;100</span></span>
       <span class="stat-l" data-i18n="overview.security_score">Security score</span></span>
     </div>
-    <div class="hint" data-i18n="security.scope">Only password entries are scored. IDs are shown; secrets never are.</div>
+    <div class="hint" style="margin-top:var(--sp-3)">{tally_html}</div>
+    <div class="hint" data-i18n="security.scope">Only password entries are scored.
+      Names are shown, hidden entries stay redacted, and secrets never appear.</div>
   </div>
 </div>
 <div class="card">
   <div class="card-body">
-    {_id_links(audit["weak"], "security.weak", "Weak passwords",
-               "security.weak_d", "Shorter than 12 characters, or using fewer than three character classes.")}
-    <div class="field"><label data-i18n="security.reused">Reused passwords</label>
-      <div class="hint" data-i18n="security.reused_d">Each row below is one group of entries sharing a password.</div>
+    {_finding(audit["weak"], lookup, "security.weak", "Weak passwords",
+              "security.weak_d", "Shorter than 12 characters, or using fewer than three character classes.",
+              "security.act_change", "Change password", anchor="weak")}
+    <div class="field" id="finding-reused"><label data-i18n="security.reused">Reused passwords</label>
+      <div class="hint" data-i18n="security.reused_d">Each group below shares one password. Changing all but one clears the finding.</div>
       {reused_html}
     </div>
-    {_id_links(audit["old"], "security.aging", "Due for rotation",
-               "security.aging_d", "Older than the rotation threshold:", f"{days} days")}
-    {_id_links(audit["incomplete"], "security.incomplete", "Missing details",
-               "security.incomplete_d", "No service name or no username.")}
-    {_id_links(audit["malformed"], "security.malformed", "Malformed authenticators",
-               "security.malformed_d", "Missing a secret, or an algorithm SPM cannot generate codes for.")}
+    {_finding(audit["old"], lookup, "security.aging", "Due for rotation",
+              "security.aging_d", "Older than the rotation threshold:",
+              "security.act_change", "Change password", f"{days} days", "aging")}
+    {_finding(audit["incomplete"], lookup, "security.incomplete", "Missing details",
+              "security.incomplete_d", "No service name or no username.",
+              "security.act_complete", "Add the details", anchor="incomplete")}
+    {_finding(audit["malformed"], lookup, "security.malformed", "Malformed authenticators",
+              "security.malformed_d", "Missing a secret, or an algorithm SPM cannot generate codes for.",
+              "security.act_fix", "Fix this entry", anchor="malformed")}
     <div class="field"><label data-i18n="security.breached">Known breaches</label>
       <div class="hint" data-i18n="security.breached_d">Matches in Pwned Passwords. Only five SHA-1 prefix characters leave this device.</div>
-      <div class="actions" style="justify-content:flex-start;flex-wrap:wrap;gap:6px">{breach_html}</div>
+      {breach_html}
     </div>
   </div>
 </div>"""
@@ -20906,7 +21149,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             check_breaches = (params.get("breaches") or [""])[0] == "1"
             audit = compute_security(entries, plaintext, check_breaches)
             self._send_html(200, render_shell(
-                security_page(audit), "security", VERSION, VAULT_PATH,
+                security_page(audit, entries), "security", VERSION, VAULT_PATH,
                 title="Security", counts=self._counts(plaintext)))
             return
 
