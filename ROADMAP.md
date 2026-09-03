@@ -121,8 +121,10 @@ co-owners of it. That review is a design concept, not a formal security audit.
 ## Next — safer integrations
 
 - Continue the browser-extension work with an origin-isolated in-field picker.
-  Written but not shipped, and not for want of effort — see *What is left, and
-  what decides when* below.
+  Not shipped, and not for want of effort — see *What is left, and what decides
+  when* below. **4.4.0 removed the blocker that section named**: the extension
+  now runs under headless Chromium in the regression suite, which is the
+  verification route this item was waiting on.
 - ~~Design pluggable, encrypted synchronization transports without introducing a
   maintainer-operated cloud service.~~ **Shipped in 3.15.0.** A transport
   answers three questions -- can I reach this target, put the remote object in
@@ -427,8 +429,20 @@ single-file change by the time it was reached.
 Two items on this board are written but not shipped, and in both cases the
 blocker is verification rather than code.
 
-- **The in-field picker** needs a browser's extension UI driven for real.
+- **The in-field picker** needed a browser's extension UI driven for real.
+  **4.4.0 built the harness that does it**, so this is no longer waiting on a
+  way to run it -- only on being written. What the harness proves today: the
+  packed extension loads and its service worker starts under headless
+  Chromium, the identity the browser assigns is the identity
+  `extension-id.sh` derives, one fill-path rule holds, and nothing reaches the
+  popup that should not. What it does not reach yet is the native-messaging
+  round trip and the fill itself: the popup reads the active tab, and an
+  extension page cannot honestly impersonate one. That is tab plumbing, and it
+  is the second half of the same project.
 - **Hardware-backed key wrapping** needs a FIDO2 key or a TPM to test against.
+  Unchanged, and 4.3.0's exploration of hardware-backed *signing* did not move
+  it: neither has a known answer to pin or a second implementation in CI to
+  disagree with.
 
 That distinction is worth stating because of what the 3.2.0–3.7.0 run showed.
 Five defects reached a release and were then found only when something was

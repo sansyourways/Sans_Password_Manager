@@ -7,6 +7,39 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-09-03
+
+**Nothing about the product changed.** This adds a way to verify part of it
+that could not be verified before, and moves a roadmap item that was waiting on
+exactly that.
+
+### Added
+- `tests/extension-ui.mjs` drives the packed browser extension in a real
+  headless Chromium, run by the regression suite when Chromium and puppeteer
+  are both present and **skipped loudly** when they are not — CI runners have
+  neither, and a skip that reads like a pass is worse than no check.
+
+  It asserts that the extension loads and its service worker starts, that the
+  id the browser assigns equals the one `extension-id.sh` derives, that a
+  non-web page is refused, and that nothing secret reaches the popup DOM.
+
+### Changed
+- The extension's stable identity is now verified against the browser rather
+  than against the script that computes it. 3.2.0 gave every unpacked copy one
+  id derived from the manifest key so the native-host registration could name
+  it; that was checked by deriving it the same way again, which proves the
+  script agrees with itself. A single flipped bit in the key is now caught.
+- The browser-extension roadmap's "manual matrix" note — that driving an
+  extension under headless Chromium "is possible and worth revisiting, but it
+  is its own project" — is replaced by what the harness actually does, and by
+  what it does not reach yet.
+
+### Note on what is not covered
+The native-messaging round trip and the fill itself are still outside the
+harness. The popup reads the active tab, and an extension page cannot honestly
+impersonate one; that needs real tab plumbing. It is named in both roadmaps
+rather than left to be discovered.
+
 ## [4.3.1] - 2026-09-03
 
 ### Fixed

@@ -223,9 +223,24 @@ CLI-level and needs no browser:
 Wildcard scope and HTTPS downgrade refusal belong to the scoping phase
 and receive their regression assertions with that implementation.
 
-**Manual matrix** — the browser UI. Driving an extension under headless Chromium
-with `--load-extension` is possible and worth revisiting, but it is its own
-project and should not gate 3.1.0.
+**In a browser, from 4.4.0** — `tests/extension-ui.mjs`, run by the regression
+suite when Chromium and puppeteer are both present and skipped loudly when they
+are not:
+
+- the packed extension loads and its **service worker starts**, which is the
+  difference between running and merely sitting unpacked on disk
+- the id the browser assigns equals the one `extension-id.sh` derives. That was
+  previously checked by re-deriving it the same way the script does, which
+  proves the script agrees with itself; this asks the browser. A single flipped
+  bit in the manifest key is caught.
+- a non-web page is refused, which is the fill-path rule that keeps autofill off
+  the extension's own pages, PDF viewers and devtools tabs
+- nothing secret reaches the popup DOM
+
+**Not yet reached.** The native-messaging round trip and the fill itself. The
+popup reads the active tab, and an extension page cannot honestly impersonate
+one — driving that needs real tab plumbing, which is the second half of this
+project and what the in-field dropdown will be built against.
 
 ## Packaging
 
