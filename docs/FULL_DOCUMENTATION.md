@@ -574,6 +574,11 @@ The Dashboard locks itself after a period of inactivity. **Settings → Idle
 Lock** offers 15s, 30s, 1m, 2m, 5m, 10m and 15m, stored per vault; 30 seconds
 is the default and was the only option before 4.0.0.
 
+![The Idle Lock section of SPM Settings: a "Lock after" dropdown set to 30s,
+above a note explaining that a longer wait leaves the decrypted vault on screen
+for longer and that the server ends an idle session shortly after this
+timer](docs/screenshots/web-v2.13.0/34-idle-lock.png)
+
 It is a short list rather than a free-text field on purpose. A number typed
 into a box invites `86400`; a list is a policy someone chose from. A value
 edited into `~/.config/spm/web-lock-<scope>.conf` by hand is treated as absent

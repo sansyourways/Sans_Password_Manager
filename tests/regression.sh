@@ -2449,6 +2449,22 @@ done
 grep -qF '(docs/product-demo.gif)' "$docs_src" || {
 	printf 'the product demo GIF is not referenced by the documentation\n' >&2; exit 1
 }
+# And the mirror of the check above: a reference to an image the repository
+# does not have. The site never notices, because build.mjs redirects every
+# docs/screenshots path at the current capture set -- so a broken link here is
+# visible only to someone reading the manual on GitHub, which is most people
+# who read it at all.
+docs_missing=0
+for docs_ref in $(sed -n 's/.*(\(docs\/screenshots\/[^)]*\)).*/\1/p' "$docs_src" | sort -u); do
+	[ -f "$ROOT_DIR/$docs_ref" ] || {
+		printf '  referenced but not in the repository: %s\n' "$docs_ref" >&2
+		docs_missing=$((docs_missing + 1))
+	}
+done
+[ "$docs_missing" -eq 0 ] || {
+	printf '%d referenced image(s) do not exist\n' "$docs_missing" >&2
+	exit 1
+}
 docs_shot_count=$(ls "$ROOT_DIR"/docs/screenshots/*/*.png "$ROOT_DIR"/docs/screenshots/*/*.jpg 2>/dev/null | wc -l)
 printf '  docs: %s captures and the demo GIF all referenced\n' "$docs_shot_count"
 
