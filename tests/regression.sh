@@ -4679,6 +4679,40 @@ vk_new_legacy_vault() {
 
 printf '  vault key stability, migration ordering and recovery verified\n'
 
+printf 'Extension regression: the packed extension runs in a browser\n'
+# The browser-extension roadmap named this as what the in-field picker waits
+# for: "driving an extension under headless Chromium with --load-extension is
+# possible and worth revisiting, but it is its own project". It is possible,
+# and this is the first half of that project.
+#
+# Everything else about the extension is asserted at the CLI, where no browser
+# is needed. This asserts the part that only a browser can answer: that
+# Chromium actually loads it, and that the identity the native-messaging
+# registration is written against is the identity the browser assigns.
+#
+# Skipped, loudly, without Chromium and puppeteer -- CI runners have neither,
+# and a skip that reads like a pass is worse than no check at all.
+ext_chromium="${CHROMIUM_BIN:-$(command -v chromium || command -v chromium-browser || true)}"
+ext_puppeteer="${SPM_PUPPETEER_PATH:-}"
+if [ -z "$ext_puppeteer" ] && [ -n "${SPM_PUPPETEER_ROOT:-}" ]; then
+	ext_puppeteer="$SPM_PUPPETEER_ROOT/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js"
+fi
+if [ -z "$ext_chromium" ] || [ ! -x "$ext_chromium" ]; then
+	printf '  extension: skipped, no Chromium on this machine\n'
+elif [ -z "$ext_puppeteer" ] || [ ! -f "$ext_puppeteer" ]; then
+	printf '  extension: skipped, no puppeteer-core (set SPM_PUPPETEER_PATH)\n'
+elif ! command -v node >/dev/null 2>&1; then
+	printf '  extension: skipped, no node on this machine\n'
+else
+	ext_dist="$("$ROOT_DIR/browser-extension-universal/build.sh" chromium)"
+	ext_id="$("$ROOT_DIR/browser-extension-universal/extension-id.sh")"
+	[ -n "$ext_id" ] || { printf 'extension-id.sh produced nothing\n' >&2; exit 1; }
+	rm -rf "$TEST_ROOT/ext-profile"
+	CHROMIUM_BIN="$ext_chromium" EXT_PROFILE="$TEST_ROOT/ext-profile" \
+		EXT_MASTER="$AUDIT_PASSWORD" EXT_SECRET="DemoSecret42" \
+		node "$ROOT_DIR/tests/extension-ui.mjs" "$ext_dist" "$ext_id" "$ext_puppeteer"
+fi
+
 printf 'Web regression: every password box has a reveal control\n'
 # Two properties. Every password input carries the control -- so a box added
 # later cannot ship without one -- and in an RTL page the control does not sit
