@@ -4118,7 +4118,24 @@ for sync_t in $sync_available; do
 		mkdir -p "$sync_root/$sync_t-bad"
 		sync_bad_target="$(sync_target_for "$sync_t" | sed "s|$sync_root/$sync_t|$sync_root/$sync_t-bad|")"
 		sync_junk="$sync_root/junk-$sync_t"
-		head -c 512 /dev/urandom > "$sync_junk"
+		# Deterministic, not random. This was 512 bytes from /dev/urandom, and
+		# gpg exits 0 on about 1.1% of those: byte 0 is read as an OpenPGP
+		# packet header and a few tags -- an unencrypted literal-data packet
+		# among them -- are parsed and emitted without any decryption at all.
+		# Three transports per run made that a ~3% chance of this block failing
+		# with "an undecryptable remote was installed", on a file that had been
+		# parsed rather than opened. Twice observed in CI, on two transports.
+		printf 'this file is not a vault and must never be installed as one\n' \
+			> "$sync_junk"
+		# Proved rather than assumed. If the fixture ever stops being
+		# undecryptable, that is what fails -- not the assertion it exists to
+		# support, and not one run in thirty.
+		if decrypt_vault_container "$sync_junk" "$sync_root/junk-check-$sync_t" \
+			"$AUDIT_PASSWORD"; then
+			printf '%s: the junk fixture decrypted, so it cannot test a refusal\n' \
+				"$sync_t" >&2
+			exit 1
+		fi
 		sync_transport_publish "$sync_t" "$sync_bad_target/spm-bad.gpg" "$sync_junk"
 		sync_before="$(sha256sum "$PASSWORD_VAULT" | awk '{print $1}')"
 		if ( SPM_SYNC_FORCE_INITIAL=1 cmd_sync pull "$sync_bad_target" bad \
@@ -4618,6 +4635,164 @@ vk_new_legacy_vault() {
 )
 
 printf '  vault key stability, migration ordering and recovery verified\n'
+
+printf 'Format regression: every documented format carries every field\n'
+# The existing round trip counted records and stopped there, so a format that
+# exported ten records and dropped a column still passed. It did: folders and
+# custom fields were lost on all twenty CLI round trips, because the CLI export
+# never wrote those columns and its import never read them, while the dashboard
+# did both. Counting cannot see that. Comparing fields can.
+FMT_ROOT="$TEST_ROOT/formats"
+mkdir -p "$FMT_ROOT"
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$ROOT_DIR/src/spm_core.py" \
+	"$FMT_ROOT" "$TEST_RECOVERY_B64" <<'FMTSEEDPY'
+import base64, importlib.util, os, sys
+
+spec = importlib.util.spec_from_file_location("spm_core_fmt", sys.argv[1])
+core = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(core)
+root, pub = sys.argv[2], sys.argv[3]
+b64 = lambda v: base64.b64encode(v.encode("utf-8")).decode("ascii")
+
+# Deliberately awkward values: a comma and a doubled quote break naive CSV, a
+# tab or a newline splits a vault record, and non-ASCII is where an encoding
+# assumption shows up.
+attrs = core.encode_attrs("Work/Ops", [("Account number", "12345-678"),
+                                       ("PIN", "4821")])
+rows = [
+    "META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-" % pub,
+    "1\tAcme Admin\tavery@example.invalid\tp@ss w/ spaces, comma & \"quote\""
+    "\tnote with, comma and \"quotes\"\t2025-01-03T09:00:00Z"
+    "\thttps://admin.example.invalid/path?q=1&r=2\t%s" % attrs,
+    "2\tUnicode Caf\u00e9\tuser+tag@example.invalid\tmot-de-passe-\u00e9"
+    "\t\u00fcn\u00efcode notes\t2024-02-10T08:30:00Z"
+    "\thttps://second.example.invalid\t",
+    "3\tNo Extras\tplain@example.invalid\tsimple123\t-"
+    "\t2023-04-12T16:20:00Z\t\t",
+    "NOTE\t1\tIncident checklist\t%s\t2026-08-31T02:15:00Z\t-"
+    % b64("line one\nline two\twith tab"),
+    "PASSPHRASE\t1\tRecovery phrase\t%s\t2026-08-29T10:00:00Z\t-"
+    % b64("orchard copper river"),
+    "BACKUP_CODE\t1\tGitHub codes\t%s\t2026-08-25T10:00:00Z\t-"
+    % b64("CODE-1\nCODE-2\nCODE-3"),
+    "AUTH\t1\tGitHub Demo\tJBSWY3DPEHPK3PXP\t45\t2026-08-27T10:00:00Z\tsha256",
+]
+core.write_vault(os.path.join(root, "rich.gpg"), "FormatMaster-Rounds!",
+                 "\n".join(rows) + "\n")
+core.write_vault(os.path.join(root, "empty.gpg"), "FormatMaster-Rounds!",
+                 "META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n" % pub)
+FMTSEEDPY
+
+(
+	set -o errexit -o nounset -o pipefail
+	MASTER_PW="FormatMaster-Rounds!"
+	VAULT_FILE="$FMT_ROOT/rich.gpg"
+	RECOVERY_FILE="$FMT_ROOT/rich.gpg.recovery"
+	decrypt_vault_to_file "$FMT_ROOT/plain-source" >/dev/null
+	for fmt_name in $formats; do
+		cmd_export "$fmt_name" "$FMT_ROOT/export.$fmt_name" >/dev/null
+	done
+	# Into an empty vault, so the imported records land on the same ids the
+	# source used and can be compared record for record. Importing over a copy
+	# of the source appends instead, which is what let the old check pass while
+	# comparing nothing.
+	for fmt_name in $formats; do
+		cp "$FMT_ROOT/empty.gpg" "$FMT_ROOT/v-$fmt_name.gpg"
+		cp "$FMT_ROOT/empty.gpg.recovery" "$FMT_ROOT/v-$fmt_name.gpg.recovery"
+		(
+			VAULT_FILE="$FMT_ROOT/v-$fmt_name.gpg"
+			RECOVERY_FILE="$FMT_ROOT/v-$fmt_name.gpg.recovery"
+			cmd_import "$fmt_name" "$FMT_ROOT/export.$fmt_name" >/dev/null
+			decrypt_vault_to_file "$FMT_ROOT/plain-$fmt_name" >/dev/null
+		)
+	done
+)
+
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$ROOT_DIR/src/spm_core.py" \
+	"$FMT_ROOT" $formats <<'FMTCMPPY'
+import importlib.util, os, sqlite3, sys
+
+spec = importlib.util.spec_from_file_location("spm_core_fmt_cmp", sys.argv[1])
+core = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(core)
+root, formats = sys.argv[2], sys.argv[3:]
+
+
+def load(path):
+    records = {}
+    with open(path, encoding="utf-8", errors="surrogateescape") as handle:
+        for line in handle:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            parts = line.split("\t")
+            if parts[0].startswith("META_"):
+                continue
+            if parts[0].isdigit():
+                folder, fields = core.decode_attrs(
+                    parts[7] if len(parts) > 7 else "")
+                records[("password", parts[0])] = {
+                    "label": parts[1], "username": parts[2],
+                    "secret": parts[3], "notes": parts[4],
+                    "url": parts[6] if len(parts) > 6 else "",
+                    "folder": folder, "fields": tuple(fields)}
+            elif parts[0] in ("NOTE", "PASSPHRASE", "BACKUP_CODE"):
+                records[(parts[0], parts[1])] = {
+                    "label": parts[2], "body": parts[3]}
+            elif parts[0] == "AUTH":
+                records[("AUTH", parts[1])] = {
+                    "label": parts[2], "secret": parts[3], "period": parts[4],
+                    "algorithm": parts[6] if len(parts) > 6 else ""}
+    return records
+
+
+source = load(os.path.join(root, "plain-source"))
+problems = []
+for fmt in formats:
+    path = os.path.join(root, "plain-%s" % fmt)
+    if not os.path.exists(path):
+        problems.append("%s: nothing was imported" % fmt)
+        continue
+    got = load(path)
+    for key, want in sorted(source.items()):
+        have = got.get(key)
+        if have is None:
+            problems.append("%s: %s/%s did not survive" % ((fmt,) + key))
+            continue
+        for field, value in sorted(want.items()):
+            if have.get(field) != value:
+                problems.append("%s: %s/%s %s became %r (was %r)" % (
+                    fmt, key[0], key[1], field, have.get(field), value))
+    for key in sorted(got):
+        if key not in source:
+            problems.append("%s: %s/%s appeared from nowhere" % ((fmt,) + key))
+
+# The header names the core's column order, so a column added to an exporter
+# without being added to the order is caught here rather than by whichever
+# reader silently maps it onto the wrong name.
+with open(os.path.join(root, "export.csv"), encoding="utf-8") as handle:
+    header = handle.readline().strip().split(",")
+if header != list(core.EXPORT_FIELDNAMES):
+    problems.append("csv header %r is not the core's column order %r"
+                    % (header, list(core.EXPORT_FIELDNAMES)))
+
+# Loaded by a real SQL parser rather than by SPM's own reader. SPM parsed the
+# VALUES tuple positionally and ignored the column list, so it read back a file
+# that named eight columns while writing nine -- "9 values for 8 columns" to
+# anything else, and every export of this format was unusable.
+try:
+    sqlite3.connect(":memory:").executescript(
+        open(os.path.join(root, "export.sql"), encoding="utf-8").read())
+except sqlite3.Error as exc:
+    problems.append("sqlite refused the sql export: %s" % exc)
+
+if problems:
+    for line in problems[:20]:
+        sys.stderr.write("  %s\n" % line)
+    sys.exit("%d format problem(s)" % len(problems))
+print("  formats: %d round-tripped field for field, and the sql export loads "
+      "in sqlite" % len(formats))
+FMTCMPPY
 
 printf 'Import regression: a review outlives a failed write\n'
 # The reviewed rows were cleared before the vault was written, so a full disk

@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="4.0.1"
+VERSION="4.1.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -798,6 +798,17 @@ SPMCORE
 	mv -f "$staged" "$SPM_CORE_PATH" || { rm -f "$staged"; die "Cannot install the SPM core."; }
 }
 
+# The path to the installed core, for the two Python helpers that import it as
+# a module rather than running it as a command. SPM_CORE_PATH alone is not
+# enough: `core` is usually called inside a command substitution, and the
+# assignment ensure_core_script makes there dies with the subshell -- so a
+# caller reading the variable afterwards finds it empty and hands an empty path
+# to importlib, which returns a spec of None.
+core_script_path() {
+	[ -n "${SPM_CORE_PATH:-}" ] && [ -f "$SPM_CORE_PATH" ] || ensure_core_script
+	printf '%s' "$SPM_CORE_PATH"
+}
+
 core() {
 	[ -n "${SPM_CORE_PATH:-}" ] && [ -f "$SPM_CORE_PATH" ] || ensure_core_script
 	# The core writes security events against SPM_VAULT_PATH. The dashboard
@@ -846,7 +857,10 @@ decrypt_vault_to_file() {
 # The vault key is deliberately NOT captured here: a key unwrapped from a
 # snapshot must never become the key the live vault is written under.
 decrypt_vault_container() {
-	printf '%s' "$3" | core read "$1" "$2" >/dev/null 2>&1
+	# Every caller is proving a file opens before it replaces the live vault,
+	# so this asks the core for the stronger answer: not "gpg exited zero" but
+	# "what came out is a vault". gpg exits zero on inputs it never decrypted.
+	printf '%s' "$3" | core read "$1" "$2" --require-vault >/dev/null 2>&1
 }
 
 # The plaintext as it was when this process decrypted it, so a write can tell
@@ -4459,9 +4473,15 @@ cmd_export() {
 	tmp="$(make_tmp)"
 	decrypt_vault_to_file "$tmp"
 
-if ! python3 - "$format" "$tmp" "$outfile" <<'PY'
-import sys, json, base64, csv, html, datetime
-fmt, vault_path, out_path = sys.argv[1:]
+if ! python3 - "$format" "$tmp" "$outfile" "$(core_script_path)" <<'PY'
+import sys, json, base64, csv, html, datetime, importlib.util
+fmt, vault_path, out_path, core_path = sys.argv[1:]
+
+# The folder and custom fields cross an export as their own columns, and the
+# encoding of that column is the core's business, not this script's.
+_spec = importlib.util.spec_from_file_location("spm_core_export", core_path)
+core = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(core)
 
 def decode_b64(val):
     try:
@@ -4487,7 +4507,8 @@ with open(vault_path, "r", encoding="utf-8", errors="ignore") as f:
                 "notes": parts[4] if len(parts) > 4 else "",
                 "created": parts[5] if len(parts) > 5 else "",
                 "extra": "",
-                "url": parts[6] if len(parts) > 6 else ""
+                "url": parts[6] if len(parts) > 6 else "",
+                **core.attrs_export_columns(parts[7] if len(parts) > 7 else "")
             })
         elif tag == "NOTE":
             rows.append({
@@ -4541,7 +4562,7 @@ with open(vault_path, "r", encoding="utf-8", errors="ignore") as f:
                 "url": ""
             })
 
-fieldnames = ["type","id","label","username","secret","notes","created","extra","url"]
+fieldnames = list(core.EXPORT_FIELDNAMES)
 
 if fmt == "json":
     with open(out_path, "w", encoding="utf-8") as f:
@@ -4617,11 +4638,19 @@ elif fmt == "xml":
         f.write("</data>\n")
 elif fmt == "sql":
     with open(out_path, "w", encoding="utf-8") as f:
-        f.write("CREATE TABLE spm_export(type TEXT,id TEXT,label TEXT,username TEXT,secret TEXT,notes TEXT,created TEXT,extra TEXT);\n")
+        # Built from fieldnames rather than written out, because the two drifted:
+        # the column list stopped at `extra` while the row already carried `url`,
+        # so every INSERT this produced said "9 values for 8 columns" and sqlite
+        # refused the whole file. SPM's own reader parses the tuple positionally
+        # and never noticed -- the round trip agreed with itself while emitting
+        # SQL no other tool would load.
+        f.write("CREATE TABLE spm_export(%s);\n"
+                % ",".join("%s TEXT" % name for name in fieldnames))
         for r in rows:
             vals = [r.get(k, "") or "" for k in fieldnames]
             safe = [v.replace("'", "''") for v in vals]
-            f.write("INSERT INTO spm_export(type,id,label,username,secret,notes,created,extra) VALUES ('%s');\n" % ("','".join(safe)))
+            f.write("INSERT INTO spm_export(%s) VALUES ('%s');\n"
+                    % (",".join(fieldnames), "','".join(safe)))
 elif fmt == "ini":
     with open(out_path, "w", encoding="utf-8") as f:
         for r in rows:
@@ -4691,11 +4720,17 @@ cmd_import() {
 	tmp="$(make_tmp)"
 	decrypt_vault_to_file "$tmp"
 
-	if ! python3 - "$format" "$infile" "$tmp" <<'PY'
-import sys, json, csv, base64, configparser, io, re
+	if ! python3 - "$format" "$infile" "$tmp" "$(core_script_path)" <<'PY'
+import sys, json, csv, base64, configparser, io, re, importlib.util
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
-fmt, src_path, vault_path = sys.argv[1:]
+fmt, src_path, vault_path, core_path = sys.argv[1:]
+
+# Same encoder the dashboard uses, so a folder column means the same thing
+# whichever surface reads the file.
+_spec = importlib.util.spec_from_file_location("spm_core_import", core_path)
+core = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(core)
 
 def load_vault_lines(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -4767,7 +4802,8 @@ def add_password(r):
         _vf(r.get("secret","")),
         _vf(r.get("notes","")),
         _vf(r.get("created","")),
-        _vurl(r.get("url",""))
+        _vurl(r.get("url","")),
+        core.attrs_from_export_row(r)
     ]))
 
 def add_note(r):
@@ -4849,18 +4885,11 @@ def parse_rows():
     with io.StringIO(_read_text(src_path), newline="") as f:
         reader = csv.DictReader(f, delimiter=delim) if fmt!="csv-noheader" else csv.reader(f, delimiter=delim)
         if fmt=="csv-noheader":
+            # Mapped against the core's column order rather than a copy of it.
+            # The copy that used to live here stopped at `url`, so a headerless
+            # export lost its folder and custom fields on the way back in.
             for row in reader:
-                rows.append({
-                    "type": row[0] if len(row)>0 else "",
-                    "id": row[1] if len(row)>1 else "",
-                    "label": row[2] if len(row)>2 else "",
-                    "username": row[3] if len(row)>3 else "",
-                    "secret": row[4] if len(row)>4 else "",
-                    "notes": row[5] if len(row)>5 else "",
-                    "created": row[6] if len(row)>6 else "",
-                    "extra": row[7] if len(row)>7 else "",
-                    "url": row[8] if len(row)>8 else "",
-                })
+                rows.append(core.export_row_from_values(row))
         else:
             rows = list(reader)
     return rows
@@ -4907,8 +4936,16 @@ def parse_advanced_rows():
         root=ET.fromstring(content)
         return [{child.tag: (child.text or "") for child in item} for item in root.findall("item")]
     if fmt == "sql":
-        rows=[]; fields=["type","id","label","username","secret","notes","created","extra","url"]
-        for values in re.findall(r"INSERT\s+INTO\s+spm_export\s*\([^)]*\)\s*VALUES\s*\((.*?)\)\s*;", content, re.I | re.S):
+        # The column names come from the statement rather than from a list
+        # kept here. A hardcoded list is what let the exporter grow a column
+        # the reader silently mapped onto the wrong name -- and what made SPM
+        # the only tool that could read its own SQL.
+        rows=[]
+        default=list(core.EXPORT_FIELDNAMES)
+        for names, values in re.findall(
+                r"INSERT\s+INTO\s+spm_export\s*\(([^)]*)\)\s*VALUES\s*\((.*?)\)\s*;",
+                content, re.I | re.S):
+            fields=[n.strip().strip('"`[]') for n in names.split(",") if n.strip()] or default
             parsed=next(csv.reader([values], delimiter=",", quotechar="'", doublequote=True, skipinitialspace=True))
             rows.append(dict(zip(fields, parsed)))
         return rows

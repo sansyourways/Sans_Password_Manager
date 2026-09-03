@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="4.0.1"
+VERSION="4.1.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -1450,6 +1450,77 @@ def decode_attrs(column):
             if isinstance(name, str) and name.strip() and isinstance(value, str):
                 fields.append((name, value))
     return folder[:ATTRS_FOLDER_MAX], fields
+
+
+# The column order every export writes and every headerless or positional
+# reader maps against. One ordered definition, because the places that had
+# their own each stopped at a different column: the SQL writer named eight
+# while writing eleven, the SQL reader named nine, and the headerless CSV
+# readers stopped at `url`. None of them failed a test, because SPM was
+# reading back exactly what SPM wrote.
+EXPORT_FIELDNAMES = ("type", "id", "label", "username", "secret", "notes",
+                     "created", "extra", "url", "folder", "fields")
+
+
+def export_row_from_values(values):
+    """A row dict from a positional record, for headerless and SQL readers."""
+    return {name: (values[index] if index < len(values) else "")
+            for index, name in enumerate(EXPORT_FIELDNAMES)}
+
+
+# ----- attributes across an export -------------------------------------------
+# A folder and its custom fields cross an export as their own readable columns
+# rather than as the stored base64 blob: an export is meant to be opened in a
+# spreadsheet, and a column of opaque base64 is neither readable nor editable
+# by whatever the user opens it with.
+#
+# Both directions live here because both surfaces need them and only one of
+# them had them. Until 4.1.0 these were private to the dashboard, so a vault
+# exported and re-imported through the CLI lost every folder and every custom
+# field, on all twenty formats, silently -- which is exactly the disagreement
+# between two surfaces that a shared core exists to make impossible.
+
+def attrs_export_columns(column):
+    """The folder and fields columns an export carries for one record."""
+    folder, fields = decode_attrs(column)
+    return {
+        "folder": folder,
+        "fields": json.dumps(
+            [{"name": n, "value": v} for n, v in fields],
+            separators=(",", ":"), ensure_ascii=False) if fields else "",
+    }
+
+
+def attrs_from_export_row(row):
+    """The attributes column for an imported row.
+
+    Tolerant on purpose: an import is the one place rows arrive from software
+    that never heard of this format. A folder or a fields list that does not
+    parse is dropped rather than failing the import, because losing one
+    optional column is better than refusing a file of real passwords.
+    """
+    folder = str(row.get("folder", "") or "")
+    fields = []
+    raw = row.get("fields", "")
+    if isinstance(raw, list):
+        candidates = raw
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            candidates = json.loads(raw)
+        except Exception:
+            candidates = []
+    else:
+        candidates = []
+    if isinstance(candidates, list):
+        for item in candidates:
+            if isinstance(item, dict):
+                name, value = item.get("name"), item.get("value")
+                if isinstance(name, str) and name.strip():
+                    fields.append((name, str(value if value is not None else "")))
+    try:
+        return encode_attrs(folder, fields)
+    except Exception:
+        return ""
 
 
 def record_folders(plaintext):
@@ -3118,6 +3189,28 @@ def scan_broken_records(plaintext):
     return broken, orphans
 
 
+def looks_like_vault(plaintext):
+    """Whether decrypted bytes are plausibly a vault rather than any old file.
+
+    "The command exited zero" is not the same as "this decrypted". gpg exits 0
+    on inputs it never decrypted at all -- an unencrypted OpenPGP literal-data
+    packet is parsed and emitted as-is -- and it does so for roughly 1.1% of
+    random 512-byte blobs, because byte 0 is read as a packet header and a few
+    tags are processed without a key. Every caller of this is about to replace
+    a live vault with the file in question, so exit status alone is too weak a
+    thing to stake that on.
+
+    Deliberately generous: any META_ row or any record line. A vault SPM wrote
+    always carries META_VAULT_VERSION, and this must not start refusing odd but
+    genuine vaults -- it exists to reject files that are not vaults at all.
+    """
+    for line in plaintext.split("\n"):
+        tag = line.split("\t", 1)[0]
+        if tag.startswith("META_") or tag in _RECORD_TAGS or tag.isdigit():
+            return True
+    return False
+
+
 def vault_counts(plaintext):
     """Record counts, duplicate password ids and empty password fields."""
     counts = {"passwords": 0, "notes": 0, "passphrases": 0,
@@ -3316,10 +3409,18 @@ def main(argv):
     command = argv[1]
     try:
         if command == "read":
-            # read <vault> <out> ; stdin: master ; stdout: vault key (may be empty)
+            # read <vault> <out> [--require-vault]
+            # stdin: master ; stdout: vault key (may be empty)
+            #
+            # --require-vault is for the callers that are about to overwrite a
+            # live vault with this file. They need "this decrypted" and not
+            # merely "the command exited zero"; see looks_like_vault.
             vault, out = argv[2], argv[3]
             (master,) = _secrets(1)
             plaintext, key = read_vault(vault, master)
+            if "--require-vault" in argv[4:] and not looks_like_vault(plaintext):
+                raise VaultError(
+                    "%s decrypted to something that is not a vault" % vault)
             write_plaintext(out, plaintext)
             sys.stdout.write(key or "")
         elif command == "write":
@@ -3587,6 +3688,17 @@ SPMCORE
 	mv -f "$staged" "$SPM_CORE_PATH" || { rm -f "$staged"; die "Cannot install the SPM core."; }
 }
 
+# The path to the installed core, for the two Python helpers that import it as
+# a module rather than running it as a command. SPM_CORE_PATH alone is not
+# enough: `core` is usually called inside a command substitution, and the
+# assignment ensure_core_script makes there dies with the subshell -- so a
+# caller reading the variable afterwards finds it empty and hands an empty path
+# to importlib, which returns a spec of None.
+core_script_path() {
+	[ -n "${SPM_CORE_PATH:-}" ] && [ -f "$SPM_CORE_PATH" ] || ensure_core_script
+	printf '%s' "$SPM_CORE_PATH"
+}
+
 core() {
 	[ -n "${SPM_CORE_PATH:-}" ] && [ -f "$SPM_CORE_PATH" ] || ensure_core_script
 	# The core writes security events against SPM_VAULT_PATH. The dashboard
@@ -3635,7 +3747,10 @@ decrypt_vault_to_file() {
 # The vault key is deliberately NOT captured here: a key unwrapped from a
 # snapshot must never become the key the live vault is written under.
 decrypt_vault_container() {
-	printf '%s' "$3" | core read "$1" "$2" >/dev/null 2>&1
+	# Every caller is proving a file opens before it replaces the live vault,
+	# so this asks the core for the stronger answer: not "gpg exited zero" but
+	# "what came out is a vault". gpg exits zero on inputs it never decrypted.
+	printf '%s' "$3" | core read "$1" "$2" --require-vault >/dev/null 2>&1
 }
 
 # The plaintext as it was when this process decrypted it, so a write can tell
@@ -7248,9 +7363,15 @@ cmd_export() {
 	tmp="$(make_tmp)"
 	decrypt_vault_to_file "$tmp"
 
-if ! python3 - "$format" "$tmp" "$outfile" <<'PY'
-import sys, json, base64, csv, html, datetime
-fmt, vault_path, out_path = sys.argv[1:]
+if ! python3 - "$format" "$tmp" "$outfile" "$(core_script_path)" <<'PY'
+import sys, json, base64, csv, html, datetime, importlib.util
+fmt, vault_path, out_path, core_path = sys.argv[1:]
+
+# The folder and custom fields cross an export as their own columns, and the
+# encoding of that column is the core's business, not this script's.
+_spec = importlib.util.spec_from_file_location("spm_core_export", core_path)
+core = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(core)
 
 def decode_b64(val):
     try:
@@ -7276,7 +7397,8 @@ with open(vault_path, "r", encoding="utf-8", errors="ignore") as f:
                 "notes": parts[4] if len(parts) > 4 else "",
                 "created": parts[5] if len(parts) > 5 else "",
                 "extra": "",
-                "url": parts[6] if len(parts) > 6 else ""
+                "url": parts[6] if len(parts) > 6 else "",
+                **core.attrs_export_columns(parts[7] if len(parts) > 7 else "")
             })
         elif tag == "NOTE":
             rows.append({
@@ -7330,7 +7452,7 @@ with open(vault_path, "r", encoding="utf-8", errors="ignore") as f:
                 "url": ""
             })
 
-fieldnames = ["type","id","label","username","secret","notes","created","extra","url"]
+fieldnames = list(core.EXPORT_FIELDNAMES)
 
 if fmt == "json":
     with open(out_path, "w", encoding="utf-8") as f:
@@ -7406,11 +7528,19 @@ elif fmt == "xml":
         f.write("</data>\n")
 elif fmt == "sql":
     with open(out_path, "w", encoding="utf-8") as f:
-        f.write("CREATE TABLE spm_export(type TEXT,id TEXT,label TEXT,username TEXT,secret TEXT,notes TEXT,created TEXT,extra TEXT);\n")
+        # Built from fieldnames rather than written out, because the two drifted:
+        # the column list stopped at `extra` while the row already carried `url`,
+        # so every INSERT this produced said "9 values for 8 columns" and sqlite
+        # refused the whole file. SPM's own reader parses the tuple positionally
+        # and never noticed -- the round trip agreed with itself while emitting
+        # SQL no other tool would load.
+        f.write("CREATE TABLE spm_export(%s);\n"
+                % ",".join("%s TEXT" % name for name in fieldnames))
         for r in rows:
             vals = [r.get(k, "") or "" for k in fieldnames]
             safe = [v.replace("'", "''") for v in vals]
-            f.write("INSERT INTO spm_export(type,id,label,username,secret,notes,created,extra) VALUES ('%s');\n" % ("','".join(safe)))
+            f.write("INSERT INTO spm_export(%s) VALUES ('%s');\n"
+                    % (",".join(fieldnames), "','".join(safe)))
 elif fmt == "ini":
     with open(out_path, "w", encoding="utf-8") as f:
         for r in rows:
@@ -7480,11 +7610,17 @@ cmd_import() {
 	tmp="$(make_tmp)"
 	decrypt_vault_to_file "$tmp"
 
-	if ! python3 - "$format" "$infile" "$tmp" <<'PY'
-import sys, json, csv, base64, configparser, io, re
+	if ! python3 - "$format" "$infile" "$tmp" "$(core_script_path)" <<'PY'
+import sys, json, csv, base64, configparser, io, re, importlib.util
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
-fmt, src_path, vault_path = sys.argv[1:]
+fmt, src_path, vault_path, core_path = sys.argv[1:]
+
+# Same encoder the dashboard uses, so a folder column means the same thing
+# whichever surface reads the file.
+_spec = importlib.util.spec_from_file_location("spm_core_import", core_path)
+core = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(core)
 
 def load_vault_lines(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -7556,7 +7692,8 @@ def add_password(r):
         _vf(r.get("secret","")),
         _vf(r.get("notes","")),
         _vf(r.get("created","")),
-        _vurl(r.get("url",""))
+        _vurl(r.get("url","")),
+        core.attrs_from_export_row(r)
     ]))
 
 def add_note(r):
@@ -7638,18 +7775,11 @@ def parse_rows():
     with io.StringIO(_read_text(src_path), newline="") as f:
         reader = csv.DictReader(f, delimiter=delim) if fmt!="csv-noheader" else csv.reader(f, delimiter=delim)
         if fmt=="csv-noheader":
+            # Mapped against the core's column order rather than a copy of it.
+            # The copy that used to live here stopped at `url`, so a headerless
+            # export lost its folder and custom fields on the way back in.
             for row in reader:
-                rows.append({
-                    "type": row[0] if len(row)>0 else "",
-                    "id": row[1] if len(row)>1 else "",
-                    "label": row[2] if len(row)>2 else "",
-                    "username": row[3] if len(row)>3 else "",
-                    "secret": row[4] if len(row)>4 else "",
-                    "notes": row[5] if len(row)>5 else "",
-                    "created": row[6] if len(row)>6 else "",
-                    "extra": row[7] if len(row)>7 else "",
-                    "url": row[8] if len(row)>8 else "",
-                })
+                rows.append(core.export_row_from_values(row))
         else:
             rows = list(reader)
     return rows
@@ -7696,8 +7826,16 @@ def parse_advanced_rows():
         root=ET.fromstring(content)
         return [{child.tag: (child.text or "") for child in item} for item in root.findall("item")]
     if fmt == "sql":
-        rows=[]; fields=["type","id","label","username","secret","notes","created","extra","url"]
-        for values in re.findall(r"INSERT\s+INTO\s+spm_export\s*\([^)]*\)\s*VALUES\s*\((.*?)\)\s*;", content, re.I | re.S):
+        # The column names come from the statement rather than from a list
+        # kept here. A hardcoded list is what let the exporter grow a column
+        # the reader silently mapped onto the wrong name -- and what made SPM
+        # the only tool that could read its own SQL.
+        rows=[]
+        default=list(core.EXPORT_FIELDNAMES)
+        for names, values in re.findall(
+                r"INSERT\s+INTO\s+spm_export\s*\(([^)]*)\)\s*VALUES\s*\((.*?)\)\s*;",
+                content, re.I | re.S):
+            fields=[n.strip().strip('"`[]') for n in names.split(",") if n.strip()] or default
             parsed=next(csv.reader([values], delimiter=",", quotechar="'", doublequote=True, skipinitialspace=True))
             rows.append(dict(zip(fields, parsed)))
         return rows
@@ -18508,8 +18646,7 @@ def _export_rows(plaintext: str):
 def export_content(fmt: str, plaintext: str):
     import csv, json, html as htmlmod, io
     rows = _export_rows(plaintext)
-    fieldnames = ["type","id","label","username","secret","notes","created","extra","url",
-                  "folder","fields"]
+    fieldnames = list(core.EXPORT_FIELDNAMES)
     fmt = fmt.lower()
     if fmt == "json":
         return json.dumps(rows, ensure_ascii=False, indent=2)
@@ -18581,11 +18718,18 @@ def export_content(fmt: str, plaintext: str):
         out.append("</data>")
         return "\n".join(out)
     if fmt == "sql":
-        out=["CREATE TABLE spm_export(type TEXT,id TEXT,label TEXT,username TEXT,secret TEXT,notes TEXT,created TEXT,extra TEXT);"]
+        # Built from fieldnames rather than written out. The two drifted: the
+        # column list stopped at `extra` while every row already carried `url`,
+        # `folder` and `fields`, so each INSERT said "11 values for 8 columns"
+        # and sqlite refused the file outright. SPM's own reader parsed the
+        # tuple positionally and never noticed.
+        out=["CREATE TABLE spm_export(%s);"
+             % ",".join("%s TEXT" % name for name in fieldnames)]
         for r in rows:
             vals=[str(r.get(k,"") or "") for k in fieldnames]
             safe=[v.replace("'", "''") for v in vals]
-            out.append("INSERT INTO spm_export(type,id,label,username,secret,notes,created,extra) VALUES ('%s');" % ("','".join(safe)))
+            out.append("INSERT INTO spm_export(%s) VALUES ('%s');"
+                       % (",".join(fieldnames), "','".join(safe)))
         return "\n".join(out) + "\n"
     if fmt == "ini":
         out=[]
@@ -18664,8 +18808,15 @@ def _parse_import_rows(fmt: str, content: str):
         root=ET.fromstring(content)
         return [{child.tag: (child.text or "") for child in item} for item in root.findall("item")]
     if fmt == "sql":
-        rows=[]; fields=["type","id","label","username","secret","notes","created","extra","url"]
-        for values in re.findall(r"INSERT\s+INTO\s+spm_export\s*\([^)]*\)\s*VALUES\s*\((.*?)\)\s*;", content, re.I | re.S):
+        # Names taken from the statement, not from a list kept here: a
+        # hardcoded list is what let the exporter grow columns the reader
+        # silently mapped onto the wrong names.
+        rows=[]
+        default=list(core.EXPORT_FIELDNAMES)
+        for names, values in re.findall(
+                r"INSERT\s+INTO\s+spm_export\s*\(([^)]*)\)\s*VALUES\s*\((.*?)\)\s*;",
+                content, re.I | re.S):
+            fields=[n.strip().strip('"`[]') for n in names.split(",") if n.strip()] or default
             parsed=next(csv.reader([values], delimiter=",", quotechar="'", doublequote=True, skipinitialspace=True))
             rows.append(dict(zip(fields, parsed)))
         return rows
@@ -18681,18 +18832,11 @@ def _parse_import_rows(fmt: str, content: str):
         # StringIO, not splitlines(): csv needs the embedded newlines intact
         # to reassemble quoted multi-line fields into a single row.
         reader = csv.reader(io.StringIO(content), delimiter=delim)
+        # Mapped against the core's column order rather than a copy of it. The
+        # copy that used to live here stopped at `url`, so a headerless export
+        # lost its folder and custom fields on the way back in.
         for row in reader:
-            rows.append({
-                "type": row[0] if len(row)>0 else "",
-                "id": row[1] if len(row)>1 else "",
-                "label": row[2] if len(row)>2 else "",
-                "username": row[3] if len(row)>3 else "",
-                "secret": row[4] if len(row)>4 else "",
-                "notes": row[5] if len(row)>5 else "",
-                "created": row[6] if len(row)>6 else "",
-                "extra": row[7] if len(row)>7 else "",
-                "url": row[8] if len(row)>8 else "",
-            })
+            rows.append(core.export_row_from_values(row))
         return rows
     reader = csv.DictReader(io.StringIO(content), delimiter=delim)
     return list(reader)
@@ -18901,52 +19045,11 @@ def _apply_import(fmt: str, content: str, plaintext: str, export_password: str =
     return apply_import_rows(classified, plaintext)
 
 
-def _row_attrs_columns(column):
-    """The folder and fields columns an export carries for one record.
-
-    Exported as their own columns rather than as the stored base64 blob: an
-    export is meant to be readable, and a column of opaque base64 is neither
-    readable nor editable by whatever the user opens it with.
-    """
-    folder, fields = core.decode_attrs(column)
-    return {
-        "folder": folder,
-        "fields": jsonlib.dumps(
-            [{"name": n, "value": v} for n, v in fields],
-            separators=(",", ":"), ensure_ascii=False) if fields else "",
-    }
-
-
-def _attrs_from_row(row):
-    """The attributes column for an imported row.
-
-    Tolerant on purpose: an import is the one place rows arrive from software
-    that never heard of this format. A folder or a fields list that does not
-    parse is dropped rather than failing the import, because losing one
-    optional column is better than refusing a file of real passwords.
-    """
-    folder = str(row.get("folder", "") or "")
-    fields = []
-    raw = row.get("fields", "")
-    if isinstance(raw, list):
-        candidates = raw
-    elif isinstance(raw, str) and raw.strip():
-        try:
-            candidates = jsonlib.loads(raw)
-        except Exception:
-            candidates = []
-    else:
-        candidates = []
-    if isinstance(candidates, list):
-        for item in candidates:
-            if isinstance(item, dict):
-                name, value = item.get("name"), item.get("value")
-                if isinstance(name, str) and name.strip():
-                    fields.append((name, str(value if value is not None else "")))
-    try:
-        return core.encode_attrs(folder, fields)
-    except Exception:
-        return ""
+# Both directions moved into the trusted core in 4.1.0, so the CLI and the
+# dashboard cannot disagree about what a folder column means. These names are
+# kept as the local spelling of the same function.
+_row_attrs_columns = core.attrs_export_columns
+_attrs_from_row = core.attrs_from_export_row
 
 
 def apply_import_rows(classified, plaintext: str):
