@@ -178,8 +178,40 @@ co-owners of it. That review is a design concept, not a formal security audit.
   It also found that `spm --version` did not exist — the flag fell through to
   the interactive banner, so a packager asking which version this is got a menu
   and a wait. Added in the same release.
-- Explore hardware-backed signing for release provenance. Hardware-backed
-  protection of the vault itself is covered under Architecture below.
+- **Explored in 4.3.0: hardware-backed signing for release provenance.**
+  Hardware-backed protection of the vault itself is covered under Architecture
+  below and is unaffected by this.
+
+  The conclusion is that hardware *in* the release is not reachable on this
+  project's terms, and that the exploration found something more useful than
+  the thing it went looking for.
+
+  **Hardware in CI: no.** The artifact is built by the release workflow from
+  the tag, and a GitHub-hosted runner exposes no TPM and no smartcard. A
+  self-hosted runner with a token plugged into it would work and would mean a
+  maintainer-operated machine in the release path, which is the shape this
+  project avoids everywhere else.
+
+  **Building locally and uploading: no.** It would put the published bytes
+  outside the workflow the attestation describes, trading a stronger claim
+  about *who* for a weaker one about *what*.
+
+  **What is reachable, and why it is not urgent.** Because 3.9.0 made the
+  archive reproducible, a maintainer holding a token can rebuild the published
+  archive byte for byte and sign *that*, after the fact, without the build
+  moving anywhere. Signing the tag with a hardware-held key is reachable today
+  too. Neither needs anything from this repository to change; both need a key
+  a person holds, which is the part that is not code.
+
+  **What the exploration actually found.** The installer verified attestations
+  with `--repo` alone, which asserts only that *some* workflow in this
+  repository attested those bytes. Only `release.yml` holds
+  `attestations: write`, so nothing was exploitable -- but that is a one-line
+  change away from being untrue, and a check should not rest on a permission
+  staying where it is. The installer now pins the signing workflow where the
+  GitHub CLI supports it, and says which of the two checks it performed when
+  it cannot. Tightening what the existing signature proves was worth more than
+  adding a second one.
 - ~~Add optional localization contributions beyond English, Indonesian, and
   Japanese.~~ Delivered in 3.13.0, though not the way the item was written.
   The obstacle was never that translations were missing: it was that

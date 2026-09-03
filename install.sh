@@ -166,10 +166,35 @@ verify_provenance() {
 		printf 'Provenance  : not checked (the GitHub CLI is not signed in)\n'
 		return 0
 	fi
-	if gh attestation verify "$archive_path" --repo "$REPO" >/dev/null 2>&1; then
-		printf 'Provenance  : attestation verified against %s\n' "$REPO"
-		return 0
-	fi
+	# --repo alone says "some workflow in this repository attested these bytes".
+	# Only release.yml is supposed to mint one -- it is the sole workflow with
+	# attestations: write -- but that is a one-line change away from being
+	# untrue, and the installer should not depend on a permission staying where
+	# it is. Pin the workflow where gh can.
+	# `case`, not grep: the installer declares curl, sha256sum, unzip, bash and
+	# mktemp as its dependencies and should not quietly grow a sixth for a
+	# capability probe. Pattern matching is a shell builtin and works on the
+	# minimal PATH the tests deliberately run this under.
+	gh_help="$(gh attestation verify --help 2>&1 || true)"
+	case "$gh_help" in
+	*--signer-workflow*)
+		if gh attestation verify "$archive_path" --repo "$REPO" \
+			--signer-workflow "$REPO/.github/workflows/release.yml" >/dev/null 2>&1; then
+			printf 'Provenance  : attestation verified against %s (release.yml)\n' "$REPO"
+			return 0
+		fi
+		;;
+	*)
+		if gh attestation verify "$archive_path" --repo "$REPO" >/dev/null 2>&1; then
+			# Said out loud rather than skipped quietly: a weaker check that
+			# reads like the stronger one is worse than no check, because it
+			# is trusted.
+			printf 'Provenance  : attestation verified against %s; this gh cannot pin\n' "$REPO"
+			printf '              the signing workflow (needs a newer GitHub CLI)\n'
+			return 0
+		fi
+		;;
+	esac
 	printf 'Provenance verification failed: %s does not carry a valid build\n' "$archive" >&2
 	printf 'attestation from %s. Installation aborted.\n' "$REPO" >&2
 	return 1

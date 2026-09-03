@@ -7,6 +7,33 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-09-03
+
+### Added
+- Every password box in web mode carries a show/hide control: the login form,
+  all three fields of the master-password change, and the Bitwarden export
+  password. One helper renders them, so a password box added later cannot ship
+  without one. The state never persists — every page load starts masked.
+
+### Changed
+- The installer pins the workflow that signed a release. `gh attestation
+  verify --repo` alone asserts only that *some* workflow in the repository
+  attested those bytes; only `release.yml` holds `attestations: write`, so
+  nothing was exploitable, but a check should not rest on a permission staying
+  where it is. Where the GitHub CLI cannot pin, the installer says which of the
+  two checks it performed rather than reporting the weaker one as the stronger.
+- Recorded the outcome of the roadmap's *explore hardware-backed signing for
+  release provenance*: hardware in CI is not reachable on this project's terms,
+  and reproducibility already makes a detached hardware signature over the
+  published archive possible without the build moving. See ROADMAP.md.
+
+### Fixed
+- In a right-to-left page the reveal control sat on top of the caret. A
+  password field keeps left-to-right content in an RTL page, so its text begins
+  on the left — while the wrapper, still RTL, put the button's inline end there
+  too. The same failure as the Arabic search icon in 3.13.0, and again visible
+  only by rendering the page.
+
 ## [4.2.1] - 2026-09-03
 
 ### Fixed
