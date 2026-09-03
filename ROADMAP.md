@@ -115,8 +115,9 @@ co-owners of it. That review is a design concept, not a formal security audit.
 
   The in-field picker and optional WebAuthn unlock remain phased in
   [`docs/BROWSER-EXTENSION-ROADMAP.md`](docs/BROWSER-EXTENSION-ROADMAP.md).
-  Both need a browser's extension UI driven for real to be worth trusting,
-  which is the gap that decides when they ship rather than the code.
+  The picker needed a browser's extension UI driven for real, which 4.4.0 and
+  4.4.1 built. The popup unlock needs a design decision first, described
+  there.
 
 ## Next — safer integrations
 
@@ -126,6 +127,18 @@ co-owners of it. That review is a design concept, not a formal security audit.
   extension now runs under headless Chromium in the regression suite, the
   verification route this item was waiting on -- and **4.4.1 extended it to
   the fill**, which is the part an in-field picker actually performs.
+- ~~Opt-in subdomain scope and downgrade protection for the browser bridge.~~
+  **Shipped in 4.5.0.** A record's URL field may be written
+  `https://*.example.com`, binding it to that host and every host beneath it.
+  It is opt in per record and never inferred: with no public suffix list,
+  inferring it would turn a record for `foo.co.uk` into a record for everything
+  under `.co.uk`. `*.com` is refused as a floor, not as a substitute for a PSL.
+
+  Downgrade protection ships with it -- an https-bound record is refused on an
+  http page -- and fails closed, so a caller that does not say what scheme the
+  page uses is refused rather than assumed safe. The matching rule moved into
+  the trusted core, where `bridge-list` and `bridge-get` now share one
+  implementation instead of carrying one each.
 - ~~Design pluggable, encrypted synchronization transports without introducing a
   maintainer-operated cloud service.~~ **Shipped in 3.15.0.** A transport
   answers three questions -- can I reach this target, put the remote object in
@@ -427,8 +440,10 @@ single-file change by the time it was reached.
 
 ### What is left, and what decides when
 
-Two items on this board are written but not shipped, and in both cases the
-blocker is verification rather than code.
+Three items on this board are written but not shipped. For two of them the
+blocker is verification rather than code; the third is waiting on a design
+decision, which is a different kind of waiting and is worth not confusing with
+the others.
 
 - **The in-field picker** needed a browser's extension UI driven for real.
   **4.4.0 built the harness that does it and 4.4.1 finished the half that can
@@ -453,6 +468,13 @@ blocker is verification rather than code.
   Unchanged, and 4.3.0's exploration of hardware-backed *signing* did not move
   it: neither has a known answer to pin or a second implementation in CI to
   disagree with.
+- **WebAuthn unlock inside the extension popup** -- the half of 4.5.0's
+  roadmap item that did not ship -- is not blocked on verification at all. The
+  popup reaches SPM through the native host, which takes no part in the
+  Dashboard's WebAuthn ceremony and holds no session for an assertion to
+  attach to. The open question is where a verified assertion is redeemed, and
+  answering it badly puts a second unlock path beside the one that exists.
+  Recording it as pending code would have been the wrong description.
 
 That distinction is worth stating because of what the 3.2.0–3.7.0 run showed.
 Five defects reached a release and were then found only when something was

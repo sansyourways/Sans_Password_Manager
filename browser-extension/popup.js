@@ -6,7 +6,7 @@ document.getElementById("fill").addEventListener("click", async () => {
   if (!/^\d+$/.test(record) || !master) { status.textContent = "Record ID and master password are required."; return; }
   const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
   const url = new URL(tab.url); status.textContent = "Requesting a domain-bound record…";
-  chrome.runtime.sendNativeMessage("xyz.sansyourways.spm", {action:"get", record, host:url.hostname, master}, async response => {
+  chrome.runtime.sendNativeMessage("xyz.sansyourways.spm", {action:"get", record, host:url.hostname, scheme:url.protocol.replace(":",""), master}, async response => {
     master = "";
     if (chrome.runtime.lastError || !response?.ok) { status.textContent = response?.error || chrome.runtime.lastError?.message || "Request failed."; return; }
     // spmFillForm from fill.js, the same function the universal extension
@@ -15,6 +15,6 @@ document.getElementById("fill").addEventListener("click", async () => {
     // state ignores -- the field looked filled and the form submitted empty.
     await chrome.scripting.executeScript({target:{tabId:tab.id}, func:spmFillForm,
       args:[response.username,response.password]});
-    response.password = ""; status.textContent = "Filled after exact hostname verification.";
+    response.password = ""; status.textContent = "Filled after verifying the hostname and the page's scheme.";
   });
 });

@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="4.4.1"
+VERSION="4.5.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -5610,35 +5610,16 @@ PY
 }
 
 cmd_bridge_get() {
-	local id="${1:-}" host="${2:-}" tmp
+	local id="${1:-}" host="${2:-}" scheme="${3:-}" tmp
 	printf '%s' "$id" | grep -Eq '^[0-9]+$' || die "Numeric record ID required."
 	[ -n "$host" ] || die "Browser hostname required."
 	IFS= read -r MASTER_PW || die "Master password required on stdin."
 	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
 	local status=0
-	python3 - "$tmp" "$id" "$host" <<'PY' || status=$?
-import json,re,sys,urllib.parse
-path,rid,requested=sys.argv[1:]; requested=requested.lower().strip(".")
-for line in open(path,encoding="utf-8",errors="replace"):
- p=line.rstrip("\n").split("\t")
- if p and p[0]==rid and len(p)>=6:
-  label,user,secret,notes=p[1:5]
-  url=p[6] if len(p)>6 else ""
-  candidates={label.lower().strip(".")}
-  # The url field is the intended binding source. Notes are still scanned so
-  # that vaults written before 2.12.0 -- where a URL could only live in the
-  # notes -- keep matching exactly as they did, with no rewrite on upgrade.
-  for token in ([url] if url else [])+re.findall(r"https?://[^\s]+",notes):
-   if not re.match(r"(?i)^https?://",token):continue
-   try:candidates.add((urllib.parse.urlparse(token).hostname or "").lower().strip("."))
-   except ValueError:pass
-  candidates.discard("")
-  if requested not in candidates:
-   print(json.dumps({"ok":False,"error":"record is not bound to this hostname"}));raise SystemExit(2)
-  print(json.dumps({"ok":True,"username":user,"password":secret}));break
-else:
- print(json.dumps({"ok":False,"error":"record not found"}));raise SystemExit(1)
-PY
+	# The matching lives in the trusted core. It used to live here, inline,
+	# and again in cmd_bridge_list -- two copies of the rule that decides
+	# whether a web page may see a credential.
+	python3 "$(core_script_path)" bridge-get "$tmp" "$id" "$host" "$scheme" || status=$?
 	secure_wipe "$tmp"; MASTER_PW=""
 	# Report the helper's status rather than the cleanup's. As a command,
 	# `spm bridge-get` already exited non-zero on a refusal because errexit
@@ -5650,32 +5631,12 @@ PY
 }
 
 cmd_bridge_list() {
-	local host="${1:-}" tmp
+	local host="${1:-}" scheme="${2:-}" tmp
 	[ -n "$host" ] || die "Browser hostname required."
 	IFS= read -r MASTER_PW || die "Master password required on stdin."
 	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
 	local status=0
-	python3 - "$tmp" "$host" <<'PY' || status=$?
-import json,re,sys,urllib.parse
-path,requested=sys.argv[1:]; requested=requested.lower().strip(".")
-if not requested or any(c.isspace() for c in requested):
- print(json.dumps({"ok":False,"error":"invalid browser hostname"}));raise SystemExit(2)
-matches=[]
-for line in open(path,encoding="utf-8",errors="replace"):
- p=line.rstrip("\n").split("\t")
- if not p or not p[0].isdigit() or len(p)<6:continue
- rid,label,user,notes=p[0],p[1],p[2],p[4]
- url=p[6] if len(p)>6 else ""
- candidates={label.lower().strip(".")}
- for token in ([url] if url else [])+re.findall(r"https?://[^\s]+",notes):
-  if not re.match(r"(?i)^https?://",token):continue
-  try:candidates.add((urllib.parse.urlparse(token).hostname or "").lower().strip("."))
-  except ValueError:pass
- candidates.discard("")
- if requested in candidates:
-  matches.append({"id":rid,"label":label,"username":user,"url":url})
-print(json.dumps({"ok":True,"matches":matches}))
-PY
+	python3 "$(core_script_path)" bridge-list "$tmp" "$host" "$scheme" || status=$?
 	secure_wipe "$tmp"; MASTER_PW=""
 	return "$status"
 }

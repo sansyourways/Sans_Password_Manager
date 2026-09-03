@@ -43,6 +43,18 @@ def valid_host(value):
         raise ValueError("invalid browser hostname")
     return value
 
+def valid_scheme(value):
+    """The page's scheme, which the downgrade rule needs and will not guess.
+
+    Anything that is not http or https becomes the empty string rather than an
+    error, and the core then refuses every https-bound record for that page.
+    Failing closed here matters more than a precise complaint: the alternative
+    is a caller that omits the scheme and keeps filling as though the page were
+    secure.
+    """
+    value = str(value or "").lower().strip(":")
+    return value if value in ("http", "https") else ""
+
 # The boundary the extension cannot talk past.
 #
 # Two halves, and the second is the one that needed writing down. Inbound, an
@@ -73,6 +85,7 @@ MATCH_FIELDS = ("id", "label", "username", "url")
 ALLOWED_ERRORS = frozenset((
     "invalid browser hostname",
     "record is not bound to this hostname",
+    "record requires a secure page",
     "record not found",
     "master password required",
     "numeric record ID required",
@@ -139,7 +152,8 @@ def handle(message):
         candidate = message.get("master")
         if not isinstance(candidate, str) or not candidate:
             return {"ok":False,"error":"master password required"}
-        response = run_spm("bridge-list", valid_host(message.get("host")), password=candidate)
+        response = run_spm("bridge-list", valid_host(message.get("host")),
+                           valid_scheme(message.get("scheme")), password=candidate)
         if response.get("ok"):
             master = candidate; unlocked_at = last_used = time.monotonic()
         # unlock reports success or failure and nothing else: the list it used
@@ -157,16 +171,18 @@ def handle(message):
         if not record.isdigit(): return {"ok":False,"error":"numeric record ID required"}
         return project("get", run_spm("bridge-get", record,
                                       valid_host(message.get("host")),
+                                      valid_scheme(message.get("scheme")),
                                       password=message["master"]))
     if action in ("list", "get"):
         if not is_unlocked():
             return {"ok":False,"error":"SPM is locked or the session expired"}
         host = valid_host(message.get("host"))
-        if action == "list": response = run_spm("bridge-list", host, password=master)
+        scheme = valid_scheme(message.get("scheme"))
+        if action == "list": response = run_spm("bridge-list", host, scheme, password=master)
         else:
             record = str(message.get("record", ""))
             if not record.isdigit(): return {"ok":False,"error":"numeric record ID required"}
-            response = run_spm("bridge-get", record, host, password=master)
+            response = run_spm("bridge-get", record, host, scheme, password=master)
         if response.get("ok"): last_used = time.monotonic()
         return project(action, response)
     return {"ok":False,"error":"unsupported native messaging action"}

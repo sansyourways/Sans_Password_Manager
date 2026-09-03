@@ -861,6 +861,43 @@ if grep -q 'javascript:' "$TEST_ROOT/url-bad-after"; then
 	printf 'a javascript: scheme reached the vault\n' >&2; exit 1
 fi
 
+# The form and the bridge have to agree about what a URL means. A scope the
+# matcher will never honour must not save cleanly and then match nothing: the
+# refusal has to arrive here, where there is somewhere to print it, rather than
+# at fill time where there is not.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/url-tld.html" \
+	-X POST --data-urlencode "csrf=$add_csrf" --data-urlencode 'name=Overbroad' \
+	--data-urlencode 'user=x' --data-urlencode 'password=y' \
+	--data-urlencode 'url=https://*.com' \
+	"http://127.0.0.1:$WEB_PORT/add"
+grep -qi 'top-level domain' "$TEST_ROOT/url-tld.html" \
+	|| { printf 'a whole-TLD scope was not refused with a reason\n' >&2; exit 1; }
+vault_plain > "$TEST_ROOT/url-tld-after"
+if grep -q 'Overbroad' "$TEST_ROOT/url-tld-after"; then
+	printf 'a whole-TLD scope reached the vault\n' >&2; exit 1
+fi
+# ...and a well-formed scope still saves, or the guard has eaten the feature.
+curl -fsS -b "$TEST_ROOT/cookies" -o /dev/null -D "$TEST_ROOT/url-scope.headers" \
+	-X POST --data-urlencode "csrf=$add_csrf" --data-urlencode 'name=Scoped Site' \
+	--data-urlencode 'user=x' --data-urlencode 'password=y' \
+	--data-urlencode 'url=https://*.scoped.example.invalid' \
+	"http://127.0.0.1:$WEB_PORT/add"
+vault_plain > "$TEST_ROOT/url-scope-after"
+scoped_id="$(awk -F '\t' '$2=="Scoped Site"{print $1}' "$TEST_ROOT/url-scope-after" | head -n1)"
+[ -n "$scoped_id" ] || { printf 'a valid subdomain scope was refused\n' >&2; exit 1; }
+[ "$(awk -F '\t' -v id="$scoped_id" '$1==id{print $7}' "$TEST_ROOT/url-scope-after")" \
+	= 'https://*.scoped.example.invalid' ] \
+	|| { printf 'the stored scope was rewritten\n' >&2; exit 1; }
+# The view page shows a scope as a scope. Rendering it as an href gives a link
+# that cannot resolve.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/url-scope-view.html" \
+	"http://127.0.0.1:$WEB_PORT/view?id=$scoped_id"
+if grep -q 'href="https://\*\.' "$TEST_ROOT/url-scope-view.html"; then
+	printf 'a wildcard scope was rendered as a dead link\n' >&2; exit 1
+fi
+grep -q 'entry.url.scope' "$TEST_ROOT/url-scope-view.html" \
+	|| { printf 'the view page does not explain what a scope matches\n' >&2; exit 1; }
+
 # The view page renders it as a link, and never as a javascript: href even if
 # a hand-edited vault smuggles one past the form.
 curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/url-view.html" \
@@ -903,35 +940,120 @@ grep -qx "URL: *" "$TEST_ROOT/legacy-get.txt" \
 
 # The browser bridge binds on the url field, and still honours a URL that only
 # exists in the notes -- that is how every vault written before 2.12.0 works.
-printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_get "$bound_id" bound.example.invalid \
+printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_get "$bound_id" bound.example.invalid https \
 	> "$TEST_ROOT/bridge-url.json" || true
 grep -q '"ok": *true' "$TEST_ROOT/bridge-url.json" \
 	|| { printf 'the bridge did not bind on the url field\n' >&2
 	     cat "$TEST_ROOT/bridge-url.json" >&2; exit 1; }
-if printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_get "$bound_id" other.example.invalid \
+if printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_get "$bound_id" other.example.invalid https \
 	> "$TEST_ROOT/bridge-wrong.json" 2>/dev/null; then
 	printf 'the bridge bound a record to a hostname it does not carry\n' >&2; exit 1
 fi
-printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_get 1 example.invalid \
+printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_get 1 example.invalid https \
 	> "$TEST_ROOT/bridge-notes.json" || true
 grep -q '"ok": *true' "$TEST_ROOT/bridge-notes.json" \
 	|| { printf 'a pre-2.12.0 notes-embedded URL stopped binding\n' >&2
 	     cat "$TEST_ROOT/bridge-notes.json" >&2; exit 1; }
-printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_list bound.example.invalid \
+printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_list bound.example.invalid https \
 	> "$TEST_ROOT/bridge-list.json" || true
 grep -q '"ok": *true' "$TEST_ROOT/bridge-list.json"
 grep -q '"id": *"'"$bound_id"'"' "$TEST_ROOT/bridge-list.json"
 if grep -q "$AUDIT_PASSWORD\|url-secret" "$TEST_ROOT/bridge-list.json"; then
 	printf 'bridge-list exposed secret material\n' >&2; exit 1
 fi
-printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_list no-match.example.invalid \
+printf '%s\n' "$AUDIT_PASSWORD" | cmd_bridge_list no-match.example.invalid https \
 	> "$TEST_ROOT/bridge-list-empty.json" || true
 grep -q '"matches": *\[\]' "$TEST_ROOT/bridge-list-empty.json"
-printf '%s\n' "$AUDIT_PASSWORD" | "$ROOT_DIR/spm.sh" bridge-list bound.example.invalid \
+printf '%s\n' "$AUDIT_PASSWORD" | "$ROOT_DIR/spm.sh" bridge-list bound.example.invalid https \
 	> "$TEST_ROOT/bridge-list-dispatch.json"
 grep -q '"ok": *true' "$TEST_ROOT/bridge-list-dispatch.json"
 [ "$(wc -l < "$TEST_ROOT/bridge-list-dispatch.json" | tr -d ' ')" = 1 ] \
 	|| { printf 'bridge-list dispatch emitted prompts around its JSON response\n' >&2; exit 1; }
+
+printf 'Extension regression: opt-in subdomain scope and downgrade refusal\n'
+# The rule that decides whether a web page may see a credential. Driven through
+# the CLI's own bridge commands rather than the matcher alone, because the
+# shell is where the argument order and the exit status live -- and it is where
+# the two copies of this rule used to sit, one per command.
+scope_root="$TEST_ROOT/scope"
+mkdir -p "$scope_root"
+scope_vault="$scope_root/vault.gpg"
+scope_plain="$scope_root/plain"
+scope_master="Scope-Regression-Master-1"
+{
+	printf 'META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n' "$TEST_RECOVERY_B64"
+	printf '1\tAcme Wildcard\tavery@example.invalid\twildcard-secret\tsynthetic\t2025-01-01T00:00:00Z\thttps://*.example.com\n'
+	printf '2\tAcme Exact\tbob@example.invalid\texact-secret\tsynthetic\t2025-01-01T00:00:00Z\thttps://exact.example.com\n'
+	printf '3\tLegacy Plain\tcarol@example.invalid\tplain-secret\tsynthetic\t2025-01-01T00:00:00Z\thttp://plain.invalid\n'
+	printf '4\tOverbroad\tdave@example.invalid\toverbroad-secret\tsynthetic\t2025-01-01T00:00:00Z\thttps://*.com\n'
+	printf '5\tnotexample.com\terin@example.invalid\tsuffix-secret\tsynthetic\t2025-01-01T00:00:00Z\t\n'
+} > "$scope_plain"
+printf '%s' "$scope_master" | core write "$scope_vault" "$scope_plain" >/dev/null
+
+scope_die() { printf 'scope: %s\n' "$1" >&2; exit 1; }
+scope_list() { # <host> <scheme>
+	printf '%s\n' "$scope_master" | VAULT_FILE="$scope_vault" \
+		cmd_bridge_list "$1" "$2" 2>/dev/null || true
+}
+scope_get() { # <id> <host> <scheme>
+	printf '%s\n' "$scope_master" | VAULT_FILE="$scope_vault" \
+		cmd_bridge_get "$1" "$2" "$3" 2>/dev/null || true
+}
+scope_offers() { # <json> <label>
+	printf '%s' "$1" | grep -q "\"label\": *\"$2\""
+}
+
+# An opt-in wildcard covers the parent host and every depth beneath it.
+for scope_host in example.com app.example.com deep.app.example.com; do
+	scope_offers "$(scope_list "$scope_host" https)" "Acme Wildcard" \
+		|| scope_die "https://*.example.com did not cover $scope_host"
+done
+# ...and it stops at a dot. A bare suffix test also matches notexample.com,
+# which is a hostname anyone can register.
+scope_offers "$(scope_list notexample.com https)" "Acme Wildcard" \
+	&& scope_die "https://*.example.com matched notexample.com"
+# A bare host never becomes a wildcard. That is the whole reason scope is opt
+# in: with no public suffix list, inferring it turns a record for one site into
+# a record for a registry.
+scope_offers "$(scope_list sub.exact.example.com https)" "Acme Exact" \
+	&& scope_die "a bare hostname was treated as a wildcard"
+# The one guard that needs no PSL: nothing legitimately claims a whole TLD.
+scope_offers "$(scope_list anything.com https)" "Overbroad" \
+	&& scope_die "*.com was accepted as a scope"
+# A label that happens to look like a host still binds, and only exactly.
+scope_offers "$(scope_list notexample.com https)" "notexample.com" \
+	|| scope_die "a label binding stopped matching its own host"
+
+# Downgrade protection, on both surfaces. The list must not offer what the get
+# will refuse, or the user picks an account and is told no for no visible
+# reason.
+scope_offers "$(scope_list exact.example.com http)" "Acme Exact" \
+	&& scope_die "an https-bound record was offered to an http page"
+scope_get 2 exact.example.com http | grep -q 'requires a secure page' \
+	|| scope_die "an https-bound record filled an http page"
+scope_get 2 exact.example.com https | grep -q 'exact-secret' \
+	|| scope_die "an https-bound record would not fill its own https page"
+# Fails closed: a caller that does not say what the page is gets nothing. An
+# extension older than this release is such a caller.
+scope_get 2 exact.example.com '' | grep -q 'requires a secure page' \
+	|| scope_die "a missing page scheme was treated as secure"
+# An http-bound record is not the mirror case; nothing is being downgraded.
+scope_get 3 plain.invalid http | grep -q 'plain-secret' \
+	|| scope_die "an http-bound record was refused on its own http page"
+
+# A refusal must not exit zero. The wrapper returned the status of its own
+# cleanup once before, which made a refusal read as success to any caller
+# checking the exit code rather than parsing the JSON.
+if printf '%s\n' "$scope_master" | VAULT_FILE="$scope_vault" \
+	cmd_bridge_get 2 exact.example.com http >/dev/null 2>&1; then
+	scope_die "a downgrade refusal exited zero"
+fi
+# And a list stays secret-free whatever it matches.
+if scope_list app.example.com https | grep -q 'wildcard-secret'; then
+	scope_die "bridge-list leaked a secret"
+fi
+printf '  scope: opt-in wildcards cover subdomains and stop at the dot, *.com is refused, and an https record will not fill an http page\n'
+
 
 printf 'Web regression: url field, scheme allowlist and bridge binding\n'
 python3 "$ROOT_DIR/tests/native_host_protocol.py"
@@ -1992,7 +2114,7 @@ printf 'Extension regression: the native-messaging boundary\n'
 # A field added there later would have reached the extension with no code
 # change and no review. These assert the projection, not the plumbing.
 PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - \
-	"$ROOT_DIR/browser-extension-universal/native_host.py" <<'BOUNDPY'
+	"$ROOT_DIR/browser-extension-universal/native_host.py" "$ROOT_DIR/src" <<'BOUNDPY'
 import sys
 
 source = open(sys.argv[1], encoding="utf-8").read()
@@ -2045,6 +2167,17 @@ if project("some-new-action", {"ok": True, "password": "p"}) != {"ok": True}:
 
 if set(actions) != {"unlock", "lock", "list", "get"}:
     sys.exit("the action table changed without this test changing: %r" % sorted(actions))
+
+# Every refusal the core's matcher can produce must be declared here. A
+# refusal the host has not been told about is projected onto the generic one,
+# which would make "this page is not secure enough for this record"
+# indistinguishable from every other failure at exactly the moment the user
+# needs to know which it was.
+sys.path.insert(0, sys.argv[2])
+import spm_core
+for refusal in (spm_core.BRIDGE_NOT_BOUND, spm_core.BRIDGE_INSECURE):
+    if refusal not in allowed_errors:
+        sys.exit("the core can refuse with %r and the host would hide it" % refusal)
 
 print("  boundary: %d actions declared, responses projected, errors from a "
       "fixed set of %d" % (len(actions), len(allowed_errors)))
