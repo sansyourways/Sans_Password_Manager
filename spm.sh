@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="4.1.0"
+VERSION="4.2.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -830,7 +830,12 @@ import urllib.request
 # The vault records the format it was written in, so a later change can migrate
 # instead of guessing. A vault with no META_VAULT_VERSION row predates this and
 # is format 1; every write stamps the current version.
-VAULT_FORMAT_VERSION = 4
+# 5 because a record may now carry a `hidden` flag inside its attributes, and
+# an older build that edited such a record would re-encode the attributes
+# without it -- quietly un-hiding an entry someone deliberately hid. Reading a
+# format-5 vault still works on 4.1.0; stamp_version is what stops it writing
+# one back.
+VAULT_FORMAT_VERSION = 5
 
 CONTAINER_MAGIC = b"SPM-VAULT-3"
 
@@ -1383,7 +1388,7 @@ ATTRS_FIELD_VALUE_MAX = 4096
 ATTRS_FIELD_MAX = 64
 
 
-def encode_attrs(folder="", fields=None):
+def encode_attrs(folder="", fields=None, hidden=False):
     """The attributes column for a record, or "" when there is nothing to say.
 
     Empty is empty rather than an encoded empty object, so a record that uses
@@ -1391,7 +1396,8 @@ def encode_attrs(folder="", fields=None):
     """
     folder = (folder or "").strip()
     fields = [(str(n).strip(), str(v)) for n, v in (fields or []) if str(n).strip()]
-    if not folder and not fields:
+    hidden = bool(hidden)
+    if not folder and not fields and not hidden:
         return ""
     if len(folder) > ATTRS_FOLDER_MAX:
         raise VaultError("folder name is longer than %d characters"
@@ -1416,27 +1422,35 @@ def encode_attrs(folder="", fields=None):
         payload["folder"] = folder
     if fields:
         payload["fields"] = [{"name": n, "value": v} for n, v in fields]
+    if hidden:
+        payload["hidden"] = True
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     return base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
 
 def decode_attrs(column):
-    """(folder, [(name, value)]) for an attributes column.
+    """(folder, [(name, value)], hidden) for an attributes column.
 
     Never raises. A column this build cannot read is a record it should still
     show, minus the part it did not understand -- refusing would make one bad
     row hide a whole vault.
+
+    Three values rather than two, deliberately. Every caller unpacked two, so
+    adding `hidden` breaks each of them at the point of use instead of letting
+    a writer re-encode a record without the flag it never read. That silent
+    drop is exactly how folders and custom fields went missing from twenty
+    export formats until 4.1.0.
     """
     column = (column or "").strip()
     if not column:
-        return "", []
+        return "", [], False
     try:
         payload = json.loads(base64.b64decode(column, validate=True)
                              .decode("utf-8"))
     except Exception:
-        return "", []
+        return "", [], False
     if not isinstance(payload, dict):
-        return "", []
+        return "", [], False
     folder = payload.get("folder") or ""
     if not isinstance(folder, str):
         folder = ""
@@ -1449,7 +1463,7 @@ def decode_attrs(column):
             name, value = item.get("name"), item.get("value")
             if isinstance(name, str) and name.strip() and isinstance(value, str):
                 fields.append((name, value))
-    return folder[:ATTRS_FOLDER_MAX], fields
+    return folder[:ATTRS_FOLDER_MAX], fields, payload.get("hidden") is True
 
 
 # The column order every export writes and every headerless or positional
@@ -1459,7 +1473,7 @@ def decode_attrs(column):
 # readers stopped at `url`. None of them failed a test, because SPM was
 # reading back exactly what SPM wrote.
 EXPORT_FIELDNAMES = ("type", "id", "label", "username", "secret", "notes",
-                     "created", "extra", "url", "folder", "fields")
+                     "created", "extra", "url", "folder", "fields", "hidden")
 
 
 def export_row_from_values(values):
@@ -1482,12 +1496,13 @@ def export_row_from_values(values):
 
 def attrs_export_columns(column):
     """The folder and fields columns an export carries for one record."""
-    folder, fields = decode_attrs(column)
+    folder, fields, hidden = decode_attrs(column)
     return {
         "folder": folder,
         "fields": json.dumps(
             [{"name": n, "value": v} for n, v in fields],
             separators=(",", ":"), ensure_ascii=False) if fields else "",
+        "hidden": "1" if hidden else "",
     }
 
 
@@ -1517,8 +1532,16 @@ def attrs_from_export_row(row):
                 name, value = item.get("name"), item.get("value")
                 if isinstance(name, str) and name.strip():
                     fields.append((name, str(value if value is not None else "")))
+    # Anything a spreadsheet or another manager might put in a truthy cell.
+    # An unrecognised value means not hidden, because the safe direction for a
+    # flag nobody understood is the one that shows the entry rather than the
+    # one that pretends a vault holds less than it does.
+    raw_hidden = row.get("hidden", "")
+    hidden = (raw_hidden is True
+              or (isinstance(raw_hidden, str)
+                  and raw_hidden.strip().lower() in ("1", "true", "yes", "y", "hidden")))
     try:
-        return encode_attrs(folder, fields)
+        return encode_attrs(folder, fields, hidden)
     except Exception:
         return ""
 
@@ -1530,7 +1553,7 @@ def record_folders(plaintext):
         parts = line.split("\t")
         if not parts or parts[0].startswith("META_") or not parts[0].isdigit():
             continue
-        folder, _ = decode_attrs(parts[7] if len(parts) > 7 else "")
+        folder, _, _ = decode_attrs(parts[7] if len(parts) > 7 else "")
         if folder:
             seen.setdefault(folder.casefold(), folder)
     return [seen[k] for k in sorted(seen)]
@@ -1947,6 +1970,85 @@ def _tidy_note_with_original(notes, original):
     return ("%s %s" % (text.strip(), marker)).strip() if text.strip() else marker
 
 
+# Which hosts count as sensitive is the user's list, kept in the vault. SPM
+# ships no opinion about it and no examples: a built-in list would be a
+# maintenance burden, would be wrong for somebody, and would put in the source
+# and in every clone of the repository exactly the words this feature exists to
+# keep off a screen. The list lives in META_HIDDEN_HOSTS because it is itself
+# sensitive -- a plaintext config file naming them would leak the very thing
+# being protected.
+HIDDEN_HOSTS_TAG = "META_HIDDEN_HOSTS"
+HIDDEN_HOSTS_MAX = 200
+
+
+def hidden_hosts(plaintext):
+    """The host words this vault treats as sensitive, lowercased and unique."""
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if parts[0] == HIDDEN_HOSTS_TAG and len(parts) > 1:
+            return _split_hosts(parts[1])
+    return []
+
+
+def _split_hosts(raw):
+    seen, out = set(), []
+    for token in re.split(r"[^A-Za-z0-9.-]+", (raw or "").lower()):
+        token = token.strip(".-")
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+        if len(out) >= HIDDEN_HOSTS_MAX:
+            break
+    return out
+
+
+def set_hidden_hosts(plaintext, raw):
+    """Store the list, replacing any previous one. Returns the new plaintext."""
+    hosts = _split_hosts(raw)
+    rows = [line for line in (plaintext or "").splitlines()
+            if line.split("\t")[0] != HIDDEN_HOSTS_TAG]
+    if hosts:
+        rows.append("%s\t%s\t-\t-\t-\t-" % (HIDDEN_HOSTS_TAG, " ".join(hosts)))
+    return "\n".join(rows) + "\n"
+
+
+def looks_sensitive(label, url, hosts):
+    """Whether an entry matches the vault's own list.
+
+    A suggestion, and only ever that: the stored per-entry flag is what
+    governs, and nothing here changes it.
+
+    Matching is on whole hosts, not on the pieces of one. Splitting a listed
+    host into its labels and looking for any of them proposed hiding every
+    entry that merely shared a suffix -- one list of ".invalid" hosts had SPM
+    offering to hide an unrelated admin account, because both ended in
+    "invalid". A URL matches the host itself or a subdomain of it; a label
+    matches only when it is the whole host or its leading name.
+    """
+    if not hosts:
+        return False
+    host = ""
+    try:
+        host = (urllib.parse.urlsplit(url or "").hostname or "").lower()
+    except ValueError:
+        host = ""
+    key = re.sub(r"[^a-z0-9]", "", (label or "").lower())
+    for listed in hosts:
+        if host and (host == listed or host.endswith("." + listed)):
+            return True
+        if not key:
+            continue
+        if key == re.sub(r"[^a-z0-9]", "", listed):
+            return True
+        # The leading name on its own, so a bare label matches a listed host.
+        # Long enough not to collide with a common word by accident.
+        leading = listed.split(".")[0]
+        if len(leading) >= 4 and key == leading:
+            return True
+    return False
+
+
 def tidy_proposals(plaintext):
     """What a tidy would change, as data. Changes nothing.
 
@@ -1955,6 +2057,7 @@ def tidy_proposals(plaintext):
     knowing any of the rules above.
     """
     proposals = []
+    hosts = hidden_hosts(plaintext)
     for line in (plaintext or "").splitlines():
         parts = line.split("\t")
         if not parts or not parts[0].isdigit() or len(parts) < 6:
@@ -1962,7 +2065,7 @@ def tidy_proposals(plaintext):
         record_id, label = parts[0], parts[1]
         notes = parts[4] if len(parts) > 4 else ""
         attrs = parts[7] if len(parts) > 7 else ""
-        folder, fields = decode_attrs(attrs)
+        folder, fields, hidden = decode_attrs(attrs)
 
         changes = {}
         proposed_folder = folder_from_notes(notes)
@@ -1977,6 +2080,13 @@ def tidy_proposals(plaintext):
             if new_notes != notes:
                 changes["notes"] = {"from": notes, "to": new_notes}
 
+        # Proposed, never applied here, and only for an entry that is not
+        # already hidden -- re-proposing a decision someone has made is how a
+        # review becomes noise people click through.
+        url = parts[6] if len(parts) > 6 else ""
+        if not hidden and looks_sensitive(label, url, hosts):
+            changes["hidden"] = {"from": False, "to": True}
+
         if changes:
             proposals.append({"id": record_id, "label": label,
                               "changes": changes})
@@ -1987,7 +2097,8 @@ TIDY_LABEL_MAX = 200
 
 
 def apply_tidy(plaintext, selections):
-    """Apply reviewed changes. `selections` maps record id -> {"label": str}.
+    """Apply reviewed changes. `selections` maps id -> {"label": str,
+    "hidden": bool}.
 
     No rule here decides anything. The guess `tidy_proposals` made is only a
     guess -- no heuristic gets both com.lsdroid.cerberuss and com.spotify.music
@@ -2034,9 +2145,18 @@ def apply_tidy(plaintext, selections):
                 parts[4] = _tidy_note_with_original(parts[4], original)
                 touched = True
 
-        if "folder" in changes:
-            _, fields = decode_attrs(parts[7])
-            parts[7] = encode_attrs(changes["folder"]["to"], fields)
+        # Both attribute changes go through one decode/encode. Two of them
+        # would make the second overwrite whatever the first had just written,
+        # because encode_attrs takes the whole column and not a patch.
+        if "folder" in changes or "hidden" in changes:
+            folder, fields, hidden = decode_attrs(parts[7])
+            if "folder" in changes:
+                folder = changes["folder"]["to"]
+            if "hidden" in changes:
+                # Only when the review said so. An unticked row keeps the
+                # decision it already had.
+                hidden = bool(chosen[record_id].get("hidden", True))
+            parts[7] = encode_attrs(folder, fields, hidden)
             touched = True
 
         out.append("\t".join(parts))
@@ -3585,12 +3705,13 @@ def main(argv):
                     continue
                 name, _, value = line.partition("\t")
                 rows.append((name, value))
-            sys.stdout.write(encode_attrs(argv[2] if len(argv) > 2 else "", rows))
+            sys.stdout.write(encode_attrs(argv[2] if len(argv) > 2 else "", rows,
+                                          "--hidden" in argv[3:]))
         elif command == "attrs-decode":
             # attrs-decode <column> ; stdout: one JSON document
-            folder, fields = decode_attrs(argv[2] if len(argv) > 2 else "")
+            folder, fields, hidden = decode_attrs(argv[2] if len(argv) > 2 else "")
             sys.stdout.write(json.dumps(
-                {"folder": folder,
+                {"folder": folder, "hidden": hidden,
                  "fields": [{"name": n, "value": v} for n, v in fields]}) + "\n")
         elif command == "folders":
             # folders <plainfile> ; stdout: one folder per line
@@ -10437,11 +10558,11 @@ WEB_CATALOGUES = {
         "tidy.folder": "Folder",
         "tidy.apply": "Apply to selected",
         "tidy.cancel": "Cancel",
-        "tidy.note": "The original identifier is kept in the entry's notes. The vault is archived before anything is written.",
+        "tidy.note": "The original identifier is kept in the entry's notes. Hiding keeps a name out of the password list, not out of the vault. The vault is archived before anything is written.",
         "tidy.none_t": "Nothing to tidy",
         "tidy.none_d": "No entry has a folder marker in its notes or a package-style name.",
         "tidy.offer_t": "Some entries can be tidied",
-        "tidy.offer_d": "entries carry a folder in their notes or a package-style name. Review the changes before anything is written.",
+        "tidy.offer_d": "entries could be tidied: a folder read from their notes, a name derived from a package identifier, or a match on your hidden-site list. Review the changes before anything is written.",
         "tidy.review": "Review changes",
         "tidy.done": "entries tidied.",
         "overview.console_cipher": "vault cipher",
@@ -10451,6 +10572,20 @@ WEB_CATALOGUES = {
         "settings.lock.apply": "Apply lock timeout",
         "settings.lock.note": "A longer wait leaves the decrypted vault on screen for longer. The server ends an idle session shortly after this timer, whatever the browser is doing.",
         "settings.lock.saved": "Idle lock updated.",
+        "entry.field.hidden": "Hide this entry",
+        "entry.hint.hidden": "Its name and username are replaced with dots in the password list until you open the Hidden section. This hides it from a glance at your screen \u2014 it is not a second password, and the entry is still in the vault and still exported.",
+        "badge.hidden": "hidden",
+        "filters.hidden": "Hidden",
+        "view.label.hidden": "Visibility",
+        "view.hidden.on": "Hidden from the password list",
+        "tidy.hide": "Hide",
+        "tidy.hidden": "Hidden",
+        "settings.hosts.title": "Sites to suggest hiding",
+        "settings.hosts.desc": "Host names you would rather not have on screen. Used only to propose hiding entries in Tidy.",
+        "settings.hosts.label": "Host names",
+        "settings.hosts.note": "One per line or separated by commas. SPM ships no list of its own. This one is stored inside your encrypted vault, not in a settings file, because a list of sites you would rather not name is itself worth protecting. It only ever suggests \u2014 every entry keeps whichever switch you set on it.",
+        "settings.hosts.apply": "Save host list",
+        "settings.hosts.saved": "Host list saved.",
     },
     "ar": {
         "nav.security": "\u0627\u0644\u0623\u0645\u0627\u0646",
@@ -10783,11 +10918,11 @@ WEB_CATALOGUES = {
         "tidy.folder": "\u0645\u062c\u0644\u062f",
         "tidy.apply": "\u0637\u0628\u0651\u0642 \u0639\u0644\u0649 \u0627\u0644\u0645\u062d\u062f\u062f",
         "tidy.cancel": "\u0625\u0644\u063a\u0627\u0621",
-        "tidy.note": "\u064a\u0628\u0642\u0649 \u0627\u0644\u0645\u0639\u0631\u0651\u0641 \u0627\u0644\u0623\u0635\u0644\u064a \u0641\u064a \u0645\u0644\u0627\u062d\u0638\u0627\u062a \u0627\u0644\u0645\u062f\u062e\u0644. \u0648\u062a\u064f\u0624\u0631\u0634\u064e\u0641 \u0627\u0644\u062e\u0632\u0646\u0629 \u0642\u0628\u0644 \u0643\u062a\u0627\u0628\u0629 \u0623\u064a \u0634\u064a\u0621.",
+        "tidy.note": "\u064a\u064f\u062d\u0641\u0638 \u0627\u0644\u0645\u0639\u0631\u0651\u0641 \u0627\u0644\u0623\u0635\u0644\u064a \u0641\u064a \u0645\u0644\u0627\u062d\u0638\u0627\u062a \u0627\u0644\u0645\u062f\u062e\u0644. \u0627\u0644\u0625\u062e\u0641\u0627\u0621 \u064a\u064f\u0628\u0642\u064a \u0627\u0644\u0627\u0633\u0645 \u062e\u0627\u0631\u062c \u0642\u0627\u0626\u0645\u0629 \u0643\u0644\u0645\u0627\u062a \u0627\u0644\u0645\u0631\u0648\u0631\u060c \u0644\u0627 \u062e\u0627\u0631\u062c \u0627\u0644\u062e\u0632\u0646\u0629. \u062a\u064f\u0624\u0631\u0634\u0641 \u0627\u0644\u062e\u0632\u0646\u0629 \u0642\u0628\u0644 \u0643\u062a\u0627\u0628\u0629 \u0623\u064a \u0634\u064a\u0621.",
         "tidy.none_t": "\u0644\u0627 \u0634\u064a\u0621 \u0644\u062a\u0631\u062a\u064a\u0628\u0647",
         "tidy.none_d": "\u0644\u0627 \u064a\u0648\u062c\u062f \u0645\u062f\u062e\u0644 \u064a\u062d\u0645\u0644 \u0639\u0644\u0627\u0645\u0629 \u0645\u062c\u0644\u062f \u0641\u064a \u0645\u0644\u0627\u062d\u0638\u0627\u062a\u0647 \u0648\u0644\u0627 \u0627\u0633\u0645\u064b\u0627 \u0639\u0644\u0649 \u0647\u064a\u0626\u0629 \u062d\u0632\u0645\u0629 \u062a\u0637\u0628\u064a\u0642.",
         "tidy.offer_t": "\u0628\u0639\u0636 \u0627\u0644\u0645\u062f\u062e\u0644\u0627\u062a \u064a\u0645\u0643\u0646 \u062a\u0631\u062a\u064a\u0628\u0647\u0627",
-        "tidy.offer_d": "\u0645\u062f\u062e\u0644\u064b\u0627 \u064a\u062d\u0645\u0644 \u0645\u062c\u0644\u062f\u064b\u0627 \u0641\u064a \u0645\u0644\u0627\u062d\u0638\u0627\u062a\u0647 \u0623\u0648 \u0627\u0633\u0645\u064b\u0627 \u0639\u0644\u0649 \u0647\u064a\u0626\u0629 \u062d\u0632\u0645\u0629 \u062a\u0637\u0628\u064a\u0642. \u0631\u0627\u062c\u0639 \u0627\u0644\u062a\u063a\u064a\u064a\u0631\u0627\u062a \u0642\u0628\u0644 \u0643\u062a\u0627\u0628\u0629 \u0623\u064a \u0634\u064a\u0621.",
+        "tidy.offer_d": "\u0645\u062f\u062e\u0644\u0627\u062a \u064a\u0645\u0643\u0646 \u062a\u0631\u062a\u064a\u0628\u0647\u0627: \u0645\u062c\u0644\u062f \u064a\u064f\u0642\u0631\u0623 \u0645\u0646 \u0645\u0644\u0627\u062d\u0638\u0627\u062a\u0647\u0627\u060c \u0623\u0648 \u0627\u0633\u0645 \u0645\u0634\u062a\u0642 \u0645\u0646 \u0645\u0639\u0631\u0651\u0641 \u062d\u0632\u0645\u0629\u060c \u0623\u0648 \u062a\u0637\u0627\u0628\u0642 \u0645\u0639 \u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0645\u0648\u0627\u0642\u0639 \u0627\u0644\u0645\u062e\u0641\u064a\u0629 \u0644\u062f\u064a\u0643. \u0631\u0627\u062c\u0639 \u0627\u0644\u062a\u063a\u064a\u064a\u0631\u0627\u062a \u0642\u0628\u0644 \u0643\u062a\u0627\u0628\u0629 \u0623\u064a \u0634\u064a\u0621.",
         "tidy.review": "\u0631\u0627\u062c\u0639 \u0627\u0644\u062a\u063a\u064a\u064a\u0631\u0627\u062a",
         "tidy.done": "\u0645\u062f\u062e\u0644\u064b\u0627 \u062c\u0631\u0649 \u062a\u0631\u062a\u064a\u0628\u0647.",
         "overview.console_cipher": "\u062a\u0634\u0641\u064a\u0631 \u0627\u0644\u062e\u0632\u0646\u0629",
@@ -10797,6 +10932,20 @@ WEB_CATALOGUES = {
         "settings.lock.apply": "\u062a\u0637\u0628\u064a\u0642 \u0645\u0647\u0644\u0629 \u0627\u0644\u0642\u0641\u0644",
         "settings.lock.note": "\u0627\u0644\u0627\u0646\u062a\u0638\u0627\u0631 \u0627\u0644\u0623\u0637\u0648\u0644 \u064a\u062a\u0631\u0643 \u0627\u0644\u062e\u0632\u0646\u0629 \u0627\u0644\u0645\u0641\u0643\u0648\u0643\u0629 \u0639\u0644\u0649 \u0627\u0644\u0634\u0627\u0634\u0629 \u0645\u062f\u0629 \u0623\u0637\u0648\u0644. \u064a\u064f\u0646\u0647\u064a \u0627\u0644\u062e\u0627\u062f\u0645 \u0627\u0644\u062c\u0644\u0633\u0629 \u0627\u0644\u062e\u0627\u0645\u0644\u0629 \u0628\u0639\u062f \u0647\u0630\u0627 \u0627\u0644\u0645\u0624\u0642\u062a \u0628\u0642\u0644\u064a\u0644\u060c \u0645\u0647\u0645\u0627 \u0641\u0639\u0644 \u0627\u0644\u0645\u062a\u0635\u0641\u062d.",
         "settings.lock.saved": "\u062a\u0645 \u062a\u062d\u062f\u064a\u062b \u0642\u0641\u0644 \u0627\u0644\u062e\u0645\u0648\u0644.",
+        "entry.field.hidden": "\u0625\u062e\u0641\u0627\u0621 \u0647\u0630\u0627 \u0627\u0644\u0645\u062f\u062e\u0644",
+        "entry.hint.hidden": "\u064a\u064f\u0633\u062a\u0628\u062f\u0644 \u0627\u0633\u0645\u0647 \u0648\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645 \u0628\u0646\u0642\u0627\u0637 \u0641\u064a \u0642\u0627\u0626\u0645\u0629 \u0643\u0644\u0645\u0627\u062a \u0627\u0644\u0645\u0631\u0648\u0631 \u062d\u062a\u0649 \u062a\u0641\u062a\u062d \u0642\u0633\u0645 \u0627\u0644\u0645\u062e\u0641\u064a. \u0647\u0630\u0627 \u064a\u062e\u0641\u064a\u0647 \u0639\u0646 \u0646\u0638\u0631\u0629 \u0639\u0627\u0628\u0631\u0629 \u0625\u0644\u0649 \u0634\u0627\u0634\u062a\u0643 \u2014 \u0644\u064a\u0633 \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u062b\u0627\u0646\u064a\u0629\u060c \u0648\u0627\u0644\u0645\u062f\u062e\u0644 \u0645\u0627 \u0632\u0627\u0644 \u0641\u064a \u0627\u0644\u062e\u0632\u0646\u0629 \u0648\u0645\u0627 \u0632\u0627\u0644 \u064a\u064f\u0635\u062f\u064e\u0651\u0631.",
+        "badge.hidden": "\u0645\u062e\u0641\u064a",
+        "filters.hidden": "\u0627\u0644\u0645\u062e\u0641\u064a",
+        "view.label.hidden": "\u0627\u0644\u0638\u0647\u0648\u0631",
+        "view.hidden.on": "\u0645\u062e\u0641\u064a \u0645\u0646 \u0642\u0627\u0626\u0645\u0629 \u0643\u0644\u0645\u0627\u062a \u0627\u0644\u0645\u0631\u0648\u0631",
+        "tidy.hide": "\u0625\u062e\u0641\u0627\u0621",
+        "tidy.hidden": "\u0645\u062e\u0641\u064a",
+        "settings.hosts.title": "\u0645\u0648\u0627\u0642\u0639 \u064a\u064f\u0642\u062a\u0631\u062d \u0625\u062e\u0641\u0627\u0624\u0647\u0627",
+        "settings.hosts.desc": "\u0623\u0633\u0645\u0627\u0621 \u0645\u0636\u064a\u0641\u064a\u0646 \u062a\u0641\u0636\u0651\u0644 \u0623\u0644\u0627 \u062a\u0638\u0647\u0631 \u0639\u0644\u0649 \u0627\u0644\u0634\u0627\u0634\u0629. \u062a\u064f\u0633\u062a\u062e\u062f\u0645 \u0641\u0642\u0637 \u0644\u0627\u0642\u062a\u0631\u0627\u062d \u0625\u062e\u0641\u0627\u0621 \u0627\u0644\u0645\u062f\u062e\u0644\u0627\u062a \u0641\u064a \u0627\u0644\u062a\u0646\u0638\u064a\u0645.",
+        "settings.hosts.label": "\u0623\u0633\u0645\u0627\u0621 \u0627\u0644\u0645\u0636\u064a\u0641\u064a\u0646",
+        "settings.hosts.note": "\u0648\u0627\u062d\u062f \u0641\u064a \u0643\u0644 \u0633\u0637\u0631 \u0623\u0648 \u0645\u0641\u0635\u0648\u0644\u0629 \u0628\u0641\u0648\u0627\u0635\u0644. \u0644\u0627 \u064a\u0623\u062a\u064a SPM \u0628\u0623\u064a \u0642\u0627\u0626\u0645\u0629 \u062e\u0627\u0635\u0629 \u0628\u0647. \u062a\u064f\u062e\u0632\u064e\u0651\u0646 \u0647\u0630\u0647 \u0627\u0644\u0642\u0627\u0626\u0645\u0629 \u062f\u0627\u062e\u0644 \u062e\u0632\u0646\u062a\u0643 \u0627\u0644\u0645\u0634\u0641\u0651\u0631\u0629 \u0644\u0627 \u0641\u064a \u0645\u0644\u0641 \u0625\u0639\u062f\u0627\u062f\u0627\u062a\u060c \u0644\u0623\u0646 \u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0645\u0648\u0627\u0642\u0639 \u0627\u0644\u062a\u064a \u062a\u0641\u0636\u0651\u0644 \u0639\u062f\u0645 \u062a\u0633\u0645\u064a\u062a\u0647\u0627 \u062a\u0633\u062a\u062d\u0642 \u0627\u0644\u062d\u0645\u0627\u064a\u0629 \u0628\u0646\u0641\u0633\u0647\u0627. \u0648\u0647\u064a \u062a\u0642\u062a\u0631\u062d \u0641\u0642\u0637 \u2014 \u0643\u0644 \u0645\u062f\u062e\u0644 \u064a\u062d\u062a\u0641\u0638 \u0628\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0630\u064a \u0636\u0628\u0637\u062a\u0647 \u0644\u0647.",
+        "settings.hosts.apply": "\u0627\u062d\u0641\u0638 \u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0645\u0636\u064a\u0641\u064a\u0646",
+        "settings.hosts.saved": "\u062a\u0645 \u062d\u0641\u0638 \u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0645\u0636\u064a\u0641\u064a\u0646.",
     },
     "de": {
         "nav.security": "Sicherheit",
@@ -11129,11 +11278,11 @@ WEB_CATALOGUES = {
         "tidy.folder": "Ordner",
         "tidy.apply": "Auf Auswahl anwenden",
         "tidy.cancel": "Abbrechen",
-        "tidy.note": "Die urspr\u00fcngliche Kennung bleibt in den Notizen des Eintrags. Der Tresor wird archiviert, bevor irgendetwas geschrieben wird.",
+        "tidy.note": "Die urspr\u00fcngliche Kennung bleibt in den Notizen des Eintrags. Verbergen h\u00e4lt einen Namen aus der Passwortliste heraus, nicht aus dem Tresor. Der Tresor wird archiviert, bevor etwas geschrieben wird.",
         "tidy.none_t": "Nichts aufzur\u00e4umen",
         "tidy.none_d": "Kein Eintrag tr\u00e4gt eine Ordnermarkierung in seinen Notizen oder einen Namen in Paketform.",
         "tidy.offer_t": "Einige Eintr\u00e4ge lassen sich aufr\u00e4umen",
-        "tidy.offer_d": "Eintr\u00e4ge tragen einen Ordner in ihren Notizen oder einen Namen in Paketform. Pr\u00fcfe die \u00c4nderungen, bevor etwas geschrieben wird.",
+        "tidy.offer_d": "Eintr\u00e4ge lie\u00dfen sich aufr\u00e4umen: ein Ordner aus ihren Notizen, ein aus einer Paketkennung abgeleiteter Name oder ein Treffer in deiner Liste verborgener Seiten. Pr\u00fcfe die \u00c4nderungen, bevor etwas geschrieben wird.",
         "tidy.review": "\u00c4nderungen pr\u00fcfen",
         "tidy.done": "Eintr\u00e4ge aufger\u00e4umt.",
         "overview.console_cipher": "Tresor-Chiffre",
@@ -11143,6 +11292,20 @@ WEB_CATALOGUES = {
         "settings.lock.apply": "Sperrzeit \u00fcbernehmen",
         "settings.lock.note": "Eine l\u00e4ngere Wartezeit l\u00e4sst den entschl\u00fcsselten Tresor l\u00e4nger auf dem Bildschirm. Der Server beendet eine unt\u00e4tige Sitzung kurz nach diesem Timer, unabh\u00e4ngig davon, was der Browser tut.",
         "settings.lock.saved": "Leerlaufsperre aktualisiert.",
+        "entry.field.hidden": "Diesen Eintrag verbergen",
+        "entry.hint.hidden": "Name und Benutzername werden in der Passwortliste durch Punkte ersetzt, bis du den Bereich \u201eVerborgen\u201c \u00f6ffnest. Das sch\u00fctzt vor einem Blick auf deinen Bildschirm \u2014 es ist kein zweites Passwort, und der Eintrag bleibt im Tresor und wird weiterhin exportiert.",
+        "badge.hidden": "verborgen",
+        "filters.hidden": "Verborgen",
+        "view.label.hidden": "Sichtbarkeit",
+        "view.hidden.on": "In der Passwortliste verborgen",
+        "tidy.hide": "Verbergen",
+        "tidy.hidden": "Verborgen",
+        "settings.hosts.title": "Seiten, deren Verbergen vorgeschlagen wird",
+        "settings.hosts.desc": "Hostnamen, die du lieber nicht auf dem Bildschirm h\u00e4ttest. Werden nur genutzt, um in Aufr\u00e4umen das Verbergen vorzuschlagen.",
+        "settings.hosts.label": "Hostnamen",
+        "settings.hosts.note": "Einer pro Zeile oder durch Kommas getrennt. SPM bringt keine eigene Liste mit. Diese liegt in deinem verschl\u00fcsselten Tresor und nicht in einer Einstellungsdatei, denn eine Liste von Seiten, die man lieber nicht benennt, ist selbst sch\u00fctzenswert. Sie schl\u00e4gt nur vor \u2014 jeder Eintrag beh\u00e4lt den Schalter, den du gesetzt hast.",
+        "settings.hosts.apply": "Hostliste speichern",
+        "settings.hosts.saved": "Hostliste gespeichert.",
     },
     "es": {
         "nav.security": "Seguridad",
@@ -11475,11 +11638,11 @@ WEB_CATALOGUES = {
         "tidy.folder": "Carpeta",
         "tidy.apply": "Aplicar a lo seleccionado",
         "tidy.cancel": "Cancelar",
-        "tidy.note": "El identificador original se conserva en las notas de la entrada. La caja fuerte se archiva antes de escribir nada.",
+        "tidy.note": "El identificador original se conserva en las notas de la entrada. Ocultar mantiene un nombre fuera de la lista de contrase\u00f1as, no fuera de la b\u00f3veda. La b\u00f3veda se archiva antes de escribir nada.",
         "tidy.none_t": "No hay nada que ordenar",
         "tidy.none_d": "Ninguna entrada tiene una marca de carpeta en sus notas ni un nombre con forma de paquete.",
         "tidy.offer_t": "Hay entradas que se pueden ordenar",
-        "tidy.offer_d": "entradas llevan una carpeta en sus notas o un nombre con forma de paquete. Revisa los cambios antes de escribir nada.",
+        "tidy.offer_d": "entradas podr\u00edan ordenarse: una carpeta le\u00edda de sus notas, un nombre derivado de un identificador de paquete o una coincidencia con tu lista de sitios ocultos. Revisa los cambios antes de escribir nada.",
         "tidy.review": "Revisar los cambios",
         "tidy.done": "entradas ordenadas.",
         "overview.console_cipher": "cifrado de la b\u00f3veda",
@@ -11489,6 +11652,20 @@ WEB_CATALOGUES = {
         "settings.lock.apply": "Aplicar tiempo de bloqueo",
         "settings.lock.note": "Una espera m\u00e1s larga deja la b\u00f3veda descifrada m\u00e1s tiempo en pantalla. El servidor termina una sesi\u00f3n inactiva poco despu\u00e9s de este temporizador, haga lo que haga el navegador.",
         "settings.lock.saved": "Bloqueo por inactividad actualizado.",
+        "entry.field.hidden": "Ocultar esta entrada",
+        "entry.hint.hidden": "Su nombre y usuario se sustituyen por puntos en la lista de contrase\u00f1as hasta que abras la secci\u00f3n Ocultas. Esto la oculta de un vistazo a tu pantalla: no es una segunda contrase\u00f1a, y la entrada sigue en la b\u00f3veda y se sigue exportando.",
+        "badge.hidden": "oculta",
+        "filters.hidden": "Ocultas",
+        "view.label.hidden": "Visibilidad",
+        "view.hidden.on": "Oculta en la lista de contrase\u00f1as",
+        "tidy.hide": "Ocultar",
+        "tidy.hidden": "Ocultas",
+        "settings.hosts.title": "Sitios que sugerir ocultar",
+        "settings.hosts.desc": "Nombres de host que preferir\u00edas no tener en pantalla. Solo se usan para proponer ocultar entradas en Ordenar.",
+        "settings.hosts.label": "Nombres de host",
+        "settings.hosts.note": "Uno por l\u00ednea o separados por comas. SPM no incluye ninguna lista propia. Esta se guarda dentro de tu b\u00f3veda cifrada y no en un archivo de configuraci\u00f3n, porque una lista de sitios que preferir\u00edas no nombrar merece protecci\u00f3n por s\u00ed misma. Solo sugiere: cada entrada conserva el interruptor que le pusiste.",
+        "settings.hosts.apply": "Guardar lista de hosts",
+        "settings.hosts.saved": "Lista de hosts guardada.",
     },
     "fr": {
         "nav.security": "S\u00e9curit\u00e9",
@@ -11821,11 +11998,11 @@ WEB_CATALOGUES = {
         "tidy.folder": "Dossier",
         "tidy.apply": "Appliquer \u00e0 la s\u00e9lection",
         "tidy.cancel": "Annuler",
-        "tidy.note": "L'identifiant d'origine est conserv\u00e9 dans les notes de la fiche. Le coffre est archiv\u00e9 avant toute \u00e9criture.",
+        "tidy.note": "L'identifiant d'origine est conserv\u00e9 dans les notes de l'entr\u00e9e. Masquer garde un nom hors de la liste des mots de passe, pas hors du coffre. Le coffre est archiv\u00e9 avant toute \u00e9criture.",
         "tidy.none_t": "Rien \u00e0 ranger",
         "tidy.none_d": "Aucune fiche ne porte de dossier dans ses notes ni de nom en forme d'identifiant de paquet.",
         "tidy.offer_t": "Des fiches peuvent \u00eatre rang\u00e9es",
-        "tidy.offer_d": "fiches portent un dossier dans leurs notes ou un nom en forme d'identifiant de paquet. V\u00e9rifiez les modifications avant toute \u00e9criture.",
+        "tidy.offer_d": "entr\u00e9es pourraient \u00eatre rang\u00e9es : un dossier lu dans leurs notes, un nom d\u00e9riv\u00e9 d'un identifiant de paquet, ou une correspondance avec votre liste de sites masqu\u00e9s. V\u00e9rifiez les modifications avant toute \u00e9criture.",
         "tidy.review": "V\u00e9rifier les modifications",
         "tidy.done": "fiches rang\u00e9es.",
         "overview.console_cipher": "chiffrement du coffre",
@@ -11835,6 +12012,20 @@ WEB_CATALOGUES = {
         "settings.lock.apply": "Appliquer le d\u00e9lai de verrouillage",
         "settings.lock.note": "Une attente plus longue laisse le coffre d\u00e9chiffr\u00e9 plus longtemps \u00e0 l'\u00e9cran. Le serveur met fin \u00e0 une session inactive peu apr\u00e8s ce d\u00e9lai, quoi que fasse le navigateur.",
         "settings.lock.saved": "Verrouillage par inactivit\u00e9 mis \u00e0 jour.",
+        "entry.field.hidden": "Masquer cette entr\u00e9e",
+        "entry.hint.hidden": "Son nom et son identifiant sont remplac\u00e9s par des points dans la liste des mots de passe jusqu'\u00e0 ce que vous ouvriez la section Masqu\u00e9es. Cela la cache d'un coup d'\u0153il \u00e0 votre \u00e9cran : ce n'est pas un second mot de passe, et l'entr\u00e9e reste dans le coffre et continue d'\u00eatre export\u00e9e.",
+        "badge.hidden": "masqu\u00e9e",
+        "filters.hidden": "Masqu\u00e9es",
+        "view.label.hidden": "Visibilit\u00e9",
+        "view.hidden.on": "Masqu\u00e9e dans la liste des mots de passe",
+        "tidy.hide": "Masquer",
+        "tidy.hidden": "Masqu\u00e9es",
+        "settings.hosts.title": "Sites \u00e0 proposer de masquer",
+        "settings.hosts.desc": "Noms d'h\u00f4tes que vous pr\u00e9f\u00e9reriez ne pas voir \u00e0 l'\u00e9cran. Utilis\u00e9s uniquement pour proposer de masquer des entr\u00e9es dans Ranger.",
+        "settings.hosts.label": "Noms d'h\u00f4tes",
+        "settings.hosts.note": "Un par ligne ou s\u00e9par\u00e9s par des virgules. SPM ne fournit aucune liste. Celle-ci est stock\u00e9e dans votre coffre chiffr\u00e9 et non dans un fichier de configuration, car une liste de sites que l'on pr\u00e9f\u00e8re ne pas nommer m\u00e9rite elle-m\u00eame d'\u00eatre prot\u00e9g\u00e9e. Elle ne fait que sugg\u00e9rer : chaque entr\u00e9e garde l'interrupteur que vous lui avez donn\u00e9.",
+        "settings.hosts.apply": "Enregistrer la liste",
+        "settings.hosts.saved": "Liste d'h\u00f4tes enregistr\u00e9e.",
     },
     "hi": {
         "nav.security": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e",
@@ -12167,11 +12358,11 @@ WEB_CATALOGUES = {
         "tidy.folder": "\u092b\u093c\u094b\u0932\u094d\u0921\u0930",
         "tidy.apply": "\u091a\u0941\u0928\u0940 \u0917\u0908 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u094b\u0902 \u092a\u0930 \u0932\u093e\u0917\u0942 \u0915\u0930\u0947\u0902",
         "tidy.cancel": "\u0930\u0926\u094d\u0926 \u0915\u0930\u0947\u0902",
-        "tidy.note": "\u092e\u0942\u0932 \u092a\u0939\u091a\u093e\u0928\u0915\u0930\u094d\u0924\u093e \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0915\u0947 \u0928\u094b\u091f \u092e\u0947\u0902 \u0930\u0916\u093e \u091c\u093e\u0924\u093e \u0939\u0948\u0964 \u0915\u0941\u091b \u092d\u0940 \u0932\u093f\u0916\u0928\u0947 \u0938\u0947 \u092a\u0939\u0932\u0947 \u0924\u093f\u091c\u094b\u0930\u0940 \u0938\u0902\u0917\u094d\u0930\u0939 \u0915\u0930 \u0932\u0940 \u091c\u093e\u0924\u0940 \u0939\u0948\u0964",
+        "tidy.note": "\u092e\u0942\u0932 \u092a\u0939\u091a\u093e\u0928\u0915\u0930\u094d\u0924\u093e \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0915\u0940 \u091f\u093f\u092a\u094d\u092a\u0923\u093f\u092f\u094b\u0902 \u092e\u0947\u0902 \u0930\u0916\u093e \u091c\u093e\u0924\u093e \u0939\u0948\u0964 \u091b\u093f\u092a\u093e\u0928\u093e \u0928\u093e\u092e \u0915\u094b \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0938\u0942\u091a\u0940 \u0938\u0947 \u092c\u093e\u0939\u0930 \u0930\u0916\u0924\u093e \u0939\u0948, \u0935\u0949\u0932\u094d\u091f \u0938\u0947 \u092c\u093e\u0939\u0930 \u0928\u0939\u0940\u0902\u0964 \u0915\u0941\u091b \u092d\u0940 \u0932\u093f\u0916\u0928\u0947 \u0938\u0947 \u092a\u0939\u0932\u0947 \u0935\u0949\u0932\u094d\u091f \u0938\u0902\u0917\u094d\u0930\u0939\u093f\u0924 \u0915\u093f\u092f\u093e \u091c\u093e\u0924\u093e \u0939\u0948\u0964",
         "tidy.none_t": "\u0935\u094d\u092f\u0935\u0938\u094d\u0925\u093f\u0924 \u0915\u0930\u0928\u0947 \u0915\u094b \u0915\u0941\u091b \u0928\u0939\u0940\u0902",
         "tidy.none_d": "\u0915\u093f\u0938\u0940 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0915\u0947 \u0928\u094b\u091f \u092e\u0947\u0902 \u092b\u093c\u094b\u0932\u094d\u0921\u0930 \u0915\u093e \u091a\u093f\u0939\u094d\u0928 \u0928\u0939\u0940\u0902 \u0939\u0948 \u0914\u0930 \u0928 \u0939\u0940 \u0915\u094b\u0908 \u0928\u093e\u092e \u092a\u0948\u0915\u0947\u091c \u0936\u0948\u0932\u0940 \u0915\u093e \u0939\u0948\u0964",
         "tidy.offer_t": "\u0915\u0941\u091b \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u0935\u094d\u092f\u0935\u0938\u094d\u0925\u093f\u0924 \u0915\u0940 \u091c\u093e \u0938\u0915\u0924\u0940 \u0939\u0948\u0902",
-        "tidy.offer_d": "\u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u094b\u0902 \u0915\u0947 \u0928\u094b\u091f \u092e\u0947\u0902 \u092b\u093c\u094b\u0932\u094d\u0921\u0930 \u0939\u0948 \u092f\u093e \u0909\u0928\u0915\u093e \u0928\u093e\u092e \u092a\u0948\u0915\u0947\u091c \u0936\u0948\u0932\u0940 \u0915\u093e \u0939\u0948\u0964 \u0915\u0941\u091b \u092d\u0940 \u0932\u093f\u0916\u0928\u0947 \u0938\u0947 \u092a\u0939\u0932\u0947 \u092c\u0926\u0932\u093e\u0935 \u0926\u0947\u0916 \u0932\u0947\u0902\u0964",
+        "tidy.offer_d": "\u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u0935\u094d\u092f\u0935\u0938\u094d\u0925\u093f\u0924 \u0915\u0940 \u091c\u093e \u0938\u0915\u0924\u0940 \u0939\u0948\u0902: \u0909\u0928\u0915\u0940 \u091f\u093f\u092a\u094d\u092a\u0923\u093f\u092f\u094b\u0902 \u0938\u0947 \u092a\u0922\u093c\u093e \u0917\u092f\u093e \u092b\u093c\u094b\u0932\u094d\u0921\u0930, \u092a\u0948\u0915\u0947\u091c \u092a\u0939\u091a\u093e\u0928\u0915\u0930\u094d\u0924\u093e \u0938\u0947 \u092c\u0928\u093e \u0928\u093e\u092e, \u092f\u093e \u0906\u092a\u0915\u0940 \u091b\u093f\u092a\u0940-\u0938\u093e\u0907\u091f \u0938\u0942\u091a\u0940 \u0938\u0947 \u092e\u0947\u0932\u0964 \u0915\u0941\u091b \u092d\u0940 \u0932\u093f\u0916\u0928\u0947 \u0938\u0947 \u092a\u0939\u0932\u0947 \u092a\u0930\u093f\u0935\u0930\u094d\u0924\u0928 \u0926\u0947\u0916\u0947\u0902\u0964",
         "tidy.review": "\u092c\u0926\u0932\u093e\u0935 \u0926\u0947\u0916\u0947\u0902",
         "tidy.done": "\u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u0935\u094d\u092f\u0935\u0938\u094d\u0925\u093f\u0924 \u0939\u0941\u0908\u0902\u0964",
         "overview.console_cipher": "\u0935\u0949\u0932\u094d\u091f \u0938\u093f\u092b\u0930",
@@ -12181,6 +12372,20 @@ WEB_CATALOGUES = {
         "settings.lock.apply": "\u0932\u0949\u0915 \u0938\u092e\u092f \u0932\u093e\u0917\u0942 \u0915\u0930\u0947\u0902",
         "settings.lock.note": "\u0932\u0902\u092c\u0940 \u092a\u094d\u0930\u0924\u0940\u0915\u094d\u0937\u093e \u0921\u093f\u0915\u094d\u0930\u093f\u092a\u094d\u091f \u0915\u093f\u090f \u0917\u090f \u0935\u0949\u0932\u094d\u091f \u0915\u094b \u0938\u094d\u0915\u094d\u0930\u0940\u0928 \u092a\u0930 \u0905\u0927\u093f\u0915 \u0938\u092e\u092f \u0924\u0915 \u091b\u094b\u0921\u093c\u0924\u0940 \u0939\u0948\u0964 \u092c\u094d\u0930\u093e\u0909\u095b\u0930 \u091c\u094b \u092d\u0940 \u0915\u0930\u0947, \u0938\u0930\u094d\u0935\u0930 \u0907\u0938 \u091f\u093e\u0907\u092e\u0930 \u0915\u0947 \u0915\u0941\u091b \u0939\u0940 \u092c\u093e\u0926 \u0928\u093f\u0937\u094d\u0915\u094d\u0930\u093f\u092f \u0938\u0924\u094d\u0930 \u0938\u092e\u093e\u092a\u094d\u0924 \u0915\u0930 \u0926\u0947\u0924\u093e \u0939\u0948\u0964",
         "settings.lock.saved": "\u0928\u093f\u0937\u094d\u0915\u094d\u0930\u093f\u092f\u0924\u093e \u0932\u0949\u0915 \u0905\u092a\u0921\u0947\u091f \u0939\u094b \u0917\u092f\u093e\u0964",
+        "entry.field.hidden": "\u0907\u0938 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0915\u094b \u091b\u093f\u092a\u093e\u090f\u0901",
+        "entry.hint.hidden": "\u091c\u092c \u0924\u0915 \u0906\u092a \u091b\u093f\u092a\u093e \u0939\u0941\u0906 \u0905\u0928\u0941\u092d\u093e\u0917 \u0928\u0939\u0940\u0902 \u0916\u094b\u0932\u0924\u0947, \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0938\u0942\u091a\u0940 \u092e\u0947\u0902 \u0907\u0938\u0915\u093e \u0928\u093e\u092e \u0914\u0930 \u0909\u092a\u092f\u094b\u0917\u0915\u0930\u094d\u0924\u093e \u0928\u093e\u092e \u092c\u093f\u0902\u0926\u0941\u0913\u0902 \u0938\u0947 \u092c\u0926\u0932 \u0926\u093f\u090f \u091c\u093e\u0924\u0947 \u0939\u0948\u0902\u0964 \u092f\u0939 \u0907\u0938\u0947 \u0906\u092a\u0915\u0940 \u0938\u094d\u0915\u094d\u0930\u0940\u0928 \u092a\u0930 \u090f\u0915 \u0928\u091c\u093c\u0930 \u0938\u0947 \u091b\u093f\u092a\u093e\u0924\u093e \u0939\u0948 \u2014 \u092f\u0939 \u0926\u0942\u0938\u0930\u093e \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0928\u0939\u0940\u0902 \u0939\u0948, \u0914\u0930 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0905\u092c \u092d\u0940 \u0935\u0949\u0932\u094d\u091f \u092e\u0947\u0902 \u0939\u0948 \u0914\u0930 \u0928\u093f\u0930\u094d\u092f\u093e\u0924 \u0939\u094b\u0924\u0940 \u0939\u0948\u0964",
+        "badge.hidden": "\u091b\u093f\u092a\u093e",
+        "filters.hidden": "\u091b\u093f\u092a\u0947 \u0939\u0941\u090f",
+        "view.label.hidden": "\u0926\u0943\u0936\u094d\u092f\u0924\u093e",
+        "view.hidden.on": "\u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0938\u0942\u091a\u0940 \u092e\u0947\u0902 \u091b\u093f\u092a\u093e",
+        "tidy.hide": "\u091b\u093f\u092a\u093e\u090f\u0901",
+        "tidy.hidden": "\u091b\u093f\u092a\u093e",
+        "settings.hosts.title": "\u091b\u093f\u092a\u093e\u0928\u0947 \u0915\u093e \u0938\u0941\u091d\u093e\u0935 \u0926\u0947\u0928\u0947 \u0935\u093e\u0932\u0940 \u0938\u093e\u0907\u091f\u0947\u0902",
+        "settings.hosts.desc": "\u0939\u094b\u0938\u094d\u091f \u0928\u093e\u092e \u091c\u093f\u0928\u094d\u0939\u0947\u0902 \u0906\u092a \u0938\u094d\u0915\u094d\u0930\u0940\u0928 \u092a\u0930 \u0928\u0939\u0940\u0902 \u091a\u093e\u0939\u0924\u0947\u0964 \u0915\u0947\u0935\u0932 \u091f\u093e\u0907\u0921\u0940 \u092e\u0947\u0902 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u091b\u093f\u092a\u093e\u0928\u0947 \u0915\u093e \u0938\u0941\u091d\u093e\u0935 \u0926\u0947\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f\u0964",
+        "settings.hosts.label": "\u0939\u094b\u0938\u094d\u091f \u0928\u093e\u092e",
+        "settings.hosts.note": "\u092a\u094d\u0930\u0924\u093f \u092a\u0902\u0915\u094d\u0924\u093f \u090f\u0915 \u092f\u093e \u0905\u0932\u094d\u092a\u0935\u093f\u0930\u093e\u092e \u0938\u0947 \u0905\u0932\u0917\u0964 SPM \u0905\u092a\u0928\u0940 \u0915\u094b\u0908 \u0938\u0942\u091a\u0940 \u0928\u0939\u0940\u0902 \u0926\u0947\u0924\u093e\u0964 \u092f\u0939 \u0906\u092a\u0915\u0940 \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u0935\u0949\u0932\u094d\u091f \u0915\u0947 \u092d\u0940\u0924\u0930 \u0930\u0916\u0940 \u091c\u093e\u0924\u0940 \u0939\u0948, \u0938\u0947\u091f\u093f\u0902\u0917\u094d\u0938 \u092b\u093c\u093e\u0907\u0932 \u092e\u0947\u0902 \u0928\u0939\u0940\u0902, \u0915\u094d\u092f\u094b\u0902\u0915\u093f \u091c\u093f\u0928 \u0938\u093e\u0907\u091f\u094b\u0902 \u0915\u093e \u0928\u093e\u092e \u0906\u092a \u0928\u0939\u0940\u0902 \u0932\u0947\u0928\u093e \u091a\u093e\u0939\u0924\u0947 \u0909\u0928\u0915\u0940 \u0938\u0942\u091a\u0940 \u0938\u094d\u0935\u092f\u0902 \u0938\u0941\u0930\u0915\u094d\u0937\u093e \u092f\u094b\u0917\u094d\u092f \u0939\u0948\u0964 \u092f\u0939 \u0915\u0947\u0935\u0932 \u0938\u0941\u091d\u093e\u0935 \u0926\u0947\u0924\u0940 \u0939\u0948 \u2014 \u0939\u0930 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0935\u0939\u0940 \u0938\u094d\u0935\u093f\u091a \u0930\u0916\u0924\u0940 \u0939\u0948 \u091c\u094b \u0906\u092a\u0928\u0947 \u0938\u0947\u091f \u0915\u093f\u092f\u093e\u0964",
+        "settings.hosts.apply": "\u0939\u094b\u0938\u094d\u091f \u0938\u0942\u091a\u0940 \u0938\u0939\u0947\u091c\u0947\u0902",
+        "settings.hosts.saved": "\u0939\u094b\u0938\u094d\u091f \u0938\u0942\u091a\u0940 \u0938\u0939\u0947\u091c\u0940 \u0917\u0908\u0964",
     },
     "id": {
         "nav.security": "Keamanan",
@@ -12513,11 +12718,11 @@ WEB_CATALOGUES = {
         "tidy.folder": "Folder",
         "tidy.apply": "Terapkan pada yang dipilih",
         "tidy.cancel": "Batal",
-        "tidy.note": "Identitas aslinya tetap disimpan di catatan entri. Vault diarsipkan sebelum apa pun ditulis.",
+        "tidy.note": "Identifier aslinya disimpan di catatan entri. Menyembunyikan menjaga nama tetap di luar daftar kata sandi, bukan di luar vault. Vault diarsipkan sebelum apa pun ditulis.",
         "tidy.none_t": "Tidak ada yang perlu dirapikan",
         "tidy.none_d": "Tidak ada entri yang memuat penanda folder di catatannya atau bernama gaya paket aplikasi.",
         "tidy.offer_t": "Ada entri yang bisa dirapikan",
-        "tidy.offer_d": "entri memuat folder di catatannya atau bernama gaya paket aplikasi. Periksa perubahannya sebelum apa pun ditulis.",
+        "tidy.offer_d": "entri bisa dirapikan: folder yang dibaca dari catatannya, nama yang diturunkan dari identifier paket, atau cocok dengan daftar situs tersembunyimu. Tinjau perubahannya sebelum apa pun ditulis.",
         "tidy.review": "Periksa perubahan",
         "tidy.done": "entri dirapikan.",
         "overview.console_cipher": "sandi enkripsi vault",
@@ -12527,6 +12732,20 @@ WEB_CATALOGUES = {
         "settings.lock.apply": "Terapkan waktu kunci",
         "settings.lock.note": "Menunggu lebih lama membuat vault yang sudah didekripsi tampil lebih lama di layar. Server mengakhiri sesi yang diam tak lama setelah pengatur waktu ini, apa pun yang dilakukan peramban.",
         "settings.lock.saved": "Kunci otomatis diperbarui.",
+        "entry.field.hidden": "Sembunyikan entri ini",
+        "entry.hint.hidden": "Nama dan nama penggunanya diganti dengan titik di daftar kata sandi sampai kamu membuka bagian Tersembunyi. Ini menyembunyikannya dari lirikan ke layarmu \u2014 ini bukan kata sandi kedua, dan entrinya tetap ada di vault dan tetap ikut diekspor.",
+        "badge.hidden": "tersembunyi",
+        "filters.hidden": "Tersembunyi",
+        "view.label.hidden": "Visibilitas",
+        "view.hidden.on": "Disembunyikan dari daftar kata sandi",
+        "tidy.hide": "Sembunyikan",
+        "tidy.hidden": "Tersembunyi",
+        "settings.hosts.title": "Situs yang disarankan disembunyikan",
+        "settings.hosts.desc": "Nama host yang tidak ingin kamu tampilkan di layar. Hanya dipakai untuk mengusulkan penyembunyian entri di Tidy.",
+        "settings.hosts.label": "Nama host",
+        "settings.hosts.note": "Satu per baris atau dipisah koma. SPM tidak membawa daftar apa pun. Daftar ini disimpan di dalam vault terenkripsimu, bukan di berkas pengaturan, karena daftar situs yang tidak ingin kamu sebutkan itu sendiri layak dilindungi. Ini hanya mengusulkan \u2014 setiap entri tetap memakai sakelar yang kamu atur.",
+        "settings.hosts.apply": "Simpan daftar host",
+        "settings.hosts.saved": "Daftar host disimpan.",
     },
     "ja": {
         "nav.security": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3",
@@ -12859,11 +13078,11 @@ WEB_CATALOGUES = {
         "tidy.folder": "\u30d5\u30a9\u30eb\u30c0\u30fc",
         "tidy.apply": "\u9078\u629e\u3057\u305f\u9805\u76ee\u306b\u9069\u7528",
         "tidy.cancel": "\u30ad\u30e3\u30f3\u30bb\u30eb",
-        "tidy.note": "\u5143\u306e\u8b58\u5225\u5b50\u306f\u9805\u76ee\u306e\u30e1\u30e2\u306b\u6b8b\u308a\u307e\u3059\u3002\u66f8\u304d\u8fbc\u3080\u524d\u306b\u4fdd\u7ba1\u5eab\u306f\u30a2\u30fc\u30ab\u30a4\u30d6\u3055\u308c\u307e\u3059\u3002",
+        "tidy.note": "\u5143\u306e\u8b58\u5225\u5b50\u306f\u30a8\u30f3\u30c8\u30ea\u30fc\u306e\u30e1\u30e2\u306b\u6b8b\u308a\u307e\u3059\u3002\u96a0\u3057\u3066\u3082\u540d\u524d\u304c\u30d1\u30b9\u30ef\u30fc\u30c9\u4e00\u89a7\u304b\u3089\u6d88\u3048\u308b\u3060\u3051\u3067\u3001\u4fdd\u7ba1\u5eab\u304b\u3089\u6d88\u3048\u308b\u308f\u3051\u3067\u306f\u3042\u308a\u307e\u305b\u3093\u3002\u66f8\u304d\u8fbc\u307f\u306e\u524d\u306b\u4fdd\u7ba1\u5eab\u3092\u4fdd\u5b58\u3057\u307e\u3059\u3002",
         "tidy.none_t": "\u6574\u7406\u3059\u308b\u3082\u306e\u306f\u3042\u308a\u307e\u305b\u3093",
         "tidy.none_d": "\u30e1\u30e2\u306b\u30d5\u30a9\u30eb\u30c0\u30fc\u6307\u5b9a\u304c\u3042\u308b\u9805\u76ee\u3082\u3001\u30d1\u30c3\u30b1\u30fc\u30b8\u540d\u5f62\u5f0f\u306e\u9805\u76ee\u3082\u3042\u308a\u307e\u305b\u3093\u3002",
         "tidy.offer_t": "\u6574\u7406\u3067\u304d\u308b\u9805\u76ee\u304c\u3042\u308a\u307e\u3059",
-        "tidy.offer_d": "\u4ef6\u306e\u9805\u76ee\u304c\u30e1\u30e2\u306b\u30d5\u30a9\u30eb\u30c0\u30fc\u3092\u6301\u3064\u304b\u3001\u30d1\u30c3\u30b1\u30fc\u30b8\u540d\u5f62\u5f0f\u3067\u3059\u3002\u66f8\u304d\u8fbc\u3080\u524d\u306b\u5909\u66f4\u5185\u5bb9\u3092\u78ba\u8a8d\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
+        "tidy.offer_d": "\u4ef6\u306e\u30a8\u30f3\u30c8\u30ea\u30fc\u3092\u6574\u7406\u3067\u304d\u307e\u3059\u3002\u30e1\u30e2\u304b\u3089\u8aad\u307f\u53d6\u3063\u305f\u30d5\u30a9\u30eb\u30c0\u30fc\u3001\u30d1\u30c3\u30b1\u30fc\u30b8\u8b58\u5225\u5b50\u304b\u3089\u5c0e\u3044\u305f\u540d\u524d\u3001\u307e\u305f\u306f\u975e\u8868\u793a\u30b5\u30a4\u30c8\u4e00\u89a7\u3068\u306e\u4e00\u81f4\u3067\u3059\u3002\u66f8\u304d\u8fbc\u3080\u524d\u306b\u5909\u66f4\u5185\u5bb9\u3092\u3054\u78ba\u8a8d\u304f\u3060\u3055\u3044\u3002",
         "tidy.review": "\u5909\u66f4\u3092\u78ba\u8a8d",
         "tidy.done": "\u4ef6\u306e\u9805\u76ee\u3092\u6574\u7406\u3057\u307e\u3057\u305f\u3002",
         "overview.console_cipher": "\u4fdd\u7ba1\u5eab\u306e\u6697\u53f7",
@@ -12873,6 +13092,20 @@ WEB_CATALOGUES = {
         "settings.lock.apply": "\u30ed\u30c3\u30af\u6642\u9593\u3092\u9069\u7528",
         "settings.lock.note": "\u5f85\u3061\u6642\u9593\u3092\u9577\u304f\u3059\u308b\u3068\u3001\u5fa9\u53f7\u3055\u308c\u305f\u4fdd\u7ba1\u5eab\u304c\u753b\u9762\u306b\u6b8b\u308b\u6642\u9593\u3082\u9577\u304f\u306a\u308a\u307e\u3059\u3002\u30d6\u30e9\u30a6\u30b6\u30fc\u306e\u72b6\u614b\u306b\u304b\u304b\u308f\u3089\u305a\u3001\u30b5\u30fc\u30d0\u30fc\u306f\u3053\u306e\u30bf\u30a4\u30de\u30fc\u306e\u5c11\u3057\u5f8c\u306b\u7121\u64cd\u4f5c\u30bb\u30c3\u30b7\u30e7\u30f3\u3092\u7d42\u4e86\u3057\u307e\u3059\u3002",
         "settings.lock.saved": "\u81ea\u52d5\u30ed\u30c3\u30af\u3092\u66f4\u65b0\u3057\u307e\u3057\u305f\u3002",
+        "entry.field.hidden": "\u3053\u306e\u30a8\u30f3\u30c8\u30ea\u30fc\u3092\u96a0\u3059",
+        "entry.hint.hidden": "\u300c\u96a0\u3057\u300d\u30bb\u30af\u30b7\u30e7\u30f3\u3092\u958b\u304f\u307e\u3067\u3001\u30d1\u30b9\u30ef\u30fc\u30c9\u4e00\u89a7\u3067\u306f\u540d\u524d\u3068\u30e6\u30fc\u30b6\u30fc\u540d\u304c\u70b9\u3067\u7f6e\u304d\u63db\u3048\u3089\u308c\u307e\u3059\u3002\u753b\u9762\u3092\u306e\u305e\u304b\u308c\u305f\u3068\u304d\u306b\u898b\u3048\u306a\u304f\u3059\u308b\u305f\u3081\u306e\u3082\u306e\u3067\u3001\u4e8c\u3064\u76ee\u306e\u30d1\u30b9\u30ef\u30fc\u30c9\u3067\u306f\u3042\u308a\u307e\u305b\u3093\u3002\u30a8\u30f3\u30c8\u30ea\u30fc\u306f\u4fdd\u7ba1\u5eab\u306b\u6b8b\u308a\u3001\u30a8\u30af\u30b9\u30dd\u30fc\u30c8\u306b\u3082\u542b\u307e\u308c\u307e\u3059\u3002",
+        "badge.hidden": "\u975e\u8868\u793a",
+        "filters.hidden": "\u96a0\u3057",
+        "view.label.hidden": "\u8868\u793a",
+        "view.hidden.on": "\u30d1\u30b9\u30ef\u30fc\u30c9\u4e00\u89a7\u3067\u306f\u975e\u8868\u793a",
+        "tidy.hide": "\u96a0\u3059",
+        "tidy.hidden": "\u975e\u8868\u793a",
+        "settings.hosts.title": "\u975e\u8868\u793a\u3092\u63d0\u6848\u3059\u308b\u30b5\u30a4\u30c8",
+        "settings.hosts.desc": "\u753b\u9762\u306b\u51fa\u3057\u305f\u304f\u306a\u3044\u30db\u30b9\u30c8\u540d\u3067\u3059\u3002\u6574\u7406\u3067\u306e\u975e\u8868\u793a\u63d0\u6848\u306b\u306e\u307f\u4f7f\u308f\u308c\u307e\u3059\u3002",
+        "settings.hosts.label": "\u30db\u30b9\u30c8\u540d",
+        "settings.hosts.note": "1\u884c\u306b1\u3064\u3001\u307e\u305f\u306f\u30ab\u30f3\u30de\u533a\u5207\u308a\u3067\u3002SPM \u306f\u72ec\u81ea\u306e\u4e00\u89a7\u3092\u540c\u68b1\u3057\u307e\u305b\u3093\u3002\u3053\u306e\u4e00\u89a7\u306f\u8a2d\u5b9a\u30d5\u30a1\u30a4\u30eb\u3067\u306f\u306a\u304f\u6697\u53f7\u5316\u3055\u308c\u305f\u4fdd\u7ba1\u5eab\u306e\u4e2d\u306b\u4fdd\u5b58\u3055\u308c\u307e\u3059\u3002\u540d\u524d\u3092\u51fa\u3057\u305f\u304f\u306a\u3044\u30b5\u30a4\u30c8\u306e\u4e00\u89a7\u305d\u306e\u3082\u306e\u304c\u5b88\u308b\u4fa1\u5024\u306e\u3042\u308b\u3082\u306e\u3060\u304b\u3089\u3067\u3059\u3002\u3042\u304f\u307e\u3067\u63d0\u6848\u3067\u3001\u5404\u30a8\u30f3\u30c8\u30ea\u30fc\u306f\u3042\u306a\u305f\u304c\u8a2d\u5b9a\u3057\u305f\u30b9\u30a4\u30c3\u30c1\u306e\u307e\u307e\u3067\u3059\u3002",
+        "settings.hosts.apply": "\u30db\u30b9\u30c8\u4e00\u89a7\u3092\u4fdd\u5b58",
+        "settings.hosts.saved": "\u30db\u30b9\u30c8\u4e00\u89a7\u3092\u4fdd\u5b58\u3057\u307e\u3057\u305f\u3002",
     },
     "ko": {
         "nav.security": "\ubcf4\uc548",
@@ -13205,11 +13438,11 @@ WEB_CATALOGUES = {
         "tidy.folder": "\ud3f4\ub354",
         "tidy.apply": "\uc120\ud0dd\ud55c \ud56d\ubaa9\uc5d0 \uc801\uc6a9",
         "tidy.cancel": "\ucde8\uc18c",
-        "tidy.note": "\uc6d0\ub798 \uc2dd\ubcc4\uc790\ub294 \ud56d\ubaa9\uc758 \uba54\ubaa8\uc5d0 \ub0a8\uc2b5\ub2c8\ub2e4. \ubb34\uc5b8\uac00 \uae30\ub85d\ub418\uae30 \uc804\uc5d0 \uae08\uace0\uac00 \uba3c\uc800 \ubcf4\uad00\ub429\ub2c8\ub2e4.",
+        "tidy.note": "\uc6d0\ub798 \uc2dd\ubcc4\uc790\ub294 \ud56d\ubaa9 \uba54\ubaa8\uc5d0 \ub0a8\uc2b5\ub2c8\ub2e4. \uc228\uae40\uc740 \uc774\ub984\uc744 \ube44\ubc00\ubc88\ud638 \ubaa9\ub85d \ubc16\uc5d0 \ub450\ub294 \uac83\uc774\uc9c0 \ubcf4\uad00\ud568 \ubc16\uc5d0 \ub450\ub294 \uac83\uc774 \uc544\ub2d9\ub2c8\ub2e4. \ubb34\uc5c7\uc774\ub4e0 \uc4f0\uae30 \uc804\uc5d0 \ubcf4\uad00\ud568\uc744 \ubcf4\uad00\ud569\ub2c8\ub2e4.",
         "tidy.none_t": "\uc815\ub9ac\ud560 \uac83\uc774 \uc5c6\uc2b5\ub2c8\ub2e4",
         "tidy.none_d": "\uba54\ubaa8\uc5d0 \ud3f4\ub354 \ud45c\uc2dc\uac00 \uc788\ub294 \ud56d\ubaa9\ub3c4, \ud328\ud0a4\uc9c0 \uc774\ub984 \ud615\uc2dd\uc758 \ud56d\ubaa9\ub3c4 \uc5c6\uc2b5\ub2c8\ub2e4.",
         "tidy.offer_t": "\uc815\ub9ac\ud560 \uc218 \uc788\ub294 \ud56d\ubaa9\uc774 \uc788\uc2b5\ub2c8\ub2e4",
-        "tidy.offer_d": "\uac1c \ud56d\ubaa9\uc774 \uba54\ubaa8\uc5d0 \ud3f4\ub354\ub97c \ub2f4\uace0 \uc788\uac70\ub098 \ud328\ud0a4\uc9c0 \uc774\ub984 \ud615\uc2dd\uc785\ub2c8\ub2e4. \uae30\ub85d\ud558\uae30 \uc804\uc5d0 \ubcc0\uacbd \ub0b4\uc6a9\uc744 \ud655\uc778\ud558\uc138\uc694.",
+        "tidy.offer_d": "\uac1c\uc758 \ud56d\ubaa9\uc744 \uc815\ub9ac\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4. \uba54\ubaa8\uc5d0\uc11c \uc77d\uc740 \ud3f4\ub354, \ud328\ud0a4\uc9c0 \uc2dd\ubcc4\uc790\uc5d0\uc11c \ub9cc\ub4e0 \uc774\ub984, \ub610\ub294 \uc228\uae40 \uc0ac\uc774\ud2b8 \ubaa9\ub85d\uacfc\uc758 \uc77c\uce58\uc785\ub2c8\ub2e4. \ubb34\uc5c7\uc774\ub4e0 \uc4f0\uae30 \uc804\uc5d0 \ubcc0\uacbd \ub0b4\uc6a9\uc744 \uac80\ud1a0\ud558\uc138\uc694.",
         "tidy.review": "\ubcc0\uacbd \ub0b4\uc6a9 \ud655\uc778",
         "tidy.done": "\uac1c \ud56d\ubaa9\uc744 \uc815\ub9ac\ud588\uc2b5\ub2c8\ub2e4.",
         "overview.console_cipher": "\ubcf4\uad00\ud568 \uc554\ud638",
@@ -13219,6 +13452,20 @@ WEB_CATALOGUES = {
         "settings.lock.apply": "\uc7a0\uae08 \uc2dc\uac04 \uc801\uc6a9",
         "settings.lock.note": "\ub300\uae30 \uc2dc\uac04\uc774 \uae38\uc218\ub85d \ubcf5\ud638\ud654\ub41c \ubcf4\uad00\ud568\uc774 \ud654\uba74\uc5d0 \ub354 \uc624\ub798 \ub0a8\uc2b5\ub2c8\ub2e4. \ube0c\ub77c\uc6b0\uc800 \uc0c1\ud0dc\uc640 \uad00\uacc4\uc5c6\uc774 \uc11c\ubc84\ub294 \uc774 \ud0c0\uc774\uba38 \uc9c1\ud6c4 \uc720\ud734 \uc138\uc158\uc744 \uc885\ub8cc\ud569\ub2c8\ub2e4.",
         "settings.lock.saved": "\uc720\ud734 \uc7a0\uae08\uc744 \uc5c5\ub370\uc774\ud2b8\ud588\uc2b5\ub2c8\ub2e4.",
+        "entry.field.hidden": "\uc774 \ud56d\ubaa9 \uc228\uae30\uae30",
+        "entry.hint.hidden": "\uc228\uae40 \uc139\uc158\uc744 \uc5f4\uae30 \uc804\uae4c\uc9c0 \ube44\ubc00\ubc88\ud638 \ubaa9\ub85d\uc5d0\uc11c \uc774\ub984\uacfc \uc0ac\uc6a9\uc790 \uc774\ub984\uc774 \uc810\uc73c\ub85c \ubc14\ub01d\ub2c8\ub2e4. \ud654\uba74\uc744 \ud758\ub057 \ubcf4\ub294 \uc2dc\uc120\uc73c\ub85c\ubd80\ud130 \uac00\ub9ac\ub294 \uac83\uc774\uba70, \ub450 \ubc88\uc9f8 \ube44\ubc00\ubc88\ud638\uac00 \uc544\ub2d9\ub2c8\ub2e4. \ud56d\ubaa9\uc740 \ubcf4\uad00\ud568\uc5d0 \uadf8\ub300\ub85c \uc788\uace0 \ub0b4\ubcf4\ub0b4\uae30\uc5d0\ub3c4 \ud3ec\ud568\ub429\ub2c8\ub2e4.",
+        "badge.hidden": "\uc228\uae40",
+        "filters.hidden": "\uc228\uae40",
+        "view.label.hidden": "\ud45c\uc2dc",
+        "view.hidden.on": "\ube44\ubc00\ubc88\ud638 \ubaa9\ub85d\uc5d0\uc11c \uc228\uae40",
+        "tidy.hide": "\uc228\uae30\uae30",
+        "tidy.hidden": "\uc228\uae40",
+        "settings.hosts.title": "\uc228\uae40\uc744 \uc81c\uc548\ud560 \uc0ac\uc774\ud2b8",
+        "settings.hosts.desc": "\ud654\uba74\uc5d0 \ub450\uace0 \uc2f6\uc9c0 \uc54a\uc740 \ud638\uc2a4\ud2b8 \uc774\ub984\uc785\ub2c8\ub2e4. \uc815\ub9ac\uc5d0\uc11c \uc228\uae40\uc744 \uc81c\uc548\ud558\ub294 \ub370\ub9cc \uc4f0\uc785\ub2c8\ub2e4.",
+        "settings.hosts.label": "\ud638\uc2a4\ud2b8 \uc774\ub984",
+        "settings.hosts.note": "\ud55c \uc904\uc5d0 \ud558\ub098\uc529 \ub610\ub294 \uc27c\ud45c\ub85c \uad6c\ubd84\ud558\uc138\uc694. SPM\uc740 \uc790\uccb4 \ubaa9\ub85d\uc744 \uc81c\uacf5\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. \uc774 \ubaa9\ub85d\uc740 \uc124\uc815 \ud30c\uc77c\uc774 \uc544\ub2c8\ub77c \uc554\ud638\ud654\ub41c \ubcf4\uad00\ud568 \uc548\uc5d0 \uc800\uc7a5\ub429\ub2c8\ub2e4. \uc774\ub984\uc744 \ub4dc\ub7ec\ub0b4\uace0 \uc2f6\uc9c0 \uc54a\uc740 \uc0ac\uc774\ud2b8\uc758 \ubaa9\ub85d \uc790\uccb4\uac00 \ubcf4\ud638\ud560 \uac00\uce58\uac00 \uc788\uae30 \ub54c\ubb38\uc785\ub2c8\ub2e4. \uc81c\uc548\ub9cc \ud560 \ubfd0, \uac01 \ud56d\ubaa9\uc740 \uc5ec\ub7ec\ubd84\uc774 \uc124\uc815\ud55c \uc2a4\uc704\uce58\ub97c \uadf8\ub300\ub85c \uc720\uc9c0\ud569\ub2c8\ub2e4.",
+        "settings.hosts.apply": "\ud638\uc2a4\ud2b8 \ubaa9\ub85d \uc800\uc7a5",
+        "settings.hosts.saved": "\ud638\uc2a4\ud2b8 \ubaa9\ub85d\uc744 \uc800\uc7a5\ud588\uc2b5\ub2c8\ub2e4.",
     },
     "pt-br": {
         "nav.security": "Seguran\u00e7a",
@@ -13551,11 +13798,11 @@ WEB_CATALOGUES = {
         "tidy.folder": "Pasta",
         "tidy.apply": "Aplicar aos selecionados",
         "tidy.cancel": "Cancelar",
-        "tidy.note": "O identificador original fica guardado nas notas da entrada. O cofre \u00e9 arquivado antes de qualquer grava\u00e7\u00e3o.",
+        "tidy.note": "O identificador original \u00e9 mantido nas notas da entrada. Ocultar mant\u00e9m um nome fora da lista de senhas, n\u00e3o fora do cofre. O cofre \u00e9 arquivado antes de qualquer escrita.",
         "tidy.none_t": "Nada a organizar",
         "tidy.none_d": "Nenhuma entrada tem marca de pasta nas notas nem nome em formato de pacote.",
         "tidy.offer_t": "Algumas entradas podem ser organizadas",
-        "tidy.offer_d": "entradas trazem uma pasta nas notas ou um nome em formato de pacote. Revise as mudan\u00e7as antes de qualquer grava\u00e7\u00e3o.",
+        "tidy.offer_d": "entradas poderiam ser organizadas: uma pasta lida das notas, um nome derivado de um identificador de pacote, ou uma correspond\u00eancia com sua lista de sites ocultos. Revise as altera\u00e7\u00f5es antes de qualquer escrita.",
         "tidy.review": "Revisar mudan\u00e7as",
         "tidy.done": "entradas organizadas.",
         "overview.console_cipher": "cifra do cofre",
@@ -13565,6 +13812,20 @@ WEB_CATALOGUES = {
         "settings.lock.apply": "Aplicar tempo de bloqueio",
         "settings.lock.note": "Uma espera maior deixa o cofre descriptografado mais tempo na tela. O servidor encerra uma sess\u00e3o inativa pouco depois deste temporizador, fa\u00e7a o navegador o que fizer.",
         "settings.lock.saved": "Bloqueio por inatividade atualizado.",
+        "entry.field.hidden": "Ocultar esta entrada",
+        "entry.hint.hidden": "O nome e o usu\u00e1rio s\u00e3o substitu\u00eddos por pontos na lista de senhas at\u00e9 voc\u00ea abrir a se\u00e7\u00e3o Ocultas. Isso a esconde de um olhar de relance na sua tela \u2014 n\u00e3o \u00e9 uma segunda senha, e a entrada continua no cofre e continua sendo exportada.",
+        "badge.hidden": "oculta",
+        "filters.hidden": "Ocultas",
+        "view.label.hidden": "Visibilidade",
+        "view.hidden.on": "Oculta na lista de senhas",
+        "tidy.hide": "Ocultar",
+        "tidy.hidden": "Ocultas",
+        "settings.hosts.title": "Sites a sugerir ocultar",
+        "settings.hosts.desc": "Nomes de host que voc\u00ea prefere n\u00e3o ter na tela. Usados apenas para propor ocultar entradas no Organizar.",
+        "settings.hosts.label": "Nomes de host",
+        "settings.hosts.note": "Um por linha ou separados por v\u00edrgulas. O SPM n\u00e3o traz lista alguma. Esta fica dentro do seu cofre criptografado, n\u00e3o em um arquivo de configura\u00e7\u00e3o, porque uma lista de sites que voc\u00ea prefere n\u00e3o nomear j\u00e1 merece prote\u00e7\u00e3o. Ela apenas sugere \u2014 cada entrada mant\u00e9m o interruptor que voc\u00ea definiu.",
+        "settings.hosts.apply": "Salvar lista de hosts",
+        "settings.hosts.saved": "Lista de hosts salva.",
     },
     "ru": {
         "nav.security": "\u0411\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c",
@@ -13897,11 +14158,11 @@ WEB_CATALOGUES = {
         "tidy.folder": "\u041f\u0430\u043f\u043a\u0430",
         "tidy.apply": "\u041f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c \u043a \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u043c",
         "tidy.cancel": "\u041e\u0442\u043c\u0435\u043d\u0430",
-        "tidy.note": "\u0418\u0441\u0445\u043e\u0434\u043d\u044b\u0439 \u0438\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u0432 \u0437\u0430\u043c\u0435\u0442\u043a\u0430\u0445 \u0437\u0430\u043f\u0438\u0441\u0438. \u041f\u0435\u0440\u0435\u0434 \u043b\u044e\u0431\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u044c\u044e \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u0430\u0440\u0445\u0438\u0432\u0438\u0440\u0443\u0435\u0442\u0441\u044f.",
+        "tidy.note": "\u0418\u0441\u0445\u043e\u0434\u043d\u044b\u0439 \u0438\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u0441\u043e\u0445\u0440\u0430\u043d\u044f\u0435\u0442\u0441\u044f \u0432 \u0437\u0430\u043c\u0435\u0442\u043a\u0430\u0445 \u0437\u0430\u043f\u0438\u0441\u0438. \u0421\u043a\u0440\u044b\u0442\u0438\u0435 \u0443\u0431\u0438\u0440\u0430\u0435\u0442 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u0438\u0437 \u0441\u043f\u0438\u0441\u043a\u0430 \u043f\u0430\u0440\u043e\u043b\u0435\u0439, \u0430 \u043d\u0435 \u0438\u0437 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0430. \u0425\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u0430\u0440\u0445\u0438\u0432\u0438\u0440\u0443\u0435\u0442\u0441\u044f \u0434\u043e \u043b\u044e\u0431\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u0438.",
         "tidy.none_t": "\u041f\u0440\u0438\u0432\u043e\u0434\u0438\u0442\u044c \u0432 \u043f\u043e\u0440\u044f\u0434\u043e\u043a \u043d\u0435\u0447\u0435\u0433\u043e",
         "tidy.none_d": "\u041d\u0438 \u0432 \u043e\u0434\u043d\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u0438 \u043d\u0435\u0442 \u043f\u043e\u043c\u0435\u0442\u043a\u0438 \u043f\u0430\u043f\u043a\u0438 \u0432 \u0437\u0430\u043c\u0435\u0442\u043a\u0430\u0445 \u0438 \u043d\u0438 \u043e\u0434\u043d\u0430 \u043d\u0435 \u043d\u0430\u0437\u0432\u0430\u043d\u0430 \u043a\u0430\u043a \u043f\u0430\u043a\u0435\u0442 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f.",
         "tidy.offer_t": "\u041d\u0435\u043a\u043e\u0442\u043e\u0440\u044b\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u043c\u043e\u0436\u043d\u043e \u043f\u0440\u0438\u0432\u0435\u0441\u0442\u0438 \u0432 \u043f\u043e\u0440\u044f\u0434\u043e\u043a",
-        "tidy.offer_d": "\u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u0441\u043e\u0434\u0435\u0440\u0436\u0430\u0442 \u043f\u0430\u043f\u043a\u0443 \u0432 \u0437\u0430\u043c\u0435\u0442\u043a\u0430\u0445 \u0438\u043b\u0438 \u043d\u0430\u0437\u0432\u0430\u043d\u044b \u043a\u0430\u043a \u043f\u0430\u043a\u0435\u0442 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f. \u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0438\u0442\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f, \u043f\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043c \u0447\u0442\u043e-\u043b\u0438\u0431\u043e \u0431\u0443\u0434\u0435\u0442 \u0437\u0430\u043f\u0438\u0441\u0430\u043d\u043e.",
+        "tidy.offer_d": "\u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u043c\u043e\u0436\u043d\u043e \u043f\u0440\u0438\u0432\u0435\u0441\u0442\u0438 \u0432 \u043f\u043e\u0440\u044f\u0434\u043e\u043a: \u043f\u0430\u043f\u043a\u0430 \u0438\u0437 \u0438\u0445 \u0437\u0430\u043c\u0435\u0442\u043e\u043a, \u0438\u043c\u044f \u0438\u0437 \u0438\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440\u0430 \u043f\u0430\u043a\u0435\u0442\u0430 \u0438\u043b\u0438 \u0441\u043e\u0432\u043f\u0430\u0434\u0435\u043d\u0438\u0435 \u0441 \u0432\u0430\u0448\u0438\u043c \u0441\u043f\u0438\u0441\u043a\u043e\u043c \u0441\u043a\u0440\u044b\u0442\u044b\u0445 \u0441\u0430\u0439\u0442\u043e\u0432. \u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0438\u0442\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f \u0434\u043e \u0442\u043e\u0433\u043e, \u043a\u0430\u043a \u0447\u0442\u043e-\u043b\u0438\u0431\u043e \u0431\u0443\u0434\u0435\u0442 \u0437\u0430\u043f\u0438\u0441\u0430\u043d\u043e.",
         "tidy.review": "\u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0435\u0442\u044c \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f",
         "tidy.done": "\u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u043f\u0440\u0438\u0432\u0435\u0434\u0435\u043d\u043e \u0432 \u043f\u043e\u0440\u044f\u0434\u043e\u043a.",
         "overview.console_cipher": "\u0448\u0438\u0444\u0440 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0430",
@@ -13911,6 +14172,20 @@ WEB_CATALOGUES = {
         "settings.lock.apply": "\u041f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c \u0432\u0440\u0435\u043c\u044f \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0438",
         "settings.lock.note": "\u0427\u0435\u043c \u0434\u043e\u043b\u044c\u0448\u0435 \u043e\u0436\u0438\u0434\u0430\u043d\u0438\u0435, \u0442\u0435\u043c \u0434\u043e\u043b\u044c\u0448\u0435 \u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0435 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u043d\u0430 \u044d\u043a\u0440\u0430\u043d\u0435. \u0421\u0435\u0440\u0432\u0435\u0440 \u0437\u0430\u0432\u0435\u0440\u0448\u0430\u0435\u0442 \u043f\u0440\u043e\u0441\u0442\u0430\u0438\u0432\u0430\u044e\u0449\u0438\u0439 \u0441\u0435\u0430\u043d\u0441 \u0432\u0441\u043a\u043e\u0440\u0435 \u043f\u043e\u0441\u043b\u0435 \u044d\u0442\u043e\u0433\u043e \u0442\u0430\u0439\u043c\u0435\u0440\u0430, \u0447\u0442\u043e \u0431\u044b \u043d\u0438 \u0434\u0435\u043b\u0430\u043b \u0431\u0440\u0430\u0443\u0437\u0435\u0440.",
         "settings.lock.saved": "\u0411\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430 \u043f\u0440\u0438 \u043f\u0440\u043e\u0441\u0442\u043e\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0430.",
+        "entry.field.hidden": "\u0421\u043a\u0440\u044b\u0442\u044c \u044d\u0442\u0443 \u0437\u0430\u043f\u0438\u0441\u044c",
+        "entry.hint.hidden": "\u0415\u0451 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u0438 \u0438\u043c\u044f \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f \u0437\u0430\u043c\u0435\u043d\u044f\u044e\u0442\u0441\u044f \u0442\u043e\u0447\u043a\u0430\u043c\u0438 \u0432 \u0441\u043f\u0438\u0441\u043a\u0435 \u043f\u0430\u0440\u043e\u043b\u0435\u0439, \u043f\u043e\u043a\u0430 \u0432\u044b \u043d\u0435 \u043e\u0442\u043a\u0440\u043e\u0435\u0442\u0435 \u0440\u0430\u0437\u0434\u0435\u043b \u00ab\u0421\u043a\u0440\u044b\u0442\u044b\u0435\u00bb. \u042d\u0442\u043e \u043f\u0440\u044f\u0447\u0435\u0442 \u0435\u0451 \u043e\u0442 \u0432\u0437\u0433\u043b\u044f\u0434\u0430 \u043d\u0430 \u0432\u0430\u0448 \u044d\u043a\u0440\u0430\u043d \u2014 \u044d\u0442\u043e \u043d\u0435 \u0432\u0442\u043e\u0440\u043e\u0439 \u043f\u0430\u0440\u043e\u043b\u044c, \u0437\u0430\u043f\u0438\u0441\u044c \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u0432 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u0438 \u043f\u043e-\u043f\u0440\u0435\u0436\u043d\u0435\u043c\u0443 \u044d\u043a\u0441\u043f\u043e\u0440\u0442\u0438\u0440\u0443\u0435\u0442\u0441\u044f.",
+        "badge.hidden": "\u0441\u043a\u0440\u044b\u0442\u0430",
+        "filters.hidden": "\u0421\u043a\u0440\u044b\u0442\u044b\u0435",
+        "view.label.hidden": "\u0412\u0438\u0434\u0438\u043c\u043e\u0441\u0442\u044c",
+        "view.hidden.on": "\u0421\u043a\u0440\u044b\u0442\u0430 \u0432 \u0441\u043f\u0438\u0441\u043a\u0435 \u043f\u0430\u0440\u043e\u043b\u0435\u0439",
+        "tidy.hide": "\u0421\u043a\u0440\u044b\u0442\u044c",
+        "tidy.hidden": "\u0421\u043a\u0440\u044b\u0442\u044b\u0435",
+        "settings.hosts.title": "\u0421\u0430\u0439\u0442\u044b, \u043a\u043e\u0442\u043e\u0440\u044b\u0435 \u043f\u0440\u0435\u0434\u043b\u0430\u0433\u0430\u0442\u044c \u0441\u043a\u0440\u044b\u0442\u044c",
+        "settings.hosts.desc": "\u0418\u043c\u0435\u043d\u0430 \u0445\u043e\u0441\u0442\u043e\u0432, \u043a\u043e\u0442\u043e\u0440\u044b\u0435 \u0432\u044b \u043f\u0440\u0435\u0434\u043f\u043e\u0447\u043b\u0438 \u0431\u044b \u043d\u0435 \u0432\u0438\u0434\u0435\u0442\u044c \u043d\u0430 \u044d\u043a\u0440\u0430\u043d\u0435. \u0418\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u044e\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u0434\u043b\u044f \u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u044f \u0441\u043a\u0440\u044b\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u0438 \u0432 \u0440\u0430\u0437\u0434\u0435\u043b\u0435 \u00ab\u041f\u043e\u0440\u044f\u0434\u043e\u043a\u00bb.",
+        "settings.hosts.label": "\u0418\u043c\u0435\u043d\u0430 \u0445\u043e\u0441\u0442\u043e\u0432",
+        "settings.hosts.note": "\u041f\u043e \u043e\u0434\u043d\u043e\u043c\u0443 \u0432 \u0441\u0442\u0440\u043e\u043a\u0435 \u0438\u043b\u0438 \u0447\u0435\u0440\u0435\u0437 \u0437\u0430\u043f\u044f\u0442\u0443\u044e. SPM \u043d\u0435 \u043f\u043e\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u0442 \u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u043e\u0433\u043e \u0441\u043f\u0438\u0441\u043a\u0430. \u042d\u0442\u043e\u0442 \u0445\u0440\u0430\u043d\u0438\u0442\u0441\u044f \u0432\u043d\u0443\u0442\u0440\u0438 \u0432\u0430\u0448\u0435\u0433\u043e \u0437\u0430\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0433\u043e \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0430, \u0430 \u043d\u0435 \u0432 \u0444\u0430\u0439\u043b\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043a, \u043f\u043e\u0442\u043e\u043c\u0443 \u0447\u0442\u043e \u0441\u043f\u0438\u0441\u043e\u043a \u0441\u0430\u0439\u0442\u043e\u0432, \u043a\u043e\u0442\u043e\u0440\u044b\u0435 \u0432\u044b \u043f\u0440\u0435\u0434\u043f\u043e\u0447\u043b\u0438 \u0431\u044b \u043d\u0435 \u043d\u0430\u0437\u044b\u0432\u0430\u0442\u044c, \u0441\u0430\u043c \u0437\u0430\u0441\u043b\u0443\u0436\u0438\u0432\u0430\u0435\u0442 \u0437\u0430\u0449\u0438\u0442\u044b. \u041e\u043d \u0442\u043e\u043b\u044c\u043a\u043e \u043f\u0440\u0435\u0434\u043b\u0430\u0433\u0430\u0435\u0442 \u2014 \u0443 \u043a\u0430\u0436\u0434\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u0438 \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u0442\u043e\u0442 \u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0430\u0442\u0435\u043b\u044c, \u043a\u043e\u0442\u043e\u0440\u044b\u0439 \u0432\u044b \u0437\u0430\u0434\u0430\u043b\u0438.",
+        "settings.hosts.apply": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0441\u043f\u0438\u0441\u043e\u043a \u0445\u043e\u0441\u0442\u043e\u0432",
+        "settings.hosts.saved": "\u0421\u043f\u0438\u0441\u043e\u043a \u0445\u043e\u0441\u0442\u043e\u0432 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d.",
     },
     "zh-hans": {
         "nav.security": "\u5b89\u5168",
@@ -14243,11 +14518,11 @@ WEB_CATALOGUES = {
         "tidy.folder": "\u6587\u4ef6\u5939",
         "tidy.apply": "\u5e94\u7528\u4e8e\u6240\u9009\u6761\u76ee",
         "tidy.cancel": "\u53d6\u6d88",
-        "tidy.note": "\u539f\u59cb\u6807\u8bc6\u4f1a\u4fdd\u7559\u5728\u8be5\u6761\u76ee\u7684\u5907\u6ce8\u4e2d\u3002\u5199\u5165\u524d\u4f1a\u5148\u5f52\u6863\u5bc6\u7801\u5e93\u3002",
+        "tidy.note": "\u539f\u59cb\u6807\u8bc6\u7b26\u4fdd\u7559\u5728\u6761\u76ee\u5907\u6ce8\u4e2d\u3002\u9690\u85cf\u53ea\u662f\u8ba9\u540d\u79f0\u4e0d\u51fa\u73b0\u5728\u5bc6\u7801\u5217\u8868\u91cc\uff0c\u800c\u4e0d\u662f\u79fb\u51fa\u4fdd\u9669\u5e93\u3002\u5199\u5165\u524d\u4f1a\u5148\u5f52\u6863\u4fdd\u9669\u5e93\u3002",
         "tidy.none_t": "\u6ca1\u6709\u9700\u8981\u6574\u7406\u7684\u5185\u5bb9",
         "tidy.none_d": "\u6ca1\u6709\u6761\u76ee\u7684\u5907\u6ce8\u4e2d\u542b\u6709\u6587\u4ef6\u5939\u6807\u8bb0\uff0c\u4e5f\u6ca1\u6709\u5305\u540d\u5f62\u5f0f\u7684\u540d\u79f0\u3002",
         "tidy.offer_t": "\u6709\u6761\u76ee\u53ef\u4ee5\u6574\u7406",
-        "tidy.offer_d": "\u4e2a\u6761\u76ee\u7684\u5907\u6ce8\u4e2d\u542b\u6709\u6587\u4ef6\u5939\uff0c\u6216\u4f7f\u7528\u4e86\u5305\u540d\u5f62\u5f0f\u7684\u540d\u79f0\u3002\u5199\u5165\u524d\u8bf7\u5148\u67e5\u770b\u8fd9\u4e9b\u66f4\u6539\u3002",
+        "tidy.offer_d": "\u4e2a\u6761\u76ee\u53ef\u4ee5\u6574\u7406\uff1a\u4ece\u5907\u6ce8\u4e2d\u8bfb\u51fa\u7684\u6587\u4ef6\u5939\u3001\u7531\u8f6f\u4ef6\u5305\u6807\u8bc6\u7b26\u63a8\u5bfc\u7684\u540d\u79f0\uff0c\u6216\u4e0e\u4f60\u7684\u9690\u85cf\u7ad9\u70b9\u5217\u8868\u76f8\u5339\u914d\u3002\u5199\u5165\u524d\u8bf7\u5148\u67e5\u770b\u8fd9\u4e9b\u66f4\u6539\u3002",
         "tidy.review": "\u67e5\u770b\u66f4\u6539",
         "tidy.done": "\u4e2a\u6761\u76ee\u5df2\u6574\u7406\u3002",
         "overview.console_cipher": "\u4fdd\u9669\u5e93\u52a0\u5bc6\u7b97\u6cd5",
@@ -14257,6 +14532,20 @@ WEB_CATALOGUES = {
         "settings.lock.apply": "\u5e94\u7528\u9501\u5b9a\u5ef6\u65f6",
         "settings.lock.note": "\u7b49\u5f85\u8d8a\u4e45\uff0c\u5df2\u89e3\u5bc6\u7684\u4fdd\u9669\u5e93\u505c\u7559\u5728\u5c4f\u5e55\u4e0a\u7684\u65f6\u95f4\u5c31\u8d8a\u957f\u3002\u65e0\u8bba\u6d4f\u89c8\u5668\u5904\u4e8e\u4f55\u79cd\u72b6\u6001\uff0c\u670d\u52a1\u5668\u90fd\u4f1a\u5728\u8be5\u8ba1\u65f6\u4e4b\u540e\u4e0d\u4e45\u7ed3\u675f\u95f2\u7f6e\u4f1a\u8bdd\u3002",
         "settings.lock.saved": "\u95f2\u7f6e\u9501\u5b9a\u5df2\u66f4\u65b0\u3002",
+        "entry.field.hidden": "\u9690\u85cf\u6b64\u6761\u76ee",
+        "entry.hint.hidden": "\u5728\u4f60\u6253\u5f00\u300c\u9690\u85cf\u300d\u5206\u533a\u4e4b\u524d\uff0c\u5bc6\u7801\u5217\u8868\u4e2d\u5b83\u7684\u540d\u79f0\u548c\u7528\u6237\u540d\u90fd\u4f1a\u663e\u793a\u4e3a\u5706\u70b9\u3002\u8fd9\u53ea\u662f\u9632\u6b62\u522b\u4eba\u77a5\u4e00\u773c\u4f60\u7684\u5c4f\u5e55\uff0c\u5e76\u4e0d\u662f\u7b2c\u4e8c\u9053\u5bc6\u7801\uff1b\u6761\u76ee\u4ecd\u5728\u4fdd\u9669\u5e93\u4e2d\uff0c\u5bfc\u51fa\u65f6\u4e5f\u4ecd\u4f1a\u5305\u542b\u3002",
+        "badge.hidden": "\u5df2\u9690\u85cf",
+        "filters.hidden": "\u9690\u85cf",
+        "view.label.hidden": "\u53ef\u89c1\u6027",
+        "view.hidden.on": "\u5df2\u4ece\u5bc6\u7801\u5217\u8868\u9690\u85cf",
+        "tidy.hide": "\u9690\u85cf",
+        "tidy.hidden": "\u9690\u85cf",
+        "settings.hosts.title": "\u5efa\u8bae\u9690\u85cf\u7684\u7ad9\u70b9",
+        "settings.hosts.desc": "\u4f60\u4e0d\u5e0c\u671b\u51fa\u73b0\u5728\u5c4f\u5e55\u4e0a\u7684\u4e3b\u673a\u540d\u3002\u4ec5\u7528\u4e8e\u5728\u6574\u7406\u4e2d\u5efa\u8bae\u9690\u85cf\u6761\u76ee\u3002",
+        "settings.hosts.label": "\u4e3b\u673a\u540d",
+        "settings.hosts.note": "\u6bcf\u884c\u4e00\u4e2a\uff0c\u6216\u7528\u9017\u53f7\u5206\u9694\u3002SPM \u4e0d\u9644\u5e26\u4efb\u4f55\u81ea\u5e26\u5217\u8868\u3002\u8be5\u5217\u8868\u4fdd\u5b58\u5728\u4f60\u7684\u52a0\u5bc6\u4fdd\u9669\u5e93\u5185\uff0c\u800c\u4e0d\u662f\u8bbe\u7f6e\u6587\u4ef6\u91cc\uff0c\u56e0\u4e3a\u4e00\u4efd\u4f60\u4e0d\u613f\u8bf4\u51fa\u540d\u5b57\u7684\u7ad9\u70b9\u6e05\u5355\u672c\u8eab\u5c31\u503c\u5f97\u4fdd\u62a4\u3002\u5b83\u53ea\u4f5c\u5efa\u8bae\u2014\u2014\u6bcf\u4e2a\u6761\u76ee\u90fd\u4fdd\u7559\u4f60\u4e3a\u5b83\u8bbe\u7f6e\u7684\u5f00\u5173\u3002",
+        "settings.hosts.apply": "\u4fdd\u5b58\u4e3b\u673a\u5217\u8868",
+        "settings.hosts.saved": "\u4e3b\u673a\u5217\u8868\u5df2\u4fdd\u5b58\u3002",
     },
 }
 # --- END GENERATED LOCALES ---
@@ -15323,6 +15612,12 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .chip-btn:hover { border-color: var(--accent); }
 .chip-on { background: var(--accent); color: var(--bg); border-color: transparent; }
 .chip-warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.chip-hidden { background: var(--surface-2); color: var(--text-dim); border-style: dashed; }
+/* A checkbox and its words as one target: the label is the hit area, so the
+   words are clickable rather than decorative, which is what a switch has to be
+   on a phone. */
+.switch { display: flex; align-items: center; gap: var(--sp-3); cursor: pointer; }
+.switch input { inline-size: 18px; block-size: 18px; accent-color: var(--accent); flex: none; }
 tr[data-row] .chip { margin-inline-start: 6px; vertical-align: middle; }
 .filter-panel { margin-bottom:var(--sp-4); }
 .filter-panel .card-head { align-items:flex-start; gap:var(--sp-3); }
@@ -16216,12 +16511,23 @@ def tidy_page(proposals, total):
             name_cell = '<span class="faint">%s</span>' % _esc(item["label"])
         folder_cell = ('<span class="chip">%s</span>' % _esc(folder["to"])
                        if folder else '<span class="faint">&mdash;</span>')
+        # Its own checkbox, not a chip. Hiding an entry is a separate decision
+        # from renaming it, and a row that proposed both would otherwise make
+        # accepting one mean accepting the other.
+        if changes.get("hidden"):
+            hidden_cell = (
+                '<label class="switch"><input type="checkbox" name="hide_%s" '
+                'value="1" checked><span data-i18n="tidy.hide">Hide</span></label>'
+                % record_id)
+        else:
+            hidden_cell = '<span class="faint">&mdash;</span>'
         rows.append(
             '<tr data-row><td class="num">%s</td>'
             '<td><label class="sr-only" for="pick_%s">Include</label>'
             '<input type="checkbox" id="pick_%s" name="pick" value="%s" checked></td>'
-            '<td>%s</td><td>%s</td></tr>'
-            % (record_id, record_id, record_id, record_id, name_cell, folder_cell))
+            '<td>%s</td><td>%s</td><td>%s</td></tr>'
+            % (record_id, record_id, record_id, record_id, name_cell,
+               folder_cell, hidden_cell))
 
     return """
 <div class="page-head">
@@ -16241,13 +16547,14 @@ def tidy_page(proposals, total):
       <th scope="col" data-i18n="tidy.include">Apply</th>
       <th scope="col" data-i18n="tidy.name">Name</th>
       <th scope="col" data-i18n="tidy.folder">Folder</th>
+      <th scope="col" data-i18n="tidy.hidden">Hidden</th>
     </tr></thead>
     <tbody>%s</tbody>
   </table></div>
   <div class="card-foot">
     <button class="btn btn-primary" type="submit" data-i18n="tidy.apply">Apply to selected</button>
     <a class="btn btn-ghost" href="/passwords" data-i18n="tidy.cancel">Cancel</a>
-    <span class="faint" data-i18n="tidy.note">The original identifier is kept in the entry's notes. The vault is archived before anything is written.</span>
+    <span class="faint" data-i18n="tidy.note">The original identifier is kept in the entry's notes. Hiding keeps a name out of the password list, not out of the vault. The vault is archived before anything is written.</span>
   </div>
 </div>
 </form>""" % (len(proposals), total, "".join(rows))
@@ -16267,7 +16574,13 @@ def tidy_empty_page():
 </div></div>"""
 
 
-def build_rows_html(entries, filtered=False):
+# What a hidden entry shows instead of its name. Rendered by the server, not
+# by CSS: a blur would leave the name in the page source, which is a promise
+# the page does not keep.
+REDACTED = "&bull;" * 8
+
+
+def build_rows_html(entries, filtered=False, reveal_hidden=False):
     if not entries:
         if filtered:
             return _empty("search", "empty.filtered.t",
@@ -16285,14 +16598,25 @@ def build_rows_html(entries, filtered=False):
     for _, parts in entries:
         eid, name, user = _esc(parts[0]), _esc(parts[1]), _esc(parts[2])
         tags = entry_tags(parts)
-        folder, _ = core.decode_attrs(parts[7] if len(parts) > 7 else "")
+        folder, _, hidden = core.decode_attrs(parts[7] if len(parts) > 7 else "")
+        # The username goes too. It is usually an email address, which names
+        # the service as surely as the service name does.
+        redacted = hidden and not reveal_hidden
+        if redacted:
+            name, user = REDACTED, REDACTED
         # Tags join the filter key so the existing instant filter matches them
         # without a second mechanism.
+        # A redacted row is not searchable by the name it is not showing.
+        # Typing a hidden entry's name into the instant filter and watching one
+        # row survive would undo, on the same page, the redaction that page had
+        # just performed.
         key = " ".join([f"{name} {user} {eid}".lower()] + ["#" + t for t in tags])
         # Display only -- the clickable chips live in the tag bar above the
         # table, which is the single control that drives filtering.
         folder_chip = (f'<span class="chip">{_esc(folder)}</span>' if folder else "")
-        chips = folder_chip + "".join(
+        hidden_chip = ('<span class="chip chip-hidden" data-i18n="badge.hidden">'
+                       'hidden</span>' if hidden else "")
+        chips = folder_chip + hidden_chip + "".join(
             f'<span class="chip">#{_esc(t)}</span>' for t in tags)
         age = _entry_age_days(parts[5] if len(parts) > 5 else "", now)
         aging = ('<span class="chip chip-warn" data-i18n="badge.aging">rotate</span>'
@@ -16319,23 +16643,31 @@ def password_filter_state(entries, query):
     folders = {}
     tags = set()
     has_unfiled = False
+    has_hidden = False
     indexed = []
     for entry in entries:
         parts = entry[1]
-        folder, _ = core.decode_attrs(parts[7] if len(parts) > 7 else "")
+        folder, _, hidden = core.decode_attrs(parts[7] if len(parts) > 7 else "")
         if folder:
             folders.setdefault(folder.casefold(), folder)
         else:
             has_unfiled = True
+        has_hidden = has_hidden or hidden
         row_tags = set(entry_tags(parts))
         tags.update(row_tags)
-        indexed.append((entry, folder, row_tags))
+        indexed.append((entry, folder, row_tags, hidden))
 
     selected_folders = []
     for raw in query.get("folder", []):
         key = raw.casefold()
         if key == "__unfiled__" and has_unfiled:
             value = "__unfiled__"
+        elif key == "__hidden__" and has_hidden:
+            # Hidden rides the folder facet rather than getting one of its own.
+            # It behaves like a folder -- one more thing to select -- and it is
+            # the only way to see these names, which is what makes revealing
+            # them a deliberate act rather than a side effect.
+            value = "__hidden__"
         else:
             value = folders.get(key)
         if value and value not in selected_folders:
@@ -16348,15 +16680,19 @@ def password_filter_state(entries, query):
 
     selected_folder_keys = {v.casefold() for v in selected_folders}
     matched = []
-    for entry, folder, row_tags in indexed:
+    for entry, folder, row_tags, hidden in indexed:
         folder_key = folder.casefold() if folder else "__unfiled__"
-        folder_hit = not selected_folder_keys or folder_key in selected_folder_keys
+        folder_hit = (not selected_folder_keys
+                      or folder_key in selected_folder_keys
+                      or (hidden and "__hidden__" in selected_folder_keys))
         tag_hit = not selected_tags or bool(row_tags.intersection(selected_tags))
         if folder_hit and tag_hit:
             matched.append(entry)
     available_folders = [folders[k] for k in sorted(folders)]
     if has_unfiled:
         available_folders.append("__unfiled__")
+    if has_hidden:
+        available_folders.append("__hidden__")
     return available_folders, sorted(tags), selected_folders, selected_tags, matched
 
 
@@ -16388,6 +16724,9 @@ def build_password_filters_html(folders, tags, selected_folders, selected_tags,
         if folder == "__unfiled__":
             folder_options.append(option(folder, "Unfiled", "folder",
                                          selected_folders, "filters.unfiled"))
+        elif folder == "__hidden__":
+            folder_options.append(option(folder, "Hidden", "folder",
+                                         selected_folders, "filters.hidden"))
         else:
             folder_options.append(option(folder, folder, "folder", selected_folders))
     tag_options = [option(tag, "#" + tag, "tag", selected_tags) for tag in tags]
@@ -16969,6 +17308,43 @@ def posted_attrs(data):
     return _one_line(folder), pairs, ""
 
 
+def _hidden_from_form(data):
+    """Whether the form asked for this entry to be hidden.
+
+    An absent checkbox means unticked, which is what makes un-hiding work: a
+    form that posts nothing for `hidden` is a form where the switch was turned
+    off, not one that forgot to mention it.
+    """
+    return (data.get("hidden") or [""])[0] in ("1", "on", "true", "yes")
+
+
+def _hidden_field(checked):
+    """The switch that marks an entry as one to keep off the screen.
+
+    The hint says what this does and, as importantly, what it does not: the
+    entry is still in the vault, still openable, still exported. Calling it
+    anything stronger would be a promise the page cannot keep.
+
+    No pre-ticking from the sensitive-host list here. Deciding for someone at
+    the moment they are typing is how a suggestion becomes a surprise; the
+    bulk path for entries that already exist is the Tidy review, where the
+    proposal is visible and refusable before anything is written.
+    """
+    return f"""
+  <div class="field">
+    <label class="switch" for="entry-hidden">
+      <input type="checkbox" id="entry-hidden" name="hidden" value="1"
+             {"checked" if checked else ""}>
+      <span data-i18n="entry.field.hidden">Hide this entry</span>
+    </label>
+    <div class="hint" data-i18n="entry.hint.hidden">Its name and username are
+      replaced with dots in the password list until you open the Hidden
+      section. This hides it from a glance at your screen &mdash; it is not a
+      second password, and the entry is still in the vault and still
+      exported.</div>
+  </div>"""
+
+
 def build_entry_form(title, vault_path, action, values=None, message=""):
     v = values or {}
     f = (
@@ -16982,6 +17358,7 @@ def build_entry_form(title, vault_path, action, values=None, message=""):
                     'http:// or https:// only.</span>') +
         _field("notes", "entry.field.notes", "Notes", v.get("notes", ""), rows=4) +
         _folder_field(v.get("folder", ""), v.get("folders", [])) +
+        _hidden_field(bool(v.get("hidden"))) +
         _custom_fields_block(v.get("fields", []))
     )
     extra = f'<input type="hidden" name="id" value="{html.escape(v.get("id",""))}">' if v.get("id") else ""
@@ -17087,10 +17464,18 @@ def _attrs_block(column):
     that printed them in clear while masking the password beside them would be
     protecting the wrong half.
     """
-    folder, fields = core.decode_attrs(column)
-    if not folder and not fields:
+    folder, fields, hidden = core.decode_attrs(column)
+    if not folder and not fields and not hidden:
         return ""
     out = []
+    if hidden:
+        # Stated on the record's own page, because this is the one screen that
+        # shows the entry in full: someone who opened it should be told the
+        # list does not.
+        out.append("""
+  <div class="field"><label data-i18n="view.label.hidden">Visibility</label>
+    <div class="secret"><span class="chip chip-hidden" data-i18n="view.hidden.on">Hidden from the password list</span></div>
+  </div>""")
     if folder:
         out.append(f"""
   <div class="field"><label data-i18n="view.label.folder">Folder</label>
@@ -17542,13 +17927,14 @@ def unlock_settings_page(creds, csrf, flash=""):
 """
 
 
-def settings_page(flash=""):
+def settings_page(flash="", hidden_hosts=()):
     """Render the Dashboard's single settings destination."""
     current = lock_timeout()
     lock_options = "".join(
         '<option value="%d"%s>%s</option>'
         % (value, " selected" if value == current else "", lock_label(value))
         for value in LOCK_CHOICES)
+    hosts_value = html.escape("\n".join(hidden_hosts))
     unlock_html = ""
     if WEBAUTHN_ENABLED:
         unlock_html = f"""
@@ -17652,6 +18038,29 @@ def settings_page(flash=""):
       an idle session shortly after this timer, whatever the browser is doing.</p>
     <button class="btn btn-primary" type="submit"
             data-i18n="settings.lock.apply">Apply lock timeout</button>
+  </form>
+  </div>
+</section>
+<section class="card settings-section" id="hidden-hosts">
+  <div class="card-head"><div>
+    <h2 data-i18n="settings.hosts.title">Sites to suggest hiding</h2>
+    <p class="faint" data-i18n="settings.hosts.desc">Host names you would rather
+      not have on screen. Used only to propose hiding entries in Tidy.</p>
+  </div></div>
+  <div class="card-body">
+  <form method="post" action="/settings/hidden-hosts">
+    <div class="field">
+      <label for="hidden-hosts-list" data-i18n="settings.hosts.label">Host names</label>
+      <textarea class="input" id="hidden-hosts-list" name="hosts" rows="3"
+                autocomplete="off" spellcheck="false">{hosts_value}</textarea>
+    </div>
+    <p class="faint" style="margin-bottom:var(--sp-4)" data-i18n="settings.hosts.note">One
+      per line or separated by commas. SPM ships no list of its own. This one is
+      stored inside your encrypted vault, not in a settings file, because a list
+      of sites you would rather not name is itself worth protecting. It only
+      ever suggests &mdash; every entry keeps whichever switch you set on it.</p>
+    <button class="btn btn-primary" type="submit"
+            data-i18n="settings.hosts.apply">Save host list</button>
   </form>
   </div>
 </section>
@@ -20534,11 +20943,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 flash = ("<div class='flash'>Master password changed. The recovery "
                          "file was rewritten and every other session was signed "
                          "out.</div>")
+            elif message == "hosts":
+                flash = ("<div class='flash' data-i18n='settings.hosts.saved'>"
+                         "Host list saved.</div>")
             elif message == "locktimeout":
                 flash = ("<div class='flash' data-i18n='settings.lock.saved'>"
                          "Idle lock updated.</div>")
             self._send_html(200, render_shell(
-                settings_page(flash), "settings", VERSION, VAULT_PATH,
+                settings_page(flash, core.hidden_hosts(plaintext)),
+                "settings", VERSION, VAULT_PATH,
                 title="Settings", counts=self._counts(plaintext)))
             return
 
@@ -20621,9 +21034,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                "btn.add_entry", "+ Add Entry",
                                [("table.id", "ID", "num"), ("table.name", "Name", ""),
                                 ("table.username", "Username", ""), ("table.actions", "Actions", "act")],
-                               build_rows_html(password_rows,
-                                               bool(selected_folders or selected_tags)
-                                               if path == "/passwords" else False),
+                               build_rows_html(
+                                   password_rows,
+                                   bool(selected_folders or selected_tags)
+                                   if path == "/passwords" else False,
+                                   "__hidden__" in selected_folders
+                                   if path == "/passwords" else False),
                                "passwords"),
                 "/notes": ("nav.notes", "Secure Notes", "page.notes.desc",
                            "Encrypted notes stored inside the same vault.", "/notes-add",
@@ -20661,8 +21077,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         '<div class="card-head">'
                         '<div><strong data-i18n="tidy.offer_t">Some entries can be tidied</strong>'
                         '<p class="faint"><span>%d</span> '
-                        '<span data-i18n="tidy.offer_d">entries carry a folder in their notes or a '
-                        'package-style name. Review the changes before anything is written.</span></p></div>'
+                        '<span data-i18n="tidy.offer_d">entries could be tidied: a folder read '
+                        'from their notes, a name derived from a package identifier, or a match '
+                        'on your hidden-site list. Review the changes before anything is '
+                        'written.</span></p></div>'
                         '<a class="btn btn-primary card-head-action" href="/tidy" '
                         'data-i18n="tidy.review">Review changes</a>'
                         '</div></section>' % len(pending_tidy))
@@ -20730,7 +21148,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Entry not found")
                 return
 
-            stored_folder, stored_fields = core.decode_attrs(
+            stored_folder, stored_fields, stored_hidden = core.decode_attrs(
                 found[7] if len(found) > 7 else "")
             values = {
                 "name": found[1],
@@ -20740,6 +21158,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "url": found[6] if len(found) > 6 else "",
                 "folder": stored_folder,
                 "fields": stored_fields,
+                "hidden": stored_hidden,
                 "folders": core.record_folders(plaintext),
             }
             page = build_entry_form(
@@ -21185,12 +21604,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                  raw_choice)
                 self._send_html(200, render_shell(
                     settings_page("<div class='flash error'>That is not one of "
-                                  "the available lock timeouts.</div>"),
+                                  "the available lock timeouts.</div>",
+                                  core.hidden_hosts(load_vault(master, self._session_rec))),
                     "settings", VERSION, VAULT_PATH, title="Settings"))
                 return
             self.log_message("idle lock set to %d seconds", choice)
             self.send_response(303)
             self.send_header("Location", "/settings?msg=locktimeout")
+            self.end_headers()
+            return
+
+        if path == "/settings/hidden-hosts":
+            # Stored in the vault, so this is a vault write and goes through
+            # the same save path as any other. The list is data about which
+            # sites the user considers sensitive; a plaintext settings file
+            # would leak exactly what the feature exists to keep off a screen.
+            try:
+                plaintext = load_vault(master, self._session_rec)
+            except Exception:
+                return self._expire_session()
+            updated = core.set_hidden_hosts(
+                plaintext, (data.get("hosts") or [""])[0])
+            if updated != plaintext:
+                save_vault(master, updated, self._session_rec)
+            self.log_message("hidden-host list updated (%d entries)",
+                             len(core.hidden_hosts(updated)))
+            self.send_response(303)
+            self.send_header("Location", "/settings?msg=hosts")
             self.end_headers()
             return
 
@@ -21201,7 +21641,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             def _reject(message):
                 self._send_html(200, render_shell(
-                    settings_page("<div class='flash error'>%s</div>" % message),
+                    settings_page("<div class='flash error'>%s</div>" % message,
+                                  core.hidden_hosts(load_vault(master, self._session_rec))),
                     "settings", VERSION, VAULT_PATH, title="Settings"))
 
             # Compared against the copy this session already proved at login
@@ -21291,7 +21732,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not key.isdigit():
                     continue
                 selections[key] = {
-                    "label": (data.get("label_" + key) or [""])[0]}
+                    "label": (data.get("label_" + key) or [""])[0],
+                    # Per row, and absent means no. A row whose name was
+                    # accepted but whose Hide switch was turned off must not
+                    # be hidden by the same click.
+                    "hidden": (data.get("hide_" + key) or [""])[0] == "1"}
             updated, changed = core.apply_tidy(plaintext, selections)
             if changed:
                 save_vault(master, updated, self._session_rec)
@@ -21348,7 +21793,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _vf(notes),
                 now,
                 url,
-                core.encode_attrs(folder, custom),
+                core.encode_attrs(folder, custom, _hidden_from_form(data)),
             ])
             lines.append(new_line)
             new_plain = "\n".join(lines) + "\n"
@@ -21425,7 +21870,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _vf(notes),
                 old_created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 url,
-                core.encode_attrs(folder, custom),
+                core.encode_attrs(folder, custom, _hidden_from_form(data)),
             ])
             lines[idx_to_update] = new_line
             new_plain = "\n".join(lines) + "\n"

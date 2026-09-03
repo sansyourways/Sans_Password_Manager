@@ -448,6 +448,105 @@ def t_a_file_that_was_never_encrypted_is_not_a_vault():
     run(["read", path, out, "--require-vault"], MASTER, expect=1)
 
 
+def t_hidden_hosts_live_in_the_vault():
+    """The list of sites someone would rather not name is itself sensitive.
+
+    So it goes in the vault, not in a settings file beside it. A META_ row,
+    which every parser and exporter already skips.
+    """
+    plaintext = sample()
+    eq(core.hidden_hosts(plaintext), [], "a vault with no list has no list")
+
+    stored = core.set_hidden_hosts(plaintext, "One.Invalid, TWO.invalid\none.invalid")
+    eq(core.hidden_hosts(stored), ["one.invalid", "two.invalid"],
+       "lowercased, de-duplicated, order kept")
+    assert "META_HIDDEN_HOSTS" in stored
+    # Not a record, so it cannot change any count or become a broken row.
+    eq(core.vault_counts(stored)[0], core.vault_counts(plaintext)[0])
+    eq(core.scan_broken_records(stored), core.scan_broken_records(plaintext))
+    eq(core.hidden_hosts(core.set_hidden_hosts(stored, "")), [],
+       "an empty list removes the row rather than storing an empty one")
+    assert "META_HIDDEN_HOSTS" not in core.set_hidden_hosts(stored, "")
+    eq(len(core.hidden_hosts(core.set_hidden_hosts(
+        plaintext, " ".join("h%d.invalid" % i for i in range(400))))),
+       core.HIDDEN_HOSTS_MAX, "the list is bounded")
+
+
+def t_sensitive_matching_is_on_whole_hosts():
+    """Matching host *parts* proposed hiding anything sharing a suffix.
+
+    Splitting "vitrine.invalid" into its labels and looking for any of them
+    made "invalid" a match, so an unrelated admin account on
+    admin.example.invalid was offered up for hiding. Whole hosts, or the
+    leading name on its own.
+    """
+    hosts = core._split_hosts("vitrine.invalid, lanterna.invalid")
+    assert core.looks_sensitive("Vitrine", "https://www.vitrine.invalid", hosts)
+    assert core.looks_sensitive("", "https://shop.lanterna.invalid", hosts), "a subdomain matches"
+    assert core.looks_sensitive("Vitrine", "", hosts), "a bare leading name matches"
+    assert core.looks_sensitive("vitrine.invalid", "", hosts)
+    # The bug, kept as a test.
+    assert not core.looks_sensitive("Acme Admin", "https://admin.example.invalid", hosts), \
+        "a shared suffix must not match"
+    assert not core.looks_sensitive("GitHub", "https://github.com", hosts)
+    # And no substring matching in either direction.
+    assert not core.looks_sensitive("Vitrinecafe", "https://vitrinecafe.invalid", hosts)
+    assert not core.looks_sensitive("Something", "https://notvitrine.invalid", hosts)
+    eq(core.looks_sensitive("Vitrine", "https://vitrine.invalid", []), False,
+       "no list means no suggestion at all")
+
+
+def t_tidy_proposes_hiding_and_only_when_asked():
+    pub = sample().split("\t")[1]
+    def vault(rows):
+        return "META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n" % pub + rows
+
+    rows = ("1\tVitrine\tu\ts\t-\t2025-01-01T00:00:00Z\thttps://vitrine.invalid\t\n"
+            "2\tGitHub\tu\ts\t-\t2025-01-01T00:00:00Z\thttps://github.com\t\n")
+    # With no list, nothing is proposed -- SPM ships no opinion of its own.
+    eq(core.tidy_proposals(vault(rows)), [])
+
+    plaintext = core.set_hidden_hosts(vault(rows), "vitrine.invalid")
+    proposals = {p["id"]: p["changes"] for p in core.tidy_proposals(plaintext)}
+    eq(sorted(proposals), ["1"], "only the matching record is proposed")
+    eq(proposals["1"]["hidden"], {"from": False, "to": True})
+
+    # Ticked: hidden. The other record is untouched.
+    updated, changed = core.apply_tidy(plaintext, {"1": {"hidden": True}})
+    eq(changed, 1)
+    rows_by_id = {l.split("\t")[0]: l.split("\t") for l in updated.splitlines()
+                  if l.split("\t")[0].isdigit()}
+    eq(core.decode_attrs(rows_by_id["1"][7])[2], True)
+    eq(core.decode_attrs(rows_by_id["2"][7])[2], False)
+
+    # Unticked: left alone, even though the row was included in the review.
+    again, changed = core.apply_tidy(plaintext, {"1": {"hidden": False}})
+    eq(core.decode_attrs({l.split("\t")[0]: l.split("\t") for l in again.splitlines()
+                          if l.split("\t")[0].isdigit()}["1"][7])[2], False,
+       "an unticked Hide switch must not hide the entry")
+
+    # An entry already hidden is not proposed again: re-proposing a decision
+    # someone made is how a review becomes noise people click through.
+    eq([p for p in core.tidy_proposals(updated) if "hidden" in p["changes"]], [])
+
+
+def t_hidden_survives_an_export_round_trip():
+    column = core.encode_attrs("Personal", [("PIN", "1234")], True)
+    row = core.attrs_export_columns(column)
+    eq(row["hidden"], "1")
+    eq(core.decode_attrs(core.attrs_from_export_row(row))[2], True)
+    # Whatever a spreadsheet put in the cell.
+    for truthy in ("1", "true", "TRUE", "yes", "hidden", True):
+        eq(core.decode_attrs(core.attrs_from_export_row(
+            {"folder": "", "fields": "", "hidden": truthy}))[2], True, repr(truthy))
+    # Anything unrecognised means visible: the safe direction for a flag nobody
+    # understood is the one that shows the entry.
+    for falsy in ("", "0", "no", "maybe", None):
+        eq(core.decode_attrs(core.attrs_from_export_row(
+            {"folder": "", "fields": "", "hidden": falsy}))[2], False, repr(falsy))
+    eq(core.attrs_export_columns(core.encode_attrs("x", []))["hidden"], "")
+
+
 def t_command_interface_reports_refusals():
     path = fresh("cli-refuse")
     legacy_vault(path, MASTER)
@@ -885,7 +984,8 @@ def t_fault_write_refuses_a_read_only_directory():
 
 def t_attrs_roundtrip():
     blob = core.encode_attrs("Work", [("API Key", "abc123"), ("PIN", "0000")])
-    folder, fields = core.decode_attrs(blob)
+    folder, fields, hidden = core.decode_attrs(blob)
+    assert hidden is False, "a record that never asked to be hidden must not be"
     eq(folder, "Work")
     eq(fields, [("API Key", "abc123"), ("PIN", "0000")])
 
@@ -896,7 +996,12 @@ def t_attrs_empty_is_empty():
     eq(core.encode_attrs("", []), "")
     eq(core.encode_attrs(None, None), "")
     eq(core.encode_attrs("   ", [("", "value")]), "")
-    eq(core.decode_attrs(""), ("", []))
+    eq(core.decode_attrs(""), ("", [], False))
+    # The flag alone is worth an attributes column; the other two being empty
+    # must not throw it away.
+    assert core.encode_attrs("", [], True)
+    eq(core.decode_attrs(core.encode_attrs("", [], True)), ("", [], True))
+    eq(core.encode_attrs("", [], False), "")
 
 
 def t_attrs_survive_hostile_values():
@@ -905,14 +1010,14 @@ def t_attrs_survive_hostile_values():
     nasty = "tab\there\nnewline\ttoo"
     blob = core.encode_attrs("Fold\ter", [("na\nme", nasty)])
     assert "\t" not in blob and "\n" not in blob, "the encoded column is not one line"
-    folder, fields = core.decode_attrs(blob)
+    folder, fields, _ = core.decode_attrs(blob)
     eq(folder, "Fold\ter")
     eq(fields, [("na\nme", nasty)])
 
 
 def t_attrs_carry_unicode():
     blob = core.encode_attrs("仕事", [("キー", "値 — ok")])
-    eq(core.decode_attrs(blob), ("仕事", [("キー", "値 — ok")]))
+    eq(core.decode_attrs(blob), ("仕事", [("キー", "値 — ok")], False))
 
 
 def t_attrs_refuse_nonsense():
@@ -935,7 +1040,7 @@ def t_attrs_never_raise_on_read():
                  base64.b64encode('{"folder": 7}'.encode()).decode(),
                  base64.b64encode('{"fields": "nope"}'.encode()).decode(),
                  base64.b64encode('{"fields": [1, 2, {"name": "ok"}]}'.encode()).decode()):
-        folder, fields = core.decode_attrs(junk)
+        folder, fields, _ = core.decode_attrs(junk)
         assert isinstance(folder, str) and isinstance(fields, list), junk
 
 
@@ -1551,7 +1656,7 @@ def t_apply_tidy_writes_the_reviewed_name_not_the_guess():
     assert changed == 1
     row = [l for l in updated.splitlines() if l.startswith("1\t")][0].split("\t")
     assert row[1] == "Cerberus", row[1]
-    folder, _ = core.decode_attrs(row[7])
+    folder, _, _ = core.decode_attrs(row[7])
     assert folder == "Security"
     assert "com.lsdroid.cerberuss" in row[4], "the original was not kept"
 

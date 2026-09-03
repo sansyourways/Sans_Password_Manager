@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **4.1.0**
+Current release: **4.2.0**
 
 ---
 
@@ -45,6 +45,7 @@ Current release: **4.1.0**
   - [Secure Notes](#secure-notes)
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
   - [Doctor / Health Check](#doctor--health-check)
+- [Hidden entries](#hidden-entries)
 - [How the vault is sealed](#how-the-vault-is-sealed)
 - [Languages](#languages)
 - [Split recovery](#split-recovery)
@@ -86,7 +87,7 @@ attacker with root access.
 
 ## Product tour
 
-Every web capture below was taken from the 4.1.0 release candidate in Chromium
+Every web capture below was taken from the 4.2.0 release candidate in Chromium
 at 1440x900, against a disposable vault holding only synthetic documentation
 data. No personal vault, browser profile, real credential, or production
 hostname appears in these images. The locked-screen captures use Chromium
@@ -324,7 +325,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 4.1.0
+bash install.sh --version 4.2.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -359,7 +360,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v4.1.0.zip \
+gh attestation verify Sans_Password_Manager_v4.2.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -375,9 +376,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v4.1.0
+git checkout v4.2.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v4.1.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v4.2.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -390,7 +391,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=4.1.0
+version=4.2.0
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -407,7 +408,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v4.1.0/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v4.2.0/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -429,7 +430,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 4.1.0 at /home/you/.local/bin/spm
+Installed SPM 4.2.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -986,6 +987,73 @@ knows, and write it back stamped with its own version — the vault reads fine
 afterwards, which is what makes it dangerous. **Note the guard only helps from
 3.11.0 onward**: a 3.10.0 or earlier build has no such check, so do not open a
 format-4 vault with one and save.
+
+---
+
+## Hidden entries
+
+Some entries are ones you would rather not have named on your screen. Mark one
+with the **Hide this entry** switch on Add or Edit, and it keeps its row in the
+password list with the service name and username replaced by dots:
+
+```text
+ID  NAME                              USERNAME
+1   Acme Admin   rotate  Work  #work  avery@example.invalid
+3   ••••••••     rotate  Personal  hidden   ••••••••
+```
+
+A **Hidden** option appears beside the folder filters once anything is hidden;
+selecting it lists those entries in full. Revealing them is then a deliberate
+act, which is the point.
+
+### What it is, and is not
+
+**This is protection against a glance at your screen, not access control.** The
+entry is still in the vault, still opens normally, and is still exported.
+Anyone with your master password sees everything.
+
+- The redaction is performed **by the server**. A blurred name would still be a
+  name in the page source.
+- A hidden entry is **not findable by the name it is not showing** — the
+  instant filter indexes the redacted text.
+- The username is redacted too, because it is usually an email address and
+  names the service as surely as the service name does.
+- Hidden entries stay listed rather than vanishing. A vanished entry looks like
+  a lost one, and either way the count is honest: a glance reveals that you
+  have hidden entries, not what they are.
+- The folder and any tags still show. Those names are yours to choose; if one
+  identifies the entry, rename it.
+
+### Marking entries you already have
+
+**Settings → Sites to suggest hiding** takes a list of host names, one per line
+or comma-separated. [Tidy](#tidying-imported-entries) then proposes hiding
+every entry that matches, so a vault of hundreds is one review rather than one
+edit each.
+
+SPM ships **no list of its own**. A built-in one would be a maintenance burden
+and would be wrong for somebody. Your list is stored **inside the encrypted
+vault**, as a `META_HIDDEN_HOSTS` row, rather than in a settings file — a
+plaintext list of sites you would rather not name would leak exactly what this
+protects.
+
+Matching is on whole hosts: a URL matches the listed host or a subdomain of it,
+and a bare name matches only when it is the whole host or its leading label. A
+host in the list does not drag in everything that merely shares a suffix.
+
+The list only ever *suggests*. Every entry keeps whichever switch you set on
+it, and an entry you have already decided about is not proposed again.
+
+### What this changed in the vault
+
+The flag lives in the same optional attributes column as the folder and custom
+fields, so a record that does not use it is written exactly as before. Format
+**5** exists because a 4.1.0 build editing a record would re-encode those
+attributes without a flag it does not know about — quietly un-hiding an entry
+you deliberately hid. Reading a format-5 vault still works on 4.1.0; writing
+one back is refused.
+
+Exports carry a `hidden` column. An unrecognised value in it means visible.
 
 ---
 
@@ -1653,7 +1721,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **4.1.0**
+Version: **4.2.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down

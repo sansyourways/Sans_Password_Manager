@@ -7,6 +7,45 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-09-03
+
+### Added
+- Entries can be marked **hidden**. A switch on the Add and Edit forms; hidden
+  entries keep their place in the password list but their service name and
+  username are replaced with dots, and a **Hidden** section beside the folder
+  filters shows them in full. The redaction is done by the server, not by CSS —
+  a blurred name is still a name in the page source.
+- A per-vault list of host names that Tidy uses to **propose** hiding entries,
+  editable under Settings. SPM ships no list of its own, and the list is stored
+  inside the encrypted vault as `META_HIDDEN_HOSTS` rather than in a settings
+  file, because a list of sites someone would rather not name is itself worth
+  protecting.
+- Tidy gained a Hidden column, so entries that already exist are one review
+  rather than one edit each. Every row is a switch that can be turned off, and
+  an entry already hidden is never proposed again.
+
+### Changed
+- `VAULT_FORMAT_VERSION` is now **5**. A record may carry the hidden flag in
+  its attributes, and a 4.1.0 build editing such a record would re-encode the
+  attributes without it — quietly un-hiding an entry someone deliberately hid.
+  Reading a format-5 vault still works on 4.1.0; `stamp_version` is what stops
+  it writing one back.
+- `decode_attrs` returns three values instead of two. Deliberately a breaking
+  signature: every caller unpacked two, so each one had to be visited rather
+  than silently re-encoding a record without a flag it never read.
+- Exports carry a `hidden` column. Anything unrecognised in that cell means
+  visible, because the safe direction for a flag nobody understood is the one
+  that shows the entry rather than one that pretends a vault holds less than
+  it does.
+
+### Security
+- Hiding is protection against a glance at your screen and nothing more. The
+  entry stays in the vault, opens normally, and is exported like any other.
+  The UI says so where the switch is, rather than leaving it to be assumed.
+- A hidden entry is not findable by the name it is not showing: the instant
+  filter indexes the redacted text, so typing the name and watching one row
+  survive cannot undo the redaction on the page that performed it.
+
 ## [4.1.0] - 2026-09-03
 
 Closes the roadmap's last open "Now" item: import/export fixtures synchronized
