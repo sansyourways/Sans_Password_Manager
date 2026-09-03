@@ -122,9 +122,10 @@ co-owners of it. That review is a design concept, not a formal security audit.
 
 - Continue the browser-extension work with an origin-isolated in-field picker.
   Not shipped, and not for want of effort — see *What is left, and what decides
-  when* below. **4.4.0 removed the blocker that section named**: the extension
-  now runs under headless Chromium in the regression suite, which is the
-  verification route this item was waiting on.
+  when* below. **4.4.0 removed the blocker that section named** -- the
+  extension now runs under headless Chromium in the regression suite, the
+  verification route this item was waiting on -- and **4.4.1 extended it to
+  the fill**, which is the part an in-field picker actually performs.
 - ~~Design pluggable, encrypted synchronization transports without introducing a
   maintainer-operated cloud service.~~ **Shipped in 3.15.0.** A transport
   answers three questions -- can I reach this target, put the remote object in
@@ -430,15 +431,24 @@ Two items on this board are written but not shipped, and in both cases the
 blocker is verification rather than code.
 
 - **The in-field picker** needed a browser's extension UI driven for real.
-  **4.4.0 built the harness that does it**, so this is no longer waiting on a
-  way to run it -- only on being written. What the harness proves today: the
-  packed extension loads and its service worker starts under headless
-  Chromium, the identity the browser assigns is the identity
-  `extension-id.sh` derives, one fill-path rule holds, and nothing reaches the
-  popup that should not. What it does not reach yet is the native-messaging
-  round trip and the fill itself: the popup reads the active tab, and an
-  extension page cannot honestly impersonate one. That is tab plumbing, and it
-  is the second half of the same project.
+  **4.4.0 built the harness that does it and 4.4.1 finished the half that can
+  be built**, so this is no longer waiting on a way to run it -- only on being
+  written. What the harness proves today: the packed extension loads and its
+  service worker starts under headless Chromium, the identity the browser
+  assigns is the identity `extension-id.sh` derives, one fill-path rule holds,
+  nothing reaches the popup that should not, and the fill itself writes to the
+  right fields, skips the wrong ones, and reaches a framework that owns the
+  property. That last one found a shipped defect: the compatibility
+  extension's copy of the fill had drifted to a plain `element.value`
+  assignment, which such a framework ignores.
+
+  What the harness does not reach is the native-messaging round trip through a
+  live popup, and that is now a recorded boundary rather than pending work.
+  `chrome.action.openPopup()` opens the popup headlessly, but the popup cannot
+  obtain `activeTab`: Chromium grants it on a genuine user gesture on the
+  toolbar action, and a synthesised call is not one. The hostname
+  verification keeps its CLI-level coverage, which tests the decision rather
+  than the plumbing.
 - **Hardware-backed key wrapping** needs a FIDO2 key or a TPM to test against.
   Unchanged, and 4.3.0's exploration of hardware-backed *signing* did not move
   it: neither has a known answer to pin or a second implementation in CI to

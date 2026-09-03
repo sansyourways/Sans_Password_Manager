@@ -4711,7 +4711,36 @@ else
 	CHROMIUM_BIN="$ext_chromium" EXT_PROFILE="$TEST_ROOT/ext-profile" \
 		EXT_MASTER="$AUDIT_PASSWORD" EXT_SECRET="DemoSecret42" \
 		node "$ROOT_DIR/tests/extension-ui.mjs" "$ext_dist" "$ext_id" "$ext_puppeteer"
+	# The function that writes a password into someone's login form, driven
+	# against a real one. Every way it fails is silent: a field that looks
+	# filled and submits empty, a hidden honeypot filled instead of the real
+	# box, a value written without the events a framework listens for.
+	CHROMIUM_BIN="$ext_chromium" node "$ROOT_DIR/tests/extension-fill.mjs" \
+		"$ROOT_DIR/browser-extension-universal/fill.js" \
+		"file://$ROOT_DIR/tests/fixtures/login-form.html" "$ext_puppeteer"
 fi
+
+# Both extensions inject the same function, and they ship as separate
+# directories in the release archive, so the file is copied rather than shared.
+# The copy is what needs watching: these two had already drifted, and the
+# legacy one assigned element.value directly -- which a framework that owns the
+# field swallows, so the form submitted empty while looking filled. That is the
+# defect this pair of checks exists to stop coming back.
+cmp -s "$ROOT_DIR/browser-extension/fill.js" \
+	"$ROOT_DIR/browser-extension-universal/fill.js" || {
+	printf 'the two fill.js copies have drifted\n' >&2; exit 1
+}
+for ext_popup in browser-extension/popup.js browser-extension-universal/popup.js; do
+	if grep -q 'func:(' "$ROOT_DIR/$ext_popup"; then
+		printf '%s injects an inline function again; it must use spmFillForm\n' \
+			"$ext_popup" >&2
+		exit 1
+	fi
+	grep -q 'func:spmFillForm' "$ROOT_DIR/$ext_popup" || {
+		printf '%s does not inject the shared fill\n' "$ext_popup" >&2; exit 1
+	}
+done
+printf '  fill: one function, copied to both extensions and identical in each\n'
 
 printf 'Web regression: every password box has a reveal control\n'
 # Two properties. Every password input carries the control -- so a box added

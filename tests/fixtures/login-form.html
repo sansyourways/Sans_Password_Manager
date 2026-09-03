@@ -1,0 +1,46 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Synthetic login form</title>
+<style>.hidden { display: none; }</style>
+<!--
+  The shapes a real login page has, arranged so that each failure is visible.
+
+  The honeypot comes FIRST in document order on purpose: if the fill stopped
+  filtering for visibility, querySelectorAll would hand it back as [0] and the
+  real box would stay empty. With the honeypot last, dropping the filter
+  changes nothing and the test passes either way -- which is what the first
+  version of this fixture did.
+
+  The password box imitates a framework that owns its value. React and friends
+  install their own `value` accessor on the element and track state through it;
+  a plain `element.value = v` therefore lands in the framework's slot and never
+  reaches the DOM, so the field submits empty while looking filled. Here the
+  own-property setter swallows the write exactly that way, and the test reads
+  the *native* value through the prototype getter to see what the DOM really
+  holds.
+-->
+<form>
+  <div class="hidden"><input type="password" id="honeypot"></div>
+  <input type="text" autocomplete="username" id="username">
+  <input type="password" id="password">
+  <input type="password" id="disabled-pw" disabled>
+  <input type="text" autocomplete="username" id="readonly-user" readonly>
+</form>
+<script>
+  window.__events = [];
+  const box = document.getElementById("password");
+  const native = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+
+  let frameworkSlot = "";
+  Object.defineProperty(box, "value", {
+    configurable: true,
+    get() { return native.get.call(this); },
+    set(v) { frameworkSlot = v; },      // swallowed, as a tracker would
+  });
+
+  window.__nativeValue = () => native.get.call(box);
+  window.__frameworkSlot = () => frameworkSlot;
+  for (const name of ["input", "change"]) {
+    box.addEventListener(name, () => window.__events.push(name));
+  }
+</script>
