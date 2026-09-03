@@ -4015,7 +4015,7 @@ if rows["4"][1] != "My Bank":
     sys.exit("a record with nothing to tidy was changed: %r" % rows["4"][1])
 
 for record_id, folder in (("1", "Main Database"), ("2", "Security")):
-    got, _ = core.decode_attrs(rows[record_id][7] if len(rows[record_id]) > 7 else "")
+    got, _, _ = core.decode_attrs(rows[record_id][7] if len(rows[record_id]) > 7 else "")
     if got != folder:
         sys.exit("record %s went to folder %r, expected %r"
                  % (record_id, got, folder))
@@ -4652,6 +4652,111 @@ vk_new_legacy_vault() {
 
 printf '  vault key stability, migration ordering and recovery verified\n'
 
+printf 'Web regression: hidden entries are redacted by the server\n'
+# The whole feature rests on one property: the name is not in the page. A CSS
+# blur would satisfy every visual check and leave the name sitting in the
+# source, which is a promise the page does not keep -- so what is asserted here
+# is the bytes on the wire, not the rendering.
+hidden_add_csrf="$(curl -fsS -b "$TEST_ROOT/cookies" "http://127.0.0.1:$WEB_PORT/add" \
+	| sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' | head -n1)"
+[ "${#hidden_add_csrf}" -eq 64 ]
+curl -fsS -b "$TEST_ROOT/cookies" -o /dev/null -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$hidden_add_csrf" \
+	--data-urlencode 'name=Lanterna Private' --data-urlencode 'user=burner@example.invalid' \
+	--data-urlencode 'password=HiddenSecret42' --data-urlencode 'url=https://lanterna.invalid' \
+	--data-urlencode 'folder=Personal' --data-urlencode 'hidden=1' \
+	"http://127.0.0.1:$WEB_PORT/add"
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/hidden-list.html" \
+	"http://127.0.0.1:$WEB_PORT/passwords"
+if grep -q 'Lanterna Private' "$TEST_ROOT/hidden-list.html"; then
+	printf 'a hidden entry name reached the password list HTML\n' >&2; exit 1
+fi
+if grep -q 'burner@example.invalid' "$TEST_ROOT/hidden-list.html"; then
+	printf 'a hidden entry username reached the password list HTML\n' >&2; exit 1
+fi
+grep -q 'folder=__hidden__' "$TEST_ROOT/hidden-list.html" || {
+	printf 'the Hidden section is not offered once an entry is hidden\n' >&2; exit 1
+}
+# And it is genuinely reachable, not merely redacted everywhere.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/hidden-section.html" \
+	"http://127.0.0.1:$WEB_PORT/passwords?folder=__hidden__"
+grep -q 'Lanterna Private' "$TEST_ROOT/hidden-section.html" || {
+	printf 'the Hidden section does not show the entry it exists for\n' >&2; exit 1
+}
+
+hidden_id="$(PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - \
+	"$ROOT_DIR/src/spm_core.py" "$PASSWORD_VAULT" "$AUDIT_PASSWORD" <<'HIDIDPY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("spm_core_hid", sys.argv[1])
+core = importlib.util.module_from_spec(spec); spec.loader.exec_module(core)
+text, _ = core.read_vault(sys.argv[2], sys.argv[3])
+for line in text.splitlines():
+    parts = line.split("\t")
+    if parts[0].isdigit() and parts[1] == "Lanterna Private":
+        if core.decode_attrs(parts[7] if len(parts) > 7 else "")[2] is not True:
+            sys.exit("the entry was stored without its hidden flag")
+        print(parts[0]); break
+else:
+    sys.exit("the hidden entry was not written to the vault")
+HIDIDPY
+)"
+[ -n "$hidden_id" ]
+
+# The switch reflects what is stored, and clearing it works: a form that posts
+# no `hidden` field is a form where the switch was turned off, not one that
+# forgot to mention it.
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/hidden-edit.html" \
+	"http://127.0.0.1:$WEB_PORT/edit?id=$hidden_id"
+# The whole tag, not a line of it: the attribute that matters wraps onto the
+# next line, so a line-based grep answers "no" for a switch that is in fact on.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$TEST_ROOT/hidden-edit.html" <<'SWITCHPY'
+import re, sys
+page = open(sys.argv[1], encoding="utf-8").read()
+tag = re.search(r"<input[^>]*id=\"entry-hidden\"[^>]*>", page, re.S)
+if not tag:
+    sys.exit("the edit form has no hidden switch at all")
+if "checked" not in tag.group(0):
+    sys.exit("the edit form does not show the entry as hidden: %s" % tag.group(0))
+SWITCHPY
+hidden_edit_csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' \
+	"$TEST_ROOT/hidden-edit.html" | head -n1)"
+curl -fsS -b "$TEST_ROOT/cookies" -o /dev/null -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$hidden_edit_csrf" --data-urlencode "id=$hidden_id" \
+	--data-urlencode 'name=Lanterna Private' --data-urlencode 'user=burner@example.invalid' \
+	--data-urlencode 'password=HiddenSecret42' --data-urlencode 'url=https://lanterna.invalid' \
+	--data-urlencode 'folder=Personal' \
+	"http://127.0.0.1:$WEB_PORT/edit?id=$hidden_id"
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/hidden-after.html" \
+	"http://127.0.0.1:$WEB_PORT/passwords"
+grep -q 'Lanterna Private' "$TEST_ROOT/hidden-after.html" || {
+	printf 'un-hiding an entry did not bring its name back\n' >&2; exit 1
+}
+
+# The host list is vault data, not settings data. A plaintext file naming the
+# sites someone would rather not name would leak exactly what this protects.
+hidden_hosts_csrf="$(curl -fsS -b "$TEST_ROOT/cookies" "http://127.0.0.1:$WEB_PORT/settings" \
+	| sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' | head -n1)"
+curl -fsS -b "$TEST_ROOT/cookies" -o /dev/null -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" \
+	--data-urlencode "csrf=$hidden_hosts_csrf" \
+	--data-urlencode 'hosts=lanterna.invalid, vitrine.invalid' \
+	"http://127.0.0.1:$WEB_PORT/settings/hidden-hosts"
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - \
+	"$ROOT_DIR/src/spm_core.py" "$PASSWORD_VAULT" "$AUDIT_PASSWORD" <<'HOSTSPY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("spm_core_hosts", sys.argv[1])
+core = importlib.util.module_from_spec(spec); spec.loader.exec_module(core)
+text, _ = core.read_vault(sys.argv[2], sys.argv[3])
+if core.hidden_hosts(text) != ["lanterna.invalid", "vitrine.invalid"]:
+    sys.exit("the host list did not reach the vault: %r" % core.hidden_hosts(text))
+HOSTSPY
+if grep -rqs 'lanterna.invalid' "$TEST_ROOT/config" 2>/dev/null; then
+	printf 'the hidden-host list was written to a plaintext settings file\n' >&2; exit 1
+fi
+printf '  hidden: names never reach the list HTML, the Hidden section shows them, and the host list stays in the vault\n'
+
 printf 'Format regression: every documented format carries every field\n'
 # The existing round trip counted records and stopped there, so a format that
 # exported ten records and dropped a column still passed. It did: folders and
@@ -4675,6 +4780,10 @@ b64 = lambda v: base64.b64encode(v.encode("utf-8")).decode("ascii")
 # assumption shows up.
 attrs = core.encode_attrs("Work/Ops", [("Account number", "12345-678"),
                                        ("PIN", "4821")])
+# One record carries the hidden flag, so the round trip proves the column added
+# in 4.2.0 survives every format rather than only the ones anyone thought to
+# check.
+hidden_attrs = core.encode_attrs("Personal", [], True)
 rows = [
     "META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-" % pub,
     "1\tAcme Admin\tavery@example.invalid\tp@ss w/ spaces, comma & \"quote\""
@@ -4685,6 +4794,8 @@ rows = [
     "\thttps://second.example.invalid\t",
     "3\tNo Extras\tplain@example.invalid\tsimple123\t-"
     "\t2023-04-12T16:20:00Z\t\t",
+    "4\tKept Private\tquiet@example.invalid\tsimple456\t-"
+    "\t2023-05-12T16:20:00Z\thttps://third.example.invalid\t%s" % hidden_attrs,
     "NOTE\t1\tIncident checklist\t%s\t2026-08-31T02:15:00Z\t-"
     % b64("line one\nline two\twith tab"),
     "PASSPHRASE\t1\tRecovery phrase\t%s\t2026-08-29T10:00:00Z\t-"
@@ -4745,13 +4856,14 @@ def load(path):
             if parts[0].startswith("META_"):
                 continue
             if parts[0].isdigit():
-                folder, fields = core.decode_attrs(
+                folder, fields, hidden = core.decode_attrs(
                     parts[7] if len(parts) > 7 else "")
                 records[("password", parts[0])] = {
                     "label": parts[1], "username": parts[2],
                     "secret": parts[3], "notes": parts[4],
                     "url": parts[6] if len(parts) > 6 else "",
-                    "folder": folder, "fields": tuple(fields)}
+                    "folder": folder, "fields": tuple(fields),
+                    "hidden": hidden}
             elif parts[0] in ("NOTE", "PASSPHRASE", "BACKUP_CODE"):
                 records[(parts[0], parts[1])] = {
                     "label": parts[2], "body": parts[3]}

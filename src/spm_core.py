@@ -36,7 +36,12 @@ import urllib.request
 # The vault records the format it was written in, so a later change can migrate
 # instead of guessing. A vault with no META_VAULT_VERSION row predates this and
 # is format 1; every write stamps the current version.
-VAULT_FORMAT_VERSION = 4
+# 5 because a record may now carry a `hidden` flag inside its attributes, and
+# an older build that edited such a record would re-encode the attributes
+# without it -- quietly un-hiding an entry someone deliberately hid. Reading a
+# format-5 vault still works on 4.1.0; stamp_version is what stops it writing
+# one back.
+VAULT_FORMAT_VERSION = 5
 
 CONTAINER_MAGIC = b"SPM-VAULT-3"
 
@@ -589,7 +594,7 @@ ATTRS_FIELD_VALUE_MAX = 4096
 ATTRS_FIELD_MAX = 64
 
 
-def encode_attrs(folder="", fields=None):
+def encode_attrs(folder="", fields=None, hidden=False):
     """The attributes column for a record, or "" when there is nothing to say.
 
     Empty is empty rather than an encoded empty object, so a record that uses
@@ -597,7 +602,8 @@ def encode_attrs(folder="", fields=None):
     """
     folder = (folder or "").strip()
     fields = [(str(n).strip(), str(v)) for n, v in (fields or []) if str(n).strip()]
-    if not folder and not fields:
+    hidden = bool(hidden)
+    if not folder and not fields and not hidden:
         return ""
     if len(folder) > ATTRS_FOLDER_MAX:
         raise VaultError("folder name is longer than %d characters"
@@ -622,27 +628,35 @@ def encode_attrs(folder="", fields=None):
         payload["folder"] = folder
     if fields:
         payload["fields"] = [{"name": n, "value": v} for n, v in fields]
+    if hidden:
+        payload["hidden"] = True
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     return base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
 
 def decode_attrs(column):
-    """(folder, [(name, value)]) for an attributes column.
+    """(folder, [(name, value)], hidden) for an attributes column.
 
     Never raises. A column this build cannot read is a record it should still
     show, minus the part it did not understand -- refusing would make one bad
     row hide a whole vault.
+
+    Three values rather than two, deliberately. Every caller unpacked two, so
+    adding `hidden` breaks each of them at the point of use instead of letting
+    a writer re-encode a record without the flag it never read. That silent
+    drop is exactly how folders and custom fields went missing from twenty
+    export formats until 4.1.0.
     """
     column = (column or "").strip()
     if not column:
-        return "", []
+        return "", [], False
     try:
         payload = json.loads(base64.b64decode(column, validate=True)
                              .decode("utf-8"))
     except Exception:
-        return "", []
+        return "", [], False
     if not isinstance(payload, dict):
-        return "", []
+        return "", [], False
     folder = payload.get("folder") or ""
     if not isinstance(folder, str):
         folder = ""
@@ -655,7 +669,7 @@ def decode_attrs(column):
             name, value = item.get("name"), item.get("value")
             if isinstance(name, str) and name.strip() and isinstance(value, str):
                 fields.append((name, value))
-    return folder[:ATTRS_FOLDER_MAX], fields
+    return folder[:ATTRS_FOLDER_MAX], fields, payload.get("hidden") is True
 
 
 # The column order every export writes and every headerless or positional
@@ -665,7 +679,7 @@ def decode_attrs(column):
 # readers stopped at `url`. None of them failed a test, because SPM was
 # reading back exactly what SPM wrote.
 EXPORT_FIELDNAMES = ("type", "id", "label", "username", "secret", "notes",
-                     "created", "extra", "url", "folder", "fields")
+                     "created", "extra", "url", "folder", "fields", "hidden")
 
 
 def export_row_from_values(values):
@@ -688,12 +702,13 @@ def export_row_from_values(values):
 
 def attrs_export_columns(column):
     """The folder and fields columns an export carries for one record."""
-    folder, fields = decode_attrs(column)
+    folder, fields, hidden = decode_attrs(column)
     return {
         "folder": folder,
         "fields": json.dumps(
             [{"name": n, "value": v} for n, v in fields],
             separators=(",", ":"), ensure_ascii=False) if fields else "",
+        "hidden": "1" if hidden else "",
     }
 
 
@@ -723,8 +738,16 @@ def attrs_from_export_row(row):
                 name, value = item.get("name"), item.get("value")
                 if isinstance(name, str) and name.strip():
                     fields.append((name, str(value if value is not None else "")))
+    # Anything a spreadsheet or another manager might put in a truthy cell.
+    # An unrecognised value means not hidden, because the safe direction for a
+    # flag nobody understood is the one that shows the entry rather than the
+    # one that pretends a vault holds less than it does.
+    raw_hidden = row.get("hidden", "")
+    hidden = (raw_hidden is True
+              or (isinstance(raw_hidden, str)
+                  and raw_hidden.strip().lower() in ("1", "true", "yes", "y", "hidden")))
     try:
-        return encode_attrs(folder, fields)
+        return encode_attrs(folder, fields, hidden)
     except Exception:
         return ""
 
@@ -736,7 +759,7 @@ def record_folders(plaintext):
         parts = line.split("\t")
         if not parts or parts[0].startswith("META_") or not parts[0].isdigit():
             continue
-        folder, _ = decode_attrs(parts[7] if len(parts) > 7 else "")
+        folder, _, _ = decode_attrs(parts[7] if len(parts) > 7 else "")
         if folder:
             seen.setdefault(folder.casefold(), folder)
     return [seen[k] for k in sorted(seen)]
@@ -1153,6 +1176,85 @@ def _tidy_note_with_original(notes, original):
     return ("%s %s" % (text.strip(), marker)).strip() if text.strip() else marker
 
 
+# Which hosts count as sensitive is the user's list, kept in the vault. SPM
+# ships no opinion about it and no examples: a built-in list would be a
+# maintenance burden, would be wrong for somebody, and would put in the source
+# and in every clone of the repository exactly the words this feature exists to
+# keep off a screen. The list lives in META_HIDDEN_HOSTS because it is itself
+# sensitive -- a plaintext config file naming them would leak the very thing
+# being protected.
+HIDDEN_HOSTS_TAG = "META_HIDDEN_HOSTS"
+HIDDEN_HOSTS_MAX = 200
+
+
+def hidden_hosts(plaintext):
+    """The host words this vault treats as sensitive, lowercased and unique."""
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if parts[0] == HIDDEN_HOSTS_TAG and len(parts) > 1:
+            return _split_hosts(parts[1])
+    return []
+
+
+def _split_hosts(raw):
+    seen, out = set(), []
+    for token in re.split(r"[^A-Za-z0-9.-]+", (raw or "").lower()):
+        token = token.strip(".-")
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+        if len(out) >= HIDDEN_HOSTS_MAX:
+            break
+    return out
+
+
+def set_hidden_hosts(plaintext, raw):
+    """Store the list, replacing any previous one. Returns the new plaintext."""
+    hosts = _split_hosts(raw)
+    rows = [line for line in (plaintext or "").splitlines()
+            if line.split("\t")[0] != HIDDEN_HOSTS_TAG]
+    if hosts:
+        rows.append("%s\t%s\t-\t-\t-\t-" % (HIDDEN_HOSTS_TAG, " ".join(hosts)))
+    return "\n".join(rows) + "\n"
+
+
+def looks_sensitive(label, url, hosts):
+    """Whether an entry matches the vault's own list.
+
+    A suggestion, and only ever that: the stored per-entry flag is what
+    governs, and nothing here changes it.
+
+    Matching is on whole hosts, not on the pieces of one. Splitting a listed
+    host into its labels and looking for any of them proposed hiding every
+    entry that merely shared a suffix -- one list of ".invalid" hosts had SPM
+    offering to hide an unrelated admin account, because both ended in
+    "invalid". A URL matches the host itself or a subdomain of it; a label
+    matches only when it is the whole host or its leading name.
+    """
+    if not hosts:
+        return False
+    host = ""
+    try:
+        host = (urllib.parse.urlsplit(url or "").hostname or "").lower()
+    except ValueError:
+        host = ""
+    key = re.sub(r"[^a-z0-9]", "", (label or "").lower())
+    for listed in hosts:
+        if host and (host == listed or host.endswith("." + listed)):
+            return True
+        if not key:
+            continue
+        if key == re.sub(r"[^a-z0-9]", "", listed):
+            return True
+        # The leading name on its own, so a bare label matches a listed host.
+        # Long enough not to collide with a common word by accident.
+        leading = listed.split(".")[0]
+        if len(leading) >= 4 and key == leading:
+            return True
+    return False
+
+
 def tidy_proposals(plaintext):
     """What a tidy would change, as data. Changes nothing.
 
@@ -1161,6 +1263,7 @@ def tidy_proposals(plaintext):
     knowing any of the rules above.
     """
     proposals = []
+    hosts = hidden_hosts(plaintext)
     for line in (plaintext or "").splitlines():
         parts = line.split("\t")
         if not parts or not parts[0].isdigit() or len(parts) < 6:
@@ -1168,7 +1271,7 @@ def tidy_proposals(plaintext):
         record_id, label = parts[0], parts[1]
         notes = parts[4] if len(parts) > 4 else ""
         attrs = parts[7] if len(parts) > 7 else ""
-        folder, fields = decode_attrs(attrs)
+        folder, fields, hidden = decode_attrs(attrs)
 
         changes = {}
         proposed_folder = folder_from_notes(notes)
@@ -1183,6 +1286,13 @@ def tidy_proposals(plaintext):
             if new_notes != notes:
                 changes["notes"] = {"from": notes, "to": new_notes}
 
+        # Proposed, never applied here, and only for an entry that is not
+        # already hidden -- re-proposing a decision someone has made is how a
+        # review becomes noise people click through.
+        url = parts[6] if len(parts) > 6 else ""
+        if not hidden and looks_sensitive(label, url, hosts):
+            changes["hidden"] = {"from": False, "to": True}
+
         if changes:
             proposals.append({"id": record_id, "label": label,
                               "changes": changes})
@@ -1193,7 +1303,8 @@ TIDY_LABEL_MAX = 200
 
 
 def apply_tidy(plaintext, selections):
-    """Apply reviewed changes. `selections` maps record id -> {"label": str}.
+    """Apply reviewed changes. `selections` maps id -> {"label": str,
+    "hidden": bool}.
 
     No rule here decides anything. The guess `tidy_proposals` made is only a
     guess -- no heuristic gets both com.lsdroid.cerberuss and com.spotify.music
@@ -1240,9 +1351,18 @@ def apply_tidy(plaintext, selections):
                 parts[4] = _tidy_note_with_original(parts[4], original)
                 touched = True
 
-        if "folder" in changes:
-            _, fields = decode_attrs(parts[7])
-            parts[7] = encode_attrs(changes["folder"]["to"], fields)
+        # Both attribute changes go through one decode/encode. Two of them
+        # would make the second overwrite whatever the first had just written,
+        # because encode_attrs takes the whole column and not a patch.
+        if "folder" in changes or "hidden" in changes:
+            folder, fields, hidden = decode_attrs(parts[7])
+            if "folder" in changes:
+                folder = changes["folder"]["to"]
+            if "hidden" in changes:
+                # Only when the review said so. An unticked row keeps the
+                # decision it already had.
+                hidden = bool(chosen[record_id].get("hidden", True))
+            parts[7] = encode_attrs(folder, fields, hidden)
             touched = True
 
         out.append("\t".join(parts))
@@ -2791,12 +2911,13 @@ def main(argv):
                     continue
                 name, _, value = line.partition("\t")
                 rows.append((name, value))
-            sys.stdout.write(encode_attrs(argv[2] if len(argv) > 2 else "", rows))
+            sys.stdout.write(encode_attrs(argv[2] if len(argv) > 2 else "", rows,
+                                          "--hidden" in argv[3:]))
         elif command == "attrs-decode":
             # attrs-decode <column> ; stdout: one JSON document
-            folder, fields = decode_attrs(argv[2] if len(argv) > 2 else "")
+            folder, fields, hidden = decode_attrs(argv[2] if len(argv) > 2 else "")
             sys.stdout.write(json.dumps(
-                {"folder": folder,
+                {"folder": folder, "hidden": hidden,
                  "fields": [{"name": n, "value": v} for n, v in fields]}) + "\n")
         elif command == "folders":
             # folders <plainfile> ; stdout: one folder per line
