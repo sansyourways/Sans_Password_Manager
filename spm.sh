@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="4.2.1"
+VERSION="4.3.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -14957,6 +14957,32 @@ I18N_SCRIPT = """
     const id = el.getAttribute("data-target");
     const node = id ? document.getElementById(id) : null;
     if (act === "reveal") { if (window.SPM_reveal) SPM_reveal(id, el); }
+    /* Password boxes toggle their own type. Handled here rather than in the
+       view-page reveal script because the login form is the one page that
+       does not load that script, and it is the box people most want to see. */
+    if (act === "reveal-input") {
+      var field = document.getElementById(el.getAttribute("data-target"));
+      if (field) {
+        var show = field.type === "password";
+        field.type = show ? "text" : "password";
+        el.setAttribute("aria-pressed", show ? "true" : "false");
+        el.setAttribute("aria-label", show
+          ? ((window.SPM_I18N && SPM_I18N.t) ? SPM_I18N.t("btn.hide", "Hide") : "Hide")
+          : ((window.SPM_I18N && SPM_I18N.t) ? SPM_I18N.t("btn.show", "Show") : "Show"));
+        var use = el.querySelector("use");
+        if (use) use.setAttribute("href", show ? "#i-hide" : "#i-view");
+        /* Keep the caret where it was: flipping type moves it to the end in
+           some browsers, which is maddening mid-password. */
+        try {
+          var at = field.selectionStart;
+          field.focus();
+          if (at !== null) field.setSelectionRange(at, at);
+        } catch (e) { field.focus(); }
+        /* Showing a password is activity, and it should not be the moment the
+           idle lock decides nothing has happened. */
+        if (show && window.SPM_AutoLock) window.SPM_AutoLock.restart();
+      }
+    }
     else if (act === "copy-val") { if (node && window.SPM_copy) SPM_copy(node.dataset.val); }
     else if (act === "copy-text") { if (node && window.SPM_copy) SPM_copy(node.textContent); }
     else if (act === "regen") { if (window.SPM_regen) SPM_regen(); }
@@ -15302,6 +15328,15 @@ p  { margin: 0; }
   transition: background .14s var(--ease), color .14s var(--ease), border-color .14s var(--ease);
 }
 .icon-btn:hover { background: var(--surface-3); color: var(--text); border-color: var(--border); }
+/* The control sits inside the field. Logical properties throughout: a physical
+   padding shorthand does not mirror, which is how the Arabic search icon once
+   ended up sitting on top of its own placeholder. */
+.input-reveal { position: relative; display: block; }
+.input-reveal .input { inline-size: 100%; padding-inline-end: 42px; }
+.reveal-btn {
+  position: absolute; inset-inline-end: 6px; top: 50%; transform: translateY(-50%);
+  inline-size: 30px; block-size: 30px;
+}
 .icon-btn.danger:hover { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
 .icon-row { display: flex; gap: 2px; justify-content: flex-end; align-items: center; }
 form.inline { display: inline; margin: 0; }
@@ -16021,6 +16056,14 @@ table.t tbody tr[data-row]:hover td:first-child { border-inline-start-color: var
   direction: ltr;
   text-align: start;
 }
+
+/* The wrapper follows its field. A password input keeps LTR content in an RTL
+   page, so its text begins on the left -- while the wrapper, still RTL, put
+   the reveal button's inline-end on the left too, directly on top of the caret
+   and the first characters typed. Exactly the failure the Arabic search icon
+   had in 3.13.0, and again visible only by rendering the page.
+   Forcing the wrapper LTR keeps the button on the end the text runs towards. */
+:root[dir="rtl"] .input-reveal { direction: ltr; }
 </style>
 """
 
@@ -17405,6 +17448,26 @@ def _field(name, label_key, label, value="", ftype="text", placeholder_key=None,
             f'{ctrl}{hint_html}</div>')
 
 
+def _password_input(field_id, name, extra=""):
+    """A password input with a show/hide control beside it.
+
+    One helper rather than five copies, so a password box added later cannot
+    quietly ship without the control. Typing a long master password blind is
+    how people end up choosing a short one.
+
+    The control is a button, not a checkbox: it performs an action rather than
+    recording a preference, and it never persists -- every page load starts
+    masked, because a field that remembered "shown" would eventually be shown
+    at the wrong moment.
+    """
+    return (
+        f'<div class="input-reveal">'
+        f'<input class="input" id="{field_id}" name="{name}" type="password" {extra}>'
+        f'<button class="icon-btn reveal-btn" type="button" data-act="reveal-input" '
+        f'data-target="{field_id}" aria-label="Show" aria-pressed="false">'
+        f'{_icon("view", "icon icon-sm")}</button></div>')
+
+
 def _folder_field(current, known):
     """A free-text folder with the vault's existing ones offered as a datalist.
 
@@ -17865,8 +17928,8 @@ def login_page(version, message=""):
       <form method="post" action="/login">
         <div class="field">
           <label for="pw" data-i18n="login.master">Master password</label>
-          <input class="input" id="pw" name="password" type="password"
-                 autocomplete="current-password" autofocus required>
+          {_password_input("pw", "password",
+                           'autocomplete="current-password" autofocus required')}
         </div>
         <button class="btn btn-primary btn-block" type="submit" data-i18n="login.unlock">Unlock</button>
       </form>
@@ -18316,18 +18379,18 @@ def settings_page(flash="", hidden_hosts=()):
   <form method="post" action="/settings/master-password" autocomplete="off">
     <div class="field">
       <label for="mp-current" data-i18n="settings.current">Current master password</label>
-      <input class="input" id="mp-current" name="current" type="password"
-             autocomplete="current-password" required>
+      {_password_input("mp-current", "current",
+                       'autocomplete="current-password" required')}
     </div>
     <div class="field">
       <label for="mp-new" data-i18n="settings.new">New master password</label>
-      <input class="input" id="mp-new" name="new" type="password"
-             autocomplete="new-password" minlength="{MASTER_MIN_LEN}" required>
+      {_password_input("mp-new", "new",
+                       f'autocomplete="new-password" minlength="{MASTER_MIN_LEN}" required')}
     </div>
     <div class="field">
       <label for="mp-confirm" data-i18n="settings.confirm">Confirm new master password</label>
-      <input class="input" id="mp-confirm" name="confirm" type="password"
-             autocomplete="new-password" minlength="{MASTER_MIN_LEN}" required>
+      {_password_input("mp-confirm", "confirm",
+                       f'autocomplete="new-password" minlength="{MASTER_MIN_LEN}" required')}
     </div>
     <p class="faint" style="margin-bottom:var(--sp-4)" data-i18n="settings.hint">At least
       {MASTER_MIN_LEN} characters. There is no way to recover a master password you
@@ -18675,9 +18738,9 @@ def transfer_page():
         </div>
         <div class="field hidden" id="import-pw-field">
           <label for="import-export-password" data-i18n="import.export_password">Export password</label>
-          <input class="input" id="import-export-password" type="password" name="export_password" autocomplete="off"
-                 data-i18n-placeholder="import.export_password_hint"
-                 placeholder="The password you set when exporting from Bitwarden">
+          {_password_input("import-export-password", "export_password",
+                           'autocomplete="off" data-i18n-placeholder="import.export_password_hint" '
+                           'placeholder="The password you set when exporting from Bitwarden"')}
           <div class="hint" data-i18n="import.export_password_note">Only needed for a password-protected Bitwarden export. It is used to read the file and is never stored.</div>
         </div>
         <div class="field">

@@ -2538,12 +2538,18 @@ run_prov() {
 	# \&\&, which made every stub a syntax error, so every case looked like an
 	# unsupported gh and the one that should have failed quietly passed.
 	rm -f "$prov_bin/gh"
+	# `pins` is whether this gh advertises --signer-workflow; `pinned` is what a
+	# pinned verify answers. Two switches because the interesting case is a gh
+	# that verifies the repository happily and refuses the workflow -- a real
+	# attestation minted by the wrong workflow, which must not read as success.
 	case "$1" in
-		absent)   supports=x  authed=x  verifies=x ;;
-		ancient)  supports=1  authed=0  verifies=1 ;;
-		unauthed) supports=0  authed=1  verifies=0 ;;
-		pass)     supports=0  authed=0  verifies=0 ;;
-		fail)     supports=0  authed=0  verifies=1 ;;
+		absent)    supports=x authed=x verifies=x pins=0 pinned=0 ;;
+		ancient)   supports=1 authed=0 verifies=1 pins=1 pinned=1 ;;
+		unauthed)  supports=0 authed=1 verifies=0 pins=0 pinned=0 ;;
+		pass)      supports=0 authed=0 verifies=0 pins=0 pinned=0 ;;
+		fail)      supports=0 authed=0 verifies=1 pins=0 pinned=1 ;;
+		nopin)     supports=0 authed=0 verifies=0 pins=1 pinned=1 ;;
+		wrongflow) supports=0 authed=0 verifies=0 pins=0 pinned=1 ;;
 		*) printf 'unknown gh behaviour %s\n' "$1" >&2; exit 1 ;;
 	esac
 	if [ "$supports" != x ]; then
@@ -2552,7 +2558,12 @@ run_prov() {
 case "\$1" in
 	auth) exit $authed ;;
 	attestation)
-		case "\$*" in *--help*) exit $supports ;; esac
+		case "\$*" in
+			*--help*)
+				[ $pins -eq 0 ] && printf '  --signer-workflow string\\n'
+				exit $supports ;;
+			*--signer-workflow*) exit $pinned ;;
+		esac
 		exit $verifies ;;
 esac
 exit 1
@@ -2609,6 +2620,13 @@ expect_prov "gh signed out" unauthed 3.9.0 0 "not signed in"
 expect_prov "gh too old"   ancient  3.9.0 0 "too old"
 # A release that should carry an attestation and does not is the whole point.
 expect_prov "bad attestation" fail   3.9.0 1 "Installation aborted"
+# --repo alone only says "some workflow in this repository". An attestation
+# minted by any other workflow must not read as a verified release.
+expect_prov "wrong workflow" wrongflow 3.9.0 1 "Installation aborted"
+# A gh that cannot pin still verifies, and says which check it actually did:
+# a weaker check that reads like the stronger one is worse than none, because
+# it gets trusted.
+expect_prov "gh cannot pin" nopin  3.9.0 0 "cannot pin"
 
 # The truth table for the comparison itself, including the two cases a string
 # compare and a bare `sort -V` respectively get wrong.
@@ -2621,7 +2639,7 @@ printf '%s' "$prov_versions" | tr '|' '\n' | while read -r a b want; do
 		exit 1
 	}
 done
-printf '  provenance: 7 installer decisions and 10 version comparisons verified\n'
+printf '  provenance: 9 installer decisions and 10 version comparisons verified\n'
 
 printf 'Import regression: Bitwarden JSON, CSV and password-protected exports\n'
 # People arrive from Bitwarden, and its export shares no field names with SPM's.
@@ -4660,6 +4678,48 @@ vk_new_legacy_vault() {
 )
 
 printf '  vault key stability, migration ordering and recovery verified\n'
+
+printf 'Web regression: every password box has a reveal control\n'
+# Two properties. Every password input carries the control -- so a box added
+# later cannot ship without one -- and in an RTL page the control does not sit
+# where the text starts. A password field keeps LTR content in an RTL page, so
+# its text begins on the left while the wrapper, still RTL, put the button
+# there too, directly over the caret. That is the Arabic search icon of 3.13.0
+# happening again, and again it was visible only by rendering the page.
+curl -fsS -o "$TEST_ROOT/login-reveal.html" "http://127.0.0.1:$WEB_PORT/login"
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/settings-reveal.html" \
+	"http://127.0.0.1:$WEB_PORT/settings"
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - \
+	"$TEST_ROOT/login-reveal.html" "$TEST_ROOT/settings-reveal.html" <<'REVEALPY'
+import re, sys
+
+seen = 0
+for path in sys.argv[1:]:
+    page = open(path, encoding="utf-8").read()
+    for field in re.finditer(r'<input[^>]*type="password"[^>]*>', page, re.S):
+        seen += 1
+        ident = re.search(r'id="([^"]+)"', field.group(0))
+        if not ident:
+            sys.exit("a password input in %s has no id to target" % path)
+        if not re.search(r'data-act="reveal-input"[^>]*data-target="%s"'
+                         % re.escape(ident.group(1)), page):
+            sys.exit("password input %r in %s has no reveal control"
+                     % (ident.group(1), path))
+if seen < 4:
+    sys.exit("only %d password inputs were found; the check is not covering them" % seen)
+
+# The rule, parsed rather than grepped: a selector that is merely present but
+# narrowed to something no element carries is inert, and a substring search
+# cannot tell the two apart.
+css = open(sys.argv[1], encoding="utf-8").read()
+rule = re.search(r'(?<![\w.#\[-]):root\[dir="rtl"\]\s+\.input-reveal\s*\{([^}]*)\}', css)
+if not rule:
+    sys.exit("no :root[dir=rtl] .input-reveal rule; the control will sit on the caret")
+if not re.search(r'direction\s*:\s*ltr', rule.group(1)):
+    sys.exit("the RTL wrapper rule does not force LTR: %s" % rule.group(1).strip())
+print("  reveal: %d password inputs, each with a control, and the RTL wrapper "
+      "follows its field" % seen)
+REVEALPY
 
 printf 'Web regression: hidden entries are redacted by the server\n'
 # The whole feature rests on one property: the name is not in the page. A CSS
