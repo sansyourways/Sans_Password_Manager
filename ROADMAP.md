@@ -233,9 +233,13 @@ as such below rather than quietly dropped.
 
   So the honest statement is that the clause names a primitive the ecosystem
   does not yet hand us on the terms this project accepts. The reachable
-  memory-hard KDF is **scrypt**, and it arrives with the data-layer
-  replacement below. Argon2id follows it when a platform floor makes it
-  testable rather than merely writable.
+  memory-hard KDF is **scrypt**, and it arrived in **4.0.0** with the
+  data-layer replacement below. What that release also added is the part that
+  makes the rest cheap: the vault records its KDF **by name and parameters**,
+  and the unwrap uses the vault's numbers rather than the running build's. So
+  Argon2id is no longer a format change waiting on a platform floor -- it is a
+  value the reader dispatches on, once a floor makes it testable rather than
+  merely writable.
 
 - **Wrap a vault key rather than the master password.** *(#37)* Format 3 seals
   the vault under a random 256-bit vault key and seals only that key under the
@@ -258,7 +262,13 @@ as such below rather than quietly dropped.
   CI fails a change where the two disagree. SPM still ships as one file; it is
   no longer written as one.
 
-### Foundation — the work this unblocks
+### Foundation — the work this unblocks — **complete as of 4.0.0**
+
+Both items below have shipped. The sequencing held: the vault-key change
+needed the format version to migrate through, both needed the core extracted
+before the crypto backend could be touched, and the backend replacement was a
+single-file change by the time it was reached.
+
 
 - ~~**Replace the gpg data layer.**~~ **Shipped in 4.0.0.** A vault is sealed
   with AES-256-CTR and authenticated with HMAC-SHA256; the master password is
@@ -383,6 +393,19 @@ function underneath it.
 
 Crypto and extension UI are the two worst places to accept that gap, so these
 two wait for a way to run them rather than for someone to write them.
+
+4.0.0 is the counter-example that shows what "a way to run them" means, and it
+is why replacing the whole data layer shipped while hardware-backed wrapping
+did not. A round trip proves nothing about a cipher: a build whose openssl
+derived a different key would encrypt and decrypt perfectly against itself and
+produce vaults no other machine could open. What made it shippable was that the
+derivation is reproducible outside the tool performing it -- fixed key, salt,
+IV and plaintext against fixed ciphertext, and openssl's `-pbkdf2 -iter 1`
+asserted byte-for-byte against `hashlib.pbkdf2_hmac` -- plus a macOS runner
+whose LibreSSL is a genuinely different implementation to disagree with.
+
+A FIDO2 key or a TPM offers no equivalent. There is no known answer to pin and
+no second implementation in CI to disagree, so the item stays where it is.
 
 3.8.0 is the first item on this board built the other way round, and the
 result argues for the rule. Its review page passed the suite — ten mutants
