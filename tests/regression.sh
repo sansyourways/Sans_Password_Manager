@@ -1096,8 +1096,17 @@ cli_score="$(cmd_security_dashboard | sed -n 's#^Score: \([0-9]*\)/100$#\1#p')"
 [ -n "$cli_score" ]
 curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/security.html" \
 	"http://127.0.0.1:$WEB_PORT/security"
-web_score="$(sed -n 's/.*<span class="stat-n score-[a-z]*">\([0-9]*\)<\/span>.*/\1/p' \
-	"$TEST_ROOT/security.html" | head -1)"
+# Read the digits, not the exact markup around them: the score now carries a
+# "/ 100" of its own inside the same element, and a pattern anchored to the
+# closing tag silently produced an empty string rather than a mismatch.
+web_score="$(PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - \
+	"$TEST_ROOT/security.html" <<'SCOREPY'
+import re, sys
+page = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(r'<span class="stat-n score-[a-z]+">\s*(\d+)', page)
+print(match.group(1) if match else "")
+SCOREPY
+)"
 [ "$cli_score" = "$web_score" ] || {
 	printf 'security score differs: CLI %s, web %s\n' "$cli_score" "$web_score" >&2
 	exit 1
@@ -4756,6 +4765,63 @@ if grep -rqs 'lanterna.invalid' "$TEST_ROOT/config" 2>/dev/null; then
 	printf 'the hidden-host list was written to a plaintext settings file\n' >&2; exit 1
 fi
 printf '  hidden: names never reach the list HTML, the Hidden section shows them, and the host list stays in the vault\n'
+
+printf 'Web regression: the security page names entries and offers an action\n'
+# The page used to render findings as bare record ids -- a column of numbers
+# that told you something was wrong and nothing about what, with nothing to
+# click. Naming the entry is the fix; keeping a hidden entry redacted here is
+# the part that has to hold, because otherwise this page is the one place a
+# hidden name can be read.
+sec_csrf="$(curl -fsS -b "$TEST_ROOT/cookies" "http://127.0.0.1:$WEB_PORT/add" \
+	| sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' | head -n1)"
+curl -fsS -b "$TEST_ROOT/cookies" -o /dev/null -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" --data-urlencode "csrf=$sec_csrf" \
+	--data-urlencode 'name=Weak And Visible' --data-urlencode 'user=weak@example.invalid' \
+	--data-urlencode 'password=abc123' "http://127.0.0.1:$WEB_PORT/add"
+curl -fsS -b "$TEST_ROOT/cookies" -o /dev/null -X POST \
+	-H "Origin: http://127.0.0.1:$WEB_PORT" --data-urlencode "csrf=$sec_csrf" \
+	--data-urlencode 'name=Weak And Hidden' --data-urlencode 'user=quiet@example.invalid' \
+	--data-urlencode 'password=abc123' --data-urlencode 'hidden=1' \
+	"http://127.0.0.1:$WEB_PORT/add"
+curl -fsS -b "$TEST_ROOT/cookies" -o "$TEST_ROOT/security.html" \
+	"http://127.0.0.1:$WEB_PORT/security"
+
+grep -q 'Weak And Visible' "$TEST_ROOT/security.html" || {
+	printf 'the security page does not name the entry a finding is about\n' >&2; exit 1
+}
+if grep -q 'Weak And Hidden' "$TEST_ROOT/security.html"; then
+	printf 'a hidden entry name reached the security page\n' >&2; exit 1
+fi
+if grep -q 'abc123' "$TEST_ROOT/security.html"; then
+	printf 'a password reached the security page\n' >&2; exit 1
+fi
+# The action, not just the diagnosis. Every finding row links to the edit form
+# for the entry it is about.
+sec_weak_id="$(PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - \
+	"$ROOT_DIR/src/spm_core.py" "$PASSWORD_VAULT" "$AUDIT_PASSWORD" <<'SECIDPY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("spm_core_sec", sys.argv[1])
+core = importlib.util.module_from_spec(spec); spec.loader.exec_module(core)
+text, _ = core.read_vault(sys.argv[2], sys.argv[3])
+for line in text.splitlines():
+    parts = line.split("\t")
+    if parts[0].isdigit() and parts[1] == "Weak And Visible":
+        print(parts[0]); break
+else:
+    sys.exit("the fixture entry was not written")
+SECIDPY
+)"
+grep -q "/edit?id=$sec_weak_id" "$TEST_ROOT/security.html" || {
+	printf 'the security page offers no way to fix the entry it reports\n' >&2; exit 1
+}
+# The score is a fraction, not a bare number, and says what drove it.
+grep -q '/&thinsp;100' "$TEST_ROOT/security.html" || {
+	printf 'the security score is shown without its scale\n' >&2; exit 1
+}
+grep -q 'href="#finding-weak"' "$TEST_ROOT/security.html" || {
+	printf 'the tally does not link to the finding it counts\n' >&2; exit 1
+}
+printf '  security: findings are named and actionable, and a hidden entry stays redacted\n'
 
 printf 'Format regression: every documented format carries every field\n'
 # The existing round trip counted records and stopped there, so a format that

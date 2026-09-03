@@ -7,6 +7,30 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.2.1] - 2026-09-03
+
+### Fixed
+- The Security page reported its findings as bare record ids — a column of
+  numbers that said something was wrong and nothing about what, and offered
+  nothing to click. Acting on it meant cross-referencing thirty-odd ids against
+  the password list by hand. Every finding now names the entry and its
+  username, and carries the one action that clears it: **Change password**,
+  **Add the details** or **Fix this entry**, linking straight to that entry's
+  form.
+- The security score appeared as a bare number. It is a fraction of 100, so it
+  now says so, and a tally under it names what drove it — `4 weak · 2 reused ·
+  5 aging · 1 incomplete` — with each item linking to the section it counts.
+  The number alone could not distinguish a slightly poor vault from a very poor
+  one, because the penalty is capped and 0 is the floor.
+- Reused passwords are shown as named groups with a count and a line saying
+  what clears the finding, rather than as rows of numbers.
+
+### Security
+- Hidden entries stay redacted on the Security page. Naming entries there would
+  otherwise have made it the one place a hidden name could be read.
+- Secrets still never appear on the page, and the scope note now states what is
+  and is not shown rather than only what is not.
+
 ## [4.2.0] - 2026-09-03
 
 ### Added
