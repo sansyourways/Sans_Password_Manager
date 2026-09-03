@@ -87,12 +87,11 @@ attacker with root access.
 
 ## Product tour
 
-Every web capture below was taken from the 4.4.0 release candidate in Chromium
+Every web capture below was taken from the 4.4.1 release candidate in Chromium
 at 1440x900, against a disposable vault holding only synthetic documentation
 data. No personal vault, browser profile, real credential, or production
 hostname appears in these images. The locked-screen captures use Chromium
-mobile emulation at 390x844 against the same build and synthetic session. They
-are unchanged for 4.4.1, which touches only the browser extensions.
+mobile emulation at 390x844 against the same build and synthetic session.
 
 ![Animated tour of SPM Dashboard cycling through the overview, the tagged password
 list, the security findings page, cross-type search, vault history and
