@@ -6,5 +6,5 @@ case "$TARGET" in chromium|firefox) ;; *) printf 'Usage: %s chromium|firefox\n' 
 OUT="$ROOT_DIR/dist/$TARGET"
 mkdir -p "$OUT"
 cp "$ROOT_DIR/manifest.$TARGET.json" "$OUT/manifest.json"
-cp "$ROOT_DIR/background.js" "$ROOT_DIR/popup.html" "$ROOT_DIR/popup.js" "$OUT/"
+cp "$ROOT_DIR/background.js" "$ROOT_DIR/popup.html" "$ROOT_DIR/popup.js" "$ROOT_DIR/fill.js" "$OUT/"
 printf '%s\n' "$OUT"

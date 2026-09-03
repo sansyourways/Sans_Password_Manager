@@ -21,20 +21,10 @@ async function fill(record) {
   setStatus("Verifying the hostname and retrieving the selected account…");
   const response = await call({action:"get", record, host});
   if (!response?.ok) return setStatus(response?.error || "Could not retrieve that account.", true);
-  await api.scripting.executeScript({target:{tabId:tab.id}, func:(username,password) => {
-    const visible = element => element.offsetParent !== null && !element.disabled && !element.readOnly;
-    const passwords = [...document.querySelectorAll('input[type="password"]')].filter(visible);
-    const users = [...document.querySelectorAll('input[type="email"],input[autocomplete="username"],input[type="text"]')].filter(visible);
-    const set = (element,value) => {
-      if (!element) return;
-      element.focus();
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set;
-      setter.call(element,value);
-      element.dispatchEvent(new Event("input",{bubbles:true}));
-      element.dispatchEvent(new Event("change",{bubbles:true}));
-    };
-    set(users[0],username); set(passwords[0],password);
-  }, args:[response.username,response.password]});
+  // spmFillForm lives in fill.js so the test drives the same function this
+  // ships, rather than a copy of it that could drift without either failing.
+  await api.scripting.executeScript({target:{tabId:tab.id}, func:spmFillForm,
+    args:[response.username,response.password]});
   response.password = "";
   setStatus("Filled after exact hostname verification.");
 }

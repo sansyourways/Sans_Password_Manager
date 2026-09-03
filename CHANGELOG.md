@@ -7,6 +7,58 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.4.1] - 2026-09-03
+
+A fill that looked like it worked.
+
+### Fixed
+- **The compatibility extension filled login forms in a way modern sites
+  ignore.** `browser-extension/popup.js` assigned `element.value` directly.
+  A framework that tracks its own state patches the instance property, so that
+  assignment updates the DOM and leaves the framework believing the field is
+  still empty: the form looks filled, the user presses submit, and nothing is
+  sent. The universal extension had been corrected to write through
+  `HTMLInputElement.prototype`'s setter; this copy had not, and nothing
+  compared the two.
+
+  Both extensions now call one function. `browser-extension/` ships in every
+  release archive, so this affected installed copies, not just the repository.
+
+### Added
+- `fill.js` — the injected fill, in its own file, byte-identical in both
+  extensions and loaded by both popups. It exists as a file so that the popup
+  and the test use *the same function*; a test with its own copy of a fill
+  would have passed against the correct copy while the shipped one was wrong,
+  which is precisely how this defect survived.
+- `tests/extension-fill.mjs` drives that function against a real login form in
+  headless Chromium and asserts that the visible fields are filled, that a
+  hidden honeypot, a disabled field and a readonly field are not, that the
+  value was written through the native setter rather than swallowed by a
+  page that owns the property, and that `input` and `change` both fired.
+
+  The fixture puts the honeypot **first** in document order and gives the real
+  field an own-property `value` accessor that discards writes, so removing the
+  visibility filter or reverting to `element.value =` each make the test fail.
+  An earlier version of this fixture did neither, and both mutants survived it.
+- The regression suite compares the two `fill.js` files and requires each
+  popup to inject the shared function rather than an inline one, so a future
+  copy cannot drift back apart in silence.
+
+### Note on tab plumbing
+4.4.0 named the native-messaging round trip and the fill as the two things the
+browser harness did not reach, and called both "tab plumbing". One of them is
+now reached, and the other is understood well enough to stop calling it
+pending work:
+
+`chrome.action.openPopup()` opens the popup under headless Chromium and the
+popup page can be attached to and driven. What it cannot obtain is
+`activeTab` — that permission is granted by a genuine user gesture on the
+toolbar action, and a debugger-synthesised call is not one. `tabs.query`
+returns a tab with an id and no URL. This is a deliberate Chromium boundary,
+not a harness limitation to engineer around, so the popup's *hostname
+verification* stays outside the browser harness and keeps its CLI-level
+coverage. The fill it guards is now covered for real.
+
 ## [4.4.0] - 2026-09-03
 
 **Nothing about the product changed.** This adds a way to verify part of it

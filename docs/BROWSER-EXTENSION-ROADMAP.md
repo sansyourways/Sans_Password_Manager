@@ -237,10 +237,33 @@ are not:
   the extension's own pages, PDF viewers and devtools tabs
 - nothing secret reaches the popup DOM
 
-**Not yet reached.** The native-messaging round trip and the fill itself. The
-popup reads the active tab, and an extension page cannot honestly impersonate
-one — driving that needs real tab plumbing, which is the second half of this
-project and what the in-field dropdown will be built against.
+**The fill, from 4.4.1** — `tests/extension-fill.mjs` drives `fill.js`, the
+function both popups inject, against a real login form:
+
+- the visible username and password fields are filled
+- a hidden honeypot, a disabled field and a readonly field are not
+- the value is written through `HTMLInputElement.prototype`'s setter, so a
+  framework that owns the property receives it rather than swallowing it
+- `input` and `change` both fire
+
+The fixture puts the honeypot first in document order and gives the real field
+an own-property `value` accessor that discards writes, so dropping the
+visibility filter and reverting to `element.value =` each fail the test. Both
+survived an earlier fixture, which is how 4.4.1's defect reached a release.
+
+The suite also `cmp`s the two `fill.js` copies and requires each popup to
+inject the shared function by name, because a fill duplicated inline in two
+popups is exactly what drifted.
+
+**Not reached, and not pending.** The native-messaging round trip through a
+live popup. `chrome.action.openPopup()` works under headless Chromium and the
+popup can be attached to and driven, but it cannot obtain `activeTab`: that
+permission is granted by a genuine user gesture on the toolbar action, and a
+debugger-synthesised call is not one, so `tabs.query` returns a tab with an id
+and no URL. This is a Chromium design decision, not a gap to engineer around.
+The popup's hostname verification therefore keeps its CLI-level coverage —
+which tests the decision, the part that can be wrong — and the fill it guards
+is covered in a browser.
 
 ## Packaging
 
