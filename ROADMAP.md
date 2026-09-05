@@ -456,9 +456,25 @@ single-file change by the time it was reached.
 
 ### What is left, and what decides when
 
-Two items on this board are written but not shipped. For one the blocker is
-verification rather than code; the other is waiting on a design decision, which
-is a different kind of waiting and is worth not confusing with it.
+One item on this board is written but not shipped, and the blocker is
+verification rather than code.
+
+The other one left this board in 4.7.0 without being built, which is a result
+rather than a retreat. WebAuthn unlock in the extension popup was recorded here
+as waiting on a design decision; the decision turned out to be foreclosed. A
+WebAuthn credential is bound to the relying-party id it was created under, and
+Chromium will assert one from a `chrome-extension://` origin only when that id
+is the extension's own -- so the credential a user enrolled for the Dashboard
+can never be used by the popup, and "reuse the Dashboard's ceremony" was never
+available to decide about. Measured, not argued: the call succeeds with the
+extension id and raises a SecurityError with the Dashboard's domain.
+
+The premise beneath it was also wrong, and had been for four releases. The plan
+said MV3 tears service workers down aggressively, so unlocks would be frequent
+and the answer was a cheaper unlock. Measured in Chromium 151, an unlocked
+bridge session survived ten minutes of untouched idle with its worker alive.
+What ended sessions was SPM's own 300-second timeout, set by an environment
+variable the extension cannot reach. 4.7.0 shipped that as a choice instead.
 
 The in-field picker used to head this list, and how it left is the argument for
 the rest of the section. It was never waiting on someone to write it -- it was
@@ -474,13 +490,13 @@ list would have passed even if it could.
   Unchanged, and 4.3.0's exploration of hardware-backed *signing* did not move
   it: neither has a known answer to pin or a second implementation in CI to
   disagree with.
-- **WebAuthn unlock inside the extension popup** -- the half of 4.5.0's
-  roadmap item that did not ship -- is not blocked on verification at all. The
-  popup reaches SPM through the native host, which takes no part in the
-  Dashboard's WebAuthn ceremony and holds no session for an assertion to
-  attach to. The open question is where a verified assertion is redeemed, and
-  answering it badly puts a second unlock path beside the one that exists.
-  Recording it as pending code would have been the wrong description.
+- ~~**WebAuthn unlock inside the extension popup.**~~ **Closed in 4.7.0 by
+  measurement rather than by code**, for the reason above: a credential cannot
+  be asserted across relying-party ids, so the Dashboard's could never serve
+  the popup. Recording it as pending code would have been the wrong
+  description; recording it as a design decision turned out to be the wrong
+  description too, and both were corrected by running the ceremony rather than
+  reasoning about it.
 
 That distinction is worth stating because of what the 3.2.0–3.7.0 run showed.
 Five defects reached a release and were then found only when something was

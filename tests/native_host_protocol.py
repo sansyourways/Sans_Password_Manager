@@ -13,7 +13,8 @@ case "$1" in
 esac
 """, encoding="utf-8")
     fake.chmod(0o700)
-    env = {**os.environ, "SPM_BIN":str(fake), "SPM_BRIDGE_IDLE_SECONDS":"300"}
+    env = {**os.environ, "SPM_BIN":str(fake), "SPM_BRIDGE_IDLE_SECONDS":"300",
+           "SPM_BRIDGE_IDLE_CEILING":"3600"}
     process = subprocess.Popen([sys.executable, str(root/"browser-extension-universal/native_host.py")],
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
 
@@ -29,8 +30,43 @@ esac
     listed=request({"id":"3","action":"list","host":"example.invalid"})
     assert listed["matches"][0]["username"] == "alice" and "test-secret" not in json.dumps(listed)
     assert request({"id":"4","action":"get","host":"example.invalid","record":"7"})["password"] == "test-secret"
-    assert request({"id":"5","action":"lock"})["ok"] is True
-    assert request({"id":"6","action":"get","host":"example.invalid","record":"7"})["ok"] is False
+    # The idle window a caller asks for is clamped, not obeyed and not refused.
+    # Refusing would let a caller map the configuration by probing it, and the
+    # honest answer to "give me twelve hours" is the ceiling.
+    status = request({"id":"5","action":"status"})
+    assert status["unlocked"] is True, status
+    assert status["idle"] == 300, status
+    assert 0 < status["expires_in"] <= 300, status
+    assert "password" not in json.dumps(status)
+    request({"id":"6","action":"lock"})
+    over = request({"id":"7","action":"unlock","host":"example.invalid",
+                    "master":"test-master","idle":86400})
+    assert over["ok"] is True
+    assert request({"id":"8","action":"status"})["idle"] == 3600, "the ceiling did not clamp"
+    request({"id":"9","action":"lock"})
+    under = request({"id":"10","action":"unlock","host":"example.invalid",
+                     "master":"test-master","idle":1})
+    assert under["ok"] is True
+    assert request({"id":"11","action":"status"})["idle"] == 30, "the floor did not clamp"
+    request({"id":"12","action":"lock"})
+    junk = request({"id":"13","action":"unlock","host":"example.invalid",
+                    "master":"test-master","idle":"not-a-number"})
+    assert junk["ok"] is True
+    assert request({"id":"14","action":"status"})["idle"] == 300, "a junk idle did not fall back"
+    # An unlock that FAILS must not move the window: the session it would have
+    # applied to does not exist.
+    request({"id":"15","action":"lock"})
+    assert request({"id":"16","action":"unlock","host":"example.invalid",
+                    "master":"wrong","idle":900})["ok"] is False
+    locked = request({"id":"17","action":"status"})
+    assert locked["unlocked"] is False and locked["expires_in"] == 0, locked
+    # ...and it must not have rewritten the window either. A wrong password is
+    # not a way to change the terms of the next session.
+    assert locked["idle"] == 300, locked
+
+    assert request({"id":"18","action":"lock"})["ok"] is True
+    assert request({"id":"19","action":"get","host":"example.invalid","record":"7"})["ok"] is False
     process.stdin.close(); process.wait(timeout=5)
     assert process.returncode == 0
-print("Native host regression: unlock, secret-free list, get and lock")
+print("Native host regression: unlock, secret-free list, get, lock, "
+      "and an idle window that is clamped rather than obeyed")

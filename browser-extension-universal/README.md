@@ -99,8 +99,8 @@ local and is not committed.
 The extension talks to SPM through one native-messaging host, and that host is
 a contract rather than a pipe. Two halves:
 
-**Inbound.** Four actions exist — `unlock`, `lock`, `list`, `get` — and an
-action not named in the host's table is refused. The extension never chooses
+**Inbound.** Five actions exist — `unlock`, `lock`, `list`, `get`, `status` —
+and an action not named in the host's table is refused. The extension never chooses
 what SPM command runs: each branch names a literal `bridge-*` command, so
 there is no path from a message to an arbitrary CLI invocation. A hostname is
 validated against a pattern and a record id must be digits.
@@ -114,6 +114,7 @@ never forwarded:
 | `lock` | `ok` |
 | `list` | `matches`, each row reduced to `id`, `label`, `username`, `url` |
 | `get` | `username`, `password` |
+| `status` | `unlocked`, `idle`, `expires_in` — the session, never the vault |
 
 This is the half worth having. `bridge-get` returns a username and a password
 today; if it ever returns a note, a URL or a TOTP seed, that field cannot reach
@@ -190,8 +191,20 @@ rather than supported.
 Open an HTTP(S) login page, select the SPM toolbar icon, enter the master
 password once, and choose a matching account. The native host keeps the master
 password only in process memory. **Lock SPM** discards it immediately. It is
-also discarded after five idle minutes, after twelve total hours, when the
-native connection ends, or when the browser closes.
+also discarded after the idle window, after twelve total hours, when the native
+connection ends, or when the browser closes.
+
+**Lock after** sets that idle window: 1 minute, 5 minutes (the default), 15
+minutes, 30 minutes or 1 hour. The popup remembers the choice and shows how
+long the current session has left. Before 4.7.0 this was a fixed five minutes
+readable only from `SPM_BRIDGE_IDLE_SECONDS`, which a browser never sets, so it
+was not adjustable in practice.
+
+The host clamps whatever it is asked for -- floor 30 seconds, ceiling one hour
+(`SPM_BRIDGE_IDLE_CEILING`), and never past the absolute session cap -- rather
+than obeying or refusing it. A longer window is a real trade: the master
+password sits in the host's memory for longer, which is why the ceiling exists
+and why the default did not move.
 
 Matching is exact by default: `example.com` does not match
 `login.example.com`. A record opts into a wider scope by writing one into its

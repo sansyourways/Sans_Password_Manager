@@ -2147,6 +2147,19 @@ if "should-not-cross" in repr(listed):
 if project("unlock", {"ok": True, "matches": [{"id": "1"}]}) != {"ok": True}:
     sys.exit("unlock returned more than a verdict")
 
+# status describes the session and never the vault. It is the one action that
+# answers while locked, so it is the one most likely to grow a convenient extra
+# field later -- "and which accounts would match here" is exactly the shape
+# that would be added without noticing what it discloses.
+state = project("status", {"ok": True, "unlocked": True, "idle": 300,
+                           "expires_in": 42, "password": "p", "master": "m",
+                           "matches": [{"id": "1", "label": "GitHub"}]})
+if set(state) != {"ok", "unlocked", "idle", "expires_in"}:
+    sys.exit("a status response carried %r"
+             % sorted(set(state) - {"ok", "unlocked", "idle", "expires_in"}))
+if "GitHub" in repr(state) or "p" == state.get("password"):
+    sys.exit("status disclosed vault contents")
+
 # Failures are chosen from a fixed set. Echoing an unexpected message is how a
 # path or a gpg diagnostic reaches the extension.
 for supplied in ("gpg: /home/someone/.spm_vault.gpg: decryption failed",
@@ -2165,7 +2178,7 @@ if project("get", {"ok": False, "error": "record not found"})["error"] != "recor
 if project("some-new-action", {"ok": True, "password": "p"}) != {"ok": True}:
     sys.exit("an undeclared action returned fields")
 
-if set(actions) != {"unlock", "lock", "list", "get"}:
+if set(actions) != {"unlock", "lock", "list", "get", "status"}:
     sys.exit("the action table changed without this test changing: %r" % sorted(actions))
 
 # Every refusal the core's matcher can produce must be declared here. A

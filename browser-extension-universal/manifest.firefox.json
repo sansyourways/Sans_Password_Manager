@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Sans Password Manager",
-  "version": "4.6.0",
+  "version": "4.7.0",
   "description": "Explicit, domain-bound autofill through the local SPM native host.",
   "permissions": [
     "activeTab",
     "nativeMessaging",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "background": {
     "scripts": [

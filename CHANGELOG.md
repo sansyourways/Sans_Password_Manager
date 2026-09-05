@@ -7,6 +7,67 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.7.0] - 2026-09-05
+
+The browser session locks when you say it does, and a four-release-old
+assumption gets corrected by measurement.
+
+### Added
+- **The bridge session's idle timeout is a setting.** The popup offers 1
+  minute, 5 minutes (the previous fixed value, still the default), 15 minutes,
+  30 minutes and 1 hour, and remembers the choice. It was previously readable
+  only from `SPM_BRIDGE_IDLE_SECONDS`, an environment variable a browser never
+  sets -- so in practice it was not adjustable at all.
+- The popup shows how long the session has left and the limit it is counting
+  against, instead of describing the lock in the future tense.
+- A `status` action on the native host, returning whether a session is open,
+  the idle window it was opened with, and the seconds remaining. It is the one
+  action that answers while locked, and it describes the session only -- never
+  the vault.
+
+### Changed
+- The host clamps the requested window rather than obeying or refusing it:
+  between 30 seconds and a ceiling of 1 hour (`SPM_BRIDGE_IDLE_CEILING`), and
+  never beyond the absolute session cap. Refusing an out-of-range value would
+  let a caller map the configuration by probing it.
+- A session keeps the terms it was unlocked with for its whole life, and a
+  failed unlock changes nothing.
+
+### Security
+- A longer idle window means the master password stays in the native host's
+  memory for longer. That is the trade being offered, the default does not
+  move, and the ceiling exists so the extension cannot ask for an unbounded
+  one.
+- `status` is projected like every other response: a field that is not
+  `unlocked`, `idle` or `expires_in` cannot cross, so a later "and which
+  accounts would match here" cannot be added without editing the table.
+
+### Tested
+- The picker's browser test asserted a fill after a fixed sleep. A commit runs
+  a vault decryption in a subprocess, so that was a bet on the machine; the
+  positive assertions now wait for the value. The negative one -- that a
+  synthetic keypress fills nothing -- was the dangerous half: on too short a
+  clock it passed with the trusted-event gate deleted, because the fill had not
+  landed yet. It now waits long enough for a fill to arrive and is followed by
+  a positive control proving real keys still fill.
+
+### Roadmap
+- **WebAuthn unlock in the extension popup is closed, unbuilt.** A WebAuthn
+  credential is bound to the relying-party id it was created under, and
+  Chromium asserts one from a `chrome-extension://` origin only when that id is
+  the extension's own. The credential enrolled for the Dashboard therefore
+  cannot ever be used by the popup, so "reuse the Dashboard's ceremony" was not
+  a design choice that needed making -- it was unavailable. Measured: the call
+  succeeds with the extension id and raises a `SecurityError` for the
+  Dashboard's domain.
+- **The reason that item existed was also wrong.** The browser-extension
+  roadmap has said since 3.1.0 that MV3 tears service workers down
+  aggressively, so re-unlocking would be frequent and the fix was a cheaper
+  unlock. Measured in Chromium 151: with SPM's own timeout raised out of the
+  way, an unlocked session survived **ten minutes of completely untouched
+  idle**, service worker still running. What ended sessions was SPM's own
+  300-second default -- which is what this release makes adjustable.
+
 ## [4.6.0] - 2026-09-05
 
 Autofill where the login form is, without the account list ever entering the

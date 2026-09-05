@@ -11,12 +11,40 @@ import time
 MAX_MESSAGE = 64 * 1024
 IDLE_SECONDS = int(os.environ.get("SPM_BRIDGE_IDLE_SECONDS", "300"))
 MAX_SECONDS = int(os.environ.get("SPM_BRIDGE_MAX_SECONDS", "43200"))
+# The longest idle window a caller may ask for. The environment variable still
+# sets the default, and an operator who wants something longer than this raises
+# it there; what this bounds is what a *message* can ask for, because the
+# extension is the least trusted thing that speaks to this host.
+IDLE_CEILING = int(os.environ.get("SPM_BRIDGE_IDLE_CEILING", "3600"))
+IDLE_FLOOR = 30
 SPM_BIN = os.environ.get("SPM_BIN", "/usr/local/bin/spm")
 HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.I)
 
 master = None
 unlocked_at = 0.0
 last_used = 0.0
+# The idle window this session was unlocked with. Held per session rather than
+# read from the environment on each check, so a session keeps the terms it was
+# started under for its whole life.
+idle_window = IDLE_SECONDS
+
+
+def valid_idle(value):
+    """An idle window a caller may ask for, clamped rather than refused.
+
+    Refusing an out-of-range value would give a caller a way to distinguish
+    configurations by probing, and there is nothing to gain by it: the answer
+    to "may I have twelve hours" is the ceiling, and the answer to "may I have
+    one second" is the floor.
+    """
+    if value is None:
+        return IDLE_SECONDS
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        return IDLE_SECONDS
+    ceiling = min(IDLE_CEILING, MAX_SECONDS)
+    return max(IDLE_FLOOR, min(seconds, ceiling))
 
 def read_message():
     raw = sys.stdin.buffer.read(4)
@@ -74,6 +102,11 @@ ACTIONS = {
     "lock": (),
     "list": ("matches",),
     "get": ("username", "password"),
+    # Session state, and nothing that depends on the vault: whether a session
+    # is open, the window it was opened with, and how long is left. A popup
+    # that cannot see this has to describe the lock in the future tense and be
+    # wrong about it.
+    "status": ("unlocked", "idle", "expires_in"),
 }
 MATCH_FIELDS = ("id", "label", "username", "url")
 
@@ -135,19 +168,33 @@ def run_spm(command, *args, password):
 def is_unlocked():
     global master
     now = time.monotonic()
-    if master is not None and now-last_used <= IDLE_SECONDS and now-unlocked_at <= MAX_SECONDS:
+    if master is not None and now-last_used <= idle_window and now-unlocked_at <= MAX_SECONDS:
         return True
     master = None
     return False
 
+
+def seconds_left():
+    """Whichever bound expires first, which is the one a user cares about."""
+    if master is None:
+        return 0
+    now = time.monotonic()
+    return int(max(0, min(idle_window - (now - last_used), MAX_SECONDS - (now - unlocked_at))))
+
 def handle(message):
-    global master, unlocked_at, last_used
+    global master, unlocked_at, last_used, idle_window
     action = message.get("action")
     if action not in ACTIONS:
         return {"ok":False,"error":"unsupported native messaging action"}
     if action == "lock":
         master = None
         return {"ok":True}
+    if action == "status":
+        # Deliberately answered before the unlock check: "locked" is the honest
+        # answer to this question, not a refusal.
+        open_session = is_unlocked()
+        return {"ok":True, "unlocked":open_session, "idle":idle_window,
+                "expires_in":seconds_left() if open_session else 0}
     if action == "unlock":
         candidate = message.get("master")
         if not isinstance(candidate, str) or not candidate:
@@ -156,6 +203,7 @@ def handle(message):
                            valid_scheme(message.get("scheme")), password=candidate)
         if response.get("ok"):
             master = candidate; unlocked_at = last_used = time.monotonic()
+            idle_window = valid_idle(message.get("idle"))
         # unlock reports success or failure and nothing else: the list it used
         # to verify the password is not the caller's to receive here.
         return project("unlock", response)

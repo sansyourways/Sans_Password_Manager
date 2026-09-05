@@ -118,12 +118,25 @@ locks the vault.
 Limits mirror the Dashboard's, which are already proven in production: an idle
 expiry plus an absolute cap, both overridable by environment variable.
 
-**Known cost, stated up front.** MV3 service workers are torn down aggressively.
-A connected native port extends a worker's life but does not pin it forever, so
-re-unlocking will happen more often than in a manager with a persistent
-background page. The mitigation is not a longer session — it is making unlock
-cheap, by reusing the WebAuthn ceremony the Dashboard already implements so
-re-unlocking is a Touch ID tap. That is phase 3 rather than a blocker.
+**Known cost, stated up front — and wrong, corrected in 4.7.0.** This said MV3
+service workers are torn down aggressively, that a connected native port
+extends a worker's life without pinning it, and that re-unlocking would
+therefore happen more often than in a manager with a persistent background
+page. The mitigation it named was not a longer session but a cheaper unlock,
+reusing the Dashboard's WebAuthn ceremony so re-unlocking is a Touch ID tap.
+
+Measured in Chromium 151, that is not what happens. With SPM's own idle timeout
+raised out of the way, an unlocked bridge session survived **ten minutes of
+completely untouched idle** with its service worker still running: the
+connected native port does keep the worker alive over that span. What ends a
+session in ordinary use is SPM's own 300-second idle timeout, which the
+extension could not change because it was read from an environment variable no
+browser ever sets.
+
+So the cost was real and the cause was misattributed, which sent the fix to the
+wrong place for four releases. 4.7.0 made the idle window a choice the popup
+offers and the host clamps. The WebAuthn item that this paragraph justified is
+closed below, on separate grounds that are also measured.
 
 ## The in-field dropdown — **shipped in 4.6.0**
 
@@ -257,12 +270,26 @@ an unverified target rather than a supported one.
   downgrade protection and one matcher in the trusted core: `bridge-list` and
   `bridge-get` each carried their own copy of the rule that decides whether a
   page may see a credential.
-- WebAuthn unlock in the popup, reusing the Dashboard's ceremony. **Needs a
-  design decision before it needs code.** The popup reaches SPM through the
-  native host, which takes no part in the Dashboard's WebAuthn ceremony and
-  holds no session for an assertion to attach to. Where a verified assertion is
-  redeemed is the open question; answering it badly puts a second unlock path
-  beside the one that already exists.
+- ~~WebAuthn unlock in the popup, reusing the Dashboard's ceremony.~~
+  **Explored in 4.7.0 and closed. It cannot be built as written, and the reason
+  is a platform rule rather than a design preference.**
+
+  A WebAuthn credential is bound to the relying-party id it was created under,
+  and a browser will assert a credential only when that RP id is a registrable
+  suffix of the calling origin. The Dashboard registers credentials under its
+  own domain. The popup's origin is `chrome-extension://<id>`, which has no
+  domain: Chromium accepts an assertion there only when the RP id is the
+  extension's own id, and refuses any other outright. Measured rather than
+  reasoned about -- from the popup, `navigator.credentials.create` succeeds
+  with the extension id and raises a SecurityError for the Dashboard's domain.
+
+  So the credential a user already enrolled for the Dashboard can never be used
+  by the popup. A popup ceremony would need its own enrolment under the
+  extension id: a second credential, a second thing to lose, and a second
+  unlock path -- which is the outcome this item was written to avoid.
+
+  The premise underneath it did not survive measurement either; see the session
+  model above. 4.7.0 fixed what actually ends a session instead.
 - Optional: save-on-submit prompt for new credentials
 
 ## Testing

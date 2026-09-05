@@ -117,6 +117,27 @@ async function menuFrame(page, timeout = 8000) {
  * script calls. evaluateOnNewDocument runs at document start, ahead of the
  * document_idle injection, which is the ordering a real page would have.
  */
+/* Waits for the fill to land instead of sleeping a magic number.
+ *
+ * A commit runs a real vault decryption in a subprocess, so how long it takes
+ * is a property of the machine rather than of the code under test. A fixed
+ * sleep that is long enough today fails the moment the box is busy, and it
+ * fails as "the password was not filled" -- which reads like a defect in the
+ * fill. Waiting for the condition removes the clock from the assertion.
+ *
+ * A negative assertion still uses a fixed wait, because there is no event to
+ * wait for when the correct outcome is that nothing happens.
+ */
+async function waitForFill(page, timeout = 8000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const filled = await page.evaluate(() => window.__nativeValue() !== "");
+    if (filled) break;
+    await sleep(100);
+  }
+  return pageState(page);
+}
+
 async function openLogin() {
   const page = await browser.newPage();
   await page.evaluateOnNewDocument(() => {
@@ -208,8 +229,7 @@ try {
   /* ---- a real click fills, through the prototype setter ---- */
   try { await frame.click("button"); }
   catch (error) { check(false, `the picker vanished before it could be clicked: ${error}`); }
-  await sleep(900);
-  state = await pageState(page);
+  state = await waitForFill(page);
   check(state.user === "avery@example.invalid", `the username was not filled: ${JSON.stringify(state.user)}`);
   check(state.password === SECRET, `the password was not filled: ${JSON.stringify(state.password)}`);
   check(state.honeypot === "" && state.disabled === "" && state.readonly === "",
@@ -233,10 +253,26 @@ try {
       field.dispatchEvent(new KeyboardEvent("keydown", {key, bubbles: true, cancelable: true}));
     }
   });
-  await sleep(900);
+  // Long enough that a fill would have landed. A commit runs a vault
+  // decryption in a subprocess, so a short wait here reports "nothing was
+  // filled" for a gate that is not there at all -- which is how removing the
+  // isTrusted check once passed this test.
+  await sleep(6000);
   state = await pageState(page);
   check(state.user === "" && state.password === "",
         `a synthetic keypress filled the form: ${JSON.stringify(state)}`);
+
+  // The positive control, on the same page and the same menu: real keys fill.
+  // Without it, "nothing was filled" could equally mean the picker had already
+  // closed, the session had expired, or the harness was broken -- and every one
+  // of those reads as a pass.
+  await page.keyboard.press("ArrowDown");
+  await sleep(200);
+  await page.keyboard.press("Enter");
+  state = await waitForFill(page);
+  check(state.password === SECRET,
+        "the gesture pass proved nothing: real keys did not fill either, so the "
+        + "empty form above is not evidence that the synthetic ones were refused");
   await page.close();
 
   /* ---- keyboard navigation, with real keys ---- */
@@ -246,8 +282,7 @@ try {
   await page.keyboard.press("ArrowDown");
   await sleep(200);
   await page.keyboard.press("Enter");
-  await sleep(900);
-  state = await pageState(page);
+  state = await waitForFill(page);
   check(state.password === SECRET,
         `arrow keys and Enter did not fill: ${JSON.stringify(state.password)}`);
   await page.close();

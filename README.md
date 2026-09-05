@@ -89,7 +89,7 @@ SPM may not be a good fit when you need:
 - Interactive terminal interface plus a local web dashboard in twelve languages, including right-to-left Arabic.
 - Passphrases, backup codes, authenticator/TOTP entries, and biometric unlock where supported.
 - Import and export across common and advanced text formats.
-- Browser extensions for Chromium and Firefox with a local native host, including an in-field account picker rendered at the extension's own origin so the page cannot read your account list.
+- Browser extensions for Chromium and Firefox with a local native host, including an in-field account picker rendered at the extension's own origin so the page cannot read your account list, and a session lock you set.
 - Portable and save bundles for user-controlled transfer and recovery.
 - Pluggable sync transports (directory, rsync, rclone) that move only encrypted bytes to infrastructure you already run.
 - Bulk tidy for imported vaults: folders read from notes, package identifiers renamed, reviewed before anything is written.
