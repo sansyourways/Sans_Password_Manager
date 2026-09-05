@@ -1154,6 +1154,16 @@ def t_events_detail_vocabulary_is_closed():
     for good in ("", "scope=live", "records=12", "format=3",
                  "scope=live,reason=bad-master"):
         core.event_line("2026-01-01T00:00:00Z", "write", "ok", good)
+    # Security-key events go through the same closed vocabulary. They were
+    # first written as free text -- record_event swallows what it cannot
+    # encode, so every one of them was silently dropped and nothing said so.
+    for good in ("reason=enrolled", "reason=forgotten", "reason=bad-secret",
+                 "reason=vault-replaced"):
+        core.event_line("2026-01-01T00:00:00Z", "hardware", "ok", good)
+    raises(ValueError,
+           lambda: core.event_line("2026-01-01T00:00:00Z", "hardware", "ok",
+                                   "reason=YubiKey 5C"),
+           "event_line accepted a device label as a reason")
 
 
 def t_events_never_fail_the_operation_they_describe():
@@ -1975,6 +1985,137 @@ def t_damage_is_reported_as_damage_not_as_a_wrong_password():
                if event["outcome"] == "fail"]
     eq(sorted(set(reasons)), ["bad-master", "corrupt"],
        "the log must record which of the two refusals happened")
+
+
+# --- security keys ----------------------------------------------------------
+# The vault key sealed under 32 bytes an authenticator derives. Everything
+# below uses fixed byte strings in place of a real PRF result: what the core
+# has to be right about is the wrapping, not where the bytes came from.
+
+KEY_A = bytes(range(32))
+KEY_B = bytes(range(32, 64))
+
+
+def t_hardware_wrap_round_trips_and_refuses_the_wrong_key():
+    vault_key = core.new_vault_key()
+    wrapped = core.hardware_wrap_key(KEY_A, vault_key)
+    eq(core.hardware_unwrap_key(KEY_A, wrapped), vault_key)
+    raises(core.VaultSecretError,
+           lambda: core.hardware_unwrap_key(KEY_B, wrapped),
+           "a different security key must not unwrap the vault key")
+
+
+def t_hardware_wrap_refuses_a_secret_of_the_wrong_size():
+    vault_key = core.new_vault_key()
+    for bad in (b"", b"short", bytes(31), bytes(33)):
+        raises(core.VaultError,
+               lambda bad=bad: core.hardware_wrap_key(bad, vault_key),
+               "a %d-byte secret must be refused" % len(bad))
+    raises(core.VaultError,
+           lambda: core.hardware_wrap_key("x" * 32, vault_key),
+           "a str secret must be refused")
+
+
+def t_hardware_unwrap_refuses_junk_without_leaking_which_kind():
+    vault_key = core.new_vault_key()
+    wrapped = core.hardware_wrap_key(KEY_A, vault_key)
+    for bad in ("not base64!!", "", core.base64.b64encode(b"tiny").decode("ascii"),
+                wrapped[:-4] + "AAAA"):
+        raises(core.VaultSecretError,
+               lambda bad=bad: core.hardware_unwrap_key(KEY_A, bad),
+               "a damaged envelope must be refused")
+
+
+def t_hardware_file_holds_one_salt_for_every_key():
+    path = fresh("hardware-salt")
+    vault_key = core.new_vault_key()
+    core.write_vault(path, MASTER, core.stamp_version(sample()), vault_key)
+
+    salt = core.hardware_salt(path)
+    eq(core.read_hardware(path), {"salt": "", "keys": []},
+       "reading the salt must not create the file")
+    state = core.add_hardware_key(path, "cred-a", core.hardware_wrap_key(KEY_A, vault_key),
+                                  "example.invalid", "YubiKey", "2026-01-01T00:00:00Z", salt)
+    eq(state["salt"], salt)
+    # A second key minted its own salt while the file was empty. It lost.
+    raises(core.VaultError,
+           lambda: core.add_hardware_key(path, "cred-b", "x", "example.invalid",
+                                         "Backup", "2026-01-01T00:00:00Z",
+                                         core.new_hardware_salt()),
+           "a salt that disagrees with the stored one must be refused")
+    state = core.add_hardware_key(path, "cred-b", core.hardware_wrap_key(KEY_B, vault_key),
+                                  "example.invalid", "Backup", "2026-01-01T00:00:00Z",
+                                  core.hardware_salt(path))
+    eq(state["salt"], salt, "the second key must be enrolled under the first salt")
+    eq(len(state["keys"]), 2)
+    # Two keys, one salt, two different envelopes -- and neither opens the
+    # other's.
+    entries = {entry["credential_id"]: entry["wrapped"] for entry in state["keys"]}
+    eq(core.hardware_unwrap_key(KEY_A, entries["cred-a"]), vault_key)
+    eq(core.hardware_unwrap_key(KEY_B, entries["cred-b"]), vault_key)
+    raises(core.VaultSecretError,
+           lambda: core.hardware_unwrap_key(KEY_A, entries["cred-b"]),
+           "one key must not open another key's envelope")
+
+
+def t_hardware_file_is_private_and_disappears_with_the_last_key():
+    path = fresh("hardware-file")
+    vault_key = core.new_vault_key()
+    core.write_vault(path, MASTER, core.stamp_version(sample()), vault_key)
+    salt = core.hardware_salt(path)
+    core.add_hardware_key(path, "cred-a", core.hardware_wrap_key(KEY_A, vault_key),
+                          "example.invalid", "YubiKey\ttabbed\nname" + "x" * 90,
+                          "2026-01-01T00:00:00Z", salt)
+    target = core.hardware_path(path)
+    eq(stat.S_IMODE(os.stat(target).st_mode), 0o600,
+       "the security-key file must not be readable by anyone else")
+    label = core.read_hardware(path)["keys"][0]["label"]
+    eq(label, ("YubiKey tabbed name" + "x" * 90)[:64],
+       "a label must be flattened and truncated before it reaches the file")
+
+    core.remove_hardware_key(path, "cred-a")
+    eq(os.path.exists(target), False,
+       "the file must be removed when the last key is forgotten")
+    eq(core.read_hardware(path), {"salt": "", "keys": []})
+
+
+def t_hardware_file_that_is_damaged_is_named_rather_than_ignored():
+    path = fresh("hardware-damaged")
+    core.write_vault(path, MASTER, core.stamp_version(sample()), core.new_vault_key())
+    with open(core.hardware_path(path), "w", encoding="utf-8") as handle:
+        handle.write("{ this is not json")
+    # "no keys enrolled" would invite the user to enrol again over the top of
+    # a file they might still need.
+    raises(core.VaultError, lambda: core.read_hardware(path),
+           "a damaged security-key file must be reported")
+
+
+def t_a_write_without_a_master_password_keeps_the_key_envelope():
+    path = fresh("hardware-write")
+    vault_key = core.new_vault_key()
+    core.write_vault(path, MASTER, core.stamp_version(sample()), vault_key)
+    wrapped = core.hardware_wrap_key(KEY_A, vault_key)
+
+    # The write a security-key session makes: it holds the vault key and no
+    # password at all.
+    updated = core.stamp_version(sample()) + \
+        "2\tSecond\tuser2@example.invalid\tAnother42\t-\t2026-01-01T00:00:00Z\n"
+    core.write_vault(path, None, updated, vault_key)
+
+    eq(core.read_vault(path, MASTER)[0], updated,
+       "the master password must still open the vault after a password-less write")
+    eq(core.unwrap_key(path, MASTER), vault_key,
+       "the key envelope must be the same one, not a fresh seal")
+    eq(core.hardware_unwrap_key(KEY_A, wrapped), vault_key,
+       "the enrolled key must still unwrap the live vault key")
+
+    # The mistake this mode exists to make impossible: an empty password is a
+    # password, and sealing under it would leave the vault open to anyone.
+    raises(core.VaultError, lambda: core.write_vault(path, None, updated, None),
+           "a password-less write with no vault key must be refused")
+    core.write_vault(path, "", updated, vault_key)
+    raises(core.VaultSecretError, lambda: core.read_vault(path, MASTER),
+       "an empty-string master is a real password and must reseal the envelope")
 
 
 def t_doctor_names_the_backend_that_sealed_the_file():

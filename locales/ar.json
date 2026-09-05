@@ -378,6 +378,26 @@
     "security.tally_old": "قديمة",
     "security.tally_incomplete": "ناقصة",
     "security.tally_malformed": "تالفة",
-    "security.tally_clean": "لا شيء يخفض هذه الدرجة."
+    "security.tally_clean": "لا شيء يخفض هذه الدرجة.",
+    "nav.hardware": "مفاتيح الأمان",
+    "page.hardware.desc": "افتح هذه الخزنة بمفتاح أمان بدلاً من كلمة المرور الرئيسية.",
+    "settings.hardware.title": "مفاتيح الأمان",
+    "settings.hardware.desc": "أدر المفاتيح التي يمكنها فتح هذه الخزنة دون كلمة المرور الرئيسية.",
+    "settings.hardware.manage": "إدارة مفاتيح الأمان",
+    "login.hardware": "الفتح بمفتاح أمان",
+    "hardware.enrolled": "تاريخ التسجيل",
+    "hardware.credential": "المعرّف",
+    "hardware.empty": "لم يُسجَّل أي مفتاح أمان بعد",
+    "hardware.empty_sub": "سجّل واحداً أدناه لفتح هذه الخزنة دون كتابة كلمة المرور الرئيسية",
+    "hardware.field.label": "اسم هذا المفتاح",
+    "hardware.enrol": "تسجيل مفتاح الأمان هذا",
+    "hardware.note": "المفتاح المسجَّل هنا يفتح الخزنة بمفرده، فهو بقوة كلمة المرور الرئيسية تماماً ويجب حفظه بالطريقة نفسها. الجلسة التي يفتحها لا تحمل كلمة مرور رئيسية: لا يمكنها تغيير كلمة المرور الرئيسية ولا استعادة نسخة احتياطية.",
+    "hardware.waiting": "المس مفتاح الأمان...",
+    "hardware.failed": "مفتاح الأمان هذا لا يفتح هذه الخزنة.",
+    "hardware.noprf": "لا يستطيع مفتاح الأمان هذا اشتقاق سر الخزنة.",
+    "hardware.enrol_failed": "فشل التسجيل.",
+    "hardware.nosupport": "هذا المتصفح لا يستطيع التخاطب مع مفتاح أمان.",
+    "hardware.confirm_forget": "هل تريد إزالة مفتاح الأمان هذا؟",
+    "hardware.forget_failed": "تعذّرت إزالة مفتاح الأمان."
   }
 }

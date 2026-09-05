@@ -378,6 +378,26 @@
     "security.tally_old": "件 期限超過",
     "security.tally_incomplete": "件 情報不足",
     "security.tally_malformed": "件 不正",
-    "security.tally_clean": "この点数を下げているものはありません。"
+    "security.tally_clean": "この点数を下げているものはありません。",
+    "nav.hardware": "セキュリティキー",
+    "page.hardware.desc": "マスターパスワードの代わりにセキュリティキーでこの保管庫を開きます。",
+    "settings.hardware.title": "セキュリティキー",
+    "settings.hardware.desc": "マスターパスワードなしでこの保管庫を開けるキーを管理します。",
+    "settings.hardware.manage": "セキュリティキーを管理",
+    "login.hardware": "セキュリティキーでロック解除",
+    "hardware.enrolled": "登録日時",
+    "hardware.credential": "資格情報",
+    "hardware.empty": "登録済みのセキュリティキーはまだありません",
+    "hardware.empty_sub": "マスターパスワードを入力せずにこの保管庫を開くには、下で登録してください",
+    "hardware.field.label": "このキーのラベル",
+    "hardware.enrol": "このセキュリティキーを登録",
+    "hardware.note": "ここに登録したキーは単独で保管庫を開きます。つまりマスターパスワードとまったく同じ強さを持つため、同じように管理してください。このキーで開いたセッションはマスターパスワードを保持しません。マスターパスワードの変更もスナップショットの復元もできません。",
+    "hardware.waiting": "セキュリティキーに触れてください...",
+    "hardware.failed": "そのセキュリティキーではこの保管庫を開けません。",
+    "hardware.noprf": "このセキュリティキーは保管庫の秘密値を導出できません。",
+    "hardware.enrol_failed": "登録に失敗しました。",
+    "hardware.nosupport": "このブラウザーはセキュリティキーと通信できません。",
+    "hardware.confirm_forget": "このセキュリティキーを削除しますか？",
+    "hardware.forget_failed": "セキュリティキーを削除できませんでした。"
   }
 }

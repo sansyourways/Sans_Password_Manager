@@ -46,6 +46,7 @@ Current release: **4.7.0**
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
   - [Doctor / Health Check](#doctor--health-check)
 - [Hidden entries](#hidden-entries)
+- [Security keys](#security-keys)
 - [How the vault is sealed](#how-the-vault-is-sealed)
 - [Languages](#languages)
 - [Split recovery](#split-recovery)
@@ -266,6 +267,9 @@ filters and result count visible](docs/screenshots/web-v2.13.0/31-passwords-filt
 - Named vault profiles and conflict-aware filesystem synchronization
 - Recipient-encrypted emergency kits with authenticated contents
 - Platform passkey metadata and an exact-domain native browser bridge
+- Security keys that open the vault outright: the vault key sealed under
+  the bytes a WebAuthn PRF credential derives, with no master password in
+  that path at all
 - Portable and SAVE bundles with recovery private keys excluded by default
 - RSA-based self-custodied recovery and built-in doctor diagnostics
 
@@ -1076,6 +1080,82 @@ Exports carry a `hidden` column. An unrecognised value in it means visible.
 
 ---
 
+## Security keys
+
+Biometric unlock resumes a session your master password opened. A security key
+**opens the vault**, cold, with no master password typed, remembered or held
+anywhere. The two are independent: you can enrol either, both, or neither.
+
+Set a relying-party id (`SPM_WEB_RP_ID`) and **Settings -> Security Keys**
+appears. Enrol a key there and the sign-in page offers *Unlock with a security
+key*.
+
+### What it needs
+
+A WebAuthn authenticator that supports the **PRF** extension (CTAP2
+`hmac-secret`). Most current FIDO2 keys do; a platform authenticator may or may
+not. Enrolment refuses a key that cannot derive a secret rather than storing
+one that could never open the vault.
+
+The credential is created as **discoverable** with **user verification
+required**. Discoverable, so the sign-in page can ask the browser for whatever
+it holds instead of publishing which credential ids exist. User verification
+required, because possession of the key alone would otherwise be possession of
+the vault.
+
+### How the vault key is sealed under a device
+
+A PRF credential derives 32 deterministic bytes from a salt: the same key and
+salt always give the same bytes, and no other key gives them. SPM seals the
+vault key under those bytes and writes the result to `<vault>.hardware`, mode
+0600, beside the vault.
+
+Beside it rather than inside it, for the reason that decides the whole design:
+a cold unlock has to read the enrolled keys *before* anything is decrypted, so
+they cannot live in the encrypted vault.
+
+One salt per vault, not one per key. The salt must be chosen before the
+ceremony, and the ceremony is what reveals which key answered. It costs
+nothing: the PRF result is per credential, so two keys given the same salt
+derive two different secrets and seal two different envelopes, and neither
+opens the other's.
+
+If that file is taken, what it discloses is which credential ids are enrolled
+and a vault key sealed under 32 bytes that exist only inside an authenticator.
+There is no password in that path for an offline attacker to work on.
+
+### What a security-key session can and cannot do
+
+It reads and writes the vault normally. A write keeps the key envelope it found
+rather than sealing a new one, so your master password still opens the vault
+afterwards.
+
+Two things are refused, both because they need a password the session never
+had:
+
+| Refused | Why |
+| --- | --- |
+| **Changing the master password** | there is nothing to compare the typed "current password" against, and accepting one would let anyone holding the key set the password that also opens the vault |
+| **Restoring a snapshot** | a restore installs a vault sealed under a different vault key -- the key every enrolled credential wraps -- so it would invalidate the only credential the session holds |
+
+Sign in with your master password to do either.
+
+If the vault file is replaced while a security-key session is open, the session
+ends: there is no password in it to re-derive a key from. The reason is written
+to the [security events](#security-events) log, which is readable while locked.
+
+### What is recorded
+
+`Security key` events cover enrolment, removal, a key that does not open this
+vault, and a vault replaced under a live session. Like every other event, they
+carry no device label and no record identity -- only what happened.
+
+### Treat an enrolled key like the master password
+
+It opens the vault on its own. That is the whole point of it and the whole cost
+of it. Losing it is not a lockout as long as you still know your master
+password; a key someone else has is a vault someone else has.
+
 ## How the vault is sealed
 
 From 4.0.0 a vault is encrypted with **AES-256-CTR** and authenticated with
@@ -1769,6 +1849,12 @@ that can export the credential key (`getPublicKey()`, Safari 16+), assertions
 are verified with `openssl` against ES256, and user verification is required —
 a bare presence tap is refused. No relying-party id means the feature and its
 endpoints do not exist at all. Failed unlocks share the login lockout budget.
+
+A relying-party id also enables **security keys**, which are a different
+thing from biometric unlock and are described in [Security
+keys](#security-keys): biometric unlock *resumes* a session the master password
+opened, and a security key *opens* the vault with no master password involved
+at any point.
 
 The origin that assertions are checked against follows the relying-party id,
 not the address SPM binds: `localhost` implies `http://localhost:<port>` (the one host

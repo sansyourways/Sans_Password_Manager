@@ -378,6 +378,26 @@
     "security.tally_old": "veraltet",
     "security.tally_incomplete": "unvollständig",
     "security.tally_malformed": "fehlerhaft",
-    "security.tally_clean": "Nichts drückt diese Bewertung."
+    "security.tally_clean": "Nichts drückt diese Bewertung.",
+    "nav.hardware": "Sicherheitsschlüssel",
+    "page.hardware.desc": "Öffne diesen Tresor mit einem Sicherheitsschlüssel statt mit deinem Hauptpasswort.",
+    "settings.hardware.title": "Sicherheitsschlüssel",
+    "settings.hardware.desc": "Verwalte die Schlüssel, die diesen Tresor ohne dein Hauptpasswort öffnen können.",
+    "settings.hardware.manage": "Sicherheitsschlüssel verwalten",
+    "login.hardware": "Mit Sicherheitsschlüssel entsperren",
+    "hardware.enrolled": "Registriert",
+    "hardware.credential": "Anmeldedaten",
+    "hardware.empty": "Noch kein Sicherheitsschlüssel registriert",
+    "hardware.empty_sub": "Registriere unten einen, um diesen Tresor ohne Eingabe des Hauptpassworts zu öffnen",
+    "hardware.field.label": "Bezeichnung für diesen Schlüssel",
+    "hardware.enrol": "Diesen Sicherheitsschlüssel registrieren",
+    "hardware.note": "Ein hier registrierter Schlüssel öffnet den Tresor allein und ist damit genauso mächtig wie das Hauptpasswort – bewahre ihn entsprechend auf. Eine damit geöffnete Sitzung hält kein Hauptpasswort: Sie kann weder das Hauptpasswort ändern noch einen Schnappschuss wiederherstellen.",
+    "hardware.waiting": "Berühre deinen Sicherheitsschlüssel...",
+    "hardware.failed": "Dieser Sicherheitsschlüssel öffnet diesen Tresor nicht.",
+    "hardware.noprf": "Dieser Sicherheitsschlüssel kann kein Tresorgeheimnis ableiten.",
+    "hardware.enrol_failed": "Registrierung fehlgeschlagen.",
+    "hardware.nosupport": "Dieser Browser kann nicht mit einem Sicherheitsschlüssel sprechen.",
+    "hardware.confirm_forget": "Diesen Sicherheitsschlüssel entfernen?",
+    "hardware.forget_failed": "Der Sicherheitsschlüssel konnte nicht entfernt werden."
   }
 }

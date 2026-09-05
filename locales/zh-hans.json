@@ -378,6 +378,26 @@
     "security.tally_old": "个已过期",
     "security.tally_incomplete": "个不完整",
     "security.tally_malformed": "个异常",
-    "security.tally_clean": "没有任何因素拉低此分数。"
+    "security.tally_clean": "没有任何因素拉低此分数。",
+    "nav.hardware": "安全密钥",
+    "page.hardware.desc": "用安全密钥打开此密码库，而不是主密码。",
+    "settings.hardware.title": "安全密钥",
+    "settings.hardware.desc": "管理无需主密码即可打开此密码库的密钥。",
+    "settings.hardware.manage": "管理安全密钥",
+    "login.hardware": "使用安全密钥解锁",
+    "hardware.enrolled": "注册时间",
+    "hardware.credential": "凭据",
+    "hardware.empty": "尚未注册任何安全密钥",
+    "hardware.empty_sub": "在下方注册一个，即可不输入主密码打开此密码库",
+    "hardware.field.label": "此密钥的名称",
+    "hardware.enrol": "注册此安全密钥",
+    "hardware.note": "在此注册的密钥可以单独打开密码库，因此它与主密码同样强大，也应当同样妥善保管。用它打开的会话不持有主密码：既不能更改主密码，也不能还原快照。",
+    "hardware.waiting": "请触摸你的安全密钥……",
+    "hardware.failed": "该安全密钥无法打开此密码库。",
+    "hardware.noprf": "此安全密钥无法派生密码库密钥。",
+    "hardware.enrol_failed": "注册失败。",
+    "hardware.nosupport": "此浏览器无法与安全密钥通信。",
+    "hardware.confirm_forget": "要移除此安全密钥吗？",
+    "hardware.forget_failed": "无法移除此安全密钥。"
   }
 }

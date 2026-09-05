@@ -378,6 +378,26 @@
     "security.tally_old": "antiguas",
     "security.tally_incomplete": "incompletas",
     "security.tally_malformed": "mal formados",
-    "security.tally_clean": "Nada está bajando esta puntuación."
+    "security.tally_clean": "Nada está bajando esta puntuación.",
+    "nav.hardware": "Llaves de seguridad",
+    "page.hardware.desc": "Abre esta caja fuerte con una llave de seguridad en lugar de tu contraseña maestra.",
+    "settings.hardware.title": "Llaves de seguridad",
+    "settings.hardware.desc": "Gestiona las llaves que pueden abrir esta caja fuerte sin tu contraseña maestra.",
+    "settings.hardware.manage": "Gestionar llaves de seguridad",
+    "login.hardware": "Desbloquear con una llave de seguridad",
+    "hardware.enrolled": "Registrada",
+    "hardware.credential": "Credencial",
+    "hardware.empty": "Todavía no hay ninguna llave de seguridad registrada",
+    "hardware.empty_sub": "Registra una abajo para abrir esta caja fuerte sin escribir tu contraseña maestra",
+    "hardware.field.label": "Nombre de esta llave",
+    "hardware.enrol": "Registrar esta llave de seguridad",
+    "hardware.note": "Una llave registrada aquí abre la caja fuerte por sí sola, así que es exactamente tan poderosa como la contraseña maestra y debe guardarse igual. Una sesión abierta con ella no guarda ninguna contraseña maestra: no puede cambiar la contraseña maestra ni restaurar una instantánea.",
+    "hardware.waiting": "Toca tu llave de seguridad...",
+    "hardware.failed": "Esa llave de seguridad no abre esta caja fuerte.",
+    "hardware.noprf": "Esta llave de seguridad no puede derivar un secreto de la caja fuerte.",
+    "hardware.enrol_failed": "El registro ha fallado.",
+    "hardware.nosupport": "Este navegador no puede comunicarse con una llave de seguridad.",
+    "hardware.confirm_forget": "¿Quitar esta llave de seguridad?",
+    "hardware.forget_failed": "No se ha podido quitar la llave de seguridad."
   }
 }

@@ -378,6 +378,26 @@
     "security.tally_old": "menua",
     "security.tally_incomplete": "tak lengkap",
     "security.tally_malformed": "rusak",
-    "security.tally_clean": "Tidak ada yang menurunkan skor ini."
+    "security.tally_clean": "Tidak ada yang menurunkan skor ini.",
+    "nav.hardware": "Kunci Keamanan",
+    "page.hardware.desc": "Buka brankas ini dengan kunci keamanan, bukan kata sandi utama.",
+    "settings.hardware.title": "Kunci Keamanan",
+    "settings.hardware.desc": "Kelola kunci yang dapat membuka brankas ini tanpa kata sandi utama.",
+    "settings.hardware.manage": "Kelola kunci keamanan",
+    "login.hardware": "Buka dengan kunci keamanan",
+    "hardware.enrolled": "Terdaftar",
+    "hardware.credential": "Kredensial",
+    "hardware.empty": "Belum ada kunci keamanan yang terdaftar",
+    "hardware.empty_sub": "Daftarkan satu di bawah untuk membuka brankas ini tanpa mengetik kata sandi utama",
+    "hardware.field.label": "Nama untuk kunci ini",
+    "hardware.enrol": "Daftarkan kunci keamanan ini",
+    "hardware.note": "Kunci yang didaftarkan di sini membuka brankas seorang diri, jadi kekuatannya persis sama dengan kata sandi utama dan harus disimpan dengan cara yang sama. Sesi yang dibuka dengannya tidak menyimpan kata sandi utama: sesi itu tidak bisa mengubah kata sandi utama dan tidak bisa memulihkan cadangan.",
+    "hardware.waiting": "Sentuh kunci keamanan Anda...",
+    "hardware.failed": "Kunci keamanan itu tidak membuka brankas ini.",
+    "hardware.noprf": "Kunci keamanan ini tidak dapat menurunkan rahasia brankas.",
+    "hardware.enrol_failed": "Pendaftaran gagal.",
+    "hardware.nosupport": "Peramban ini tidak dapat berbicara dengan kunci keamanan.",
+    "hardware.confirm_forget": "Hapus kunci keamanan ini?",
+    "hardware.forget_failed": "Kunci keamanan tidak dapat dihapus."
   }
 }

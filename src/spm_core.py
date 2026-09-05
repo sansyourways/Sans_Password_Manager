@@ -195,6 +195,20 @@ KDF_DKLEN = 32
 # stated rather than inherited: 128 * n * r is the working set.
 KDF_MAXMEM = 128 * KDF_N * KDF_R * 2
 
+# ----- hardware-held wrapping ------------------------------------------------
+# A security key can derive a stable secret from a credential and a salt --
+# WebAuthn calls it the PRF extension, CTAP2 calls it hmac-secret. That secret
+# never leaves the device except as its output, and the device will not produce
+# it without the user verification it was enrolled with.
+#
+# SPM uses it as key material and nothing more: the vault key is sealed under it
+# with the same encrypt-then-MAC the master password path uses, so the only new
+# cryptography here is the derivation of a wrapping key from the device's 32
+# bytes, and that is one HMAC with a fixed label.
+HARDWARE_SECRET_BYTES = 32
+HARDWARE_WRAP_INFO = b"SPM-HARDWARE-WRAP-v1"
+HARDWARE_SALT_BYTES = 32
+
 
 def _key_fd(key_text):
     """A read fd holding `key_text`, for openssl's -pass fd:.
@@ -424,6 +438,46 @@ def unwrap_key_aead(kdf, envelope, master):
         raise VaultSecretError("that secret does not open this vault")
 
 
+def hardware_kek(secret):
+    """The wrapping key for a secret a security key derived.
+
+    The device's output is not used as a key directly. One HMAC under a fixed
+    label separates this use from any other the same PRF secret is put to --
+    a second application asking the same credential for the same salt gets the
+    same 32 bytes, and this makes SPM's wrapping key not be those 32 bytes.
+    """
+    if not isinstance(secret, (bytes, bytearray)):
+        raise VaultError("a hardware secret must be bytes")
+    if len(secret) != HARDWARE_SECRET_BYTES:
+        raise VaultError("a hardware secret must be exactly %d bytes"
+                         % HARDWARE_SECRET_BYTES)
+    raw = hmac.new(bytes(secret), HARDWARE_WRAP_INFO, hashlib.sha256).digest()
+    return base64.b64encode(raw).decode("ascii")
+
+
+def hardware_wrap_key(secret, vault_key):
+    """The vault key sealed under a security key's secret, as base64 text."""
+    blob = seal(hardware_kek(secret), vault_key.encode("utf-8"))
+    return base64.b64encode(blob).decode("ascii")
+
+
+def hardware_unwrap_key(secret, wrapped):
+    """The vault key back, or a refusal that names the security key.
+
+    Wrong-secret and tampered-blob both arrive here as the same failure from
+    `unseal`, which is deliberate: the tag is checked before anything is
+    decrypted, so neither case reveals which it was.
+    """
+    try:
+        blob = base64.b64decode(wrapped, validate=True)
+    except ValueError as exc:          # binascii.Error subclasses it
+        raise VaultSecretError("that security key does not open this vault") from exc
+    try:
+        return unseal(hardware_kek(secret), blob).decode("utf-8")
+    except VaultError as exc:
+        raise VaultSecretError("that security key does not open this vault") from exc
+
+
 # ----- version stamping ------------------------------------------------------
 
 def stamp_version(plaintext):
@@ -564,14 +618,19 @@ EVENT_RETENTION_DEFAULT = 500
 # unlocks is precisely the signal this log exists to show, and collapsing five
 # attempts into one would be the log lying about the thing it is for.
 EVENT_COALESCE_DEFAULT = 60
-EVENT_KINDS = ("unlock", "write", "rewrap", "recover", "restore", "archive")
+EVENT_KINDS = ("unlock", "write", "rewrap", "recover", "restore", "archive",
+               "hardware")
 EVENT_OUTCOMES = ("ok", "fail")
 # Details are key=value with both sides constrained, rather than free text.
 # Free text is how a label ends up in a log one day: someone adds a helpful
 # "which record" to an error path and nobody notices it is now on disk in the
 # clear. A closed vocabulary makes that a test failure instead of a leak.
 EVENT_DETAIL_KEYS = ("records", "format", "scope", "reason")
-EVENT_REASONS = ("bad-master", "corrupt", "missing", "unreadable")
+# "reason" carries why a security-key event happened as well as why an
+# unlock failed. Constrained the same way and for the same reason: a
+# free-text detail is how a device label reaches the log in the clear.
+EVENT_REASONS = ("bad-master", "corrupt", "missing", "unreadable",
+                 "enrolled", "forgotten", "bad-secret", "vault-replaced")
 EVENT_SCOPES = ("live", "other")
 
 
@@ -1002,6 +1061,124 @@ def _prune(directory, suffix, keep):
 
 def recovery_path(vault_path):
     return vault_path + ".recovery"
+
+
+# The enrolled security keys live beside the vault rather than inside it, for
+# the reason that decides the whole shape of this feature: a cold unlock has to
+# read them BEFORE anything is decrypted. A META_ row inside the vault could
+# only ever be read by someone who had already opened it, which is exactly the
+# person who does not need it. The recovery file established this pattern in
+# 3.0.0 and this follows it.
+#
+# What the file discloses if taken: which credential ids are enrolled, and a
+# vault key sealed under 32 bytes that exist only inside an authenticator.
+# There is no password in that path to guess at, so unlike the master-password
+# envelope beside it, this one offers an offline attacker nothing to work on.
+def hardware_path(vault_path):
+    return vault_path + ".hardware"
+
+
+def read_hardware(vault_path):
+    """{"salt": <b64>, "keys": [...]} for this vault. No file means none.
+
+    One salt for the whole vault rather than one per key, because the salt has
+    to be chosen before the ceremony and the ceremony is what reveals which key
+    answered. A single salt keeps the request unambiguous, and it costs
+    nothing: the PRF secret is per credential, so two keys given the same salt
+    still derive two different secrets and seal two different envelopes.
+    """
+    target = hardware_path(vault_path)
+    if not os.path.exists(target):
+        return {"salt": "", "keys": []}
+    try:
+        with open(target, "r", encoding="utf-8") as handle:
+            document = json.load(handle)
+        entries = document["keys"]
+        salt = str(document.get("salt") or "")
+        if not isinstance(entries, list):
+            raise ValueError("keys is not a list")
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        # Named rather than reported as "no keys enrolled". Turning a damaged
+        # file into "your security key was never registered" invites the user
+        # to enrol again over the top of it.
+        raise VaultError("the security-key file for this vault is unreadable") from exc
+    return {"salt": salt,
+            "keys": [entry for entry in entries if isinstance(entry, dict)
+                     and entry.get("credential_id") and entry.get("wrapped")]}
+
+
+def write_hardware(vault_path, salt, entries):
+    """Replace the security-key file durably, or remove it when empty."""
+    target = hardware_path(vault_path)
+    if not entries:
+        if os.path.exists(target):
+            os.remove(target)
+            _fsync_dir(os.path.dirname(os.path.abspath(target)) or ".")
+        return target
+    directory = os.path.dirname(os.path.abspath(target)) or "."
+    handle, staged = tempfile.mkstemp(
+        prefix="." + os.path.basename(target) + ".stage.", dir=directory)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as out:
+            json.dump({"version": 1, "salt": salt, "keys": entries},
+                      out, indent=2, sort_keys=True)
+            out.write("\n")
+            out.flush()
+            os.fsync(out.fileno())
+        os.chmod(staged, 0o600)
+        os.replace(staged, target)
+        staged = ""
+        _fsync_dir(directory)
+    finally:
+        if staged and os.path.exists(staged):
+            os.remove(staged)
+    return target
+
+
+def new_hardware_salt():
+    return base64.b64encode(os.urandom(HARDWARE_SALT_BYTES)).decode("ascii")
+
+
+def hardware_salt(vault_path):
+    """The salt an enrolment ceremony must evaluate the PRF with.
+
+    Returned rather than written, because the salt is only worth keeping once a
+    key has actually been enrolled under it -- a minted-and-abandoned salt in
+    the file would be a vault that claims security keys it does not have.
+    add_hardware_key is what persists it, and it refuses a salt that disagrees
+    with one already in use.
+    """
+    return read_hardware(vault_path)["salt"] or new_hardware_salt()
+
+
+def add_hardware_key(vault_path, credential_id, wrapped, rp_id, label, created,
+                     salt=""):
+    """Enrol one security key, replacing any entry for the same credential."""
+    label = re.sub(r"[\t\r\n]+", " ", str(label or "Security key")).strip()[:64]
+    current = read_hardware(vault_path)
+    if current["salt"] and salt and salt != current["salt"]:
+        # Two enrolments raced, each having minted its own salt while the file
+        # was still absent. The loser's envelope was sealed under a secret this
+        # vault will never ask an authenticator for again, so it would enrol a
+        # key that can never open it. Refusing is the only honest answer; the
+        # user retries and picks up the salt that won.
+        raise VaultError("this vault already uses a different security-key salt")
+    salt = current["salt"] or salt or new_hardware_salt()
+    entries = [entry for entry in current["keys"]
+               if entry.get("credential_id") != credential_id]
+    entries.append({"credential_id": credential_id, "wrapped": wrapped,
+                    "rp_id": rp_id, "label": label or "Security key",
+                    "created": created})
+    write_hardware(vault_path, salt, entries)
+    return {"salt": salt, "keys": entries}
+
+
+def remove_hardware_key(vault_path, credential_id):
+    current = read_hardware(vault_path)
+    entries = [entry for entry in current["keys"]
+               if entry.get("credential_id") != credential_id]
+    write_hardware(vault_path, current["salt"], entries)
+    return {"salt": current["salt"] if entries else "", "keys": entries}
 
 
 def recovery_pubkey_pem(plaintext):
@@ -1899,6 +2076,16 @@ def write_vault(vault_path, master, plaintext, vault_key=None):
     vault_name = os.path.basename(vault_path)
     plaintext = stamp_version(plaintext)
 
+    # `master is None` means "keep the key envelope exactly as it is". A caller
+    # holding the vault key but not the password -- a session unlocked by a
+    # security key -- has nothing to seal an envelope with, and the empty
+    # string is not a safe stand-in: it would succeed, and quietly re-wrap the
+    # vault under an empty password. Distinguishing None from "" is the whole
+    # of that guard.
+    keep_envelope = master is None
+    if keep_envelope and vault_key is None:
+        raise VaultError("a write without a master password needs the vault key")
+
     migrating = False
     if vault_key is None and os.path.exists(vault_path):
         vault_key = unwrap_key(vault_path, master)
@@ -1912,11 +2099,21 @@ def write_vault(vault_path, master, plaintext, vault_key=None):
     os.close(tmp_fd)
     try:
         os.chmod(tmp_path, 0o600)
-        kdf_salt = os.urandom(KDF_SALT_BYTES)
-        envelope = seal(derive_kek(master, kdf_salt), vault_key.encode("utf-8"))
         cipher = seal(vault_key, plaintext.encode("utf-8"))
+        if keep_envelope:
+            with open(vault_path, "rb") as handle:
+                existing = parse_container_aead(handle.read())
+            if existing is None:
+                raise VaultError("this vault has no key envelope to keep")
+            kdf, envelope, _ = existing
+            container = build_container_aead(kdf["salt"], envelope, cipher,
+                                             kdf["n"], kdf["r"], kdf["p"])
+        else:
+            kdf_salt = os.urandom(KDF_SALT_BYTES)
+            envelope = seal(derive_kek(master, kdf_salt), vault_key.encode("utf-8"))
+            container = build_container_aead(kdf_salt, envelope, cipher)
         with open(tmp_path, "wb") as handle:
-            handle.write(build_container_aead(kdf_salt, envelope, cipher))
+            handle.write(container)
 
         if os.path.exists(vault_path):
             archive_generation(vault_path)

@@ -378,6 +378,26 @@
     "security.tally_old": "anciens",
     "security.tally_incomplete": "incomplets",
     "security.tally_malformed": "invalides",
-    "security.tally_clean": "Rien ne fait baisser cette note."
+    "security.tally_clean": "Rien ne fait baisser cette note.",
+    "nav.hardware": "Clés de sécurité",
+    "page.hardware.desc": "Ouvrez ce coffre avec une clé de sécurité plutôt qu'avec votre mot de passe maître.",
+    "settings.hardware.title": "Clés de sécurité",
+    "settings.hardware.desc": "Gérez les clés qui peuvent ouvrir ce coffre sans votre mot de passe maître.",
+    "settings.hardware.manage": "Gérer les clés de sécurité",
+    "login.hardware": "Déverrouiller avec une clé de sécurité",
+    "hardware.enrolled": "Enregistrée",
+    "hardware.credential": "Identifiant",
+    "hardware.empty": "Aucune clé de sécurité enregistrée pour l'instant",
+    "hardware.empty_sub": "Enregistrez-en une ci-dessous pour ouvrir ce coffre sans taper votre mot de passe maître",
+    "hardware.field.label": "Nom de cette clé",
+    "hardware.enrol": "Enregistrer cette clé de sécurité",
+    "hardware.note": "Une clé enregistrée ici ouvre le coffre à elle seule : elle est donc exactement aussi puissante que le mot de passe maître et doit être conservée de la même façon. Une session ouverte avec elle ne détient aucun mot de passe maître : elle ne peut ni changer le mot de passe maître ni restaurer un instantané.",
+    "hardware.waiting": "Touchez votre clé de sécurité...",
+    "hardware.failed": "Cette clé de sécurité n'ouvre pas ce coffre.",
+    "hardware.noprf": "Cette clé de sécurité ne peut pas dériver de secret de coffre.",
+    "hardware.enrol_failed": "L'enregistrement a échoué.",
+    "hardware.nosupport": "Ce navigateur ne peut pas dialoguer avec une clé de sécurité.",
+    "hardware.confirm_forget": "Retirer cette clé de sécurité ?",
+    "hardware.forget_failed": "La clé de sécurité n'a pas pu être retirée."
   }
 }
