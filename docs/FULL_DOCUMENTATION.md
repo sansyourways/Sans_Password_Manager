@@ -1915,6 +1915,12 @@ accounts for opens a menu beside the field. Arrow keys move through it, Enter
 or a click fills, and Escape dismisses it. While SPM is locked the menu does
 not appear at all.
 
+![The SPM account menu open beneath the email field of a synthetic login form, listing two accounts with their usernames](docs/screenshots/browser-extension-setup/in-field-picker.png)
+
+This capture was taken in Chromium against a synthetic login page served from
+localhost, using a disposable vault. The two accounts, their usernames and the
+page itself are all synthetic; no personal vault or real credential is used.
+
 The menu is an iframe served from the extension's own origin rather than an
 element injected into the page, so the page cannot read the account list,
 script the menu, or see which row is highlighted. The part of the extension

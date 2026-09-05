@@ -142,6 +142,11 @@ password field on a site you have accounts for opens a menu beside it: arrow
 keys move through it, Enter or a click fills, Escape dismisses it, and the menu
 never appears at all while SPM is locked.
 
+![The SPM account menu open beneath the email field of a synthetic login form, listing two accounts with their usernames](../docs/screenshots/browser-extension-setup/in-field-picker.png)
+
+Captured in Chromium against a synthetic login page on localhost with a
+disposable vault. The accounts, usernames and page are synthetic.
+
 The menu is an **iframe served from the extension's own origin**, not an
 element injected into the page. That is the difference between "the page cannot
 see your account list" and "the page probably cannot": an injected menu lives
