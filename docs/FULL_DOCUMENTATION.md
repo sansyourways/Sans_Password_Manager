@@ -1086,7 +1086,7 @@ Biometric unlock resumes a session your master password opened. A security key
 **opens the vault**, cold, with no master password typed, remembered or held
 anywhere. The two are independent: you can enrol either, both, or neither.
 
-Set a relying-party id (`SPM_WEB_RP_ID`) and **Settings -> Security Keys**
+Set a relying-party id (`SPM_WEB_RP_ID`) and **Settings → Security Keys**
 appears. Enrol a key there and the sign-in page offers *Unlock with a security
 key*.
 
