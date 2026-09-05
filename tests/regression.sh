@@ -402,6 +402,35 @@ grep -q 'self.auth_lock = threading.RLock()' "$web_script"
 # tools/build-locales.py. The lint is the contributor-facing check, so running
 # it here means the suite and the tool cannot disagree about what is valid.
 python3 "$ROOT_DIR/tools/i18n-lint.py"
+
+# The lint has to be able to fail, which is not the same as passing. Every
+# catalogue in the tree is valid, so nothing here exercises the flag rule
+# unless something broken is handed to it on purpose.
+lint_root="$TEST_ROOT/locale-lint"
+rm -rf "$lint_root"
+cp -R "$ROOT_DIR/locales" "$lint_root"
+for bad in '"ID"' '"\ud83c\udff3"' '""' 'null'; do
+	PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$lint_root/id.json" "$bad" <<'BADFLAG'
+import io, json, sys
+doc = json.load(io.open(sys.argv[1], encoding="utf-8"))
+doc["meta"]["flag"] = json.loads(sys.argv[2])
+with io.open(sys.argv[1], "w", encoding="utf-8") as out:
+	json.dump(doc, out, ensure_ascii=False, indent=2)
+BADFLAG
+	if python3 "$ROOT_DIR/tools/i18n-lint.py" "$lint_root" >/dev/null 2>&1; then
+		printf 'the i18n lint accepted %s as a flag\n' "$bad" >&2
+		exit 1
+	fi
+	# And the generator, which carries the same rule for a different reason:
+	# it is the thing that writes source code, so a direct invocation that
+	# skipped the lint must not be able to fold a broken value into it.
+	if SPM_LOCALE_DIR="$lint_root" python3 "$ROOT_DIR/tools/build-locales.py" \
+		--validate >/dev/null 2>&1; then
+		printf 'the locale generator accepted %s as a flag\n' "$bad" >&2
+		exit 1
+	fi
+done
+printf '  i18n: a flag that is not two regional indicators is refused by the lint and the generator\n'
 # A stale generated region would serve yesterday's words from today's JSON,
 # and nothing else would notice: the page still renders.
 python3 "$ROOT_DIR/tools/build-locales.py" --check
@@ -459,6 +488,23 @@ for code in sorted(catalogues):
         sys.exit("%s declares direction %r" % (code, meta["dir"]))
     if meta["review"] not in ("maintained", "unreviewed"):
         sys.exit("%s declares review status %r" % (code, meta["review"]))
+    # Two regional indicator symbols, and the value read back out of the
+    # GENERATED region rather than out of the JSON. That distinction is the
+    # whole point of this check: a flag is the first value in this project
+    # outside the Basic Multilingual Plane, and the generator used to write it
+    # with json.dumps(ensure_ascii=True), which emits a surrogate pair. That is
+    # valid JSON and, in Python source, two lone surrogates that never combine
+    # and raise on encode -- so every page carrying a picker would have died at
+    # render time while locales/*.json looked perfect.
+    flag = meta.get("flag") or ""
+    if len(flag) != 2 or any(not 0x1F1E6 <= ord(ch) <= 0x1F1FF for ch in flag):
+        sys.exit("%s declares flag %r; expected two regional indicator symbols"
+                 % (code, flag))
+    try:
+        flag.encode("utf-8")
+    except UnicodeEncodeError:
+        sys.exit("%s's flag survived as surrogates, so no page carrying the "
+                 "picker can be rendered" % code)
     if code != code.lower():
         sys.exit("%s is not lowercase; the server lowercases before matching"
                  % code)
@@ -577,6 +623,17 @@ printf 'Web regression: the language a page is actually served in\n'
 # HTTP, because the saving and the correctness both live in what is sent.
 grep -q 'lang="en" dir="ltr"' "$TEST_ROOT/login.html" || {
 	printf 'the English login page does not declare lang and dir\n' >&2; exit 1
+}
+# The picker, as actually served. The flag leads and the language's own name
+# follows it -- a reader who needs Arabic cannot be expected to find it listed
+# as "Arabic", and a flag alone identifies nothing, since a flag is a country
+# and a language is not.
+grep -q '<option value="en" dir="ltr" selected>🇬🇧' \
+	"$TEST_ROOT/login.html" || {
+	printf 'the language picker serves no flag for English\n' >&2; exit 1
+}
+grep -q 'English</option>' "$TEST_ROOT/login.html" || {
+	printf 'the language picker dropped the language name\n' >&2; exit 1
 }
 # Read the DICT the browser is handed rather than grepping the page: the
 # direction and review maps legitimately name every language, so a substring

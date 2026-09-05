@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **4.8.0**
+Current release: **4.9.0**
 
 ---
 
@@ -88,7 +88,7 @@ attacker with root access.
 
 ## Product tour
 
-Every web capture below was taken from the 4.8.0 release candidate in Chromium
+Every web capture below was taken from the 4.9.0 release candidate in Chromium
 at 1440x900, against a disposable vault holding only synthetic documentation
 data. No personal vault, browser profile, real credential, or production
 hostname appears in these images. The locked-screen captures use Chromium
@@ -344,7 +344,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 4.8.0
+bash install.sh --version 4.9.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -379,7 +379,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v4.8.0.zip \
+gh attestation verify Sans_Password_Manager_v4.9.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -395,9 +395,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v4.8.0
+git checkout v4.9.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v4.8.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v4.9.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -410,7 +410,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=4.8.0
+version=4.9.0
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -427,7 +427,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v4.8.0/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v4.9.0/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -449,7 +449,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 4.8.0 at /home/you/.local/bin/spm
+Installed SPM 4.9.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -1321,6 +1321,7 @@ Every catalogue is one JSON file in `locales/`, and nothing else:
     "code": "sv",
     "name": "Svenska",
     "english_name": "Swedish",
+    "flag": "\ud83c\uddf8\ud83c\uddea",
     "dir": "ltr",
     "review": "unreviewed"
   },
@@ -1334,23 +1335,40 @@ Every catalogue is one JSON file in `locales/`, and nothing else:
 Swedish cannot be expected to find it listed as "Swedish". `dir` is `ltr` or
 `rtl`. `review` is `unreviewed` until a speaker has been through it.
 
+`meta.flag` is exactly two regional indicator symbols, and it is the one field
+here that is a judgement rather than a fact. A flag is a country and a language
+is not, so in the picker the flag leads and `meta.name` follows it: the flag is
+a landmark for an eye scanning twelve entries, and the name is what identifies
+one. Where the code already names a region, follow the code — `pt-br` takes 🇧🇷
+and `zh-hans` takes 🇨🇳. Everywhere else the choice is arguable, which is why it
+lives in the file rather than in the server, and why a pull request is the
+right place to disagree with it. Note also that a platform without
+regional-indicator glyphs renders the flag as two letters, so it must never be
+the only thing distinguishing two entries.
+
 To add a language, copy `locales/en.json`, translate the values, and check it:
 
 ```bash
 cp locales/en.json locales/sv.json      # then edit meta and translate
-python3 tools/i18n-lint.py              # parity, markup, placeholders
+python3 tools/i18n-lint.py              # parity, markup, placeholders, flag
 python3 tools/build-locales.py          # fold it into the web server
 ./build.sh                              # regenerate spm.sh
 ```
 
 The lint refuses a catalogue that is missing a key, carries one English does
-not, contains markup, or drops a placeholder such as `{n}` — each of which
-fails silently at runtime rather than loudly.
+not, contains markup, drops a placeholder such as `{n}`, or declares a flag
+that is not two regional indicator symbols — each of which fails silently at
+runtime rather than loudly. It takes a directory, so
+`python3 tools/i18n-lint.py /path/to/locales` checks a catalogue before it is
+in the tree.
 
 `tools/build-locales.py` writes a generated region inside
 `src/spm_web_server.py`; that region is committed, and `./build.sh --check`
 verifies it matches `locales/`. Editing the JSON without rebuilding is caught
-there rather than shipping yesterday's words.
+there rather than shipping yesterday's words. It parses the region it has just
+produced and compares it against the catalogues before writing anything, which
+is what stops a value that cannot survive the trip — the flag was the first
+one — from reaching a file that imports perfectly and fails at render time.
 
 A page carries only the language it is in, plus English as the fallback. The
 rest are fetched from `/locale?lang=<code>` the first time somebody switches,
@@ -1822,7 +1840,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **4.8.0**
+Version: **4.9.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
