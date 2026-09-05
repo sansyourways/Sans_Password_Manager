@@ -8492,6 +8492,11 @@ HARDWARE_MANAGE_SCRIPT = """
 """
 
 
+def _shorten(value, limit):
+    """A prefix that says it is one."""
+    return value if len(value) <= limit else value[:limit] + "\u2026"
+
+
 def hardware_settings_page(state, csrf, flash=""):
     """Manage the security keys that can open this vault cold."""
     rows = []
@@ -8507,8 +8512,11 @@ def hardware_settings_page(state, csrf, flash=""):
             % (_esc(entry.get("label") or "Security key"),
                _esc(entry.get("created") or ""),
                # Enough to tell two keys apart on screen, and never the whole
-               # id: the page is a screenshot away from a support channel.
-               _esc((entry.get("credential_id") or "")[:12]),
+               # id: the page is a screenshot away from a support channel. The
+               # ellipsis is not decoration -- a bare cut reads as a typo, and
+               # a reader comparing this against an id elsewhere needs to know
+               # they are looking at a prefix.
+               _esc(_shorten(entry.get("credential_id") or "", 12)),
                _esc(entry.get("credential_id") or "")))
     if not rows:
         rows.append(

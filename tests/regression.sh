@@ -4277,6 +4277,14 @@ grep -q '"keys": 1' "$hw_root/enrol.json" || hw_fail 'the security key did not e
 curl -fsS -o "$hw_root/login2.html" "http://127.0.0.1:$HW_PORT/login"
 grep -q 'window.SPM_HARDWARE = {' "$hw_root/login2.html" ||
 	hw_fail 'the sign-in page does not offer the ceremony after an enrolment'
+# The manager lists the key, and shows the credential as a prefix that says it
+# is one. A bare cut reads as a typo to anyone comparing it against an id.
+curl -fsS -b "$hw_root/jar" -o "$hw_root/hardware.html" \
+	"http://127.0.0.1:$HW_PORT/hardware/settings"
+grep -q 'Regression key' "$hw_root/hardware.html" ||
+	hw_fail 'the enrolled key is not listed on the manager'
+grep -q '<code>regression-c…</code>' "$hw_root/hardware.html" ||
+	hw_fail 'the credential prefix is not marked as truncated'
 grep -q 'regression-cred' "$hw_root/login2.html" &&
 	hw_fail 'the sign-in page publishes enrolled credential ids to anyone who loads it'
 
