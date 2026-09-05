@@ -7,6 +7,60 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.5.0] - 2026-09-04
+
+Which pages may see a credential, decided in one place.
+
+### Added
+- **Opt-in subdomain scope.** A record's URL field may be written
+  `https://*.example.com`, which binds it to `example.com` and every host
+  beneath it. It is opt in per record and never inferred from a bare hostname:
+  with no public suffix list, treating `foo.co.uk` as also covering `.co.uk`
+  would bind a record to every site in the United Kingdom, and bundling a PSL
+  is a data dependency this project does not have.
+
+  The one guard that needs no PSL is a floor on how much can be claimed:
+  `https://*.com` is refused, by the form with a reason and by the matcher if
+  it reaches one. It is a floor and not a substitute — `*.co.uk` still parses,
+  because SPM cannot tell it from `*.example.com`. That is the cost of having
+  no PSL, and the reason this is opt in rather than automatic.
+
+- **Downgrade protection.** A record bound to an `https://` URL is refused on
+  an `http://` page — the last of the fill-path rules that had no
+  implementation. The list and the fill agree: an account that will be refused
+  is not offered in the first place, so the user never picks one and is told no
+  for no visible reason.
+
+  It fails closed. A caller that does not say what scheme the page uses is
+  refused for https-bound records, because an unknown scheme cannot be shown to
+  be secure and a credential fill is not the place to assume the safe answer.
+
+### Changed
+- **The bridge's matching rule now lives in the trusted core.** `bridge-list`
+  and `bridge-get` each carried their own copy, written inline in a shell
+  heredoc, and the rule that decides whether a web page may see a credential is
+  the last place to keep two of. Both now call one function; the CLI decrypts
+  and delegates.
+- `bridge-list` and `bridge-get` take the page's scheme as an argument, and the
+  native host passes it. **An extension older than this release stops filling
+  https-bound records** until it is reloaded, which is the fail-closed half of
+  the rule above rather than a regression.
+- The entry form explains the scope form and refuses one it cannot honour, in
+  all twelve languages. A field that accepts what the feature rejects is worse
+  than one that refuses early: the refusal would otherwise arrive at fill time,
+  where there is nowhere to print it.
+- A wildcard is rendered on the view page as a scope rather than as a link,
+  because `https://*.example.com` is not a destination and an href pointing at
+  one cannot resolve.
+
+### Roadmap
+This closes the last open P2 item's scoping half. The other half — WebAuthn
+unlock inside the popup, reusing the Dashboard's ceremony — is not shipped and
+is not merely unwritten: the popup reaches SPM through the native host, which
+has no part in the Dashboard's WebAuthn ceremony and no session to attach an
+assertion to. It is recorded in both roadmaps as needing that design rather
+than as pending work.
+
 ## [4.4.1] - 2026-09-03
 
 A fill that looked like it worked.

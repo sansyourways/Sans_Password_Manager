@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="4.4.1"
+VERSION="4.5.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -2049,6 +2049,128 @@ def looks_sensitive(label, url, hosts):
     return False
 
 
+# --- Browser bindings: which records a page may see, and on what terms ------
+#
+# One implementation. The CLI's `bridge-list` and `bridge-get` each carried
+# their own copy of this, built inline in a shell heredoc, and the two had
+# already begun to disagree in shape if not yet in behaviour. A matcher that
+# decides whether a page may see a credential is the last place to keep two of.
+
+BRIDGE_URL_RE = re.compile(r"https?://[^\s]+")
+BRIDGE_SCHEME_RE = re.compile(r"(?i)^https?://")
+
+
+def _binding_host(token):
+    """The host a bound URL names, wildcard preserved. '' if it names none."""
+    try:
+        return (urllib.parse.urlsplit(token).hostname or "").lower().strip(".")
+    except ValueError:
+        return ""
+
+
+def wildcard_scope(pattern):
+    """The parent host an opt-in '*.' scope covers, or '' if it is not one.
+
+    A wildcard is only ever written by hand into a record's URL field. It is
+    never inferred from a bare hostname: without a public suffix list, treating
+    'foo.co.uk' as also covering '.co.uk' would bind a record to every site in
+    the United Kingdom, and bundling a PSL is a data dependency this project
+    does not have.
+
+    The one guard that does not need a PSL is a floor on how much can be
+    claimed: '*.com' is refused because no record legitimately covers a whole
+    top-level domain. It is a floor and not a substitute -- '*.co.uk' still
+    parses, because SPM cannot tell it from '*.example.com'. That is the cost
+    of having no PSL, and the reason this is opt in per record rather than
+    inferred for every record.
+    """
+    if not pattern.startswith("*."):
+        return ""
+    parent = pattern[2:].strip(".")
+    if not parent or "*" in parent:
+        return ""
+    if len(parent.split(".")) < 2:
+        return ""
+    return parent
+
+
+def host_in_scope(requested, pattern):
+    """Whether a page's host is covered by one binding pattern."""
+    requested = (requested or "").lower().strip(".")
+    pattern = (pattern or "").lower().strip(".")
+    if not requested or not pattern:
+        return False
+    parent = wildcard_scope(pattern)
+    if parent:
+        # The parent itself and anything under it. The dot is what keeps
+        # '*.example.com' off 'notexample.com', which a bare suffix test
+        # would match.
+        return requested == parent or requested.endswith("." + parent)
+    return requested == pattern
+
+
+def record_bindings(label, notes, url):
+    """Every host pattern a record is bound to, with the scheme each requires.
+
+    Returns a list of (pattern, scheme) pairs. The scheme is 'https' only when
+    the binding was written as an https URL; a label-derived binding has no
+    scheme of its own and does not demand one.
+    """
+    bindings, seen = [], set()
+
+    def add(pattern, scheme):
+        pattern = (pattern or "").lower().strip(".")
+        if not pattern or (pattern, scheme) in seen:
+            return
+        seen.add((pattern, scheme))
+        bindings.append((pattern, scheme))
+
+    add((label or "").lower().strip("."), "")
+    # The url field is the intended binding source. Notes are still scanned so
+    # that vaults written before 2.12.0 -- where a URL could only live in the
+    # notes -- keep matching exactly as they did, with no rewrite on upgrade.
+    tokens = ([url] if url else []) + BRIDGE_URL_RE.findall(notes or "")
+    for token in tokens:
+        if not BRIDGE_SCHEME_RE.match(token):
+            continue
+        host = _binding_host(token)
+        if host:
+            add(host, "https" if token.lower().startswith("https://") else "http")
+    return bindings
+
+
+# Refusals the bridge can produce. Named here because the native host projects
+# every error onto a fixed set, and a refusal the host has not been told about
+# reaches the extension as a generic one.
+BRIDGE_NOT_BOUND = "record is not bound to this hostname"
+BRIDGE_INSECURE = "record requires a secure page"
+
+
+def bridge_match(requested, scheme, label, notes, url):
+    """Whether this page may see this record, and why not when it may not.
+
+    Returns (True, "") or (False, reason).
+
+    Downgrade protection is the second half and it fails closed. A record bound
+    to an https URL is refused on an http page, and refused again when the
+    caller did not say what the page's scheme was -- an unknown scheme cannot
+    be shown to be https, and a credential fill is not the place to assume the
+    safe answer. A caller that predates the scheme argument therefore stops
+    filling https-bound records rather than quietly keeping the old behaviour.
+    """
+    scheme = (scheme or "").lower().strip(":")
+    matched = [(pattern, bound) for pattern, bound in record_bindings(label, notes, url)
+               if host_in_scope(requested, pattern)]
+    if not matched:
+        return False, BRIDGE_NOT_BOUND
+    # Any binding that permits this page is enough; a record bound to both
+    # http and https on the same host is not downgraded by the https one.
+    for _pattern, bound in matched:
+        if bound != "https" or scheme == "https":
+            return True, ""
+    return False, BRIDGE_INSECURE
+
+
 def tidy_proposals(plaintext):
     """What a tidy would change, as data. Changes nothing.
 
@@ -3785,6 +3907,50 @@ def main(argv):
             report = doctor_report(plaintext, argv[3], argv[4], argv[5:])
             sys.stdout.write(json.dumps(report, indent=2) + "\n")
             return 1 if report["summary"]["failed"] else 0
+        elif command == "bridge-list":
+            # bridge-list <plainfile> <page host> <page scheme>
+            # stdout: JSON. Secret-free by construction -- a match is a
+            # summary, and the secret column is never read here.
+            host = (argv[3] or "").lower().strip(".")
+            scheme = argv[4] if len(argv) > 4 else ""
+            if not host or any(ch.isspace() for ch in host):
+                sys.stdout.write(json.dumps(
+                    {"ok": False, "error": "invalid browser hostname"}) + "\n")
+                return 2
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                matches = []
+                for line in handle:
+                    parts = line.rstrip("\n").split("\t")
+                    if not parts or not parts[0].isdigit() or len(parts) < 6:
+                        continue
+                    url = parts[6] if len(parts) > 6 else ""
+                    ok, _reason = bridge_match(host, scheme, parts[1], parts[4], url)
+                    if ok:
+                        matches.append({"id": parts[0], "label": parts[1],
+                                        "username": parts[2], "url": url})
+            sys.stdout.write(json.dumps({"ok": True, "matches": matches}) + "\n")
+        elif command == "bridge-get":
+            # bridge-get <plainfile> <record id> <page host> <page scheme>
+            rid, host = argv[3], (argv[4] or "").lower().strip(".")
+            scheme = argv[5] if len(argv) > 5 else ""
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    parts = line.rstrip("\n").split("\t")
+                    if parts and parts[0] == rid and len(parts) >= 6:
+                        url = parts[6] if len(parts) > 6 else ""
+                        ok, reason = bridge_match(host, scheme, parts[1], parts[4], url)
+                        if not ok:
+                            sys.stdout.write(json.dumps(
+                                {"ok": False, "error": reason}) + "\n")
+                            return 2
+                        sys.stdout.write(json.dumps(
+                            {"ok": True, "username": parts[2],
+                             "password": parts[3]}, ensure_ascii=False) + "\n")
+                        break
+                else:
+                    sys.stdout.write(json.dumps(
+                        {"ok": False, "error": "record not found"}) + "\n")
+                    return 1
         elif command == "self-test":
             return 0
         else:
@@ -8621,35 +8787,16 @@ PY
 }
 
 cmd_bridge_get() {
-	local id="${1:-}" host="${2:-}" tmp
+	local id="${1:-}" host="${2:-}" scheme="${3:-}" tmp
 	printf '%s' "$id" | grep -Eq '^[0-9]+$' || die "Numeric record ID required."
 	[ -n "$host" ] || die "Browser hostname required."
 	IFS= read -r MASTER_PW || die "Master password required on stdin."
 	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
 	local status=0
-	python3 - "$tmp" "$id" "$host" <<'PY' || status=$?
-import json,re,sys,urllib.parse
-path,rid,requested=sys.argv[1:]; requested=requested.lower().strip(".")
-for line in open(path,encoding="utf-8",errors="replace"):
- p=line.rstrip("\n").split("\t")
- if p and p[0]==rid and len(p)>=6:
-  label,user,secret,notes=p[1:5]
-  url=p[6] if len(p)>6 else ""
-  candidates={label.lower().strip(".")}
-  # The url field is the intended binding source. Notes are still scanned so
-  # that vaults written before 2.12.0 -- where a URL could only live in the
-  # notes -- keep matching exactly as they did, with no rewrite on upgrade.
-  for token in ([url] if url else [])+re.findall(r"https?://[^\s]+",notes):
-   if not re.match(r"(?i)^https?://",token):continue
-   try:candidates.add((urllib.parse.urlparse(token).hostname or "").lower().strip("."))
-   except ValueError:pass
-  candidates.discard("")
-  if requested not in candidates:
-   print(json.dumps({"ok":False,"error":"record is not bound to this hostname"}));raise SystemExit(2)
-  print(json.dumps({"ok":True,"username":user,"password":secret}));break
-else:
- print(json.dumps({"ok":False,"error":"record not found"}));raise SystemExit(1)
-PY
+	# The matching lives in the trusted core. It used to live here, inline,
+	# and again in cmd_bridge_list -- two copies of the rule that decides
+	# whether a web page may see a credential.
+	python3 "$(core_script_path)" bridge-get "$tmp" "$id" "$host" "$scheme" || status=$?
 	secure_wipe "$tmp"; MASTER_PW=""
 	# Report the helper's status rather than the cleanup's. As a command,
 	# `spm bridge-get` already exited non-zero on a refusal because errexit
@@ -8661,32 +8808,12 @@ PY
 }
 
 cmd_bridge_list() {
-	local host="${1:-}" tmp
+	local host="${1:-}" scheme="${2:-}" tmp
 	[ -n "$host" ] || die "Browser hostname required."
 	IFS= read -r MASTER_PW || die "Master password required on stdin."
 	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
 	local status=0
-	python3 - "$tmp" "$host" <<'PY' || status=$?
-import json,re,sys,urllib.parse
-path,requested=sys.argv[1:]; requested=requested.lower().strip(".")
-if not requested or any(c.isspace() for c in requested):
- print(json.dumps({"ok":False,"error":"invalid browser hostname"}));raise SystemExit(2)
-matches=[]
-for line in open(path,encoding="utf-8",errors="replace"):
- p=line.rstrip("\n").split("\t")
- if not p or not p[0].isdigit() or len(p)<6:continue
- rid,label,user,notes=p[0],p[1],p[2],p[4]
- url=p[6] if len(p)>6 else ""
- candidates={label.lower().strip(".")}
- for token in ([url] if url else [])+re.findall(r"https?://[^\s]+",notes):
-  if not re.match(r"(?i)^https?://",token):continue
-  try:candidates.add((urllib.parse.urlparse(token).hostname or "").lower().strip("."))
-  except ValueError:pass
- candidates.discard("")
- if requested in candidates:
-  matches.append({"id":rid,"label":label,"username":user,"url":url})
-print(json.dumps({"ok":True,"matches":matches}))
-PY
+	python3 "$(core_script_path)" bridge-list "$tmp" "$host" "$scheme" || status=$?
 	secure_wipe "$tmp"; MASTER_PW=""
 	return "$status"
 }
@@ -10380,7 +10507,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "Service / Name",
         "entry.field.username": "Username / Email",
         "entry.field.url": "URL",
-        "entry.hint.url": "Used to match this entry to a site. http:// or https:// only.",
+        "entry.hint.url": "Used to match this entry to a site. http:// or https:// only. Write https://*.example.com to include subdomains.",
+        "entry.url.scope": "Matches this host and its subdomains.",
         "entry.field.password": "Password",
         "entry.field.notes": "Notes",
         "note.field.title": "Title",
@@ -10753,7 +10881,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "\u0627\u0644\u062e\u062f\u0645\u0629 / \u0627\u0644\u0627\u0633\u0645",
         "entry.field.username": "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645 / \u0627\u0644\u0628\u0631\u064a\u062f",
         "entry.field.url": "\u0627\u0644\u0631\u0627\u0628\u0637",
-        "entry.hint.url": "\u064a\u064f\u0633\u062a\u062e\u062f\u0645 \u0644\u0631\u0628\u0637 \u0647\u0630\u0627 \u0627\u0644\u0645\u062f\u062e\u0644 \u0628\u0645\u0648\u0642\u0639. http:// \u0623\u0648 https:// \u0641\u0642\u0637.",
+        "entry.hint.url": "\u064a\u064f\u0633\u062a\u062e\u062f\u0645 \u0644\u0631\u0628\u0637 \u0647\u0630\u0627 \u0627\u0644\u0645\u062f\u062e\u0644 \u0628\u0645\u0648\u0642\u0639. http:// \u0623\u0648 https:// \u0641\u0642\u0637. \u0627\u0643\u062a\u0628 https://*.example.com \u0644\u062a\u0636\u0645\u064a\u0646 \u0627\u0644\u0646\u0637\u0627\u0642\u0627\u062a \u0627\u0644\u0641\u0631\u0639\u064a\u0629.",
+        "entry.url.scope": "\u064a\u0637\u0627\u0628\u0642 \u0647\u0630\u0627 \u0627\u0644\u0645\u0636\u064a\u0641 \u0648\u0646\u0637\u0627\u0642\u0627\u062a\u0647 \u0627\u0644\u0641\u0631\u0639\u064a\u0629.",
         "entry.field.password": "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631",
         "entry.field.notes": "\u0645\u0644\u0627\u062d\u0638\u0627\u062a",
         "note.field.title": "\u0627\u0644\u0639\u0646\u0648\u0627\u0646",
@@ -11126,7 +11255,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "Dienst / Name",
         "entry.field.username": "Benutzername / E-Mail",
         "entry.field.url": "URL",
-        "entry.hint.url": "Ordnet diesen Eintrag einer Website zu. Nur http:// oder https://.",
+        "entry.hint.url": "Ordnet diesen Eintrag einer Website zu. Nur http:// oder https://. Schreiben Sie https://*.example.com, um Subdomains einzuschlie\u00dfen.",
+        "entry.url.scope": "Gilt f\u00fcr diesen Host und seine Subdomains.",
         "entry.field.password": "Passwort",
         "entry.field.notes": "Notizen",
         "note.field.title": "Titel",
@@ -11499,7 +11629,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "Servicio / Nombre",
         "entry.field.username": "Usuario / Correo",
         "entry.field.url": "URL",
-        "entry.hint.url": "Sirve para asociar esta entrada a un sitio. Solo http:// o https://.",
+        "entry.hint.url": "Sirve para asociar esta entrada a un sitio. Solo http:// o https://. Escribe https://*.example.com para incluir subdominios.",
+        "entry.url.scope": "Coincide con este host y sus subdominios.",
         "entry.field.password": "Contrase\u00f1a",
         "entry.field.notes": "Notas",
         "note.field.title": "T\u00edtulo",
@@ -11872,7 +12003,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "Service / Nom",
         "entry.field.username": "Identifiant / E-mail",
         "entry.field.url": "URL",
-        "entry.hint.url": "Sert \u00e0 associer cette fiche \u00e0 un site. http:// ou https:// uniquement.",
+        "entry.hint.url": "Sert \u00e0 associer cette fiche \u00e0 un site. http:// ou https:// uniquement. \u00c9crivez https://*.example.com pour inclure les sous-domaines.",
+        "entry.url.scope": "Correspond \u00e0 cet h\u00f4te et \u00e0 ses sous-domaines.",
         "entry.field.password": "Mot de passe",
         "entry.field.notes": "Notes",
         "note.field.title": "Titre",
@@ -12245,7 +12377,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "\u0938\u0947\u0935\u093e / \u0928\u093e\u092e",
         "entry.field.username": "\u0909\u092a\u092f\u094b\u0917\u0915\u0930\u094d\u0924\u093e \u0928\u093e\u092e / \u0908\u092e\u0947\u0932",
         "entry.field.url": "URL",
-        "entry.hint.url": "\u0907\u0938 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0915\u094b \u0915\u093f\u0938\u0940 \u0938\u093e\u0907\u091f \u0938\u0947 \u091c\u094b\u0921\u093c\u0928\u0947 \u0915\u0947 \u0915\u093e\u092e \u0906\u0924\u093e \u0939\u0948\u0964 \u0915\u0947\u0935\u0932 http:// \u092f\u093e https://\u0964",
+        "entry.hint.url": "\u0907\u0938 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0915\u094b \u0915\u093f\u0938\u0940 \u0938\u093e\u0907\u091f \u0938\u0947 \u091c\u094b\u0921\u093c\u0928\u0947 \u0915\u0947 \u0915\u093e\u092e \u0906\u0924\u093e \u0939\u0948\u0964 \u0915\u0947\u0935\u0932 http:// \u092f\u093e https://\u0964 \u0938\u092c\u0921\u094b\u092e\u0947\u0928 \u0936\u093e\u092e\u093f\u0932 \u0915\u0930\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f https://*.example.com \u0932\u093f\u0916\u0947\u0902\u0964",
+        "entry.url.scope": "\u092f\u0939 \u0939\u094b\u0938\u094d\u091f \u0914\u0930 \u0907\u0938\u0915\u0947 \u0938\u092c\u0921\u094b\u092e\u0947\u0928 \u092e\u0947\u0932 \u0916\u093e\u0924\u0947 \u0939\u0948\u0902\u0964",
         "entry.field.password": "\u092a\u093e\u0938\u0935\u0930\u094d\u0921",
         "entry.field.notes": "\u0928\u094b\u091f",
         "note.field.title": "\u0936\u0940\u0930\u094d\u0937\u0915",
@@ -12618,7 +12751,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "Layanan / Nama",
         "entry.field.username": "Pengguna / Email",
         "entry.field.url": "URL",
-        "entry.hint.url": "Dipakai untuk mencocokkan entry ini dengan situs. Hanya http:// atau https://.",
+        "entry.hint.url": "Dipakai untuk mencocokkan entry ini dengan situs. Hanya http:// atau https://. Tulis https://*.example.com untuk menyertakan subdomain.",
+        "entry.url.scope": "Cocok dengan host ini dan subdomainnya.",
         "entry.field.password": "Kata sandi",
         "entry.field.notes": "Catatan",
         "note.field.title": "Judul",
@@ -12991,7 +13125,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "\u30b5\u30fc\u30d3\u30b9 / \u540d\u79f0",
         "entry.field.username": "\u30e6\u30fc\u30b6\u30fc\u540d / \u30e1\u30fc\u30eb",
         "entry.field.url": "URL",
-        "entry.hint.url": "\u3053\u306e\u30a8\u30f3\u30c8\u30ea\u3092\u30b5\u30a4\u30c8\u306b\u7d10\u3065\u3051\u308b\u305f\u3081\u306b\u4f7f\u7528\u3057\u307e\u3059\u3002http:// \u307e\u305f\u306f https:// \u306e\u307f\u3002",
+        "entry.hint.url": "\u3053\u306e\u30a8\u30f3\u30c8\u30ea\u3092\u30b5\u30a4\u30c8\u306b\u7d10\u3065\u3051\u308b\u305f\u3081\u306b\u4f7f\u7528\u3057\u307e\u3059\u3002http:// \u307e\u305f\u306f https:// \u306e\u307f\u3002\u30b5\u30d6\u30c9\u30e1\u30a4\u30f3\u3092\u542b\u3081\u308b\u306b\u306f https://*.example.com \u3068\u66f8\u304d\u307e\u3059\u3002",
+        "entry.url.scope": "\u3053\u306e\u30db\u30b9\u30c8\u3068\u305d\u306e\u30b5\u30d6\u30c9\u30e1\u30a4\u30f3\u306b\u4e00\u81f4\u3057\u307e\u3059\u3002",
         "entry.field.password": "\u30d1\u30b9\u30ef\u30fc\u30c9",
         "entry.field.notes": "\u30e1\u30e2",
         "note.field.title": "\u30bf\u30a4\u30c8\u30eb",
@@ -13364,7 +13499,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "\uc11c\ube44\uc2a4 / \uc774\ub984",
         "entry.field.username": "\uc0ac\uc6a9\uc790 \uc774\ub984 / \uc774\uba54\uc77c",
         "entry.field.url": "URL",
-        "entry.hint.url": "\uc774 \ud56d\ubaa9\uc744 \uc0ac\uc774\ud2b8\uc640 \uc5f0\uacb0\ud558\ub294 \ub370 \uc4f0\uc785\ub2c8\ub2e4. http:// \ub610\ub294 https://\ub9cc \uac00\ub2a5\ud569\ub2c8\ub2e4.",
+        "entry.hint.url": "\uc774 \ud56d\ubaa9\uc744 \uc0ac\uc774\ud2b8\uc640 \uc5f0\uacb0\ud558\ub294 \ub370 \uc4f0\uc785\ub2c8\ub2e4. http:// \ub610\ub294 https://\ub9cc \uac00\ub2a5\ud569\ub2c8\ub2e4. \ud558\uc704 \ub3c4\uba54\uc778\uc744 \ud3ec\ud568\ud558\ub824\uba74 https://*.example.com \uc73c\ub85c \uc4f0\uc138\uc694.",
+        "entry.url.scope": "\uc774 \ud638\uc2a4\ud2b8\uc640 \ud558\uc704 \ub3c4\uba54\uc778\uc5d0 \uc77c\uce58\ud569\ub2c8\ub2e4.",
         "entry.field.password": "\ube44\ubc00\ubc88\ud638",
         "entry.field.notes": "\uba54\ubaa8",
         "note.field.title": "\uc81c\ubaa9",
@@ -13737,7 +13873,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "Servi\u00e7o / Nome",
         "entry.field.username": "Usu\u00e1rio / E-mail",
         "entry.field.url": "URL",
-        "entry.hint.url": "Serve para associar este registro a um site. Somente http:// ou https://.",
+        "entry.hint.url": "Usado para associar esta entrada a um site. Apenas http:// ou https://. Escreva https://*.example.com para incluir subdom\u00ednios.",
+        "entry.url.scope": "Corresponde a este host e aos seus subdom\u00ednios.",
         "entry.field.password": "Senha",
         "entry.field.notes": "Notas",
         "note.field.title": "T\u00edtulo",
@@ -14110,7 +14247,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "\u0421\u0435\u0440\u0432\u0438\u0441 / \u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435",
         "entry.field.username": "\u0418\u043c\u044f \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f / \u042d\u043b. \u043f\u043e\u0447\u0442\u0430",
         "entry.field.url": "URL",
-        "entry.hint.url": "\u0418\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442\u0441\u044f, \u0447\u0442\u043e\u0431\u044b \u0441\u0432\u044f\u0437\u0430\u0442\u044c \u044d\u0442\u0443 \u0437\u0430\u043f\u0438\u0441\u044c \u0441 \u0441\u0430\u0439\u0442\u043e\u043c. \u0422\u043e\u043b\u044c\u043a\u043e http:// \u0438\u043b\u0438 https://.",
+        "entry.hint.url": "\u0418\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442\u0441\u044f \u0434\u043b\u044f \u0441\u0432\u044f\u0437\u0438 \u044d\u0442\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u0438 \u0441 \u0441\u0430\u0439\u0442\u043e\u043c. \u0422\u043e\u043b\u044c\u043a\u043e http:// \u0438\u043b\u0438 https://. \u041d\u0430\u043f\u0438\u0448\u0438\u0442\u0435 https://*.example.com, \u0447\u0442\u043e\u0431\u044b \u0432\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u043f\u043e\u0434\u0434\u043e\u043c\u0435\u043d\u044b.",
+        "entry.url.scope": "\u0421\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442 \u0441 \u044d\u0442\u0438\u043c \u0445\u043e\u0441\u0442\u043e\u043c \u0438 \u0435\u0433\u043e \u043f\u043e\u0434\u0434\u043e\u043c\u0435\u043d\u0430\u043c\u0438.",
         "entry.field.password": "\u041f\u0430\u0440\u043e\u043b\u044c",
         "entry.field.notes": "\u0417\u0430\u043c\u0435\u0442\u043a\u0438",
         "note.field.title": "\u0417\u0430\u0433\u043e\u043b\u043e\u0432\u043e\u043a",
@@ -14483,7 +14621,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "\u670d\u52a1 / \u540d\u79f0",
         "entry.field.username": "\u7528\u6237\u540d / \u90ae\u7bb1",
         "entry.field.url": "\u7f51\u5740",
-        "entry.hint.url": "\u7528\u4e8e\u628a\u6b64\u6761\u76ee\u4e0e\u7f51\u7ad9\u5bf9\u5e94\u8d77\u6765\u3002\u4ec5\u9650 http:// \u6216 https://\u3002",
+        "entry.hint.url": "\u7528\u4e8e\u5c06\u6b64\u6761\u76ee\u4e0e\u7f51\u7ad9\u5173\u8054\u3002\u4ec5\u9650 http:// \u6216 https://\u3002\u5199 https://*.example.com \u53ef\u5305\u542b\u5b50\u57df\u540d\u3002",
+        "entry.url.scope": "\u5339\u914d\u6b64\u4e3b\u673a\u53ca\u5176\u5b50\u57df\u540d\u3002",
         "entry.field.password": "\u5bc6\u7801",
         "entry.field.notes": "\u5907\u6ce8",
         "note.field.title": "\u6807\u9898",
@@ -17844,7 +17983,13 @@ def view_entry_page(parts, history=()):
     # which went through the form validator, and this value becomes an href.
     raw_url = parts[6] if len(parts) > 6 else ""
     safe_url = raw_url if _URL_RE.match(raw_url.strip()) else ""
-    if safe_url:
+    if safe_url and "*" in safe_url:
+        # A scope, not a destination. Rendering it as an href gives a link that
+        # cannot resolve, so it is shown as what it is: the set of hosts this
+        # entry is offered on.
+        url_html = ('<code>%s</code> <span class="hint" data-i18n="entry.url.scope">'
+                    'Matches this host and its subdomains.</span>' % _esc(safe_url))
+    elif safe_url:
         url_html = (f'<a href="{_esc(safe_url)}" target="_blank" '
                     f'rel="noopener noreferrer nofollow">{_esc(safe_url)}</a>')
     else:
@@ -19064,6 +19209,34 @@ def _load_core():
 
 
 core = _load_core()
+
+
+def url_problem(raw):
+    """Why this URL field cannot be used, or "" when it can.
+
+    The form and the browser bridge have to agree about what a URL means. They
+    did not: the field accepted anything with an http(s) scheme, so a scope the
+    matcher will never honour -- https://*.com, or a wildcard buried in the
+    middle of a host -- saved cleanly and then silently matched nothing. A
+    field that accepts what the feature refuses is worse than one that refuses
+    early, because the refusal arrives at fill time with no explanation.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    if not _URL_RE.match(text):
+        return "URL must start with http:// or https://."
+    try:
+        host = (urllib.parse.urlsplit(text).hostname or "")
+    except ValueError:
+        return "URL must start with http:// or https://."
+    if "*" not in host:
+        return ""
+    if not core.wildcard_scope(host.lower()):
+        return ("A subdomain scope is written https://*.example.com, and must "
+                "name a domain: https://*.com would cover every site under a "
+                "whole top-level domain.")
+    return ""
 
 VAULT_FORMAT_VERSION = core.VAULT_FORMAT_VERSION
 RECOVERY_PATH = core.recovery_path(VAULT_PATH)
@@ -22058,14 +22231,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             notes = (data.get("notes") or [""])[0]
             url_raw = (data.get("url") or [""])[0]
             url = _vurl(url_raw)
+            # A scope the matcher will refuse must not save cleanly.
+            url_reason = url_problem(url_raw)
             folder, custom, attrs_error = posted_attrs(data)
 
-            if not name or url is None or attrs_error:
+            if not name or url is None or url_reason or attrs_error:
                 plaintext = load_vault(master, self._session_rec)
                 if not name:
                     problem = "Name / service is required."
-                elif url is None:
-                    problem = "URL must start with http:// or https://."
+                elif url is None or url_reason:
+                    problem = url_reason
                 else:
                     problem = attrs_error
                 page = build_entry_form(
@@ -22123,6 +22298,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             notes = (data.get("notes") or [""])[0]
             url_raw = (data.get("url") or [""])[0]
             url = _vurl(url_raw)
+            # A scope the matcher will refuse must not save cleanly.
+            url_reason = url_problem(url_raw)
             folder, custom, attrs_error = posted_attrs(data)
 
             plaintext = load_vault(master, self._session_rec)
@@ -22141,11 +22318,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Entry not found")
                 return
 
-            if not name or url is None or attrs_error:
+            if not name or url is None or url_reason or attrs_error:
                 if not name:
                     problem = "Name / service is required."
-                elif url is None:
-                    problem = "URL must start with http:// or https://."
+                elif url is None or url_reason:
+                    problem = url_reason
                 else:
                     problem = attrs_error
                 values = {

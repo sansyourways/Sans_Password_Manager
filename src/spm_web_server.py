@@ -267,7 +267,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "Service / Name",
         "entry.field.username": "Username / Email",
         "entry.field.url": "URL",
-        "entry.hint.url": "Used to match this entry to a site. http:// or https:// only.",
+        "entry.hint.url": "Used to match this entry to a site. http:// or https:// only. Write https://*.example.com to include subdomains.",
+        "entry.url.scope": "Matches this host and its subdomains.",
         "entry.field.password": "Password",
         "entry.field.notes": "Notes",
         "note.field.title": "Title",
@@ -640,7 +641,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "\u0627\u0644\u062e\u062f\u0645\u0629 / \u0627\u0644\u0627\u0633\u0645",
         "entry.field.username": "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645 / \u0627\u0644\u0628\u0631\u064a\u062f",
         "entry.field.url": "\u0627\u0644\u0631\u0627\u0628\u0637",
-        "entry.hint.url": "\u064a\u064f\u0633\u062a\u062e\u062f\u0645 \u0644\u0631\u0628\u0637 \u0647\u0630\u0627 \u0627\u0644\u0645\u062f\u062e\u0644 \u0628\u0645\u0648\u0642\u0639. http:// \u0623\u0648 https:// \u0641\u0642\u0637.",
+        "entry.hint.url": "\u064a\u064f\u0633\u062a\u062e\u062f\u0645 \u0644\u0631\u0628\u0637 \u0647\u0630\u0627 \u0627\u0644\u0645\u062f\u062e\u0644 \u0628\u0645\u0648\u0642\u0639. http:// \u0623\u0648 https:// \u0641\u0642\u0637. \u0627\u0643\u062a\u0628 https://*.example.com \u0644\u062a\u0636\u0645\u064a\u0646 \u0627\u0644\u0646\u0637\u0627\u0642\u0627\u062a \u0627\u0644\u0641\u0631\u0639\u064a\u0629.",
+        "entry.url.scope": "\u064a\u0637\u0627\u0628\u0642 \u0647\u0630\u0627 \u0627\u0644\u0645\u0636\u064a\u0641 \u0648\u0646\u0637\u0627\u0642\u0627\u062a\u0647 \u0627\u0644\u0641\u0631\u0639\u064a\u0629.",
         "entry.field.password": "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631",
         "entry.field.notes": "\u0645\u0644\u0627\u062d\u0638\u0627\u062a",
         "note.field.title": "\u0627\u0644\u0639\u0646\u0648\u0627\u0646",
@@ -1013,7 +1015,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "Dienst / Name",
         "entry.field.username": "Benutzername / E-Mail",
         "entry.field.url": "URL",
-        "entry.hint.url": "Ordnet diesen Eintrag einer Website zu. Nur http:// oder https://.",
+        "entry.hint.url": "Ordnet diesen Eintrag einer Website zu. Nur http:// oder https://. Schreiben Sie https://*.example.com, um Subdomains einzuschlie\u00dfen.",
+        "entry.url.scope": "Gilt f\u00fcr diesen Host und seine Subdomains.",
         "entry.field.password": "Passwort",
         "entry.field.notes": "Notizen",
         "note.field.title": "Titel",
@@ -1386,7 +1389,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "Servicio / Nombre",
         "entry.field.username": "Usuario / Correo",
         "entry.field.url": "URL",
-        "entry.hint.url": "Sirve para asociar esta entrada a un sitio. Solo http:// o https://.",
+        "entry.hint.url": "Sirve para asociar esta entrada a un sitio. Solo http:// o https://. Escribe https://*.example.com para incluir subdominios.",
+        "entry.url.scope": "Coincide con este host y sus subdominios.",
         "entry.field.password": "Contrase\u00f1a",
         "entry.field.notes": "Notas",
         "note.field.title": "T\u00edtulo",
@@ -1759,7 +1763,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "Service / Nom",
         "entry.field.username": "Identifiant / E-mail",
         "entry.field.url": "URL",
-        "entry.hint.url": "Sert \u00e0 associer cette fiche \u00e0 un site. http:// ou https:// uniquement.",
+        "entry.hint.url": "Sert \u00e0 associer cette fiche \u00e0 un site. http:// ou https:// uniquement. \u00c9crivez https://*.example.com pour inclure les sous-domaines.",
+        "entry.url.scope": "Correspond \u00e0 cet h\u00f4te et \u00e0 ses sous-domaines.",
         "entry.field.password": "Mot de passe",
         "entry.field.notes": "Notes",
         "note.field.title": "Titre",
@@ -2132,7 +2137,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "\u0938\u0947\u0935\u093e / \u0928\u093e\u092e",
         "entry.field.username": "\u0909\u092a\u092f\u094b\u0917\u0915\u0930\u094d\u0924\u093e \u0928\u093e\u092e / \u0908\u092e\u0947\u0932",
         "entry.field.url": "URL",
-        "entry.hint.url": "\u0907\u0938 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0915\u094b \u0915\u093f\u0938\u0940 \u0938\u093e\u0907\u091f \u0938\u0947 \u091c\u094b\u0921\u093c\u0928\u0947 \u0915\u0947 \u0915\u093e\u092e \u0906\u0924\u093e \u0939\u0948\u0964 \u0915\u0947\u0935\u0932 http:// \u092f\u093e https://\u0964",
+        "entry.hint.url": "\u0907\u0938 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0915\u094b \u0915\u093f\u0938\u0940 \u0938\u093e\u0907\u091f \u0938\u0947 \u091c\u094b\u0921\u093c\u0928\u0947 \u0915\u0947 \u0915\u093e\u092e \u0906\u0924\u093e \u0939\u0948\u0964 \u0915\u0947\u0935\u0932 http:// \u092f\u093e https://\u0964 \u0938\u092c\u0921\u094b\u092e\u0947\u0928 \u0936\u093e\u092e\u093f\u0932 \u0915\u0930\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f https://*.example.com \u0932\u093f\u0916\u0947\u0902\u0964",
+        "entry.url.scope": "\u092f\u0939 \u0939\u094b\u0938\u094d\u091f \u0914\u0930 \u0907\u0938\u0915\u0947 \u0938\u092c\u0921\u094b\u092e\u0947\u0928 \u092e\u0947\u0932 \u0916\u093e\u0924\u0947 \u0939\u0948\u0902\u0964",
         "entry.field.password": "\u092a\u093e\u0938\u0935\u0930\u094d\u0921",
         "entry.field.notes": "\u0928\u094b\u091f",
         "note.field.title": "\u0936\u0940\u0930\u094d\u0937\u0915",
@@ -2505,7 +2511,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "Layanan / Nama",
         "entry.field.username": "Pengguna / Email",
         "entry.field.url": "URL",
-        "entry.hint.url": "Dipakai untuk mencocokkan entry ini dengan situs. Hanya http:// atau https://.",
+        "entry.hint.url": "Dipakai untuk mencocokkan entry ini dengan situs. Hanya http:// atau https://. Tulis https://*.example.com untuk menyertakan subdomain.",
+        "entry.url.scope": "Cocok dengan host ini dan subdomainnya.",
         "entry.field.password": "Kata sandi",
         "entry.field.notes": "Catatan",
         "note.field.title": "Judul",
@@ -2878,7 +2885,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "\u30b5\u30fc\u30d3\u30b9 / \u540d\u79f0",
         "entry.field.username": "\u30e6\u30fc\u30b6\u30fc\u540d / \u30e1\u30fc\u30eb",
         "entry.field.url": "URL",
-        "entry.hint.url": "\u3053\u306e\u30a8\u30f3\u30c8\u30ea\u3092\u30b5\u30a4\u30c8\u306b\u7d10\u3065\u3051\u308b\u305f\u3081\u306b\u4f7f\u7528\u3057\u307e\u3059\u3002http:// \u307e\u305f\u306f https:// \u306e\u307f\u3002",
+        "entry.hint.url": "\u3053\u306e\u30a8\u30f3\u30c8\u30ea\u3092\u30b5\u30a4\u30c8\u306b\u7d10\u3065\u3051\u308b\u305f\u3081\u306b\u4f7f\u7528\u3057\u307e\u3059\u3002http:// \u307e\u305f\u306f https:// \u306e\u307f\u3002\u30b5\u30d6\u30c9\u30e1\u30a4\u30f3\u3092\u542b\u3081\u308b\u306b\u306f https://*.example.com \u3068\u66f8\u304d\u307e\u3059\u3002",
+        "entry.url.scope": "\u3053\u306e\u30db\u30b9\u30c8\u3068\u305d\u306e\u30b5\u30d6\u30c9\u30e1\u30a4\u30f3\u306b\u4e00\u81f4\u3057\u307e\u3059\u3002",
         "entry.field.password": "\u30d1\u30b9\u30ef\u30fc\u30c9",
         "entry.field.notes": "\u30e1\u30e2",
         "note.field.title": "\u30bf\u30a4\u30c8\u30eb",
@@ -3251,7 +3259,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "\uc11c\ube44\uc2a4 / \uc774\ub984",
         "entry.field.username": "\uc0ac\uc6a9\uc790 \uc774\ub984 / \uc774\uba54\uc77c",
         "entry.field.url": "URL",
-        "entry.hint.url": "\uc774 \ud56d\ubaa9\uc744 \uc0ac\uc774\ud2b8\uc640 \uc5f0\uacb0\ud558\ub294 \ub370 \uc4f0\uc785\ub2c8\ub2e4. http:// \ub610\ub294 https://\ub9cc \uac00\ub2a5\ud569\ub2c8\ub2e4.",
+        "entry.hint.url": "\uc774 \ud56d\ubaa9\uc744 \uc0ac\uc774\ud2b8\uc640 \uc5f0\uacb0\ud558\ub294 \ub370 \uc4f0\uc785\ub2c8\ub2e4. http:// \ub610\ub294 https://\ub9cc \uac00\ub2a5\ud569\ub2c8\ub2e4. \ud558\uc704 \ub3c4\uba54\uc778\uc744 \ud3ec\ud568\ud558\ub824\uba74 https://*.example.com \uc73c\ub85c \uc4f0\uc138\uc694.",
+        "entry.url.scope": "\uc774 \ud638\uc2a4\ud2b8\uc640 \ud558\uc704 \ub3c4\uba54\uc778\uc5d0 \uc77c\uce58\ud569\ub2c8\ub2e4.",
         "entry.field.password": "\ube44\ubc00\ubc88\ud638",
         "entry.field.notes": "\uba54\ubaa8",
         "note.field.title": "\uc81c\ubaa9",
@@ -3624,7 +3633,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "Servi\u00e7o / Nome",
         "entry.field.username": "Usu\u00e1rio / E-mail",
         "entry.field.url": "URL",
-        "entry.hint.url": "Serve para associar este registro a um site. Somente http:// ou https://.",
+        "entry.hint.url": "Usado para associar esta entrada a um site. Apenas http:// ou https://. Escreva https://*.example.com para incluir subdom\u00ednios.",
+        "entry.url.scope": "Corresponde a este host e aos seus subdom\u00ednios.",
         "entry.field.password": "Senha",
         "entry.field.notes": "Notas",
         "note.field.title": "T\u00edtulo",
@@ -3997,7 +4007,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "\u0421\u0435\u0440\u0432\u0438\u0441 / \u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435",
         "entry.field.username": "\u0418\u043c\u044f \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f / \u042d\u043b. \u043f\u043e\u0447\u0442\u0430",
         "entry.field.url": "URL",
-        "entry.hint.url": "\u0418\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442\u0441\u044f, \u0447\u0442\u043e\u0431\u044b \u0441\u0432\u044f\u0437\u0430\u0442\u044c \u044d\u0442\u0443 \u0437\u0430\u043f\u0438\u0441\u044c \u0441 \u0441\u0430\u0439\u0442\u043e\u043c. \u0422\u043e\u043b\u044c\u043a\u043e http:// \u0438\u043b\u0438 https://.",
+        "entry.hint.url": "\u0418\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442\u0441\u044f \u0434\u043b\u044f \u0441\u0432\u044f\u0437\u0438 \u044d\u0442\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u0438 \u0441 \u0441\u0430\u0439\u0442\u043e\u043c. \u0422\u043e\u043b\u044c\u043a\u043e http:// \u0438\u043b\u0438 https://. \u041d\u0430\u043f\u0438\u0448\u0438\u0442\u0435 https://*.example.com, \u0447\u0442\u043e\u0431\u044b \u0432\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u043f\u043e\u0434\u0434\u043e\u043c\u0435\u043d\u044b.",
+        "entry.url.scope": "\u0421\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442 \u0441 \u044d\u0442\u0438\u043c \u0445\u043e\u0441\u0442\u043e\u043c \u0438 \u0435\u0433\u043e \u043f\u043e\u0434\u0434\u043e\u043c\u0435\u043d\u0430\u043c\u0438.",
         "entry.field.password": "\u041f\u0430\u0440\u043e\u043b\u044c",
         "entry.field.notes": "\u0417\u0430\u043c\u0435\u0442\u043a\u0438",
         "note.field.title": "\u0417\u0430\u0433\u043e\u043b\u043e\u0432\u043e\u043a",
@@ -4370,7 +4381,8 @@ WEB_CATALOGUES = {
         "entry.field.service": "\u670d\u52a1 / \u540d\u79f0",
         "entry.field.username": "\u7528\u6237\u540d / \u90ae\u7bb1",
         "entry.field.url": "\u7f51\u5740",
-        "entry.hint.url": "\u7528\u4e8e\u628a\u6b64\u6761\u76ee\u4e0e\u7f51\u7ad9\u5bf9\u5e94\u8d77\u6765\u3002\u4ec5\u9650 http:// \u6216 https://\u3002",
+        "entry.hint.url": "\u7528\u4e8e\u5c06\u6b64\u6761\u76ee\u4e0e\u7f51\u7ad9\u5173\u8054\u3002\u4ec5\u9650 http:// \u6216 https://\u3002\u5199 https://*.example.com \u53ef\u5305\u542b\u5b50\u57df\u540d\u3002",
+        "entry.url.scope": "\u5339\u914d\u6b64\u4e3b\u673a\u53ca\u5176\u5b50\u57df\u540d\u3002",
         "entry.field.password": "\u5bc6\u7801",
         "entry.field.notes": "\u5907\u6ce8",
         "note.field.title": "\u6807\u9898",
@@ -7731,7 +7743,13 @@ def view_entry_page(parts, history=()):
     # which went through the form validator, and this value becomes an href.
     raw_url = parts[6] if len(parts) > 6 else ""
     safe_url = raw_url if _URL_RE.match(raw_url.strip()) else ""
-    if safe_url:
+    if safe_url and "*" in safe_url:
+        # A scope, not a destination. Rendering it as an href gives a link that
+        # cannot resolve, so it is shown as what it is: the set of hosts this
+        # entry is offered on.
+        url_html = ('<code>%s</code> <span class="hint" data-i18n="entry.url.scope">'
+                    'Matches this host and its subdomains.</span>' % _esc(safe_url))
+    elif safe_url:
         url_html = (f'<a href="{_esc(safe_url)}" target="_blank" '
                     f'rel="noopener noreferrer nofollow">{_esc(safe_url)}</a>')
     else:
@@ -8951,6 +8969,34 @@ def _load_core():
 
 
 core = _load_core()
+
+
+def url_problem(raw):
+    """Why this URL field cannot be used, or "" when it can.
+
+    The form and the browser bridge have to agree about what a URL means. They
+    did not: the field accepted anything with an http(s) scheme, so a scope the
+    matcher will never honour -- https://*.com, or a wildcard buried in the
+    middle of a host -- saved cleanly and then silently matched nothing. A
+    field that accepts what the feature refuses is worse than one that refuses
+    early, because the refusal arrives at fill time with no explanation.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    if not _URL_RE.match(text):
+        return "URL must start with http:// or https://."
+    try:
+        host = (urllib.parse.urlsplit(text).hostname or "")
+    except ValueError:
+        return "URL must start with http:// or https://."
+    if "*" not in host:
+        return ""
+    if not core.wildcard_scope(host.lower()):
+        return ("A subdomain scope is written https://*.example.com, and must "
+                "name a domain: https://*.com would cover every site under a "
+                "whole top-level domain.")
+    return ""
 
 VAULT_FORMAT_VERSION = core.VAULT_FORMAT_VERSION
 RECOVERY_PATH = core.recovery_path(VAULT_PATH)
@@ -11945,14 +11991,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             notes = (data.get("notes") or [""])[0]
             url_raw = (data.get("url") or [""])[0]
             url = _vurl(url_raw)
+            # A scope the matcher will refuse must not save cleanly.
+            url_reason = url_problem(url_raw)
             folder, custom, attrs_error = posted_attrs(data)
 
-            if not name or url is None or attrs_error:
+            if not name or url is None or url_reason or attrs_error:
                 plaintext = load_vault(master, self._session_rec)
                 if not name:
                     problem = "Name / service is required."
-                elif url is None:
-                    problem = "URL must start with http:// or https://."
+                elif url is None or url_reason:
+                    problem = url_reason
                 else:
                     problem = attrs_error
                 page = build_entry_form(
@@ -12010,6 +12058,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             notes = (data.get("notes") or [""])[0]
             url_raw = (data.get("url") or [""])[0]
             url = _vurl(url_raw)
+            # A scope the matcher will refuse must not save cleanly.
+            url_reason = url_problem(url_raw)
             folder, custom, attrs_error = posted_attrs(data)
 
             plaintext = load_vault(master, self._session_rec)
@@ -12028,11 +12078,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Entry not found")
                 return
 
-            if not name or url is None or attrs_error:
+            if not name or url is None or url_reason or attrs_error:
                 if not name:
                     problem = "Name / service is required."
-                elif url is None:
-                    problem = "URL must start with http:// or https://."
+                elif url is None or url_reason:
+                    problem = url_reason
                 else:
                     problem = attrs_error
                 values = {

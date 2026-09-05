@@ -147,7 +147,10 @@ These are the properties that separate autofill from a credential leak.
 - **Never fill inside a cross-origin iframe** by default. An embedded login form
   from another origin is a standard credential-theft pattern.
 - **Refuse to fill an `http://` page from a record whose URL is `https://`.**
-  Downgrade protection.
+  Downgrade protection. **Shipped in 4.5.0**, and it fails closed: a caller
+  that does not say what scheme the page uses is refused for https-bound
+  records, because an unknown scheme cannot be shown to be secure. The list and
+  the fill agree, so an account the fill will refuse is never offered.
 - The `http(s)`-only scheme allowlist added in 2.12.0 already prevents a
   `javascript:` URL from reaching the extension as a match target.
 
@@ -168,6 +171,15 @@ https://*.example.com      host and any subdomain
 ```
 
 The wildcard is expanded by the bridge, never inferred from a bare hostname.
+
+**Shipped in 4.5.0.** One guard needs no PSL and is a floor rather than a
+substitute: `https://*.com` is refused, because nothing legitimately covers a
+whole top-level domain. `*.co.uk` still parses -- SPM cannot tell it from
+`*.example.com` -- which is the cost of having no PSL and the reason scope is
+opt in per record. Matching stops at a dot, so `*.example.com` does not match
+`notexample.com`; the form refuses a scope the matcher will not honour, and the
+view page renders a scope as a scope rather than as an href that cannot
+resolve.
 
 ## Phasing
 
@@ -205,8 +217,16 @@ which requires existing users to reload the extension, lands on its own.
 
 ### After that — cheap unlock and scoping
 
-- WebAuthn unlock in the popup, reusing the Dashboard's ceremony
-- Opt-in `*.` subdomain scoping
+- ~~Opt-in `*.` subdomain scoping~~ **Shipped in 4.5.0**, together with
+  downgrade protection and one matcher in the trusted core: `bridge-list` and
+  `bridge-get` each carried their own copy of the rule that decides whether a
+  page may see a credential.
+- WebAuthn unlock in the popup, reusing the Dashboard's ceremony. **Needs a
+  design decision before it needs code.** The popup reaches SPM through the
+  native host, which takes no part in the Dashboard's WebAuthn ceremony and
+  holds no session for an assertion to attach to. Where a verified assertion is
+  redeemed is the open question; answering it badly puts a second unlock path
+  beside the one that already exists.
 - Optional: save-on-submit prompt for new credentials
 
 ## Testing
@@ -220,8 +240,21 @@ CLI-level and needs no browser:
 - native-host `lock` makes a previously working session fail
 - unlock, list, get, and lock work over native-messaging framing
 
-Wildcard scope and HTTPS downgrade refusal belong to the scoping phase
-and receive their regression assertions with that implementation.
+**Scope and downgrade, from 4.5.0** -- driven through the CLI's own bridge
+commands rather than the matcher alone, because the shell is where the argument
+order and the exit status live:
+
+- an opt-in wildcard covers the parent host and every depth beneath it
+- it stops at a dot, so `*.example.com` does not match `notexample.com`
+- a bare hostname is never treated as a wildcard
+- `*.com` is refused as a scope
+- an https-bound record is neither offered to nor filled on an http page
+- a missing page scheme is not treated as secure
+- a refusal exits non-zero, and a list stays secret-free whatever it matches
+- every refusal the core can produce is declared in the native host's error
+  table, so a downgrade refusal does not reach the extension as the generic one
+
+Five mutations of the matcher were each killed by the assertion written for it.
 
 **In a browser, from 4.4.0** — `tests/extension-ui.mjs`, run by the regression
 suite when Chromium and puppeteer are both present and skipped loudly when they

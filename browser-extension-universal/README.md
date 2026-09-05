@@ -2,7 +2,8 @@
 
 This folder contains one extension codebase for Chrome, Chromium, Edge, Brave,
 Opera, Vivaldi, and Firefox desktop. It lists only accounts bound to the active
-tab's exact hostname and fills only the account you explicitly choose.
+tab's hostname -- exactly, or through a scope a record opts into -- and fills
+only the account you explicitly choose.
 
 ## Recommended: guided one-command setup
 
@@ -138,8 +139,17 @@ password only in process memory. **Lock SPM** discards it immediately. It is
 also discarded after five idle minutes, after twelve total hours, when the
 native connection ends, or when the browser closes.
 
-Matching is exact. `example.com` does not match `login.example.com`. The CLI
-re-verifies the hostname again when the chosen credential is retrieved.
+Matching is exact by default: `example.com` does not match
+`login.example.com`. A record opts into a wider scope by writing one into its
+URL field, `https://*.example.com`, which covers that host and every host
+beneath it. The wildcard is never inferred from a bare hostname, and
+`https://*.com` is refused. The CLI re-verifies the hostname again when the
+chosen credential is retrieved.
+
+A record bound to an `https://` URL is refused on an `http://` page, and is not
+offered in the picker there either. The popup sends the page's scheme with
+every request; a build older than 4.5.0 does not, and is refused for
+https-bound records until it is reloaded.
 
 Safari and iOS browsers are not supported: Safari requires a signed Xcode app
 wrapper and iOS browsers do not expose this native-messaging extension model.

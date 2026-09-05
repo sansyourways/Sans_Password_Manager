@@ -1255,6 +1255,128 @@ def looks_sensitive(label, url, hosts):
     return False
 
 
+# --- Browser bindings: which records a page may see, and on what terms ------
+#
+# One implementation. The CLI's `bridge-list` and `bridge-get` each carried
+# their own copy of this, built inline in a shell heredoc, and the two had
+# already begun to disagree in shape if not yet in behaviour. A matcher that
+# decides whether a page may see a credential is the last place to keep two of.
+
+BRIDGE_URL_RE = re.compile(r"https?://[^\s]+")
+BRIDGE_SCHEME_RE = re.compile(r"(?i)^https?://")
+
+
+def _binding_host(token):
+    """The host a bound URL names, wildcard preserved. '' if it names none."""
+    try:
+        return (urllib.parse.urlsplit(token).hostname or "").lower().strip(".")
+    except ValueError:
+        return ""
+
+
+def wildcard_scope(pattern):
+    """The parent host an opt-in '*.' scope covers, or '' if it is not one.
+
+    A wildcard is only ever written by hand into a record's URL field. It is
+    never inferred from a bare hostname: without a public suffix list, treating
+    'foo.co.uk' as also covering '.co.uk' would bind a record to every site in
+    the United Kingdom, and bundling a PSL is a data dependency this project
+    does not have.
+
+    The one guard that does not need a PSL is a floor on how much can be
+    claimed: '*.com' is refused because no record legitimately covers a whole
+    top-level domain. It is a floor and not a substitute -- '*.co.uk' still
+    parses, because SPM cannot tell it from '*.example.com'. That is the cost
+    of having no PSL, and the reason this is opt in per record rather than
+    inferred for every record.
+    """
+    if not pattern.startswith("*."):
+        return ""
+    parent = pattern[2:].strip(".")
+    if not parent or "*" in parent:
+        return ""
+    if len(parent.split(".")) < 2:
+        return ""
+    return parent
+
+
+def host_in_scope(requested, pattern):
+    """Whether a page's host is covered by one binding pattern."""
+    requested = (requested or "").lower().strip(".")
+    pattern = (pattern or "").lower().strip(".")
+    if not requested or not pattern:
+        return False
+    parent = wildcard_scope(pattern)
+    if parent:
+        # The parent itself and anything under it. The dot is what keeps
+        # '*.example.com' off 'notexample.com', which a bare suffix test
+        # would match.
+        return requested == parent or requested.endswith("." + parent)
+    return requested == pattern
+
+
+def record_bindings(label, notes, url):
+    """Every host pattern a record is bound to, with the scheme each requires.
+
+    Returns a list of (pattern, scheme) pairs. The scheme is 'https' only when
+    the binding was written as an https URL; a label-derived binding has no
+    scheme of its own and does not demand one.
+    """
+    bindings, seen = [], set()
+
+    def add(pattern, scheme):
+        pattern = (pattern or "").lower().strip(".")
+        if not pattern or (pattern, scheme) in seen:
+            return
+        seen.add((pattern, scheme))
+        bindings.append((pattern, scheme))
+
+    add((label or "").lower().strip("."), "")
+    # The url field is the intended binding source. Notes are still scanned so
+    # that vaults written before 2.12.0 -- where a URL could only live in the
+    # notes -- keep matching exactly as they did, with no rewrite on upgrade.
+    tokens = ([url] if url else []) + BRIDGE_URL_RE.findall(notes or "")
+    for token in tokens:
+        if not BRIDGE_SCHEME_RE.match(token):
+            continue
+        host = _binding_host(token)
+        if host:
+            add(host, "https" if token.lower().startswith("https://") else "http")
+    return bindings
+
+
+# Refusals the bridge can produce. Named here because the native host projects
+# every error onto a fixed set, and a refusal the host has not been told about
+# reaches the extension as a generic one.
+BRIDGE_NOT_BOUND = "record is not bound to this hostname"
+BRIDGE_INSECURE = "record requires a secure page"
+
+
+def bridge_match(requested, scheme, label, notes, url):
+    """Whether this page may see this record, and why not when it may not.
+
+    Returns (True, "") or (False, reason).
+
+    Downgrade protection is the second half and it fails closed. A record bound
+    to an https URL is refused on an http page, and refused again when the
+    caller did not say what the page's scheme was -- an unknown scheme cannot
+    be shown to be https, and a credential fill is not the place to assume the
+    safe answer. A caller that predates the scheme argument therefore stops
+    filling https-bound records rather than quietly keeping the old behaviour.
+    """
+    scheme = (scheme or "").lower().strip(":")
+    matched = [(pattern, bound) for pattern, bound in record_bindings(label, notes, url)
+               if host_in_scope(requested, pattern)]
+    if not matched:
+        return False, BRIDGE_NOT_BOUND
+    # Any binding that permits this page is enough; a record bound to both
+    # http and https on the same host is not downgraded by the https one.
+    for _pattern, bound in matched:
+        if bound != "https" or scheme == "https":
+            return True, ""
+    return False, BRIDGE_INSECURE
+
+
 def tidy_proposals(plaintext):
     """What a tidy would change, as data. Changes nothing.
 
@@ -2991,6 +3113,50 @@ def main(argv):
             report = doctor_report(plaintext, argv[3], argv[4], argv[5:])
             sys.stdout.write(json.dumps(report, indent=2) + "\n")
             return 1 if report["summary"]["failed"] else 0
+        elif command == "bridge-list":
+            # bridge-list <plainfile> <page host> <page scheme>
+            # stdout: JSON. Secret-free by construction -- a match is a
+            # summary, and the secret column is never read here.
+            host = (argv[3] or "").lower().strip(".")
+            scheme = argv[4] if len(argv) > 4 else ""
+            if not host or any(ch.isspace() for ch in host):
+                sys.stdout.write(json.dumps(
+                    {"ok": False, "error": "invalid browser hostname"}) + "\n")
+                return 2
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                matches = []
+                for line in handle:
+                    parts = line.rstrip("\n").split("\t")
+                    if not parts or not parts[0].isdigit() or len(parts) < 6:
+                        continue
+                    url = parts[6] if len(parts) > 6 else ""
+                    ok, _reason = bridge_match(host, scheme, parts[1], parts[4], url)
+                    if ok:
+                        matches.append({"id": parts[0], "label": parts[1],
+                                        "username": parts[2], "url": url})
+            sys.stdout.write(json.dumps({"ok": True, "matches": matches}) + "\n")
+        elif command == "bridge-get":
+            # bridge-get <plainfile> <record id> <page host> <page scheme>
+            rid, host = argv[3], (argv[4] or "").lower().strip(".")
+            scheme = argv[5] if len(argv) > 5 else ""
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    parts = line.rstrip("\n").split("\t")
+                    if parts and parts[0] == rid and len(parts) >= 6:
+                        url = parts[6] if len(parts) > 6 else ""
+                        ok, reason = bridge_match(host, scheme, parts[1], parts[4], url)
+                        if not ok:
+                            sys.stdout.write(json.dumps(
+                                {"ok": False, "error": reason}) + "\n")
+                            return 2
+                        sys.stdout.write(json.dumps(
+                            {"ok": True, "username": parts[2],
+                             "password": parts[3]}, ensure_ascii=False) + "\n")
+                        break
+                else:
+                    sys.stdout.write(json.dumps(
+                        {"ok": False, "error": "record not found"}) + "\n")
+                    return 1
         elif command == "self-test":
             return 0
         else:
