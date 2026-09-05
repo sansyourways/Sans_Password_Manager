@@ -2,7 +2,10 @@
 
 Status: **3.1.0 protocol and popup picker shipped; 3.2.0 guided setup and
 stable extension identity shipped; 3.7.0 declared the boundary the host
-enforces.** The origin-isolated in-field picker is next.
+enforces; 4.5.0 shipped opt-in subdomain scope and downgrade protection;
+4.6.0 shipped the origin-isolated in-field picker.** What remains of this plan
+is WebAuthn unlock in the popup, which is waiting on a design decision, and an
+optional save-on-submit prompt.
 
 Phases were rebased onto 3.1.0 after 3.0.0 took the major version for the
 vault-format change, and shifted one release again when 3.2.0 went to the
@@ -17,9 +20,11 @@ dead controls, 3.4.0 to diagnostics, 3.5.0 to per-record history — none of the
 this plan. **The order is the part worth trusting; the version each phase lands
 in is decided when it is ready, not here.**
 
-For these two that is not a scheduling question. Both need a browser's
-extension UI driven for real before they are worth trusting, and that is what
-decides when they ship.
+For these two that was not a scheduling question. Both needed a browser's
+extension UI driven for real before they were worth trusting, and that is what
+decided when they shipped: 4.4.0 built that harness, 4.4.1 extended it to the
+fill, and 4.6.0 used it to ship the picker with every fill-path rule asserted
+in a browser rather than argued for on paper.
 
 This is an implementation plan with target versions, so it lives here rather
 than in [`ROADMAP.md`](../ROADMAP.md), which deliberately communicates direction
@@ -120,7 +125,7 @@ background page. The mitigation is not a longer session — it is making unlock
 cheap, by reusing the WebAuthn ceremony the Dashboard already implements so
 re-unlocking is a Touch ID tap. That is phase 3 rather than a blocker.
 
-## The in-field dropdown
+## The in-field dropdown — **shipped in 4.6.0**
 
 Render the menu in an **iframe served from the extension origin**
 (`chrome-extension://<id>/menu.html`), not an injected `<div>`.
@@ -133,7 +138,19 @@ do, and it is the difference between "the page cannot see your account list" and
 
 Cost: the iframe must be listed in `web_accessible_resources`, which exposes the
 extension ID to the page and allows fingerprinting. This is universal among
-password managers. MV3's `use_dynamic_url` reduces it and should be evaluated.
+password managers.
+
+`use_dynamic_url` was evaluated in 4.6.0 and not adopted. It rotates the
+resource URL, which genuinely reduces fingerprinting; it also moves the origin
+the background recognises its own menu frame by, and Firefox's MV3 does not
+implement it, so adopting it means a Chromium-only change to a boundary check.
+That is worth doing deliberately rather than as a side effect.
+
+A second cost is smaller and real: the overlay has a height, and the height
+follows the number of rows up to four, so a page can infer roughly how many
+accounts matched. It cannot infer which. Sizing to a fixed height would close
+that and would make a one-account menu look broken; the leak is recorded here
+rather than traded for the worse interface.
 
 ### Fill-path rules
 
@@ -153,6 +170,19 @@ These are the properties that separate autofill from a credential leak.
   the fill agree, so an account the fill will refuse is never offered.
 - The `http(s)`-only scheme allowlist added in 2.12.0 already prevents a
   `javascript:` URL from reaching the extension as a match target.
+
+**All of these shipped in 4.6.0, each with a test that fails when the code
+enforcing it is removed.** Two are stricter than written above. "Never fill
+inside a cross-origin iframe" is enforced as *never fill inside any subframe*:
+telling a same-origin embed from a hostile one needs the tab's own URL, which
+needs a permission worth more than the case it would enable, so the whole class
+is refused. And the picker will not fill a record it did not offer, which is
+what keeps the downgrade rule true at the fill and not only in the list.
+
+The gesture rule rests on `isTrusted`. A page can focus a field and can
+dispatch a `KeyboardEvent` identical to Enter in every other respect; it cannot
+set that flag, because the browser sets it and only for real input. Opening the
+menu is deliberately not gated on it, since an open menu reveals nothing.
 
 ## Matching rules
 
@@ -208,14 +238,20 @@ Not a picker phase. It removes the installation friction that 3.1.0 shipped
 with, and it is separated from the in-field work so that the identity change,
 which requires existing users to reload the extension, lands on its own.
 
-### Next — in-field dropdown
+### 4.6.0 — in-field dropdown — **shipped**
 
 - Content script, field detection, extension-origin iframe menu
 - Keyboard navigation (arrows, Enter, Escape), focus handling
-- The fill-path rules above, each with a test
-- Firefox for Android verification pass
+- The fill-path rules above, each with a test that kills its own mutant
+- Driven end to end in Chromium, including the native-messaging round trip
 
-### After that — cheap unlock and scoping
+Not done in this phase: the **Firefox for Android verification pass**. The code
+is shared and the manifest carries the same content script, but "extensions run
+there" is not the same statement as "this overlay behaves on a touch keyboard
+at that viewport", and this repository has no way to run that. It is listed as
+an unverified target rather than a supported one.
+
+### After that — cheap unlock
 
 - ~~Opt-in `*.` subdomain scoping~~ **Shipped in 4.5.0**, together with
   downgrade protection and one matcher in the trusted core: `bridge-list` and
@@ -288,15 +324,52 @@ The suite also `cmp`s the two `fill.js` copies and requires each popup to
 inject the shared function by name, because a fill duplicated inline in two
 popups is exactly what drifted.
 
-**Not reached, and not pending.** The native-messaging round trip through a
-live popup. `chrome.action.openPopup()` works under headless Chromium and the
-popup can be attached to and driven, but it cannot obtain `activeTab`: that
-permission is granted by a genuine user gesture on the toolbar action, and a
-debugger-synthesised call is not one, so `tabs.query` returns a tab with an id
+**The picker, from 4.6.0** — `tests/extension-menu.mjs` drives the whole
+feature in Chromium: a real login form served over http, the real content
+script, the real extension-origin iframe, the real native host, and a real
+vault. Including the native-messaging round trip, which is new.
+
+- the menu opens on focus and is served from `chrome-extension://…/menu.html`
+- the account list is not in the page's DOM, and the picker's shadow host stays
+  closed to page script
+- a synthetic Enter fills nothing; a real one fills
+- arrow keys and Enter fill; Escape dismisses
+- an https-bound record is not offered on an http page, and cannot be chosen
+  through the menu's own channel either
+- a login field in a cross-origin iframe is offered nothing, and is not filled
+- page script cannot reach the extension's message channel at all
+- a menu loaded with a nonce the background never issued lists nothing
+
+Six mutants, each killed by its own assertion: the trusted-event gate removed,
+the top-frame refusal removed, the list rendered into the page, an unoffered
+record made choosable, the fill-time hostname re-read dropped, the shadow root
+opened. The cross-origin refusal was mutated in two steps on purpose — first
+with the content script allowed into every frame and the background check
+intact, which still refused, and then with both removed, which did not. A guard
+that is only ever shadowed by another guard is not known to work.
+
+That pass also corrected the test rather than the code once. The check that the
+page cannot read the list read `outerHTML`, which does not see into a closed
+shadow root, so a list rendered into one would have passed a test claiming to
+prove the opposite. The replacement is the real attack — a page that patches
+`attachShadow` before anything else runs — and it comes back empty, because a
+content script runs in an isolated world with its own `Element.prototype`.
+
+**Still not reached, and still not pending.** The native-messaging round trip
+through *the popup*. `chrome.action.openPopup()` works under headless Chromium
+and the popup can be attached to and driven, but it cannot obtain `activeTab`:
+that permission is granted by a genuine user gesture on the toolbar action, and
+a debugger-synthesised call is not one, so `tabs.query` returns a tab with an id
 and no URL. This is a Chromium design decision, not a gap to engineer around.
 The popup's hostname verification therefore keeps its CLI-level coverage —
 which tests the decision, the part that can be wrong — and the fill it guards
 is covered in a browser.
+
+The picker reaches the host in the test above precisely because it does not use
+`activeTab`: a content script and an extension-origin iframe need no such
+grant. So the round trip is now covered for the path that could carry it, and
+the popup's remains a recorded boundary rather than a hole that was quietly
+worked around.
 
 ## Packaging
 

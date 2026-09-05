@@ -7,6 +7,63 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.6.0] - 2026-09-05
+
+Autofill where the login form is, without the account list ever entering the
+page.
+
+### Added
+- **An in-field account picker.** Focusing a login field on a site with saved
+  accounts opens a menu next to it; arrow keys move through it, Enter or a
+  click fills, Escape dismisses it. No record ID, and no master password per
+  fill -- the session the popup already unlocks is what it draws on.
+- The menu is an **iframe served from the extension's own origin**, not an
+  injected element. An injected menu lives in the page's document, and a page
+  that wants your account list can reach it; a cross-origin iframe is a
+  boundary the page cannot read through. The content script that anchors it is
+  never told which accounts matched -- only how many.
+- `content.js`, `menu.html` and `menu.js`, and the `content_scripts` and
+  `web_accessible_resources` entries both manifests now carry.
+
+### Changed
+- The background script decides which site a request is about from the
+  browser's own view of the sender rather than from anything the page frame
+  says. A hostname supplied by a content script is a hostname an attacker can
+  eventually choose, and the whole bridge rests on a record reaching only the
+  site it is bound to.
+- The popup's channel is refused outright when it arrives from a page frame,
+  so the picker's plumbing cannot be used to ask for an arbitrary host.
+
+### Security
+- **A fill still requires a genuine gesture.** The picker opens on focus, which
+  a page can cause and which reveals nothing; choosing an account requires an
+  event the browser marked trusted, which a page cannot forge. Dispatching a
+  synthetic Enter fills nothing.
+- **The hostname is read again at fill time**, from the browser, not carried
+  over from when the list was built.
+- **A login field inside a cross-origin iframe is never offered the picker.**
+  Enforced twice: the content script is not injected into subframes, and the
+  background refuses any request that does not come from the top-level frame.
+- **A record the picker did not offer cannot be filled through it**, so 4.5.0's
+  downgrade rule holds at the fill as well as in the list: on an http page an
+  https-bound record is neither listed nor fillable.
+- The account list and the credential never enter the page's own DOM, and the
+  picker's shadow host stays closed to page script.
+
+### Tested
+- `tests/extension-menu.mjs` drives the whole feature in Chromium against a
+  real login form over http, through the real native host and a real vault --
+  including the native-messaging round trip, which the popup's own tests could
+  never reach because `activeTab` needs a real toolbar gesture. The picker does
+  not use `activeTab`, so this is the shipped path rather than a stand-in.
+- Six mutants, each killed by the assertion written for it: the trusted-event
+  gate removed, the top-frame refusal removed, the account list rendered into
+  the page, an unoffered record made choosable, the fill-time hostname re-read
+  dropped, and the shadow root opened.
+- A flake found and fixed rather than retried: an arrow key could arrive before
+  the menu had rendered its rows, so the first keypress did nothing. The menu
+  now queues keys until the list exists.
+
 ## [4.5.0] - 2026-09-04
 
 Which pages may see a credential, decided in one place.

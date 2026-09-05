@@ -5,6 +5,10 @@ Opera, Vivaldi, and Firefox desktop. It lists only accounts bound to the active
 tab's hostname -- exactly, or through a scope a record opts into -- and fills
 only the account you explicitly choose.
 
+There are two ways in. The toolbar popup has been here since 3.1.0. Since
+4.6.0 there is also an **in-field picker**: focus a login field and the
+accounts bound to that site appear next to it.
+
 ## Recommended: guided one-command setup
 
 ```bash
@@ -131,6 +135,51 @@ session for them to act on. That is a property of a one-shot protocol, not
 something this table can close. The popup in this folder never sends the master
 password except to `unlock`.
 
+## The in-field picker
+
+Unlock once through the toolbar popup. After that, focusing a username or
+password field on a site you have accounts for opens a menu beside it: arrow
+keys move through it, Enter or a click fills, Escape dismisses it, and the menu
+never appears at all while SPM is locked.
+
+The menu is an **iframe served from the extension's own origin**, not an
+element injected into the page. That is the difference between "the page cannot
+see your account list" and "the page probably cannot": an injected menu lives
+in the page's document, and a page that wants to know which accounts you hold
+can go and read it. The content script that positions the iframe is told how
+many accounts matched and never which ones.
+
+Four rules hold, and each has a test that fails if the code enforcing it is
+removed:
+
+- **A fill needs a real gesture.** Opening the menu does not -- a page can
+  focus a field, and an open menu discloses nothing. Choosing an account
+  requires an event the browser marked trusted, which page script cannot forge.
+  A synthetic Enter fills nothing.
+- **The hostname is read again at fill time**, from the browser rather than
+  from anything the page frame claims about itself.
+- **A login field inside a cross-origin iframe is never offered the picker**,
+  and in fact no subframe is: telling a same-origin embed from a hostile one
+  would need a permission worth more than the case it enables.
+- **A record the picker did not offer cannot be filled through it**, so an
+  https-bound record on an `http` page is neither listed nor reachable.
+
+One thing a page can still infer: the overlay's height follows the number of
+rows, up to four, so it learns roughly how many accounts you have for it. It
+does not learn what they are. A fixed height would close that and would make a
+one-account menu look broken.
+
+The picker needs the extension to run on the pages it appears on, which is why
+the manifest declares a content script for `http` and `https`. It does not add
+the `tabs` or host permissions: the fill happens in the content script already
+present, and the frame's URL arrives from the browser with every message. The
+popup path still needs only `activeTab`.
+
+Firefox for Android is not a verified target. The code is shared and the
+manifest carries the same content script, but nothing here can run that
+overlay on a touch keyboard at that viewport, so it is listed as unverified
+rather than supported.
+
 ## Use
 
 Open an HTTP(S) login page, select the SPM toolbar icon, enter the master
@@ -150,6 +199,10 @@ A record bound to an `https://` URL is refused on an `http://` page, and is not
 offered in the picker there either. The popup sends the page's scheme with
 every request; a build older than 4.5.0 does not, and is refused for
 https-bound records until it is reloaded.
+
+Reload the extension after upgrading to 4.6.0 as well: it gains a content
+script, and a browser does not start running one for an extension it already
+has loaded.
 
 Safari and iOS browsers are not supported: Safari requires a signed Xcode app
 wrapper and iOS browsers do not expose this native-messaging extension model.

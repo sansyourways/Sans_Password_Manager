@@ -4851,6 +4851,49 @@ else
 	CHROMIUM_BIN="$ext_chromium" node "$ROOT_DIR/tests/extension-fill.mjs" \
 		"$ROOT_DIR/browser-extension-universal/fill.js" \
 		"file://$ROOT_DIR/tests/fixtures/login-form.html" "$ext_puppeteer"
+
+	# The in-field picker, end to end: a real page, a real content script, the
+	# real extension-origin iframe, the real native host, and this vault.
+	#
+	# The popup's round trip could not be driven this way -- `activeTab` is
+	# granted for a genuine toolbar gesture and a synthesised one does not
+	# count -- and that is recorded in the roadmap as a boundary. The picker
+	# does not use `activeTab`, so nothing here is a stand-in.
+	menu_root="$TEST_ROOT/picker"
+	menu_home="$menu_root/home"
+	menu_profile="$menu_root/profile"
+	menu_vault="$menu_root/vault.gpg"
+	menu_master="Picker-Regression-Master-7"
+	menu_secret="picker-local-secret-1"
+	menu_secure_secret="picker-secure-only-2"
+	rm -rf "$menu_root"
+	mkdir -p "$menu_home" "$menu_profile/NativeMessagingHosts"
+	{
+		printf 'META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n' "$TEST_RECOVERY_B64"
+		printf '1\tLocal Demo\tavery@example.invalid\t%s\tsynthetic\t2025-01-01T00:00:00Z\thttp://127.0.0.1\n' \
+			"$menu_secret"
+		printf '2\tSecond Local\tbob@example.invalid\tsecond-secret\tsynthetic\t2025-01-01T00:00:00Z\thttp://127.0.0.1\n'
+		# Bound to https on the same host. The picker must not offer it on an
+		# http page, which is 4.5.0's downgrade rule seen from the browser.
+		printf '3\tSecure Only\tcarol@example.invalid\t%s\tsynthetic\t2025-01-01T00:00:00Z\thttps://127.0.0.1\n' \
+			"$menu_secure_secret"
+	} > "$menu_root/plain"
+	printf '%s' "$menu_master" | core write "$menu_vault" "$menu_root/plain" >/dev/null
+
+	# Chromium reads native-messaging registrations from its user-data
+	# directory, so the test browser reaches the real host without touching
+	# anything this machine has installed.
+	printf '{\n  "name": "xyz.sansyourways.spm",\n  "description": "SPM regression bridge",\n  "path": "%s",\n  "type": "stdio",\n  "allowed_origins": ["chrome-extension://%s/"]\n}\n' \
+		"$ROOT_DIR/browser-extension-universal/native_host.py" "$ext_id" \
+		> "$menu_profile/NativeMessagingHosts/xyz.sansyourways.spm.json"
+
+	CHROMIUM_BIN="$ext_chromium" EXT_PROFILE="$menu_profile" \
+		EXT_MASTER="$menu_master" EXT_SECRET="$menu_secret" \
+		EXT_SECURE_SECRET="$menu_secure_secret" \
+		HOME="$menu_home" PASSWORD_VAULT="$menu_vault" \
+		SPM_BIN="$ROOT_DIR/spm.sh" NO_COLOR=1 \
+		node "$ROOT_DIR/tests/extension-menu.mjs" \
+			"$ext_dist" "$ROOT_DIR/tests/fixtures" "$ext_puppeteer"
 fi
 
 # Both extensions inject the same function, and they ship as separate
