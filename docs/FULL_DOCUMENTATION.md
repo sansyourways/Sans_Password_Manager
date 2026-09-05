@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **4.5.0**
+Current release: **4.6.0**
 
 ---
 
@@ -87,7 +87,7 @@ attacker with root access.
 
 ## Product tour
 
-Every web capture below was taken from the 4.5.0 release candidate in Chromium
+Every web capture below was taken from the 4.6.0 release candidate in Chromium
 at 1440x900, against a disposable vault holding only synthetic documentation
 data. No personal vault, browser profile, real credential, or production
 hostname appears in these images. The locked-screen captures use Chromium
@@ -340,7 +340,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 4.5.0
+bash install.sh --version 4.6.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -375,7 +375,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v4.5.0.zip \
+gh attestation verify Sans_Password_Manager_v4.6.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -391,9 +391,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v4.5.0
+git checkout v4.6.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v4.5.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v4.6.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -406,7 +406,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=4.5.0
+version=4.6.0
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -423,7 +423,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v4.5.0/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v4.6.0/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -445,7 +445,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 4.5.0 at /home/you/.local/bin/spm
+Installed SPM 4.6.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -1740,7 +1740,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **4.5.0**
+Version: **4.6.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
@@ -1906,6 +1906,40 @@ A record bound to an `https://` URL is refused on an `http://` page, and an
 account that would be refused is not offered in the picker. This fails closed:
 an extension older than 4.5.0 does not tell the bridge what scheme the page
 uses, and is refused for https-bound records until it is reloaded.
+
+### Fill from the login field
+
+Since 4.6.0 the extension also fills without the toolbar. Unlock once through
+the popup; after that, focusing a username or password field on a site you have
+accounts for opens a menu beside the field. Arrow keys move through it, Enter
+or a click fills, and Escape dismisses it. While SPM is locked the menu does
+not appear at all.
+
+The menu is an iframe served from the extension's own origin rather than an
+element injected into the page, so the page cannot read the account list,
+script the menu, or see which row is highlighted. The part of the extension
+that runs inside the page is told how many accounts matched and never which
+ones.
+
+Four rules govern the fill, each asserted in a browser rather than described:
+
+- A fill requires an event the browser marked as genuine user input. Opening
+  the menu does not, because an open menu discloses nothing; choosing an
+  account does. A page that dispatches its own Enter key fills nothing.
+- The page's hostname is read from the browser again at fill time, not carried
+  over from when the list was built.
+- A login field inside a cross-origin iframe is never offered the menu.
+- A record the menu did not offer cannot be filled through it, so the
+  downgrade rule above holds at the fill as well as in the list.
+
+The menu's height follows the number of accounts, up to four rows, so a page
+can infer roughly how many accounts you hold for it. It cannot infer what they
+are.
+
+This requires the extension to run on the pages the menu appears on, which is
+why it declares a content script for `http` and `https`. Reload the extension
+after upgrading: a browser does not begin running a content script for an
+extension it already has loaded.
 
 Safari and iOS browsers cannot use this native-messaging package. Safari needs
 a separately signed Xcode application wrapper; on iOS, use the installable SPM

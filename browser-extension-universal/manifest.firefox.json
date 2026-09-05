@@ -1,12 +1,51 @@
 {
   "manifest_version": 3,
   "name": "Sans Password Manager",
-  "version": "4.5.0",
+  "version": "4.6.0",
   "description": "Explicit, domain-bound autofill through the local SPM native host.",
-  "permissions": ["activeTab", "nativeMessaging", "scripting"],
-  "background": {"scripts": ["background.js"]},
-  "action": {"default_popup": "popup.html", "default_title": "SPM Autofill"},
+  "permissions": [
+    "activeTab",
+    "nativeMessaging",
+    "scripting"
+  ],
+  "background": {
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SPM Autofill"
+  },
   "browser_specific_settings": {
-    "gecko": {"id": "browser-extension@sansyourways.xyz", "strict_min_version": "109.0"}
-  }
+    "gecko": {
+      "id": "browser-extension@sansyourways.xyz",
+      "strict_min_version": "109.0"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "fill.js",
+        "content.js"
+      ],
+      "all_frames": false,
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "menu.html"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
+    }
+  ]
 }

@@ -121,12 +121,28 @@ co-owners of it. That review is a design concept, not a formal security audit.
 
 ## Next — safer integrations
 
-- Continue the browser-extension work with an origin-isolated in-field picker.
-  Not shipped, and not for want of effort — see *What is left, and what decides
-  when* below. **4.4.0 removed the blocker that section named** -- the
-  extension now runs under headless Chromium in the regression suite, the
-  verification route this item was waiting on -- and **4.4.1 extended it to
-  the fill**, which is the part an in-field picker actually performs.
+- ~~Continue the browser-extension work with an origin-isolated in-field
+  picker.~~ **Shipped in 4.6.0.** Focus a login field and the accounts bound to
+  that site appear beside it; arrows move, Enter or a click fills, Escape
+  dismisses.
+
+  The menu is an iframe served from the extension's own origin rather than an
+  element injected into the page, which is the whole point: an injected menu
+  lives in the page's document and a page that wants your account list can
+  read it. The content script that anchors it is told how many accounts
+  matched and never which.
+
+  Every fill-path rule this plan has carried since 3.1.0 now has a test that
+  fails when the code enforcing it is removed. A fill needs an event the
+  browser marked trusted, so a page that dispatches its own Enter fills
+  nothing; the hostname is re-read from the browser at fill time; a login field
+  inside a cross-origin iframe is offered nothing; and a record the picker did
+  not offer cannot be filled through it, which keeps 4.5.0's downgrade rule
+  true at the fill and not only in the list.
+
+  It took three releases to become testable and one to write. 4.4.0 built the
+  headless-Chromium harness, 4.4.1 extended it to the fill, and this is what
+  they were for.
 - ~~Opt-in subdomain scope and downgrade protection for the browser bridge.~~
   **Shipped in 4.5.0.** A record's URL field may be written
   `https://*.example.com`, binding it to that host and every host beneath it.
@@ -440,30 +456,20 @@ single-file change by the time it was reached.
 
 ### What is left, and what decides when
 
-Three items on this board are written but not shipped. For two of them the
-blocker is verification rather than code; the third is waiting on a design
-decision, which is a different kind of waiting and is worth not confusing with
-the others.
+Two items on this board are written but not shipped. For one the blocker is
+verification rather than code; the other is waiting on a design decision, which
+is a different kind of waiting and is worth not confusing with it.
 
-- **The in-field picker** needed a browser's extension UI driven for real.
-  **4.4.0 built the harness that does it and 4.4.1 finished the half that can
-  be built**, so this is no longer waiting on a way to run it -- only on being
-  written. What the harness proves today: the packed extension loads and its
-  service worker starts under headless Chromium, the identity the browser
-  assigns is the identity `extension-id.sh` derives, one fill-path rule holds,
-  nothing reaches the popup that should not, and the fill itself writes to the
-  right fields, skips the wrong ones, and reaches a framework that owns the
-  property. That last one found a shipped defect: the compatibility
-  extension's copy of the fill had drifted to a plain `element.value`
-  assignment, which such a framework ignores.
+The in-field picker used to head this list, and how it left is the argument for
+the rest of the section. It was never waiting on someone to write it -- it was
+waiting on a way to run it. 4.4.0 built that, 4.4.1 proved the fill with it,
+and 4.6.0 shipped the picker with every fill-path rule asserted in a browser
+and six mutants killed. The harness also earned its keep twice over: it found
+the drifted fill that 4.4.1 repaired, and during 4.6.0 it showed that one of
+the new tests was checking the wrong thing -- `outerHTML` cannot see into a
+closed shadow root, so the assertion that the page could not read the account
+list would have passed even if it could.
 
-  What the harness does not reach is the native-messaging round trip through a
-  live popup, and that is now a recorded boundary rather than pending work.
-  `chrome.action.openPopup()` opens the popup headlessly, but the popup cannot
-  obtain `activeTab`: Chromium grants it on a genuine user gesture on the
-  toolbar action, and a synthesised call is not one. The hostname
-  verification keeps its CLI-level coverage, which tests the decision rather
-  than the plumbing.
 - **Hardware-backed key wrapping** needs a FIDO2 key or a TPM to test against.
   Unchanged, and 4.3.0's exploration of hardware-backed *signing* did not move
   it: neither has a known answer to pin or a second implementation in CI to
@@ -485,8 +491,9 @@ import one, a focus ring at 1.15:1, and an error path that stringified a
 filesystem path instead of refusing it. Each passed a test that exercised the
 function underneath it.
 
-Crypto and extension UI are the two worst places to accept that gap, so these
-two wait for a way to run them rather than for someone to write them.
+Crypto and extension UI were the two worst places to accept that gap. Extension
+UI now has a way to be run, and the picker shipped through it; what is left
+here waits for the same reason, not for someone to write it.
 
 4.0.0 is the counter-example that shows what "a way to run them" means, and it
 is why replacing the whole data layer shipped while hardware-backed wrapping
