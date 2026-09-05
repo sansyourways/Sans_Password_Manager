@@ -7,6 +7,39 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.9.0] - 2026-09-05
+
+Flags in the language picker, and the locale generator fixed for the first
+value that left the Basic Multilingual Plane.
+
+### Added
+- **A flag beside each language** in the Dashboard picker and on the
+  documentation site. The flag leads and the language's own name follows it: a
+  flag is a country and a language is not, so the flag is a landmark for the
+  eye and the name is what identifies the entry.
+- `meta.flag` in every `locales/*.json`, required and validated as exactly two
+  regional indicator symbols. Where the locale code names a region the flag
+  follows the code (`pt-br` → 🇧🇷, `zh-hans` → 🇨🇳) rather than a judgement.
+- `tools/i18n-lint.py` accepts a locale directory, so a catalogue can be
+  checked before it is in the tree — and so the suite can hand it something
+  broken and confirm it refuses.
+- `tools/build-locales.py` accepts `SPM_LOCALE_DIR` and `--validate`, which
+  reads and checks without writing.
+
+### Fixed
+- **The locale generator could not carry a character above U+FFFF.** It wrote
+  values with `json.dumps(ensure_ascii=True)`, which encodes an astral
+  character as a surrogate pair — valid JSON, and in Python source two lone
+  surrogates that never combine and cannot be encoded to UTF-8. The JSON was
+  correct, the region parsed, the module imported and `./build.sh --check`
+  passed; every page with a language picker would have raised at render time.
+  The region is Python and is now written with Python's escaping.
+
+### Changed
+- The generator parses the region it just produced and compares it to the data
+  that went in, before writing. The bug above produced a file that imported
+  perfectly and died on the first page that rendered a picker.
+
 ## [4.8.0] - 2026-09-05
 
 A security key opens the vault, and the last item on the architecture board

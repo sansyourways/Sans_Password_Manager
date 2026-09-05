@@ -16,7 +16,10 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LOCALE_DIR = os.path.join(ROOT, "locales")
+# A directory may be named on the command line, which is how the regression
+# suite feeds this a deliberately broken catalogue and checks that it refuses.
+# A check nothing ever fails is a check nobody has run.
+LOCALE_DIR = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "locales")
 
 # A catalogue value is inserted as textContent, never as markup, so a tag in a
 # value cannot execute -- it just renders as literal angle brackets and looks
@@ -39,7 +42,7 @@ def main():
     codes = sorted(
         name[:-5] for name in os.listdir(LOCALE_DIR) if name.endswith(".json"))
     if "en" not in codes:
-        fail(["locales/en.json is missing; it defines the key set"])
+        fail(["en.json is missing from %s; it defines the key set" % LOCALE_DIR])
 
     catalogues, metas = {}, {}
     for code in codes:
@@ -51,6 +54,14 @@ def main():
             continue
         metas[code] = doc.get("meta") or {}
         catalogues[code] = doc.get("strings") or {}
+        flag = metas[code].get("flag") or ""
+        # Two regional indicator symbols and nothing else. A stray emoji or a
+        # bare two-letter string renders as text in the middle of the picker,
+        # which looks like a defect rather than like a missing flag.
+        if len(flag) != 2 or any(not 0x1F1E6 <= ord(ch) <= 0x1F1FF for ch in flag):
+            problems.append(
+                "%s.json declares flag %r; expected two regional indicator symbols"
+                % (code, flag))
         if metas[code].get("code") != code:
             problems.append(
                 "%s.json declares code %r, which does not match its filename"
@@ -99,8 +110,11 @@ def main():
     if problems:
         fail(problems)
     reviewed = sum(1 for code in metas if metas[code].get("review") == "maintained")
-    print("i18n: %d languages, %d keys each, %d maintained, %d unreviewed."
-          % (len(catalogues), len(english), reviewed, len(catalogues) - reviewed))
+    print("i18n: %d languages, %d keys each, %d maintained, %d unreviewed, "
+          "%d flagged."
+          % (len(catalogues), len(english), reviewed,
+             len(catalogues) - reviewed,
+             sum(1 for code in metas if metas[code].get("flag"))))
 
 
 if __name__ == "__main__":

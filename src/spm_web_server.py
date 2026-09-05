@@ -102,18 +102,18 @@ LATEST_CACHE = {"value": "", "ts": 0}
 # Do not edit by hand -- edit the JSON and rebuild. `./build.sh --check`
 # verifies this region is current.
 WEB_LOCALES = {
-    "en": {"name": "English", "english_name": "English", "dir": "ltr", "review": "maintained"},
-    "ar": {"name": "\u0627\u0644\u0639\u0631\u0628\u064a\u0629", "english_name": "Arabic", "dir": "rtl", "review": "unreviewed"},
-    "de": {"name": "Deutsch", "english_name": "German", "dir": "ltr", "review": "unreviewed"},
-    "es": {"name": "Espa\u00f1ol", "english_name": "Spanish", "dir": "ltr", "review": "unreviewed"},
-    "fr": {"name": "Fran\u00e7ais", "english_name": "French", "dir": "ltr", "review": "unreviewed"},
-    "hi": {"name": "\u0939\u093f\u0928\u094d\u0926\u0940", "english_name": "Hindi", "dir": "ltr", "review": "unreviewed"},
-    "id": {"name": "Indonesia", "english_name": "Indonesian", "dir": "ltr", "review": "maintained"},
-    "ja": {"name": "\u65e5\u672c\u8a9e", "english_name": "Japanese", "dir": "ltr", "review": "maintained"},
-    "ko": {"name": "\ud55c\uad6d\uc5b4", "english_name": "Korean", "dir": "ltr", "review": "unreviewed"},
-    "pt-br": {"name": "Portugu\u00eas (Brasil)", "english_name": "Portuguese (Brazil)", "dir": "ltr", "review": "unreviewed"},
-    "ru": {"name": "\u0420\u0443\u0441\u0441\u043a\u0438\u0439", "english_name": "Russian", "dir": "ltr", "review": "unreviewed"},
-    "zh-hans": {"name": "\u7b80\u4f53\u4e2d\u6587", "english_name": "Chinese (Simplified)", "dir": "ltr", "review": "unreviewed"},
+    "en": {"name": "English", "english_name": "English", "flag": "\U0001f1ec\U0001f1e7", "dir": "ltr", "review": "maintained"},
+    "ar": {"name": "\u0627\u0644\u0639\u0631\u0628\u064a\u0629", "english_name": "Arabic", "flag": "\U0001f1f8\U0001f1e6", "dir": "rtl", "review": "unreviewed"},
+    "de": {"name": "Deutsch", "english_name": "German", "flag": "\U0001f1e9\U0001f1ea", "dir": "ltr", "review": "unreviewed"},
+    "es": {"name": "Espa\u00f1ol", "english_name": "Spanish", "flag": "\U0001f1ea\U0001f1f8", "dir": "ltr", "review": "unreviewed"},
+    "fr": {"name": "Fran\u00e7ais", "english_name": "French", "flag": "\U0001f1eb\U0001f1f7", "dir": "ltr", "review": "unreviewed"},
+    "hi": {"name": "\u0939\u093f\u0928\u094d\u0926\u0940", "english_name": "Hindi", "flag": "\U0001f1ee\U0001f1f3", "dir": "ltr", "review": "unreviewed"},
+    "id": {"name": "Indonesia", "english_name": "Indonesian", "flag": "\U0001f1ee\U0001f1e9", "dir": "ltr", "review": "maintained"},
+    "ja": {"name": "\u65e5\u672c\u8a9e", "english_name": "Japanese", "flag": "\U0001f1ef\U0001f1f5", "dir": "ltr", "review": "maintained"},
+    "ko": {"name": "\ud55c\uad6d\uc5b4", "english_name": "Korean", "flag": "\U0001f1f0\U0001f1f7", "dir": "ltr", "review": "unreviewed"},
+    "pt-br": {"name": "Portugu\u00eas (Brasil)", "english_name": "Portuguese (Brazil)", "flag": "\U0001f1e7\U0001f1f7", "dir": "ltr", "review": "unreviewed"},
+    "ru": {"name": "\u0420\u0443\u0441\u0441\u043a\u0438\u0439", "english_name": "Russian", "flag": "\U0001f1f7\U0001f1fa", "dir": "ltr", "review": "unreviewed"},
+    "zh-hans": {"name": "\u7b80\u4f53\u4e2d\u6587", "english_name": "Chinese (Simplified)", "flag": "\U0001f1e8\U0001f1f3", "dir": "ltr", "review": "unreviewed"},
 }
 
 WEB_CATALOGUES = {
@@ -4866,11 +4866,19 @@ def lang_options_markup(active):
     cannot be expected to find it listed as "Arabic". Unreviewed translations
     are marked here rather than only in the docs, because the picker is where
     somebody chooses to rely on one.
+
+    The flag leads and the name carries the meaning, in that order and not the
+    other way round. A flag is a country and a language is not: English is not
+    one country and Arabic is not one either, so the flag is a landmark for the
+    eye scanning a list of twelve, never the thing that identifies the entry.
+    It is also the part that degrades -- a platform with no regional-indicator
+    glyphs renders it as two letters -- which is survivable precisely because
+    the name beside it is doing the work.
     """
     parts = []
     for code in sorted(WEB_LOCALES, key=lambda c: (c != "en", c)):
         meta = WEB_LOCALES[code]
-        label = meta["name"]
+        label = "%s\u00a0\u00a0%s" % (meta["flag"], meta["name"])
         if meta["review"] == "unreviewed":
             label += " (\u03b2)"
         parts.append(
