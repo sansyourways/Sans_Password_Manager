@@ -4211,6 +4211,194 @@ print("  tidy: reviewed, corrected, applied to 2 of 4; folders filed, "
       "identifiers kept, unselected rows untouched")
 TIDYPY
 
+printf 'Security-key regression: a vault key sealed under an authenticator\n'
+# Everything here is driven with a stand-in 32-byte secret in place of a real
+# PRF result, because what the server has to be right about is what it does
+# with those bytes. The ceremony that produces them is a browser question and
+# is answered by tests/dashboard-hardware.mjs against a virtual authenticator.
+hw_root="$TEST_ROOT/hardware"
+hw_vault="$hw_root/vault.gpg"
+hw_plain="$hw_root/plain"
+hw_master="Hardware-Regression-Master-3"
+mkdir -p "$hw_root"
+{
+	printf 'META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n' "$TEST_RECOVERY_B64"
+	printf '1\tExample\tavery@example.invalid\thardware-secret-1\t-\t2025-01-01T00:00:00Z\t\t\n'
+} > "$hw_plain"
+printf '%s' "$hw_master" | core write "$hw_vault" "$hw_plain" >/dev/null
+
+HW_PORT="$((WEB_PORT + 6))"
+SPM_VAULT_PATH="$hw_vault" SPM_WEB_BIND=127.0.0.1 \
+	SPM_WEB_PORT="$HW_PORT" SPM_VERSION="$VERSION" \
+	XDG_CONFIG_HOME="$hw_root/config" \
+	SPM_WEB_RP_ID=localhost python3 "$web_script" \
+	>"$TEST_ROOT/hardware-web.log" 2>&1 &
+HW_PID="$!"
+hw_fail() { printf '%s\n' "$1" >&2; kill "$HW_PID" 2>/dev/null; exit 1; }
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+	curl -fsS -o "$hw_root/login.html" "http://127.0.0.1:$HW_PORT/login" 2>/dev/null && break
+	sleep 0.25
+done
+
+# With nothing enrolled the sign-in page must not offer the ceremony. A button
+# that appears unconditionally offers an unlock that cannot work, and the
+# bootstrap it needs would have to publish a salt for a vault with no keys.
+grep -q 'window.SPM_HARDWARE = null;' "$hw_root/login.html" ||
+	hw_fail 'the sign-in page offers a security-key unlock with no key enrolled'
+
+curl -fsS -c "$hw_root/jar" -o /dev/null -X POST \
+	--data-urlencode "password=$hw_master" "http://127.0.0.1:$HW_PORT/login"
+curl -fsS -b "$hw_root/jar" -o "$hw_root/settings.html" "http://127.0.0.1:$HW_PORT/settings"
+hw_csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' "$hw_root/settings.html" | head -n1)"
+[ -n "$hw_csrf" ] || hw_fail 'the settings page carries no CSRF token'
+grep -q 'href="/hardware/settings"' "$hw_root/settings.html" ||
+	hw_fail 'settings does not link to the security-key manager'
+
+hw_salt="$(curl -fsS -b "$hw_root/jar" -H 'Content-Type: application/json' \
+	-d "{\"csrf\":\"$hw_csrf\"}" "http://127.0.0.1:$HW_PORT/hardware/salt" |
+	sed -n 's/.*"salt": "\([^"]*\)".*/\1/p')"
+[ -n "$hw_salt" ] || hw_fail 'the salt endpoint returned nothing'
+# Reading the salt must not create the file. A minted-and-abandoned salt would
+# be a vault claiming security keys it does not have.
+[ ! -e "$hw_vault.hardware" ] ||
+	hw_fail 'reading the enrolment salt created the security-key file'
+
+hw_secret="$(python3 -c 'import base64;print(base64.b64encode(bytes(range(32))).decode())')"
+hw_other="$(python3 -c 'import base64;print(base64.b64encode(bytes(range(32,64))).decode())')"
+curl -fsS -b "$hw_root/jar" -H 'Content-Type: application/json' -o "$hw_root/enrol.json" \
+	-d "{\"csrf\":\"$hw_csrf\",\"credential_id\":\"regression-cred\",\"secret\":\"$hw_secret\",\"salt\":\"$hw_salt\",\"label\":\"Regression key\"}" \
+	"http://127.0.0.1:$HW_PORT/hardware/enroll"
+grep -q '"keys": 1' "$hw_root/enrol.json" || hw_fail 'the security key did not enrol'
+# file_mode, not stat -c: BSD stat wants -f, and this file holds a wrapped
+# vault key on every platform SPM runs on.
+[ "$(file_mode "$hw_vault.hardware")" = "600" ] ||
+	hw_fail 'the security-key file is readable by someone other than its owner'
+
+curl -fsS -o "$hw_root/login2.html" "http://127.0.0.1:$HW_PORT/login"
+grep -q 'window.SPM_HARDWARE = {' "$hw_root/login2.html" ||
+	hw_fail 'the sign-in page does not offer the ceremony after an enrolment'
+grep -q 'regression-cred' "$hw_root/login2.html" &&
+	hw_fail 'the sign-in page publishes enrolled credential ids to anyone who loads it'
+
+# A key nobody enrolled, and a key that is enrolled answering with the wrong
+# secret. Two different facts, one answer: telling them apart would let a
+# caller sort its guesses into "this credential exists" and "it does not".
+hw_code="$(curl -s -o "$hw_root/unknown.json" -w '%{http_code}' -H 'Content-Type: application/json' \
+	-d "{\"credential_id\":\"never-enrolled\",\"secret\":\"$hw_secret\"}" \
+	"http://127.0.0.1:$HW_PORT/hardware/unlock")"
+[ "$hw_code" = "403" ] || hw_fail "an unenrolled credential id answered $hw_code"
+hw_code="$(curl -s -o "$hw_root/wrong.json" -w '%{http_code}' -H 'Content-Type: application/json' \
+	-d "{\"credential_id\":\"regression-cred\",\"secret\":\"$hw_other\"}" \
+	"http://127.0.0.1:$HW_PORT/hardware/unlock")"
+[ "$hw_code" = "403" ] || hw_fail "a wrong security-key secret answered $hw_code"
+cmp -s "$hw_root/unknown.json" "$hw_root/wrong.json" ||
+	hw_fail 'an unenrolled key and a wrong secret are told apart by their answers'
+grep -q 'does not open this vault' "$hw_root/wrong.json" ||
+	hw_fail 'a wrong secret was refused with the wrong message'
+# The events log is the only trace of someone trying keys against the vault,
+# and it is readable while locked, which is what makes it worth writing.
+curl -fsS -b "$hw_root/jar" -o "$hw_root/events0.html" "http://127.0.0.1:$HW_PORT/events"
+grep -q 'that key does not open this vault' "$hw_root/events0.html" ||
+	hw_fail 'a refused security key left no trace in the events log'
+
+hw_code="$(curl -s -o "$hw_root/unlock.json" -w '%{http_code}' -c "$hw_root/keyjar" \
+	-H 'Content-Type: application/json' \
+	-d "{\"credential_id\":\"regression-cred\",\"secret\":\"$hw_secret\"}" \
+	"http://127.0.0.1:$HW_PORT/hardware/unlock")"
+[ "$hw_code" = "200" ] || hw_fail "the right security-key secret answered $hw_code"
+grep -q spm_session "$hw_root/keyjar" || hw_fail 'the security-key unlock set no session cookie'
+
+curl -fsS -b "$hw_root/keyjar" -o "$hw_root/pw.html" "http://127.0.0.1:$HW_PORT/passwords"
+grep -q 'avery@example.invalid' "$hw_root/pw.html" ||
+	hw_fail 'the security-key session cannot read the vault it opened'
+
+# The write. A session with no master password must keep the key envelope it
+# found -- sealing a new one under an empty string would leave the vault open
+# to anyone, and nothing on screen would say so.
+hw_keycsrf="$(curl -fsS -b "$hw_root/keyjar" "http://127.0.0.1:$HW_PORT/settings" |
+	sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' | head -n1)"
+curl -fsS -b "$hw_root/keyjar" -o /dev/null -X POST \
+	-d "csrf=$hw_keycsrf" --data-urlencode 'hosts=example.invalid' \
+	"http://127.0.0.1:$HW_PORT/settings/hidden-hosts"
+printf '%s' "$hw_master" | core read "$hw_vault" "$hw_root/after" >/dev/null ||
+	hw_fail 'the master password no longer opens the vault after a password-less write'
+grep -q 'example.invalid' "$hw_root/after" ||
+	hw_fail 'the write a security-key session made did not land'
+printf '' | core read "$hw_vault" /dev/null >/dev/null 2>&1 &&
+	hw_fail 'the vault opens with an empty master password'
+
+# Two things a security-key session must not be able to do. Both would use a
+# password it never had: one compares against it, the other replaces the vault
+# with a file sealed under a different key entirely.
+curl -fsS -b "$hw_root/keyjar" -o "$hw_root/change.html" -X POST \
+	-d "csrf=$hw_keycsrf" --data-urlencode "current=$hw_master" \
+	--data-urlencode 'new=a-different-long-password-9' \
+	--data-urlencode 'confirm=a-different-long-password-9' \
+	"http://127.0.0.1:$HW_PORT/settings/master-password"
+grep -q 'needs a session that was opened with it' "$hw_root/change.html" ||
+	hw_fail 'a security-key session was allowed to change the master password'
+printf '%s' "$hw_master" | core read "$hw_vault" /dev/null >/dev/null ||
+	hw_fail 'the master password changed anyway'
+
+# Refused before the snapshot name is even read, so a name that does not exist
+# still answers 403 rather than 404: the route is unavailable to this session,
+# not conditionally available.
+hw_code="$(curl -s -b "$hw_root/keyjar" -o /dev/null -w '%{http_code}' -X POST \
+	-d "csrf=$hw_keycsrf" -d "name=vault.gpg.20250101-000000" \
+	"http://127.0.0.1:$HW_PORT/history-restore")"
+[ "$hw_code" = "403" ] ||
+	hw_fail "a security-key session was offered a snapshot restore ($hw_code)"
+
+# The vault replaced under a live security-key session. There is no password
+# in that session to re-derive a key from, so it must end -- and say why
+# somewhere the user can still read once it has, because the sign-in page will
+# go on offering a key that no longer opens anything.
+cp "$hw_vault" "$hw_root/vault.keep"
+# Built beside the live file and copied over it, not written through it: a
+# write to an existing vault goes through its key envelope and would need the
+# password this replacement is deliberately not sealed under.
+printf '%s' 'Some-Other-Vault-Master-2' | core write "$hw_root/other.gpg" "$hw_plain" >/dev/null
+cp "$hw_root/other.gpg" "$hw_vault"
+hw_code="$(curl -s -b "$hw_root/keyjar" -o /dev/null -w '%{http_code}' "http://127.0.0.1:$HW_PORT/passwords")"
+[ "$hw_code" = "302" ] ||
+	hw_fail "a security-key session survived the vault being replaced ($hw_code)"
+curl -fsS -b "$hw_root/jar" -o "$hw_root/events.html" "http://127.0.0.1:$HW_PORT/events"
+grep -q 'the vault was replaced under a security-key session' "$hw_root/events.html" ||
+	hw_fail 'the replaced vault was not recorded anywhere the user can read it'
+grep -q 'Security key' "$hw_root/events.html" ||
+	hw_fail 'the security-key events are not labelled on the events page'
+# And a cold unlock with the enrolled key must fail too, rather than opening a
+# session around a vault key that fits nothing. The envelope still unwraps --
+# it is the vault underneath that moved -- so this is the one refusal that
+# cannot be reached by getting the secret wrong.
+hw_code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
+	-d "{\"credential_id\":\"regression-cred\",\"secret\":\"$hw_secret\"}" \
+	"http://127.0.0.1:$HW_PORT/hardware/unlock")"
+[ "$hw_code" = "403" ] ||
+	hw_fail "a security key opened a session against a vault it no longer fits ($hw_code)"
+# The other way a vault stops fitting: the file is not a container at all --
+# truncated, half-written, restored from something that was never a vault. The
+# envelope still unwraps, so the key looks fine and opens nothing. Refused at
+# the unlock rather than a few requests later.
+printf 'not a vault at all' > "$hw_vault"
+hw_code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
+	-d "{\"credential_id\":\"regression-cred\",\"secret\":\"$hw_secret\"}" \
+	"http://127.0.0.1:$HW_PORT/hardware/unlock")"
+[ "$hw_code" = "403" ] ||
+	hw_fail "a security key opened a session against a damaged vault ($hw_code)"
+cp "$hw_root/vault.keep" "$hw_vault"
+
+curl -fsS -b "$hw_root/keyjar" -H 'Content-Type: application/json' -o "$hw_root/forget.json" \
+	-d "{\"csrf\":\"$hw_keycsrf\",\"credential_id\":\"regression-cred\"}" \
+	"http://127.0.0.1:$HW_PORT/hardware/forget"
+grep -q '"keys": 0' "$hw_root/forget.json" || hw_fail 'the security key was not forgotten'
+[ ! -e "$hw_vault.hardware" ] ||
+	hw_fail 'the security-key file survived the removal of its last key'
+
+kill "$HW_PID" 2>/dev/null || true
+wait "$HW_PID" 2>/dev/null || true
+printf '  web: a security key enrols, opens the vault, writes without a password, and is refused the two things a password buys\n'
+
 printf 'Sync regression: pluggable transports\n'
 # The conflict model, the digest verification, the archive-before-replace and
 # the refusal to install a remote that will not decrypt all live above the
@@ -4907,6 +5095,40 @@ else
 		SPM_BIN="$ROOT_DIR/spm.sh" NO_COLOR=1 \
 		node "$ROOT_DIR/tests/extension-menu.mjs" \
 			"$ext_dist" "$ROOT_DIR/tests/fixtures" "$ext_puppeteer"
+
+	# The security-key unlock, through a real WebAuthn ceremony. Chromium's
+	# virtual authenticator implements the PRF extension, which is the one
+	# thing about this feature that cannot be asserted with curl: that the
+	# same key returns the same 32 bytes for the same salt, every time.
+	#
+	# localhost rather than 127.0.0.1, because WebAuthn runs only in a secure
+	# context and localhost is the one plain-http host browsers treat as one.
+	hwb_root="$TEST_ROOT/hardware-browser"
+	hwb_vault="$hwb_root/vault.gpg"
+	hwb_master="Hardware-Browser-Master-5"
+	hwb_port="$((WEB_PORT + 8))"
+	mkdir -p "$hwb_root"
+	{
+		printf 'META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n' "$TEST_RECOVERY_B64"
+		printf '1\tExample\tavery@example.invalid\thardware-browser-1\t-\t2025-01-01T00:00:00Z\t\t\n'
+	} > "$hwb_root/plain"
+	printf '%s' "$hwb_master" | core write "$hwb_vault" "$hwb_root/plain" >/dev/null
+	SPM_VAULT_PATH="$hwb_vault" SPM_WEB_BIND=127.0.0.1 \
+		SPM_WEB_PORT="$hwb_port" SPM_VERSION="$VERSION" \
+		XDG_CONFIG_HOME="$hwb_root/config" \
+		SPM_WEB_RP_ID=localhost python3 "$web_script" \
+		>"$TEST_ROOT/hardware-browser-web.log" 2>&1 &
+	HWB_PID="$!"
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		curl -fsS -o /dev/null "http://localhost:$hwb_port/login" 2>/dev/null && break
+		sleep 0.25
+	done
+	CHROMIUM_BIN="$ext_chromium" HW_USERNAME="avery@example.invalid" \
+		node "$ROOT_DIR/tests/dashboard-hardware.mjs" \
+		"http://localhost:$hwb_port" "$hwb_master" "$ext_puppeteer" || {
+		kill "$HWB_PID" 2>/dev/null; exit 1; }
+	kill "$HWB_PID" 2>/dev/null || true
+	wait "$HWB_PID" 2>/dev/null || true
 fi
 
 # Both extensions inject the same function, and they ship as separate

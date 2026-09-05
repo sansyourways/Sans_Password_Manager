@@ -378,6 +378,26 @@
     "security.tally_old": "개 노후",
     "security.tally_incomplete": "개 미완성",
     "security.tally_malformed": "개 오류",
-    "security.tally_clean": "이 점수를 떨어뜨리는 것이 없습니다."
+    "security.tally_clean": "이 점수를 떨어뜨리는 것이 없습니다.",
+    "nav.hardware": "보안 키",
+    "page.hardware.desc": "마스터 비밀번호 대신 보안 키로 이 금고를 엽니다.",
+    "settings.hardware.title": "보안 키",
+    "settings.hardware.desc": "마스터 비밀번호 없이 이 금고를 열 수 있는 키를 관리합니다.",
+    "settings.hardware.manage": "보안 키 관리",
+    "login.hardware": "보안 키로 잠금 해제",
+    "hardware.enrolled": "등록일",
+    "hardware.credential": "자격 증명",
+    "hardware.empty": "아직 등록된 보안 키가 없습니다",
+    "hardware.empty_sub": "마스터 비밀번호를 입력하지 않고 이 금고를 열려면 아래에서 하나 등록하세요",
+    "hardware.field.label": "이 키의 이름",
+    "hardware.enrol": "이 보안 키 등록",
+    "hardware.note": "여기에 등록한 키는 그것만으로 금고를 엽니다. 따라서 마스터 비밀번호와 정확히 같은 힘을 가지며 같은 방식으로 보관해야 합니다. 이 키로 연 세션은 마스터 비밀번호를 갖지 않습니다. 마스터 비밀번호를 바꿀 수도, 스냅샷을 복원할 수도 없습니다.",
+    "hardware.waiting": "보안 키를 터치하세요...",
+    "hardware.failed": "그 보안 키로는 이 금고를 열 수 없습니다.",
+    "hardware.noprf": "이 보안 키는 금고 비밀값을 파생할 수 없습니다.",
+    "hardware.enrol_failed": "등록에 실패했습니다.",
+    "hardware.nosupport": "이 브라우저는 보안 키와 통신할 수 없습니다.",
+    "hardware.confirm_forget": "이 보안 키를 삭제할까요?",
+    "hardware.forget_failed": "보안 키를 삭제하지 못했습니다."
   }
 }

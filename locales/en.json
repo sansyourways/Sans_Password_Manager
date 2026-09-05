@@ -378,6 +378,26 @@
     "security.tally_old": "aging",
     "security.tally_incomplete": "incomplete",
     "security.tally_malformed": "malformed",
-    "security.tally_clean": "Nothing is pulling this score down."
+    "security.tally_clean": "Nothing is pulling this score down.",
+    "nav.hardware": "Security Keys",
+    "page.hardware.desc": "Open this vault with a security key instead of your master password.",
+    "settings.hardware.title": "Security Keys",
+    "settings.hardware.desc": "Manage the keys that can open this vault without your master password.",
+    "settings.hardware.manage": "Manage security keys",
+    "login.hardware": "Unlock with a security key",
+    "hardware.enrolled": "Enrolled",
+    "hardware.credential": "Credential",
+    "hardware.empty": "No security key enrolled yet",
+    "hardware.empty_sub": "Enrol one below to open this vault without typing your master password",
+    "hardware.field.label": "Label for this key",
+    "hardware.enrol": "Enrol this security key",
+    "hardware.note": "A key enrolled here opens the vault on its own, so it is exactly as powerful as the master password and should be kept the same way. A session opened with one holds no master password: it cannot change the master password and cannot restore a snapshot.",
+    "hardware.waiting": "Touch your security key...",
+    "hardware.failed": "That security key does not open this vault.",
+    "hardware.noprf": "This security key cannot derive a vault secret.",
+    "hardware.enrol_failed": "Enrolment failed.",
+    "hardware.nosupport": "This browser cannot talk to a security key.",
+    "hardware.confirm_forget": "Remove this security key?",
+    "hardware.forget_failed": "The security key could not be removed."
   }
 }

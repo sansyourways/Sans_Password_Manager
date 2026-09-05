@@ -7,6 +7,49 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.8.0] - 2026-09-05
+
+A security key opens the vault, and the last item on the architecture board
+leaves it by being run rather than argued about.
+
+### Added
+- **Hardware-backed key wrapping.** With a relying-party id set, the Dashboard
+  offers a **Security Keys** page and the sign-in screen offers *Unlock with a
+  security key*. The vault key is sealed under the 32 bytes a WebAuthn PRF
+  credential derives from a per-vault salt, stored beside the vault in a
+  `.hardware` file at mode 0600. There is no master password in that path at
+  all.
+- A session opened by a security key holds no master password. Reads and writes
+  work; a write keeps the key envelope it found rather than sealing a new one.
+- Security-key events: enrolled, removed, a key that does not open this vault,
+  and a vault replaced under a live security-key session. The last is the one
+  failure a user cannot otherwise diagnose, and the events page is readable
+  while locked.
+- `tests/dashboard-hardware.mjs` drives the real ceremony against Chromium's
+  virtual authenticator, opening the vault twice from a clean cookie jar --
+  which is what proves the PRF is deterministic rather than lucky.
+
+### Changed
+- `write_vault` accepts `None` as the master password, meaning "keep the key
+  envelope". A password-less write without the vault key is refused; an
+  empty-string master is still a real password and still reseals.
+- The events vocabulary gained the `hardware` kind and four reasons. It stays
+  closed: free text is how a device label reaches a log in the clear.
+- A refused security-key unlock answers identically whether the credential was
+  never enrolled or the secret was wrong.
+
+### Security
+- A security-key session cannot change the master password: it never proved
+  knowledge of one, and accepting a typed "current password" would let anyone
+  holding the key set the password that also opens the vault.
+- A security-key session cannot restore a snapshot: the restore installs a
+  vault sealed under a different vault key, which is the key every enrolled
+  credential wraps. Refused before the snapshot name is read.
+- Enrolled credentials are discoverable and require user verification, so the
+  sign-in page publishes no credential ids and a bare presence tap is refused.
+- The vault replaced under a live security-key session ends that session
+  instead of re-deriving from a password it does not have.
+
 ## [4.7.0] - 2026-09-05
 
 The browser session locks when you say it does, and a four-release-old

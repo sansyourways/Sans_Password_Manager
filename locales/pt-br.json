@@ -378,6 +378,26 @@
     "security.tally_old": "antigas",
     "security.tally_incomplete": "incompletas",
     "security.tally_malformed": "malformados",
-    "security.tally_clean": "Nada está reduzindo esta pontuação."
+    "security.tally_clean": "Nada está reduzindo esta pontuação.",
+    "nav.hardware": "Chaves de segurança",
+    "page.hardware.desc": "Abra este cofre com uma chave de segurança em vez da senha mestra.",
+    "settings.hardware.title": "Chaves de segurança",
+    "settings.hardware.desc": "Gerencie as chaves que podem abrir este cofre sem a sua senha mestra.",
+    "settings.hardware.manage": "Gerenciar chaves de segurança",
+    "login.hardware": "Desbloquear com uma chave de segurança",
+    "hardware.enrolled": "Registrada",
+    "hardware.credential": "Credencial",
+    "hardware.empty": "Nenhuma chave de segurança registrada ainda",
+    "hardware.empty_sub": "Registre uma abaixo para abrir este cofre sem digitar a senha mestra",
+    "hardware.field.label": "Nome desta chave",
+    "hardware.enrol": "Registrar esta chave de segurança",
+    "hardware.note": "Uma chave registrada aqui abre o cofre sozinha, portanto é exatamente tão poderosa quanto a senha mestra e deve ser guardada do mesmo jeito. Uma sessão aberta com ela não guarda nenhuma senha mestra: não pode mudar a senha mestra nem restaurar um instantâneo.",
+    "hardware.waiting": "Toque na sua chave de segurança...",
+    "hardware.failed": "Essa chave de segurança não abre este cofre.",
+    "hardware.noprf": "Esta chave de segurança não consegue derivar um segredo do cofre.",
+    "hardware.enrol_failed": "O registro falhou.",
+    "hardware.nosupport": "Este navegador não consegue conversar com uma chave de segurança.",
+    "hardware.confirm_forget": "Remover esta chave de segurança?",
+    "hardware.forget_failed": "A chave de segurança não pôde ser removida."
   }
 }

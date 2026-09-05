@@ -456,11 +456,18 @@ single-file change by the time it was reached.
 
 ### What is left, and what decides when
 
-One item on this board is written but not shipped, and the blocker is
-verification rather than code.
+Nothing on this board is waiting. Both remaining items left it in the same
+week, and neither left by being written harder.
 
-The other one left this board in 4.7.0 without being built, which is a result
-rather than a retreat. WebAuthn unlock in the extension popup was recorded here
+Hardware-backed key wrapping left in 4.8.0 by becoming runnable. It was never
+blocked on code -- it was blocked on the one line recorded against it, "needs a
+FIDO2 key or a TPM to test against", which stayed true right up until Chromium
+shipped a virtual authenticator that implements the WebAuthn PRF extension. The
+ceremony can now be executed: enrol a key, sign out, open the vault, sign out,
+open it again. The rule that held the item here is the rule that released it.
+
+The other left in 4.7.0 without being built, which is a result rather than a
+retreat. WebAuthn unlock in the extension popup was recorded here
 as waiting on a design decision; the decision turned out to be foreclosed. A
 WebAuthn credential is bound to the relying-party id it was created under, and
 Chromium will assert one from a `chrome-extension://` origin only when that id
@@ -486,10 +493,17 @@ the new tests was checking the wrong thing -- `outerHTML` cannot see into a
 closed shadow root, so the assertion that the page could not read the account
 list would have passed even if it could.
 
-- **Hardware-backed key wrapping** needs a FIDO2 key or a TPM to test against.
-  Unchanged, and 4.3.0's exploration of hardware-backed *signing* did not move
-  it: neither has a known answer to pin or a second implementation in CI to
-  disagree with.
+- ~~**Hardware-backed key wrapping**~~ **Shipped in 4.8.0.** The entry against
+  it for four releases was "needs a FIDO2 key or a TPM to test against", and
+  that was the whole blocker. Chromium's virtual authenticator implements the
+  WebAuthn PRF extension, so the ceremony can now be driven end to end in a
+  browser: enrol a key, sign out, open the vault, sign out, open it again. The
+  second unlock is the assertion that matters -- the design rests entirely on
+  the PRF returning the same bytes for the same salt, and one success could be
+  luck. Note what did *not* have to change: the wrapping itself is HMAC-SHA256
+  over 32 bytes and the vault's existing seal, so there was never a new
+  primitive here needing an answer to pin. The item was blocked on running the
+  ceremony, and that is what became possible.
 - ~~**WebAuthn unlock inside the extension popup.**~~ **Closed in 4.7.0 by
   measurement rather than by code**, for the reason above: a credential cannot
   be asserted across relying-party ids, so the Dashboard's could never serve
@@ -521,8 +535,18 @@ IV and plaintext against fixed ciphertext, and openssl's `-pbkdf2 -iter 1`
 asserted byte-for-byte against `hashlib.pbkdf2_hmac` -- plus a macOS runner
 whose LibreSSL is a genuinely different implementation to disagree with.
 
-A FIDO2 key or a TPM offers no equivalent. There is no known answer to pin and
-no second implementation in CI to disagree, so the item stays where it is.
+A FIDO2 key or a TPM offers no equivalent, and for four releases that read as
+"so hardware wrapping stays where it is". 4.8.0 shows the rule was being
+applied one step too early. What 4.0.0 needed a pinned answer for was a
+*derivation* -- a build whose openssl derived a different key would encrypt and
+decrypt perfectly against itself and produce vaults no other machine could
+open. Hardware wrapping introduces no derivation of its own: the wrapping key
+is HMAC-SHA256 over 32 bytes and the envelope is the seal the vault already
+uses, both already pinned. What it introduces is a *ceremony*, and a ceremony
+is not verified by pinning an answer -- it is verified by running it and
+watching what comes back. Chromium's virtual authenticator implements PRF, so
+it can be run, twice, from a clean cookie jar. The blocker was real; the reason
+recorded for it was one category off.
 
 3.8.0 is the first item on this board built the other way round, and the
 result argues for the rule. Its review page passed the suite — ten mutants

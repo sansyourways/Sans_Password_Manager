@@ -20,8 +20,9 @@ Sans Password Manager (SPM) is a local-first password manager for the terminal a
 - Local ownership: the encrypted vault lives on your device.
 - Two interfaces: use the CLI/TUI or the offline web dashboard.
 - Dashboard settings in one place, including four preview-before-apply themes
-  (Sundial, Console, Cyberpunk, and Edgerunner), master-password changes, and
-  optional biometric unlock. Applied themes also follow the login and lock screens.
+  (Sundial, Console, Cyberpunk, and Edgerunner), master-password changes,
+  optional biometric unlock, and security-key enrolment. Applied themes also
+  follow the login and lock screens.
 - A theme-compatible **Organize passwords** section filters the password list by
   one or more folders and `#tags`; active filters remain in the URL for reloads,
   bookmarks, and back-button navigation.
@@ -88,6 +89,7 @@ SPM may not be a good fit when you need:
 - Split recovery: Shamir t-of-n shares that reconstruct the vault key without the master password, and stay valid after it changes.
 - Interactive terminal interface plus a local web dashboard in twelve languages, including right-to-left Arabic.
 - Passphrases, backup codes, authenticator/TOTP entries, and biometric unlock where supported.
+- Security keys that open the vault outright: the vault key is sealed under the bytes a WebAuthn PRF credential derives, so there is no master password in that path at all.
 - Import and export across common and advanced text formats.
 - Browser extensions for Chromium and Firefox with a local native host, including an in-field account picker rendered at the extension's own origin so the page cannot read your account list, and a session lock you set.
 - Portable and save bundles for user-controlled transfer and recovery.

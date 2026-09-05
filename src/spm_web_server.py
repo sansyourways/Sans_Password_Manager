@@ -88,6 +88,9 @@ def _webauthn_config():
 
 WEBAUTHN_RP_ID, WEBAUTHN_ORIGIN = _webauthn_config()
 WEBAUTHN_ENABLED = bool(WEBAUTHN_RP_ID)
+# A security key wrapping the vault key needs the same relying party as every
+# other ceremony, so it is available exactly when WebAuthn is.
+HARDWARE_ENABLED = WEBAUTHN_ENABLED
 # How long a server-issued ceremony challenge stays usable. Long enough for a
 # Face ID prompt the user has to notice, short enough to be worthless later.
 WEBAUTHN_CHALLENGE_TTL = 120
@@ -487,6 +490,26 @@ WEB_CATALOGUES = {
         "security.tally_incomplete": "incomplete",
         "security.tally_malformed": "malformed",
         "security.tally_clean": "Nothing is pulling this score down.",
+        "nav.hardware": "Security Keys",
+        "page.hardware.desc": "Open this vault with a security key instead of your master password.",
+        "settings.hardware.title": "Security Keys",
+        "settings.hardware.desc": "Manage the keys that can open this vault without your master password.",
+        "settings.hardware.manage": "Manage security keys",
+        "login.hardware": "Unlock with a security key",
+        "hardware.enrolled": "Enrolled",
+        "hardware.credential": "Credential",
+        "hardware.empty": "No security key enrolled yet",
+        "hardware.empty_sub": "Enrol one below to open this vault without typing your master password",
+        "hardware.field.label": "Label for this key",
+        "hardware.enrol": "Enrol this security key",
+        "hardware.note": "A key enrolled here opens the vault on its own, so it is exactly as powerful as the master password and should be kept the same way. A session opened with one holds no master password: it cannot change the master password and cannot restore a snapshot.",
+        "hardware.waiting": "Touch your security key...",
+        "hardware.failed": "That security key does not open this vault.",
+        "hardware.noprf": "This security key cannot derive a vault secret.",
+        "hardware.enrol_failed": "Enrolment failed.",
+        "hardware.nosupport": "This browser cannot talk to a security key.",
+        "hardware.confirm_forget": "Remove this security key?",
+        "hardware.forget_failed": "The security key could not be removed.",
     },
     "ar": {
         "nav.security": "\u0627\u0644\u0623\u0645\u0627\u0646",
@@ -861,6 +884,26 @@ WEB_CATALOGUES = {
         "security.tally_incomplete": "\u0646\u0627\u0642\u0635\u0629",
         "security.tally_malformed": "\u062a\u0627\u0644\u0641\u0629",
         "security.tally_clean": "\u0644\u0627 \u0634\u064a\u0621 \u064a\u062e\u0641\u0636 \u0647\u0630\u0647 \u0627\u0644\u062f\u0631\u062c\u0629.",
+        "nav.hardware": "\u0645\u0641\u0627\u062a\u064a\u062d \u0627\u0644\u0623\u0645\u0627\u0646",
+        "page.hardware.desc": "\u0627\u0641\u062a\u062d \u0647\u0630\u0647 \u0627\u0644\u062e\u0632\u0646\u0629 \u0628\u0645\u0641\u062a\u0627\u062d \u0623\u0645\u0627\u0646 \u0628\u062f\u0644\u0627\u064b \u0645\u0646 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629.",
+        "settings.hardware.title": "\u0645\u0641\u0627\u062a\u064a\u062d \u0627\u0644\u0623\u0645\u0627\u0646",
+        "settings.hardware.desc": "\u0623\u062f\u0631 \u0627\u0644\u0645\u0641\u0627\u062a\u064a\u062d \u0627\u0644\u062a\u064a \u064a\u0645\u0643\u0646\u0647\u0627 \u0641\u062a\u062d \u0647\u0630\u0647 \u0627\u0644\u062e\u0632\u0646\u0629 \u062f\u0648\u0646 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629.",
+        "settings.hardware.manage": "\u0625\u062f\u0627\u0631\u0629 \u0645\u0641\u0627\u062a\u064a\u062d \u0627\u0644\u0623\u0645\u0627\u0646",
+        "login.hardware": "\u0627\u0644\u0641\u062a\u062d \u0628\u0645\u0641\u062a\u0627\u062d \u0623\u0645\u0627\u0646",
+        "hardware.enrolled": "\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062a\u0633\u062c\u064a\u0644",
+        "hardware.credential": "\u0627\u0644\u0645\u0639\u0631\u0651\u0641",
+        "hardware.empty": "\u0644\u0645 \u064a\u064f\u0633\u062c\u064e\u0651\u0644 \u0623\u064a \u0645\u0641\u062a\u0627\u062d \u0623\u0645\u0627\u0646 \u0628\u0639\u062f",
+        "hardware.empty_sub": "\u0633\u062c\u0651\u0644 \u0648\u0627\u062d\u062f\u0627\u064b \u0623\u062f\u0646\u0627\u0647 \u0644\u0641\u062a\u062d \u0647\u0630\u0647 \u0627\u0644\u062e\u0632\u0646\u0629 \u062f\u0648\u0646 \u0643\u062a\u0627\u0628\u0629 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629",
+        "hardware.field.label": "\u0627\u0633\u0645 \u0647\u0630\u0627 \u0627\u0644\u0645\u0641\u062a\u0627\u062d",
+        "hardware.enrol": "\u062a\u0633\u062c\u064a\u0644 \u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0623\u0645\u0627\u0646 \u0647\u0630\u0627",
+        "hardware.note": "\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0645\u0633\u062c\u064e\u0651\u0644 \u0647\u0646\u0627 \u064a\u0641\u062a\u062d \u0627\u0644\u062e\u0632\u0646\u0629 \u0628\u0645\u0641\u0631\u062f\u0647\u060c \u0641\u0647\u0648 \u0628\u0642\u0648\u0629 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629 \u062a\u0645\u0627\u0645\u0627\u064b \u0648\u064a\u062c\u0628 \u062d\u0641\u0638\u0647 \u0628\u0627\u0644\u0637\u0631\u064a\u0642\u0629 \u0646\u0641\u0633\u0647\u0627. \u0627\u0644\u062c\u0644\u0633\u0629 \u0627\u0644\u062a\u064a \u064a\u0641\u062a\u062d\u0647\u0627 \u0644\u0627 \u062a\u062d\u0645\u0644 \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0631\u0626\u064a\u0633\u064a\u0629: \u0644\u0627 \u064a\u0645\u0643\u0646\u0647\u0627 \u062a\u063a\u064a\u064a\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629 \u0648\u0644\u0627 \u0627\u0633\u062a\u0639\u0627\u062f\u0629 \u0646\u0633\u062e\u0629 \u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629.",
+        "hardware.waiting": "\u0627\u0644\u0645\u0633 \u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0623\u0645\u0627\u0646...",
+        "hardware.failed": "\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0623\u0645\u0627\u0646 \u0647\u0630\u0627 \u0644\u0627 \u064a\u0641\u062a\u062d \u0647\u0630\u0647 \u0627\u0644\u062e\u0632\u0646\u0629.",
+        "hardware.noprf": "\u0644\u0627 \u064a\u0633\u062a\u0637\u064a\u0639 \u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0623\u0645\u0627\u0646 \u0647\u0630\u0627 \u0627\u0634\u062a\u0642\u0627\u0642 \u0633\u0631 \u0627\u0644\u062e\u0632\u0646\u0629.",
+        "hardware.enrol_failed": "\u0641\u0634\u0644 \u0627\u0644\u062a\u0633\u062c\u064a\u0644.",
+        "hardware.nosupport": "\u0647\u0630\u0627 \u0627\u0644\u0645\u062a\u0635\u0641\u062d \u0644\u0627 \u064a\u0633\u062a\u0637\u064a\u0639 \u0627\u0644\u062a\u062e\u0627\u0637\u0628 \u0645\u0639 \u0645\u0641\u062a\u0627\u062d \u0623\u0645\u0627\u0646.",
+        "hardware.confirm_forget": "\u0647\u0644 \u062a\u0631\u064a\u062f \u0625\u0632\u0627\u0644\u0629 \u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0623\u0645\u0627\u0646 \u0647\u0630\u0627\u061f",
+        "hardware.forget_failed": "\u062a\u0639\u0630\u0651\u0631\u062a \u0625\u0632\u0627\u0644\u0629 \u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0623\u0645\u0627\u0646.",
     },
     "de": {
         "nav.security": "Sicherheit",
@@ -1235,6 +1278,26 @@ WEB_CATALOGUES = {
         "security.tally_incomplete": "unvollst\u00e4ndig",
         "security.tally_malformed": "fehlerhaft",
         "security.tally_clean": "Nichts dr\u00fcckt diese Bewertung.",
+        "nav.hardware": "Sicherheitsschl\u00fcssel",
+        "page.hardware.desc": "\u00d6ffne diesen Tresor mit einem Sicherheitsschl\u00fcssel statt mit deinem Hauptpasswort.",
+        "settings.hardware.title": "Sicherheitsschl\u00fcssel",
+        "settings.hardware.desc": "Verwalte die Schl\u00fcssel, die diesen Tresor ohne dein Hauptpasswort \u00f6ffnen k\u00f6nnen.",
+        "settings.hardware.manage": "Sicherheitsschl\u00fcssel verwalten",
+        "login.hardware": "Mit Sicherheitsschl\u00fcssel entsperren",
+        "hardware.enrolled": "Registriert",
+        "hardware.credential": "Anmeldedaten",
+        "hardware.empty": "Noch kein Sicherheitsschl\u00fcssel registriert",
+        "hardware.empty_sub": "Registriere unten einen, um diesen Tresor ohne Eingabe des Hauptpassworts zu \u00f6ffnen",
+        "hardware.field.label": "Bezeichnung f\u00fcr diesen Schl\u00fcssel",
+        "hardware.enrol": "Diesen Sicherheitsschl\u00fcssel registrieren",
+        "hardware.note": "Ein hier registrierter Schl\u00fcssel \u00f6ffnet den Tresor allein und ist damit genauso m\u00e4chtig wie das Hauptpasswort \u2013 bewahre ihn entsprechend auf. Eine damit ge\u00f6ffnete Sitzung h\u00e4lt kein Hauptpasswort: Sie kann weder das Hauptpasswort \u00e4ndern noch einen Schnappschuss wiederherstellen.",
+        "hardware.waiting": "Ber\u00fchre deinen Sicherheitsschl\u00fcssel...",
+        "hardware.failed": "Dieser Sicherheitsschl\u00fcssel \u00f6ffnet diesen Tresor nicht.",
+        "hardware.noprf": "Dieser Sicherheitsschl\u00fcssel kann kein Tresorgeheimnis ableiten.",
+        "hardware.enrol_failed": "Registrierung fehlgeschlagen.",
+        "hardware.nosupport": "Dieser Browser kann nicht mit einem Sicherheitsschl\u00fcssel sprechen.",
+        "hardware.confirm_forget": "Diesen Sicherheitsschl\u00fcssel entfernen?",
+        "hardware.forget_failed": "Der Sicherheitsschl\u00fcssel konnte nicht entfernt werden.",
     },
     "es": {
         "nav.security": "Seguridad",
@@ -1609,6 +1672,26 @@ WEB_CATALOGUES = {
         "security.tally_incomplete": "incompletas",
         "security.tally_malformed": "mal formados",
         "security.tally_clean": "Nada est\u00e1 bajando esta puntuaci\u00f3n.",
+        "nav.hardware": "Llaves de seguridad",
+        "page.hardware.desc": "Abre esta caja fuerte con una llave de seguridad en lugar de tu contrase\u00f1a maestra.",
+        "settings.hardware.title": "Llaves de seguridad",
+        "settings.hardware.desc": "Gestiona las llaves que pueden abrir esta caja fuerte sin tu contrase\u00f1a maestra.",
+        "settings.hardware.manage": "Gestionar llaves de seguridad",
+        "login.hardware": "Desbloquear con una llave de seguridad",
+        "hardware.enrolled": "Registrada",
+        "hardware.credential": "Credencial",
+        "hardware.empty": "Todav\u00eda no hay ninguna llave de seguridad registrada",
+        "hardware.empty_sub": "Registra una abajo para abrir esta caja fuerte sin escribir tu contrase\u00f1a maestra",
+        "hardware.field.label": "Nombre de esta llave",
+        "hardware.enrol": "Registrar esta llave de seguridad",
+        "hardware.note": "Una llave registrada aqu\u00ed abre la caja fuerte por s\u00ed sola, as\u00ed que es exactamente tan poderosa como la contrase\u00f1a maestra y debe guardarse igual. Una sesi\u00f3n abierta con ella no guarda ninguna contrase\u00f1a maestra: no puede cambiar la contrase\u00f1a maestra ni restaurar una instant\u00e1nea.",
+        "hardware.waiting": "Toca tu llave de seguridad...",
+        "hardware.failed": "Esa llave de seguridad no abre esta caja fuerte.",
+        "hardware.noprf": "Esta llave de seguridad no puede derivar un secreto de la caja fuerte.",
+        "hardware.enrol_failed": "El registro ha fallado.",
+        "hardware.nosupport": "Este navegador no puede comunicarse con una llave de seguridad.",
+        "hardware.confirm_forget": "\u00bfQuitar esta llave de seguridad?",
+        "hardware.forget_failed": "No se ha podido quitar la llave de seguridad.",
     },
     "fr": {
         "nav.security": "S\u00e9curit\u00e9",
@@ -1983,6 +2066,26 @@ WEB_CATALOGUES = {
         "security.tally_incomplete": "incomplets",
         "security.tally_malformed": "invalides",
         "security.tally_clean": "Rien ne fait baisser cette note.",
+        "nav.hardware": "Cl\u00e9s de s\u00e9curit\u00e9",
+        "page.hardware.desc": "Ouvrez ce coffre avec une cl\u00e9 de s\u00e9curit\u00e9 plut\u00f4t qu'avec votre mot de passe ma\u00eetre.",
+        "settings.hardware.title": "Cl\u00e9s de s\u00e9curit\u00e9",
+        "settings.hardware.desc": "G\u00e9rez les cl\u00e9s qui peuvent ouvrir ce coffre sans votre mot de passe ma\u00eetre.",
+        "settings.hardware.manage": "G\u00e9rer les cl\u00e9s de s\u00e9curit\u00e9",
+        "login.hardware": "D\u00e9verrouiller avec une cl\u00e9 de s\u00e9curit\u00e9",
+        "hardware.enrolled": "Enregistr\u00e9e",
+        "hardware.credential": "Identifiant",
+        "hardware.empty": "Aucune cl\u00e9 de s\u00e9curit\u00e9 enregistr\u00e9e pour l'instant",
+        "hardware.empty_sub": "Enregistrez-en une ci-dessous pour ouvrir ce coffre sans taper votre mot de passe ma\u00eetre",
+        "hardware.field.label": "Nom de cette cl\u00e9",
+        "hardware.enrol": "Enregistrer cette cl\u00e9 de s\u00e9curit\u00e9",
+        "hardware.note": "Une cl\u00e9 enregistr\u00e9e ici ouvre le coffre \u00e0 elle seule : elle est donc exactement aussi puissante que le mot de passe ma\u00eetre et doit \u00eatre conserv\u00e9e de la m\u00eame fa\u00e7on. Une session ouverte avec elle ne d\u00e9tient aucun mot de passe ma\u00eetre : elle ne peut ni changer le mot de passe ma\u00eetre ni restaurer un instantan\u00e9.",
+        "hardware.waiting": "Touchez votre cl\u00e9 de s\u00e9curit\u00e9...",
+        "hardware.failed": "Cette cl\u00e9 de s\u00e9curit\u00e9 n'ouvre pas ce coffre.",
+        "hardware.noprf": "Cette cl\u00e9 de s\u00e9curit\u00e9 ne peut pas d\u00e9river de secret de coffre.",
+        "hardware.enrol_failed": "L'enregistrement a \u00e9chou\u00e9.",
+        "hardware.nosupport": "Ce navigateur ne peut pas dialoguer avec une cl\u00e9 de s\u00e9curit\u00e9.",
+        "hardware.confirm_forget": "Retirer cette cl\u00e9 de s\u00e9curit\u00e9 ?",
+        "hardware.forget_failed": "La cl\u00e9 de s\u00e9curit\u00e9 n'a pas pu \u00eatre retir\u00e9e.",
     },
     "hi": {
         "nav.security": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e",
@@ -2357,6 +2460,26 @@ WEB_CATALOGUES = {
         "security.tally_incomplete": "\u0905\u0927\u0942\u0930\u0947",
         "security.tally_malformed": "\u0924\u094d\u0930\u0941\u091f\u093f\u092a\u0942\u0930\u094d\u0923",
         "security.tally_clean": "\u0907\u0938 \u0938\u094d\u0915\u094b\u0930 \u0915\u094b \u0915\u0941\u091b \u092d\u0940 \u0928\u0940\u091a\u0947 \u0928\u0939\u0940\u0902 \u0932\u093e \u0930\u0939\u093e\u0964",
+        "nav.hardware": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u093f\u092f\u093e\u0901",
+        "page.hardware.desc": "\u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0915\u0947 \u092c\u091c\u093e\u092f \u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u0907\u0938 \u0924\u093f\u091c\u094b\u0930\u0940 \u0915\u094b \u0916\u094b\u0932\u0947\u0902\u0964",
+        "settings.hardware.title": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u093f\u092f\u093e\u0901",
+        "settings.hardware.desc": "\u0909\u0928 \u0915\u0941\u0902\u091c\u093f\u092f\u094b\u0902 \u0915\u094b \u092a\u094d\u0930\u092c\u0902\u0927\u093f\u0924 \u0915\u0930\u0947\u0902 \u091c\u094b \u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0915\u0947 \u092c\u093f\u0928\u093e \u092f\u0939 \u0924\u093f\u091c\u094b\u0930\u0940 \u0916\u094b\u0932 \u0938\u0915\u0924\u0940 \u0939\u0948\u0902\u0964",
+        "settings.hardware.manage": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u093f\u092f\u093e\u0901 \u092a\u094d\u0930\u092c\u0902\u0927\u093f\u0924 \u0915\u0930\u0947\u0902",
+        "login.hardware": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u0905\u0928\u0932\u0949\u0915 \u0915\u0930\u0947\u0902",
+        "hardware.enrolled": "\u092a\u0902\u091c\u0940\u0915\u0943\u0924",
+        "hardware.credential": "\u0915\u094d\u0930\u0947\u0921\u0947\u0902\u0936\u093f\u092f\u0932",
+        "hardware.empty": "\u0905\u092d\u0940 \u0915\u094b\u0908 \u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u092a\u0902\u091c\u0940\u0915\u0943\u0924 \u0928\u0939\u0940\u0902 \u0939\u0948",
+        "hardware.empty_sub": "\u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u091f\u093e\u0907\u092a \u0915\u093f\u090f \u092c\u093f\u0928\u093e \u092f\u0939 \u0924\u093f\u091c\u094b\u0930\u0940 \u0916\u094b\u0932\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u0928\u0940\u091a\u0947 \u090f\u0915 \u092a\u0902\u091c\u0940\u0915\u0943\u0924 \u0915\u0930\u0947\u0902",
+        "hardware.field.label": "\u0907\u0938 \u0915\u0941\u0902\u091c\u0940 \u0915\u093e \u0928\u093e\u092e",
+        "hardware.enrol": "\u092f\u0939 \u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u092a\u0902\u091c\u0940\u0915\u0943\u0924 \u0915\u0930\u0947\u0902",
+        "hardware.note": "\u092f\u0939\u093e\u0901 \u092a\u0902\u091c\u0940\u0915\u0943\u0924 \u0915\u0941\u0902\u091c\u0940 \u0905\u0915\u0947\u0932\u0947 \u0939\u0940 \u0924\u093f\u091c\u094b\u0930\u0940 \u0916\u094b\u0932 \u0926\u0947\u0924\u0940 \u0939\u0948, \u0907\u0938\u0932\u093f\u090f \u0935\u0939 \u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u091c\u093f\u0924\u0928\u0940 \u0939\u0940 \u0936\u0915\u094d\u0924\u093f\u0936\u093e\u0932\u0940 \u0939\u0948 \u0914\u0930 \u0909\u0938\u0947 \u0909\u0938\u0940 \u0924\u0930\u0939 \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0930\u0916\u0947\u0902\u0964 \u0907\u0938\u0938\u0947 \u0916\u0941\u0932\u093e \u0938\u0924\u094d\u0930 \u0915\u094b\u0908 \u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0928\u0939\u0940\u0902 \u0930\u0916\u0924\u093e: \u0935\u0939 \u0928 \u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u092c\u0926\u0932 \u0938\u0915\u0924\u093e \u0939\u0948 \u0914\u0930 \u0928 \u0938\u094d\u0928\u0948\u092a\u0936\u0949\u091f \u092a\u0941\u0928\u0930\u094d\u0938\u094d\u0925\u093e\u092a\u093f\u0924 \u0915\u0930 \u0938\u0915\u0924\u093e \u0939\u0948\u0964",
+        "hardware.waiting": "\u0905\u092a\u0928\u0940 \u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u0915\u094b \u091b\u0941\u090f\u0901...",
+        "hardware.failed": "\u092f\u0939 \u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u0907\u0938 \u0924\u093f\u091c\u094b\u0930\u0940 \u0915\u094b \u0928\u0939\u0940\u0902 \u0916\u094b\u0932\u0924\u0940\u0964",
+        "hardware.noprf": "\u092f\u0939 \u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u0924\u093f\u091c\u094b\u0930\u0940 \u0915\u093e \u0917\u0941\u092a\u094d\u0924 \u092e\u093e\u0928 \u0928\u0939\u0940\u0902 \u092c\u0928\u093e \u0938\u0915\u0924\u0940\u0964",
+        "hardware.enrol_failed": "\u092a\u0902\u091c\u0940\u0915\u0930\u0923 \u0935\u093f\u092b\u0932 \u0930\u0939\u093e\u0964",
+        "hardware.nosupport": "\u092f\u0939 \u092c\u094d\u0930\u093e\u0909\u091c\u093c\u0930 \u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u092c\u093e\u0924 \u0928\u0939\u0940\u0902 \u0915\u0930 \u0938\u0915\u0924\u093e\u0964",
+        "hardware.confirm_forget": "\u0915\u094d\u092f\u093e \u092f\u0939 \u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u0939\u091f\u093e\u0928\u0940 \u0939\u0948?",
+        "hardware.forget_failed": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u0939\u091f\u093e\u0908 \u0928\u0939\u0940\u0902 \u091c\u093e \u0938\u0915\u0940\u0964",
     },
     "id": {
         "nav.security": "Keamanan",
@@ -2731,6 +2854,26 @@ WEB_CATALOGUES = {
         "security.tally_incomplete": "tak lengkap",
         "security.tally_malformed": "rusak",
         "security.tally_clean": "Tidak ada yang menurunkan skor ini.",
+        "nav.hardware": "Kunci Keamanan",
+        "page.hardware.desc": "Buka brankas ini dengan kunci keamanan, bukan kata sandi utama.",
+        "settings.hardware.title": "Kunci Keamanan",
+        "settings.hardware.desc": "Kelola kunci yang dapat membuka brankas ini tanpa kata sandi utama.",
+        "settings.hardware.manage": "Kelola kunci keamanan",
+        "login.hardware": "Buka dengan kunci keamanan",
+        "hardware.enrolled": "Terdaftar",
+        "hardware.credential": "Kredensial",
+        "hardware.empty": "Belum ada kunci keamanan yang terdaftar",
+        "hardware.empty_sub": "Daftarkan satu di bawah untuk membuka brankas ini tanpa mengetik kata sandi utama",
+        "hardware.field.label": "Nama untuk kunci ini",
+        "hardware.enrol": "Daftarkan kunci keamanan ini",
+        "hardware.note": "Kunci yang didaftarkan di sini membuka brankas seorang diri, jadi kekuatannya persis sama dengan kata sandi utama dan harus disimpan dengan cara yang sama. Sesi yang dibuka dengannya tidak menyimpan kata sandi utama: sesi itu tidak bisa mengubah kata sandi utama dan tidak bisa memulihkan cadangan.",
+        "hardware.waiting": "Sentuh kunci keamanan Anda...",
+        "hardware.failed": "Kunci keamanan itu tidak membuka brankas ini.",
+        "hardware.noprf": "Kunci keamanan ini tidak dapat menurunkan rahasia brankas.",
+        "hardware.enrol_failed": "Pendaftaran gagal.",
+        "hardware.nosupport": "Peramban ini tidak dapat berbicara dengan kunci keamanan.",
+        "hardware.confirm_forget": "Hapus kunci keamanan ini?",
+        "hardware.forget_failed": "Kunci keamanan tidak dapat dihapus.",
     },
     "ja": {
         "nav.security": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3",
@@ -3105,6 +3248,26 @@ WEB_CATALOGUES = {
         "security.tally_incomplete": "\u4ef6 \u60c5\u5831\u4e0d\u8db3",
         "security.tally_malformed": "\u4ef6 \u4e0d\u6b63",
         "security.tally_clean": "\u3053\u306e\u70b9\u6570\u3092\u4e0b\u3052\u3066\u3044\u308b\u3082\u306e\u306f\u3042\u308a\u307e\u305b\u3093\u3002",
+        "nav.hardware": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc",
+        "page.hardware.desc": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\u306e\u4ee3\u308f\u308a\u306b\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u3067\u3053\u306e\u4fdd\u7ba1\u5eab\u3092\u958b\u304d\u307e\u3059\u3002",
+        "settings.hardware.title": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc",
+        "settings.hardware.desc": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\u306a\u3057\u3067\u3053\u306e\u4fdd\u7ba1\u5eab\u3092\u958b\u3051\u308b\u30ad\u30fc\u3092\u7ba1\u7406\u3057\u307e\u3059\u3002",
+        "settings.hardware.manage": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u3092\u7ba1\u7406",
+        "login.hardware": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u3067\u30ed\u30c3\u30af\u89e3\u9664",
+        "hardware.enrolled": "\u767b\u9332\u65e5\u6642",
+        "hardware.credential": "\u8cc7\u683c\u60c5\u5831",
+        "hardware.empty": "\u767b\u9332\u6e08\u307f\u306e\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u306f\u307e\u3060\u3042\u308a\u307e\u305b\u3093",
+        "hardware.empty_sub": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5165\u529b\u305b\u305a\u306b\u3053\u306e\u4fdd\u7ba1\u5eab\u3092\u958b\u304f\u306b\u306f\u3001\u4e0b\u3067\u767b\u9332\u3057\u3066\u304f\u3060\u3055\u3044",
+        "hardware.field.label": "\u3053\u306e\u30ad\u30fc\u306e\u30e9\u30d9\u30eb",
+        "hardware.enrol": "\u3053\u306e\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u3092\u767b\u9332",
+        "hardware.note": "\u3053\u3053\u306b\u767b\u9332\u3057\u305f\u30ad\u30fc\u306f\u5358\u72ec\u3067\u4fdd\u7ba1\u5eab\u3092\u958b\u304d\u307e\u3059\u3002\u3064\u307e\u308a\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\u3068\u307e\u3063\u305f\u304f\u540c\u3058\u5f37\u3055\u3092\u6301\u3064\u305f\u3081\u3001\u540c\u3058\u3088\u3046\u306b\u7ba1\u7406\u3057\u3066\u304f\u3060\u3055\u3044\u3002\u3053\u306e\u30ad\u30fc\u3067\u958b\u3044\u305f\u30bb\u30c3\u30b7\u30e7\u30f3\u306f\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u4fdd\u6301\u3057\u307e\u305b\u3093\u3002\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\u306e\u5909\u66f4\u3082\u30b9\u30ca\u30c3\u30d7\u30b7\u30e7\u30c3\u30c8\u306e\u5fa9\u5143\u3082\u3067\u304d\u307e\u305b\u3093\u3002",
+        "hardware.waiting": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u306b\u89e6\u308c\u3066\u304f\u3060\u3055\u3044...",
+        "hardware.failed": "\u305d\u306e\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u3067\u306f\u3053\u306e\u4fdd\u7ba1\u5eab\u3092\u958b\u3051\u307e\u305b\u3093\u3002",
+        "hardware.noprf": "\u3053\u306e\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u306f\u4fdd\u7ba1\u5eab\u306e\u79d8\u5bc6\u5024\u3092\u5c0e\u51fa\u3067\u304d\u307e\u305b\u3093\u3002",
+        "hardware.enrol_failed": "\u767b\u9332\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002",
+        "hardware.nosupport": "\u3053\u306e\u30d6\u30e9\u30a6\u30b6\u30fc\u306f\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u3068\u901a\u4fe1\u3067\u304d\u307e\u305b\u3093\u3002",
+        "hardware.confirm_forget": "\u3053\u306e\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u3092\u524a\u9664\u3057\u307e\u3059\u304b\uff1f",
+        "hardware.forget_failed": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u3092\u524a\u9664\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002",
     },
     "ko": {
         "nav.security": "\ubcf4\uc548",
@@ -3479,6 +3642,26 @@ WEB_CATALOGUES = {
         "security.tally_incomplete": "\uac1c \ubbf8\uc644\uc131",
         "security.tally_malformed": "\uac1c \uc624\ub958",
         "security.tally_clean": "\uc774 \uc810\uc218\ub97c \ub5a8\uc5b4\ub728\ub9ac\ub294 \uac83\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "nav.hardware": "\ubcf4\uc548 \ud0a4",
+        "page.hardware.desc": "\ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638 \ub300\uc2e0 \ubcf4\uc548 \ud0a4\ub85c \uc774 \uae08\uace0\ub97c \uc5fd\ub2c8\ub2e4.",
+        "settings.hardware.title": "\ubcf4\uc548 \ud0a4",
+        "settings.hardware.desc": "\ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638 \uc5c6\uc774 \uc774 \uae08\uace0\ub97c \uc5f4 \uc218 \uc788\ub294 \ud0a4\ub97c \uad00\ub9ac\ud569\ub2c8\ub2e4.",
+        "settings.hardware.manage": "\ubcf4\uc548 \ud0a4 \uad00\ub9ac",
+        "login.hardware": "\ubcf4\uc548 \ud0a4\ub85c \uc7a0\uae08 \ud574\uc81c",
+        "hardware.enrolled": "\ub4f1\ub85d\uc77c",
+        "hardware.credential": "\uc790\uaca9 \uc99d\uba85",
+        "hardware.empty": "\uc544\uc9c1 \ub4f1\ub85d\ub41c \ubcf4\uc548 \ud0a4\uac00 \uc5c6\uc2b5\ub2c8\ub2e4",
+        "hardware.empty_sub": "\ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638\ub97c \uc785\ub825\ud558\uc9c0 \uc54a\uace0 \uc774 \uae08\uace0\ub97c \uc5f4\ub824\uba74 \uc544\ub798\uc5d0\uc11c \ud558\ub098 \ub4f1\ub85d\ud558\uc138\uc694",
+        "hardware.field.label": "\uc774 \ud0a4\uc758 \uc774\ub984",
+        "hardware.enrol": "\uc774 \ubcf4\uc548 \ud0a4 \ub4f1\ub85d",
+        "hardware.note": "\uc5ec\uae30\uc5d0 \ub4f1\ub85d\ud55c \ud0a4\ub294 \uadf8\uac83\ub9cc\uc73c\ub85c \uae08\uace0\ub97c \uc5fd\ub2c8\ub2e4. \ub530\ub77c\uc11c \ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638\uc640 \uc815\ud655\ud788 \uac19\uc740 \ud798\uc744 \uac00\uc9c0\uba70 \uac19\uc740 \ubc29\uc2dd\uc73c\ub85c \ubcf4\uad00\ud574\uc57c \ud569\ub2c8\ub2e4. \uc774 \ud0a4\ub85c \uc5f0 \uc138\uc158\uc740 \ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638\ub97c \uac16\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. \ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638\ub97c \ubc14\uafc0 \uc218\ub3c4, \uc2a4\ub0c5\uc0f7\uc744 \ubcf5\uc6d0\ud560 \uc218\ub3c4 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "hardware.waiting": "\ubcf4\uc548 \ud0a4\ub97c \ud130\uce58\ud558\uc138\uc694...",
+        "hardware.failed": "\uadf8 \ubcf4\uc548 \ud0a4\ub85c\ub294 \uc774 \uae08\uace0\ub97c \uc5f4 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "hardware.noprf": "\uc774 \ubcf4\uc548 \ud0a4\ub294 \uae08\uace0 \ube44\ubc00\uac12\uc744 \ud30c\uc0dd\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "hardware.enrol_failed": "\ub4f1\ub85d\uc5d0 \uc2e4\ud328\ud588\uc2b5\ub2c8\ub2e4.",
+        "hardware.nosupport": "\uc774 \ube0c\ub77c\uc6b0\uc800\ub294 \ubcf4\uc548 \ud0a4\uc640 \ud1b5\uc2e0\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "hardware.confirm_forget": "\uc774 \ubcf4\uc548 \ud0a4\ub97c \uc0ad\uc81c\ud560\uae4c\uc694?",
+        "hardware.forget_failed": "\ubcf4\uc548 \ud0a4\ub97c \uc0ad\uc81c\ud558\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4.",
     },
     "pt-br": {
         "nav.security": "Seguran\u00e7a",
@@ -3853,6 +4036,26 @@ WEB_CATALOGUES = {
         "security.tally_incomplete": "incompletas",
         "security.tally_malformed": "malformados",
         "security.tally_clean": "Nada est\u00e1 reduzindo esta pontua\u00e7\u00e3o.",
+        "nav.hardware": "Chaves de seguran\u00e7a",
+        "page.hardware.desc": "Abra este cofre com uma chave de seguran\u00e7a em vez da senha mestra.",
+        "settings.hardware.title": "Chaves de seguran\u00e7a",
+        "settings.hardware.desc": "Gerencie as chaves que podem abrir este cofre sem a sua senha mestra.",
+        "settings.hardware.manage": "Gerenciar chaves de seguran\u00e7a",
+        "login.hardware": "Desbloquear com uma chave de seguran\u00e7a",
+        "hardware.enrolled": "Registrada",
+        "hardware.credential": "Credencial",
+        "hardware.empty": "Nenhuma chave de seguran\u00e7a registrada ainda",
+        "hardware.empty_sub": "Registre uma abaixo para abrir este cofre sem digitar a senha mestra",
+        "hardware.field.label": "Nome desta chave",
+        "hardware.enrol": "Registrar esta chave de seguran\u00e7a",
+        "hardware.note": "Uma chave registrada aqui abre o cofre sozinha, portanto \u00e9 exatamente t\u00e3o poderosa quanto a senha mestra e deve ser guardada do mesmo jeito. Uma sess\u00e3o aberta com ela n\u00e3o guarda nenhuma senha mestra: n\u00e3o pode mudar a senha mestra nem restaurar um instant\u00e2neo.",
+        "hardware.waiting": "Toque na sua chave de seguran\u00e7a...",
+        "hardware.failed": "Essa chave de seguran\u00e7a n\u00e3o abre este cofre.",
+        "hardware.noprf": "Esta chave de seguran\u00e7a n\u00e3o consegue derivar um segredo do cofre.",
+        "hardware.enrol_failed": "O registro falhou.",
+        "hardware.nosupport": "Este navegador n\u00e3o consegue conversar com uma chave de seguran\u00e7a.",
+        "hardware.confirm_forget": "Remover esta chave de seguran\u00e7a?",
+        "hardware.forget_failed": "A chave de seguran\u00e7a n\u00e3o p\u00f4de ser removida.",
     },
     "ru": {
         "nav.security": "\u0411\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c",
@@ -4227,6 +4430,26 @@ WEB_CATALOGUES = {
         "security.tally_incomplete": "\u043d\u0435\u043f\u043e\u043b\u043d\u044b\u0445",
         "security.tally_malformed": "\u043d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0445",
         "security.tally_clean": "\u041d\u0438\u0447\u0442\u043e \u043d\u0435 \u0441\u043d\u0438\u0436\u0430\u0435\u0442 \u044d\u0442\u0443 \u043e\u0446\u0435\u043d\u043a\u0443.",
+        "nav.hardware": "\u041a\u043b\u044e\u0447\u0438 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438",
+        "page.hardware.desc": "\u041e\u0442\u043a\u0440\u044b\u0432\u0430\u0439\u0442\u0435 \u044d\u0442\u043e \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u043a\u043b\u044e\u0447\u043e\u043c \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438 \u0432\u043c\u0435\u0441\u0442\u043e \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044f.",
+        "settings.hardware.title": "\u041a\u043b\u044e\u0447\u0438 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438",
+        "settings.hardware.desc": "\u0423\u043f\u0440\u0430\u0432\u043b\u044f\u0439\u0442\u0435 \u043a\u043b\u044e\u0447\u0430\u043c\u0438, \u043a\u043e\u0442\u043e\u0440\u044b\u0435 \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u044e\u0442 \u044d\u0442\u043e \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u0431\u0435\u0437 \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044f.",
+        "settings.hardware.manage": "\u0423\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u043a\u043b\u044e\u0447\u0430\u043c\u0438 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438",
+        "login.hardware": "\u0420\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043a\u043b\u044e\u0447\u043e\u043c \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438",
+        "hardware.enrolled": "\u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043e\u0432\u0430\u043d",
+        "hardware.credential": "\u0423\u0447\u0451\u0442\u043d\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435",
+        "hardware.empty": "\u041a\u043b\u044e\u0447\u0438 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438 \u0435\u0449\u0451 \u043d\u0435 \u0437\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043e\u0432\u0430\u043d\u044b",
+        "hardware.empty_sub": "\u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u0443\u0439\u0442\u0435 \u043a\u043b\u044e\u0447 \u043d\u0438\u0436\u0435, \u0447\u0442\u043e\u0431\u044b \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0442\u044c \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u0431\u0435\u0437 \u0432\u0432\u043e\u0434\u0430 \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044f",
+        "hardware.field.label": "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u044d\u0442\u043e\u0433\u043e \u043a\u043b\u044e\u0447\u0430",
+        "hardware.enrol": "\u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u044d\u0442\u043e\u0442 \u043a\u043b\u044e\u0447",
+        "hardware.note": "\u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0439 \u0437\u0434\u0435\u0441\u044c \u043a\u043b\u044e\u0447 \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u0442 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u0441\u0430\u043c \u043f\u043e \u0441\u0435\u0431\u0435, \u0442\u043e \u0435\u0441\u0442\u044c \u043e\u043d \u0440\u043e\u0432\u043d\u043e \u0442\u0430\u043a \u0436\u0435 \u0441\u0438\u043b\u0451\u043d, \u043a\u0430\u043a \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044c, \u0438 \u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0435\u0433\u043e \u043d\u0443\u0436\u043d\u043e \u0442\u0430\u043a \u0436\u0435. \u0421\u0435\u0430\u043d\u0441, \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0439 \u043a\u043b\u044e\u0447\u043e\u043c, \u043d\u0435 \u0441\u043e\u0434\u0435\u0440\u0436\u0438\u0442 \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044f: \u043e\u043d \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0441\u043c\u0435\u043d\u0438\u0442\u044c \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044c \u0438 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u0441\u043d\u0438\u043c\u043e\u043a.",
+        "hardware.waiting": "\u041a\u043e\u0441\u043d\u0438\u0442\u0435\u0441\u044c \u043a\u043b\u044e\u0447\u0430 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438...",
+        "hardware.failed": "\u042d\u0442\u043e\u0442 \u043a\u043b\u044e\u0447 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438 \u043d\u0435 \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u0442 \u0434\u0430\u043d\u043d\u043e\u0435 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435.",
+        "hardware.noprf": "\u042d\u0442\u043e\u0442 \u043a\u043b\u044e\u0447 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0432\u044b\u0432\u0435\u0441\u0442\u0438 \u0441\u0435\u043a\u0440\u0435\u0442 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0430.",
+        "hardware.enrol_failed": "\u0420\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u044f \u043d\u0435 \u0443\u0434\u0430\u043b\u0430\u0441\u044c.",
+        "hardware.nosupport": "\u042d\u0442\u043e\u0442 \u0431\u0440\u0430\u0443\u0437\u0435\u0440 \u043d\u0435 \u0443\u043c\u0435\u0435\u0442 \u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c \u0441 \u043a\u043b\u044e\u0447\u043e\u043c \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438.",
+        "hardware.confirm_forget": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u044d\u0442\u043e\u0442 \u043a\u043b\u044e\u0447 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438?",
+        "hardware.forget_failed": "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u043a\u043b\u044e\u0447 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438.",
     },
     "zh-hans": {
         "nav.security": "\u5b89\u5168",
@@ -4601,6 +4824,26 @@ WEB_CATALOGUES = {
         "security.tally_incomplete": "\u4e2a\u4e0d\u5b8c\u6574",
         "security.tally_malformed": "\u4e2a\u5f02\u5e38",
         "security.tally_clean": "\u6ca1\u6709\u4efb\u4f55\u56e0\u7d20\u62c9\u4f4e\u6b64\u5206\u6570\u3002",
+        "nav.hardware": "\u5b89\u5168\u5bc6\u94a5",
+        "page.hardware.desc": "\u7528\u5b89\u5168\u5bc6\u94a5\u6253\u5f00\u6b64\u5bc6\u7801\u5e93\uff0c\u800c\u4e0d\u662f\u4e3b\u5bc6\u7801\u3002",
+        "settings.hardware.title": "\u5b89\u5168\u5bc6\u94a5",
+        "settings.hardware.desc": "\u7ba1\u7406\u65e0\u9700\u4e3b\u5bc6\u7801\u5373\u53ef\u6253\u5f00\u6b64\u5bc6\u7801\u5e93\u7684\u5bc6\u94a5\u3002",
+        "settings.hardware.manage": "\u7ba1\u7406\u5b89\u5168\u5bc6\u94a5",
+        "login.hardware": "\u4f7f\u7528\u5b89\u5168\u5bc6\u94a5\u89e3\u9501",
+        "hardware.enrolled": "\u6ce8\u518c\u65f6\u95f4",
+        "hardware.credential": "\u51ed\u636e",
+        "hardware.empty": "\u5c1a\u672a\u6ce8\u518c\u4efb\u4f55\u5b89\u5168\u5bc6\u94a5",
+        "hardware.empty_sub": "\u5728\u4e0b\u65b9\u6ce8\u518c\u4e00\u4e2a\uff0c\u5373\u53ef\u4e0d\u8f93\u5165\u4e3b\u5bc6\u7801\u6253\u5f00\u6b64\u5bc6\u7801\u5e93",
+        "hardware.field.label": "\u6b64\u5bc6\u94a5\u7684\u540d\u79f0",
+        "hardware.enrol": "\u6ce8\u518c\u6b64\u5b89\u5168\u5bc6\u94a5",
+        "hardware.note": "\u5728\u6b64\u6ce8\u518c\u7684\u5bc6\u94a5\u53ef\u4ee5\u5355\u72ec\u6253\u5f00\u5bc6\u7801\u5e93\uff0c\u56e0\u6b64\u5b83\u4e0e\u4e3b\u5bc6\u7801\u540c\u6837\u5f3a\u5927\uff0c\u4e5f\u5e94\u5f53\u540c\u6837\u59a5\u5584\u4fdd\u7ba1\u3002\u7528\u5b83\u6253\u5f00\u7684\u4f1a\u8bdd\u4e0d\u6301\u6709\u4e3b\u5bc6\u7801\uff1a\u65e2\u4e0d\u80fd\u66f4\u6539\u4e3b\u5bc6\u7801\uff0c\u4e5f\u4e0d\u80fd\u8fd8\u539f\u5feb\u7167\u3002",
+        "hardware.waiting": "\u8bf7\u89e6\u6478\u4f60\u7684\u5b89\u5168\u5bc6\u94a5\u2026\u2026",
+        "hardware.failed": "\u8be5\u5b89\u5168\u5bc6\u94a5\u65e0\u6cd5\u6253\u5f00\u6b64\u5bc6\u7801\u5e93\u3002",
+        "hardware.noprf": "\u6b64\u5b89\u5168\u5bc6\u94a5\u65e0\u6cd5\u6d3e\u751f\u5bc6\u7801\u5e93\u5bc6\u94a5\u3002",
+        "hardware.enrol_failed": "\u6ce8\u518c\u5931\u8d25\u3002",
+        "hardware.nosupport": "\u6b64\u6d4f\u89c8\u5668\u65e0\u6cd5\u4e0e\u5b89\u5168\u5bc6\u94a5\u901a\u4fe1\u3002",
+        "hardware.confirm_forget": "\u8981\u79fb\u9664\u6b64\u5b89\u5168\u5bc6\u94a5\u5417\uff1f",
+        "hardware.forget_failed": "\u65e0\u6cd5\u79fb\u9664\u6b64\u5b89\u5168\u5bc6\u94a5\u3002",
     },
 }
 # --- END GENERATED LOCALES ---
@@ -7838,6 +8081,12 @@ def login_page(version, message=""):
         </div>
         <button class="btn btn-primary btn-block" type="submit" data-i18n="login.unlock">Unlock</button>
       </form>
+      <div id="hardware-unlock" hidden style="margin-top:var(--sp-4)">
+        <button class="btn btn-ghost btn-block" type="button" id="hardware-btn"
+                data-i18n="login.hardware">Unlock with a security key</button>
+        <div class="faint" id="hardware-status" role="status" aria-live="polite"
+             style="margin-top:var(--sp-3);min-height:1.2em"></div>
+      </div>
     </div>
     <div class="card-foot">
       <span data-i18n="login.note">All decryption happens on this host. Nothing leaves it.</span>
@@ -7853,8 +8102,10 @@ def login_page(version, message=""):
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 {LANG_BOOTSTRAP}
+{_hardware_bootstrap()}
 {I18N_SCRIPT}
 {SHELL_SCRIPT}
+{HARDWARE_UNLOCK_SCRIPT}
 </body>
 </html>"""
 
@@ -8020,6 +8271,287 @@ UNLOCK_REGISTER_SCRIPT = """
 """
 
 
+# --- security keys ----------------------------------------------------------
+# A security key that supports the PRF extension can derive 32 deterministic
+# bytes from a salt. SPM seals the vault key under those bytes, which is what
+# makes a cold unlock possible with no master password in it at all -- the
+# session it opens holds no password, and every write it makes keeps the key
+# envelope it found rather than sealing a new one.
+
+def _hardware_bootstrap():
+    """window.SPM_HARDWARE for the sign-in page.
+
+    Two values, and neither is a secret. Whether any key is enrolled -- which
+    the button's presence would disclose anyway -- and the salt the PRF is
+    evaluated with. The salt has to be readable before there is a session to
+    authorise reading it, and on its own it is worth nothing: deriving the
+    wrapping key needs the authenticator, and using it needs the vault file.
+    """
+    payload = "null"
+    if HARDWARE_ENABLED:
+        try:
+            state = core.read_hardware(VAULT_PATH)
+        except Exception:
+            state = {"salt": "", "keys": []}
+        if state["keys"] and state["salt"]:
+            payload = jsonlib.dumps(
+                {"rp_id": WEBAUTHN_RP_ID, "salt": state["salt"]}
+            ).replace("<", "\\u003c")
+    return "<script>window.SPM_HARDWARE = %s;</script>" % payload
+
+
+# Shared by both hardware scripts. Standard base64 with padding, because the
+# secret crosses to Python as base64.b64decode(validate=True) and base64url
+# would be refused there rather than silently mis-decoded.
+HARDWARE_HELPERS = """
+  function b64ToBytes(value) {
+    var raw = atob(String(value || "")), out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+  function bytesToB64(buf) {
+    var bytes = new Uint8Array(buf), s = "";
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+  function prfSecret(cred) {
+    var ext = cred.getClientExtensionResults ? cred.getClientExtensionResults() : null;
+    var results = ext && ext.prf && ext.prf.results;
+    return (results && results.first) || null;
+  }
+  function t(key, fallback) {
+    return (window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t(key, fallback) : fallback;
+  }
+"""
+
+HARDWARE_UNLOCK_SCRIPT = """
+<script>
+(function () {
+  var conf = window.SPM_HARDWARE;
+  var wrap = document.getElementById("hardware-unlock");
+  if (!conf || !wrap || !window.PublicKeyCredential || !navigator.credentials) return;
+  wrap.hidden = false;
+  var btn = document.getElementById("hardware-btn");
+  var status = document.getElementById("hardware-status");
+""" + HARDWARE_HELPERS + """
+  btn.addEventListener("click", function () {
+    btn.disabled = true;
+    status.textContent = t("hardware.waiting", "Touch your security key...");
+    /* The challenge is generated here rather than fetched, because this server
+       verifies no assertion signature: what proves the key is the secret it
+       derives, which either unwraps the vault key or does not. A challenge
+       from the server would look like a defence and be none -- there would be
+       nothing on the other side checking it was ever signed. The API requires
+       the field, so it gets random bytes. */
+    var challenge = new Uint8Array(32);
+    crypto.getRandomValues(challenge);
+    navigator.credentials.get({publicKey: {
+      challenge: challenge,
+      rpId: conf.rp_id,
+      /* No allowCredentials: the keys are enrolled as discoverable, so the
+         browser offers what it holds and the sign-in page never has to publish
+         a list of credential ids to anyone who loads it. */
+      userVerification: "required",
+      timeout: 60000,
+      extensions: {prf: {eval: {first: b64ToBytes(conf.salt)}}}
+    }}).then(function (cred) {
+      if (!cred) throw new Error(t("hardware.failed", "That security key does not open this vault."));
+      var secret = prfSecret(cred);
+      if (!secret) throw new Error(t("hardware.noprf", "This security key cannot derive a vault secret."));
+      return fetch("/hardware/unlock", {
+        method: "POST", credentials: "same-origin",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({credential_id: cred.id, secret: bytesToB64(secret)})
+      }).then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          if (!r.ok) throw new Error(j.error || t("hardware.failed", "That security key does not open this vault."));
+          return j;
+        });
+      });
+    }).then(function () {
+      window.location.replace("/");
+    }).catch(function (err) {
+      status.textContent = (err && err.message) ? err.message
+        : t("hardware.failed", "That security key does not open this vault.");
+      btn.disabled = false;
+    });
+  });
+})();
+</script>
+"""
+
+HARDWARE_MANAGE_SCRIPT = """
+<script>
+(function () {
+  var enrol = document.getElementById("hardware-enrol");
+  if (!enrol) return;
+  var status = document.getElementById("hardware-status");
+  var CSRF = enrol.getAttribute("data-csrf") || "";
+  var RP = enrol.getAttribute("data-rp") || "";
+""" + HARDWARE_HELPERS + """
+  function post(url, body) {
+    return fetch(url, {
+      method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(Object.assign({csrf: CSRF}, body || {}))
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) throw new Error(j.error || t("hardware.enrol_failed", "Enrolment failed."));
+        return j;
+      });
+    });
+  }
+  enrol.addEventListener("click", function () {
+    if (!window.PublicKeyCredential || !navigator.credentials) {
+      status.textContent = t("hardware.nosupport", "This browser cannot talk to a security key.");
+      return;
+    }
+    enrol.disabled = true;
+    status.textContent = t("hardware.waiting", "Touch your security key...");
+    var label = (document.getElementById("hardware-label") || {}).value || "";
+    var salt = null, credential = null;
+    post("/hardware/salt").then(function (c) {
+      salt = c.salt;
+      var challenge = new Uint8Array(32);
+      crypto.getRandomValues(challenge);
+      var userId = new Uint8Array(16);
+      crypto.getRandomValues(userId);
+      return navigator.credentials.create({publicKey: {
+        challenge: challenge,
+        rp: {id: RP, name: "Sans Password Manager"},
+        user: {id: userId, name: "vault", displayName: "vault"},
+        pubKeyCredParams: [{type: "public-key", alg: -7}, {type: "public-key", alg: -257}],
+        authenticatorSelection: {
+          /* Discoverable, so the sign-in page can ask for "whatever you have"
+             instead of publishing which credential ids exist. Required user
+             verification, because possession of the key alone would otherwise
+             be possession of the vault. */
+          residentKey: "required",
+          requireResidentKey: true,
+          userVerification: "required"
+        },
+        attestation: "none",
+        timeout: 60000,
+        extensions: {prf: {}}
+      }});
+    }).then(function (cred) {
+      if (!cred) throw new Error(t("hardware.enrol_failed", "Enrolment failed."));
+      var ext = cred.getClientExtensionResults ? cred.getClientExtensionResults() : null;
+      if (!ext || !ext.prf || !ext.prf.enabled) {
+        throw new Error(t("hardware.noprf", "This security key cannot derive a vault secret."));
+      }
+      credential = cred.id;
+      /* A second ceremony, immediately. Creation reports only that the PRF is
+         available; the bytes come from an assertion, and they are the same
+         bytes the sign-in page will ask this key for. */
+      var challenge = new Uint8Array(32);
+      crypto.getRandomValues(challenge);
+      return navigator.credentials.get({publicKey: {
+        challenge: challenge,
+        rpId: RP,
+        allowCredentials: [{type: "public-key", id: b64urlToBytes(cred.id)}],
+        userVerification: "required",
+        timeout: 60000,
+        extensions: {prf: {eval: {first: b64ToBytes(salt)}}}
+      }});
+    }).then(function (assertion) {
+      var secret = assertion && prfSecret(assertion);
+      if (!secret) throw new Error(t("hardware.noprf", "This security key cannot derive a vault secret."));
+      return post("/hardware/enroll", {
+        credential_id: credential, secret: bytesToB64(secret),
+        salt: salt, label: label
+      });
+    }).then(function () {
+      window.location.replace("/hardware/settings?msg=enrolled");
+    }).catch(function (err) {
+      status.textContent = (err && err.message) ? err.message
+        : t("hardware.enrol_failed", "Enrolment failed.");
+      enrol.disabled = false;
+    });
+  });
+  function b64urlToBytes(value) {
+    var pad = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+    while (pad.length % 4) pad += "=";
+    return b64ToBytes(pad);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("[data-forget]"), function (button) {
+    button.addEventListener("click", function () {
+      if (!window.confirm(t("hardware.confirm_forget", "Remove this security key?"))) return;
+      button.disabled = true;
+      post("/hardware/forget", {credential_id: button.getAttribute("data-forget")})
+        .then(function () { window.location.replace("/hardware/settings?msg=forgotten"); })
+        .catch(function (err) {
+          status.textContent = (err && err.message) ? err.message
+            : t("hardware.forget_failed", "The security key could not be removed.");
+          button.disabled = false;
+        });
+    });
+  });
+})();
+</script>
+"""
+
+
+def hardware_settings_page(state, csrf, flash=""):
+    """Manage the security keys that can open this vault cold."""
+    rows = []
+    for entry in state["keys"]:
+        rows.append(
+            '<tr data-row><td><strong>%s</strong></td>'
+            '<td class="faint">%s</td>'
+            '<td class="faint"><code>%s</code></td>'
+            '<td style="text-align:end">'
+            '<button class="btn btn-danger btn-sm" type="button" '
+            'data-forget="%s" data-i18n="btn.delete">Delete</button>'
+            "</td></tr>"
+            % (_esc(entry.get("label") or "Security key"),
+               _esc(entry.get("created") or ""),
+               # Enough to tell two keys apart on screen, and never the whole
+               # id: the page is a screenshot away from a support channel.
+               _esc((entry.get("credential_id") or "")[:12]),
+               _esc(entry.get("credential_id") or "")))
+    if not rows:
+        rows.append(
+            '<tr><td colspan="4"><div class="empty">'
+            '<div class="empty-ico">%s</div>'
+            '<div class="empty-t" data-i18n="hardware.empty">'
+            'No security key enrolled yet</div>'
+            '<div class="empty-s" data-i18n="hardware.empty_sub">'
+            'Enrol one below to open this vault without typing your master '
+            'password</div>'
+            "</div></td></tr>" % _icon("shield", "icon icon-lg"))
+    page = list_page(
+        "nav.hardware", "Security Keys",
+        "page.hardware.desc",
+        "Open this vault with a security key instead of your master password.",
+        "", "", "",
+        [("table.label", "Label", ""),
+         ("hardware.enrolled", "Enrolled", ""),
+         ("hardware.credential", "Credential", ""),
+         ("table.actions", "Actions", "act")],
+        "".join(rows))
+    return f"""{flash}{page}
+<div class="card" style="margin-top:var(--sp-4)"><div class="card-body">
+  <div class="field">
+    <label for="hardware-label" data-i18n="hardware.field.label">Label for this key</label>
+    <input class="input" id="hardware-label" maxlength="64" placeholder="YubiKey">
+  </div>
+  <button class="btn btn-primary" type="button" id="hardware-enrol"
+          data-csrf="{html.escape(csrf)}" data-rp="{html.escape(WEBAUTHN_RP_ID)}"
+          data-i18n="hardware.enrol">Enrol this security key</button>
+  <div class="faint" id="hardware-status" role="status" aria-live="polite"
+       style="margin-top:var(--sp-3);min-height:1.2em"></div>
+  <p class="faint" style="margin-top:var(--sp-3)" data-i18n="hardware.note">A key
+  enrolled here opens the vault on its own, so it is exactly as powerful as the
+  master password and should be kept the same way. A session opened with one
+  holds no master password: it cannot change the master password and cannot
+  restore a snapshot.</p>
+</div></div>
+{HARDWARE_MANAGE_SCRIPT}
+"""
+
+
+
 def unlock_page(version, csrf):
     """The locked screen.
 
@@ -8157,6 +8689,20 @@ def settings_page(flash="", hidden_hosts=()):
     <a class="btn btn-ghost" href="/unlock/settings" style="margin-top:var(--sp-3)">
       {_icon("shield", "icon icon-sm")}
       <span data-i18n="settings.unlock.manage">Manage biometric unlock</span>
+    </a>
+  </div>
+</section>"""
+    hardware_html = ""
+    if HARDWARE_ENABLED:
+        hardware_html = f"""
+<section class="card settings-section" id="security-keys">
+  <div class="card-head"><h2 data-i18n="settings.hardware.title">Security Keys</h2></div>
+  <div class="card-body">
+    <p class="faint" data-i18n="settings.hardware.desc">Manage the keys that can
+      open this vault without your master password.</p>
+    <a class="btn btn-ghost" href="/hardware/settings" style="margin-top:var(--sp-3)">
+      {_icon("shield", "icon icon-sm")}
+      <span data-i18n="settings.hardware.manage">Manage security keys</span>
     </a>
   </div>
 </section>"""
@@ -8321,6 +8867,7 @@ def settings_page(flash="", hidden_hosts=()):
   </div>
 </section>
 {unlock_html}
+{hardware_html}
 </div>
 {SETTINGS_SCRIPT}
 """
@@ -8690,7 +9237,8 @@ def events_page(events):
     the vault would put back exactly what the log is careful to leave out.
     """
     label_for = {"unlock": "Unlock", "write": "Write", "rewrap": "Master change",
-                 "recover": "Recovery", "restore": "Restore", "archive": "Snapshot"}
+                 "recover": "Recovery", "restore": "Restore", "archive": "Snapshot",
+                 "hardware": "Security key"}
     failures = sum(1 for e in events if e["outcome"] == "fail")
     rows = []
     for index, event in enumerate(events, start=1):
@@ -8702,7 +9250,12 @@ def events_page(events):
             bits.append({"bad-master": "wrong master password or damaged file",
                          "missing": "file not found",
                          "corrupt": "unreadable container",
-                         "unreadable": "could not be read"}.get(
+                         "unreadable": "could not be read",
+                         "enrolled": "enrolled",
+                         "forgotten": "removed",
+                         "bad-secret": "that key does not open this vault",
+                         "vault-replaced":
+                             "the vault was replaced under a security-key session"}.get(
                              detail["reason"], _esc(detail["reason"])))
         if detail.get("scope") == "other":
             bits.append("not the live vault")
@@ -9023,6 +9576,38 @@ def decrypt_vault(master: str) -> str:
 _LAST_READ = threading.local()
 
 
+class _HardwareMaster(str):
+    """The stand-in a security-key session holds instead of a master password.
+
+    It is a str and it is truthy, so every `if not master` guard written before
+    security keys existed keeps admitting a session unchanged -- there is no
+    per-route opt-in to forget. It is recognised by identity and never by
+    value, so the routes that need a real password can refuse it rather than
+    use it: rewrapping the key envelope, changing the master password, and
+    proving a snapshot opens.
+    """
+
+    __slots__ = ()
+
+
+HARDWARE_MASTER = _HardwareMaster("\x00security-key-session")
+
+
+def is_hardware_master(master) -> bool:
+    return master is HARDWARE_MASTER
+
+
+def session_master(session):
+    """What a session should hand the vault helpers as its master password.
+
+    One place converts the stored None of a security-key session into the
+    sentinel, so no call site has to remember that None is a state rather than
+    an absence.
+    """
+    stored = (session or {}).get("master", "")
+    return HARDWARE_MASTER if stored is None else stored
+
+
 def load_vault(master: str, session=None) -> str:
     """Vault plaintext, reusing this session's unwrapped vault key when it can.
 
@@ -9053,6 +9638,21 @@ def load_vault(master: str, session=None) -> str:
                     return plaintext
             except Exception:
                 pass
+        if is_hardware_master(master):
+            # There is no password to re-derive from. A cached key that stopped
+            # opening the vault means the file was replaced under this session
+            # -- a restore, a sync, or something worse -- and the honest answer
+            # is to end the session rather than to guess.
+            #
+            # Recorded, because this is the one failure a security-key user
+            # cannot diagnose from the screen: the session simply ends and the
+            # sign-in page offers a key that no longer opens anything. The
+            # events log is readable while locked, which is what makes it the
+            # right place for it.
+            core.record_event("hardware", "fail", "reason=vault-replaced",
+                              VAULT_PATH)
+            raise core.VaultSecretError(
+                "this security-key session no longer opens the vault")
         plaintext, key = core.read_vault(VAULT_PATH, master)
         session["vault_key"] = key or ""
         _LAST_READ.plaintext = plaintext
@@ -9067,7 +9667,13 @@ def unwrap_vault_key(master: str, path=None):
 
 
 def encrypt_vault(master: str, plaintext: str, vault_key=None) -> str:
-    return core.write_vault(VAULT_PATH, master, plaintext, vault_key)
+    # None, not the sentinel: the core reads a None master as "keep the key
+    # envelope you already have". Passing the sentinel through would re-seal
+    # the vault under a string nobody can type, which is the one mistake this
+    # whole path exists to make impossible.
+    return core.write_vault(VAULT_PATH,
+                            None if is_hardware_master(master) else master,
+                            plaintext, vault_key)
 
 
 def save_vault(master: str, plaintext: str, session=None) -> None:
@@ -10534,7 +11140,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # record through. The handler instance is per-request, so this cannot
         # leak between connections.
         self._session_rec = session
-        return session.get("master", "")
+        # None is how a security-key session records "no master password". It
+        # would read as "not signed in" everywhere, so it is swapped for the
+        # sentinel here, at the one place every route already goes through.
+        return session_master(session)
 
     def _session_record(self):
         """The raw session record whatever its state, plus its token."""
@@ -10709,7 +11318,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # was deleted (or when SPM_WEB_RP_ID changed) still believes one
             # exists. Ask the vault, which is the only authority.
             try:
-                plaintext = load_vault(session.get("master", ""), session)
+                plaintext = load_vault(session_master(session), session)
             except Exception:
                 self._send_json(403, {"error": "vault unavailable"})
                 return True
@@ -10750,7 +11359,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if path == "/unlock/challenge":
             try:
-                plaintext = load_vault(session.get("master", ""), session)
+                plaintext = load_vault(session_master(session), session)
             except Exception:
                 self._send_json(403, {"error": "vault unavailable"})
                 return True
@@ -10772,6 +11381,161 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return True
 
         return False
+
+    def _hardware_secret(self, payload):
+        """The 32 bytes a security key derived, or b"" if the caller sent junk."""
+        try:
+            secret = base64.b64decode(str(payload.get("secret") or ""), validate=True)
+        except ValueError:                     # binascii.Error subclasses it
+            return b""
+        return secret if len(secret) == core.HARDWARE_SECRET_BYTES else b""
+
+    def _handle_hardware_post(self, path):
+        """Enrol a security key, forget one, or open the vault with one.
+
+        There is no assertion signature checked here, and that is a decision
+        rather than an omission. What proves the caller holds the key is that
+        the secret it supplies unwraps the vault key: if it does not, the seal's
+        tag fails and there is nothing for the server to decide. Verifying a
+        signature as well would be a second, weaker statement about the same
+        fact, and it would put a server-side "yes" on a path that currently has
+        none to subvert.
+        """
+        if path not in ("/hardware/unlock", "/hardware/salt",
+                        "/hardware/enroll", "/hardware/forget"):
+            return False
+        if not HARDWARE_ENABLED:
+            self._send_json(400, {"error": "security keys are not configured"})
+            return True
+
+        if path == "/hardware/unlock":
+            # Pre-authentication, like /login, so it carries no CSRF token and
+            # is rate-limited by the same counter. Guessing the secret is not
+            # the threat -- it is 32 bytes from a device -- but an endpoint that
+            # answers unboundedly is worth closing anyway.
+            if self._login_lockout_remaining() > 0:
+                self._send_json(429, {"error": "too many attempts"})
+                return True
+            raw = self._read_body(limit=8192)
+            if raw is None:
+                return True
+            try:
+                payload = jsonlib.loads(raw.decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("not an object")
+            except (UnicodeDecodeError, ValueError):
+                self._send_json(400, {"error": "malformed request"})
+                return True
+            credential = str(payload.get("credential_id") or "")
+            secret = self._hardware_secret(payload)
+            entry = next((item for item in core.read_hardware(VAULT_PATH)["keys"]
+                          if item.get("credential_id") == credential), None)
+            refusal = {"error": "that security key does not open this vault"}
+
+            def refuse():
+                # One refusal, whatever went wrong. A key nobody enrolled, a
+                # malformed secret and a secret that does not fit the envelope
+                # are three different facts, and answering them differently
+                # would let a caller sort its guesses. They also all have the
+                # same consequence, so there is one place that records it --
+                # which is what makes the recording testable at all.
+                self._record_login_failure()
+                core.record_event("hardware", "fail", "reason=bad-secret", VAULT_PATH)
+                self._send_json(403, refusal)
+
+            if entry is None or not secret:
+                refuse()
+                return True
+            try:
+                vault_key = core.hardware_unwrap_key(secret, entry["wrapped"])
+                plaintext = core.read_vault_with_key(VAULT_PATH, vault_key)
+                if plaintext is None:
+                    # The envelope opened but its key does not fit this vault:
+                    # a file left behind by a restore or a sync. Fails closed,
+                    # and says the same thing as a wrong key rather than
+                    # confirming that this one was once right.
+                    raise core.VaultSecretError("stale security-key file")
+            except (core.VaultError, OSError):
+                refuse()
+                return True
+            _, opened_creds = parse_webauthn(plaintext)
+            has_cred = any(parts[4] == WEBAUTHN_RP_ID for _, parts in opened_creds)
+            self._clear_login_failures()
+            token = secrets.token_hex(32)
+            self.server.sessions[token] = {
+                # None, not "": a session opened by a security key holds no
+                # master password, and every write it makes must keep the key
+                # envelope rather than seal a new one under the empty string.
+                "master": None,
+                "vault_key": vault_key,
+                "csrf": secrets.token_hex(32),
+                "created": time.time(),
+                "last_seen": time.time(),
+                "state": "active",
+                "suspended_at": 0,
+                "challenge": b"",
+                "challenge_at": 0,
+                "challenge_kind": "",
+                "has_cred": has_cred,
+            }
+            body = jsonlib.dumps({"ok": True}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Set-Cookie",
+                             f"spm_session={token}; {self._session_cookie_attrs()}")
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+
+        _, session = self._session_record()
+        if session is None or session.get("state") != "active":
+            self._send_json(403, {"error": "no session"})
+            return True
+        payload = self._read_json_authorized()
+        if payload is None:
+            return True
+
+        if path == "/hardware/salt":
+            # The value the enrolment ceremony evaluates the PRF with. Handed
+            # out before the ceremony because the ceremony is what reveals
+            # which key answered, and echoed back with the enrolment so the
+            # core can refuse a salt that lost a race.
+            self._send_json(200, {"ok": True, "salt": core.hardware_salt(VAULT_PATH)})
+            return True
+
+        if path == "/hardware/forget":
+            credential = str(payload.get("credential_id") or "")
+            if not credential:
+                self._send_json(400, {"error": "malformed request"})
+                return True
+            state = core.remove_hardware_key(VAULT_PATH, credential)
+            core.record_event("hardware", "ok", "reason=forgotten", VAULT_PATH)
+            self._send_json(200, {"ok": True, "keys": len(state["keys"])})
+            return True
+
+        vault_key = session.get("vault_key") or ""
+        if not vault_key:
+            self._send_json(400, {"error": "this session has no vault key"})
+            return True
+        credential = str(payload.get("credential_id") or "")
+        secret = self._hardware_secret(payload)
+        if not credential or not secret:
+            self._send_json(400, {"error": "malformed credential"})
+            return True
+        try:
+            state = core.add_hardware_key(
+                VAULT_PATH, credential, core.hardware_wrap_key(secret, vault_key),
+                WEBAUTHN_RP_ID, payload.get("label"),
+                time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                str(payload.get("salt") or ""))
+        except core.VaultError as exc:
+            self._send_json(409, {"error": str(exc)})
+            return True
+        core.record_event("hardware", "ok", "reason=enrolled", VAULT_PATH)
+        self._send_json(200, {"ok": True, "keys": len(state["keys"])})
+        return True
 
     def _webauthn_register(self, session, payload):
         """Finish a registration ceremony and store the credential."""
@@ -10806,7 +11570,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         label = (payload.get("label") or "").strip() or "Biometric unlock"
         label = re.sub(r"[\t\r\n]", " ", label)[:64]
-        master = session.get("master", "")
+        master = session_master(session)
         try:
             plaintext = load_vault(master, self._session_rec)
         except Exception:
@@ -10871,7 +11635,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         try:
-            plaintext = load_vault(session.get("master", ""), session)
+            plaintext = load_vault(session_master(session), session)
         except Exception:
             self._send_json(403, {"error": "vault unavailable"})
             return
@@ -11168,6 +11932,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 unlock_settings_page(creds, self._session_csrf(), flash),
                 "settings", VERSION, VAULT_PATH,
                 title="Biometric Unlock", counts=self._counts(plaintext)))
+            return
+
+        if path == "/hardware/settings":
+            if not HARDWARE_ENABLED:
+                self.send_error(404, "Not found")
+                return
+            try:
+                plaintext = load_vault(master, self._session_rec)
+            except Exception:
+                return self._expire_session()
+            try:
+                state = core.read_hardware(VAULT_PATH)
+            except core.VaultError as exc:
+                state = {"salt": "", "keys": []}
+                self.log_message("security-key file unreadable: %s", exc)
+            params = urllib.parse.parse_qs(parsed.query)
+            flash = ""
+            if (params.get("msg") or [""])[0] == "enrolled":
+                flash = "<div class='flash'>Security key enrolled.</div>"
+            elif (params.get("msg") or [""])[0] == "forgotten":
+                flash = "<div class='flash'>Security key removed.</div>"
+            self._send_html(200, render_shell(
+                hardware_settings_page(state, self._session_csrf(), flash),
+                "settings", VERSION, VAULT_PATH,
+                title="Security Keys", counts=self._counts(plaintext)))
             return
 
         if path == "/settings":
@@ -11814,6 +12603,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if handled:
                 return
 
+        if path.startswith("/hardware/"):
+            handled = self._handle_hardware_post(path)
+            if handled:
+                return
+
         master = self._get_cookie_session()
         if not master:
             self._deny_unauthenticated()
@@ -11883,6 +12677,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     settings_page("<div class='flash error'>%s</div>" % message,
                                   core.hidden_hosts(load_vault(master, self._session_rec))),
                     "settings", VERSION, VAULT_PATH, title="Settings"))
+
+            # A security-key session cannot do this. It never proved knowledge
+            # of the current password -- it proved possession of a device that
+            # unwraps the vault key -- so there is nothing here to compare the
+            # typed "current password" against, and accepting one would let
+            # anyone holding the key set the password that also opens the vault.
+            if is_hardware_master(master):
+                _reject("Changing the master password needs a session that was "
+                        "opened with it. Sign in with your master password first.")
+                return
 
             # Compared against the copy this session already proved at login
             # rather than by decrypting again: a typo should not cost a gpg
@@ -12181,6 +12985,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/history-restore":
+            if is_hardware_master(master):
+                # A restore replaces the vault with one sealed under a
+                # different vault key, which is exactly the key every enrolled
+                # security key wraps. Done from a security-key session it would
+                # invalidate the only credential that session holds, with no
+                # password on hand to recover with. Refused before the name is
+                # even read: the route is unavailable, not conditionally so.
+                self.send_error(403, "Restoring a snapshot needs a session "
+                                     "opened with the master password")
+                return
             name = (data.get("name") or [""])[0]
             # Match the generated snapshot name exactly. A traversal denylist
             # would have to anticipate every encoding of "..", an allowlist
