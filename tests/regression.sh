@@ -4269,7 +4269,9 @@ curl -fsS -b "$hw_root/jar" -H 'Content-Type: application/json' -o "$hw_root/enr
 	-d "{\"csrf\":\"$hw_csrf\",\"credential_id\":\"regression-cred\",\"secret\":\"$hw_secret\",\"salt\":\"$hw_salt\",\"label\":\"Regression key\"}" \
 	"http://127.0.0.1:$HW_PORT/hardware/enroll"
 grep -q '"keys": 1' "$hw_root/enrol.json" || hw_fail 'the security key did not enrol'
-[ "$(stat -c '%a' "$hw_vault.hardware")" = "600" ] ||
+# file_mode, not stat -c: BSD stat wants -f, and this file holds a wrapped
+# vault key on every platform SPM runs on.
+[ "$(file_mode "$hw_vault.hardware")" = "600" ] ||
 	hw_fail 'the security-key file is readable by someone other than its owner'
 
 curl -fsS -o "$hw_root/login2.html" "http://127.0.0.1:$HW_PORT/login"
