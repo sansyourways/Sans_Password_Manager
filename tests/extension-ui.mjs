@@ -45,9 +45,11 @@ try {
                   { waitUntil: "domcontentloaded" });
 
   const controls = await page.evaluate(() =>
-    ["master", "unlockButton", "refresh", "lock", "accounts", "unlock", "status"]
+    ["master", "unlockButton", "refresh", "lock", "accounts", "unlock", "status",
+     "lockAfter", "session"]
       .filter((id) => document.getElementById(id)));
-  check(controls.length === 7, `popup is missing controls: got ${controls.join(",")}`);
+  check(controls.length === 9, `popup is missing controls: got ${controls.join(",")}`);
+
 
   // The popup's own page is not an http(s) page, so this exercises the refusal
   // that keeps autofill off non-web surfaces -- the extension's own settings
@@ -58,6 +60,25 @@ try {
     { timeout: 10000 });
   const status = await page.evaluate(() =>
     document.getElementById("status").textContent.trim());
+
+  // 4.7.0 made the session's idle window a choice. The options are asserted
+  // rather than the element, for the same reason the Dashboard's idle lock is:
+  // a dropdown that had silently lost its options still renders as a dropdown,
+  // and the failure would be a session that locks on a schedule nobody picked.
+  // Waited for, because the popup fills them in during its async start-up.
+  await page.waitForFunction(
+    () => document.querySelectorAll("#lockAfter option").length > 0, {timeout: 10000})
+    .catch(() => {});
+  const lockChoices = await page.evaluate(() =>
+    [...document.querySelectorAll("#lockAfter option")].map((option) => Number(option.value)));
+  check(lockChoices.length >= 5,
+        `the lock-after control offers ${lockChoices.length} choices: ${lockChoices}`);
+  check(lockChoices.includes(300),
+        `the previous fixed five minutes is not offered: ${lockChoices}`);
+  const selected = await page.evaluate(() => Number(document.getElementById("lockAfter").value));
+  check(selected === 300, `the default idle window is ${selected}, expected 300`);
+  check(lockChoices.every((value) => value >= 30 && value <= 3600),
+        `a choice lies outside what the host will honour: ${lockChoices}`);
   check(/HTTP or HTTPS/i.test(status),
         `a non-web page did not refuse autofill; status was: ${status}`);
 

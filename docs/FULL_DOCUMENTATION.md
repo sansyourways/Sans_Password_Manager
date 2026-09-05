@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **4.6.0**
+Current release: **4.7.0**
 
 ---
 
@@ -87,7 +87,7 @@ attacker with root access.
 
 ## Product tour
 
-Every web capture below was taken from the 4.6.0 release candidate in Chromium
+Every web capture below was taken from the 4.7.0 release candidate in Chromium
 at 1440x900, against a disposable vault holding only synthetic documentation
 data. No personal vault, browser profile, real credential, or production
 hostname appears in these images. The locked-screen captures use Chromium
@@ -340,7 +340,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 4.6.0
+bash install.sh --version 4.7.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -375,7 +375,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v4.6.0.zip \
+gh attestation verify Sans_Password_Manager_v4.7.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -391,9 +391,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v4.6.0
+git checkout v4.7.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v4.6.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v4.7.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -406,7 +406,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=4.6.0
+version=4.7.0
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -423,7 +423,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v4.6.0/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v4.7.0/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -445,7 +445,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 4.6.0 at /home/you/.local/bin/spm
+Installed SPM 4.7.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -1740,7 +1740,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **4.6.0**
+Version: **4.7.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down
@@ -1895,7 +1895,16 @@ Temporary Firefox add-ons must still be loaded again after restart unless
 installed through a signed distribution.
 
 Open an HTTP(S) login page and select the SPM toolbar icon. Unlock once, then
-choose one of the accounts bound to that exact hostname. The master password is
+choose one of the accounts bound to that exact hostname.
+
+**Lock after** on the unlock form sets how long the session survives with
+nothing happening: 1 minute, 5 minutes (the default), 15 minutes, 30 minutes or
+1 hour. The choice is remembered, and the popup shows how long the current
+session has left. A longer window means the master password stays in the native
+host's memory for longer, so the host clamps what it is asked for to a floor of
+30 seconds and a ceiling of one hour, and never past the absolute session cap.
+Before 4.7.0 this was a fixed five minutes readable only from an environment
+variable, which a browser never sets. The master password is
 kept only in the native host process and is discarded on explicit lock, idle
 timeout, native-port disconnect, or browser exit. The hostname is verified
 again before the selected password is returned. A record for `example.com`
