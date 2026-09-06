@@ -6109,7 +6109,7 @@ for rec_type in $rec_types; do
 	rec_in="$TEST_ROOT/rec-in-$rec_type"
 	{
 		printf 'Label for %s\n' "$rec_type"
-		core record schema "$rec_type" | while IFS="$(printf '\t')" read -r f k w req; do
+		core record schema "$rec_type" | while IFS="$(printf '\t')" read -r f _k _w _r; do
 			[ -n "$f" ] || continue
 			printf 'value-%s\n' "$f"
 		done
