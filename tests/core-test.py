@@ -2175,6 +2175,336 @@ def t_doctor_names_the_backend_that_sealed_the_file():
     eq(entry["backend"], "gpg")
 
 
+# ----- typed records ---------------------------------------------------------
+
+def t_vault_format_version_is_pinned():
+    # Every other assertion in this file reads VAULT_FORMAT_VERSION as a
+    # symbol, which is right for them and means none of them notices the
+    # number changing. The number is the whole mechanism behind the downgrade
+    # guard: raising it tells every older SPM to refuse the write. So one test
+    # pins the literal, and a release that means to move it edits this line
+    # deliberately rather than discovering later that nothing objected.
+    eq(core.VAULT_FORMAT_VERSION, 6,
+       "format 6 introduced typed records; bump this test with the format")
+
+
+def t_sanitize_field_covers_everything_splitlines_breaks_on():
+    # Derived from Python rather than asserted against a list someone typed:
+    # the failure this guards is a value that splits a record in two when it
+    # is read back, and str.splitlines() is what decides that. A hand-kept
+    # list is exactly how the shell and the dashboard came to hold two copies
+    # that only agreed because somebody remembered to keep them in step.
+    breaks = {chr(n) for n in range(0x2100)
+              if len(("a%sb" % chr(n)).splitlines()) > 1}
+    missing = sorted(breaks - set(core.VAULT_BREAK_CHARS))
+    eq(missing, [], "these characters split a record and are not collapsed")
+    assert "\t" in core.VAULT_BREAK_CHARS, "the field separator must be collapsed too"
+    for ch in core.VAULT_BREAK_CHARS:
+        out = core.sanitize_field("a%sb" % ch)
+        eq(out, "a b", "%r must collapse to a space" % ch)
+        eq(len(out.splitlines()), 1, "%r must not survive sanitising" % ch)
+
+
+def t_record_breaks_and_break_chars_agree():
+    # RECORD_BREAKS names characters for a human in a diagnostic and omits the
+    # structural three; VAULT_BREAK_CHARS is what a writer collapses. They
+    # describe the same hazard from two sides, so they must not drift.
+    eq(sorted(set(core.RECORD_BREAKS) | set("\t\r\n")),
+       sorted(set(core.VAULT_BREAK_CHARS)),
+       "the detector and the sanitiser disagree about what breaks a record")
+
+
+def t_record_schema_registry_is_well_formed():
+    assert core.RECORD_TYPES, "no record types are registered"
+    eq(sorted(core.RECORD_TYPES), list(core.RECORD_TYPES),
+       "RECORD_TYPES must be ordered so a nav menu and a --type listing agree")
+    eq(sorted(core.RECORD_TYPES), sorted(core.RECORD_SCHEMAS),
+       "RECORD_TYPES and RECORD_SCHEMAS must hold the same types")
+    for name in core.RECORD_TYPES:
+        assert len(name) <= core.RECORD_TYPE_MAX, name
+        schema = core.record_schema(name)
+        assert schema.get("label"), "%s has no label" % name
+        fields = core.record_fields(name)
+        assert fields, "%s has no fields" % name
+        seen = set()
+        for field, kind, widget, required in fields:
+            assert field and field not in seen, "%s repeats field %r" % (name, field)
+            seen.add(field)
+            assert kind in (core.FIELD_PLAIN, core.FIELD_SECRET), (name, field, kind)
+            assert widget in ("line", "multiline", "number", "date", "month"), \
+                (name, field, widget)
+            assert isinstance(required, bool), (name, field)
+        assert any(r for _n, _k, _w, r in fields), \
+            "%s has no required field, so an empty record would be valid" % name
+        assert core.record_secret_fields(name), \
+            "%s stores no secret; it does not need to be a vault record" % name
+
+
+def t_record_roundtrip_every_type():
+    for name in core.RECORD_TYPES:
+        values = {f: "value-for-%s" % f
+                  for f, _k, _w, required in core.record_fields(name) if required}
+        row = core.build_record_row(name, "7", "a label", values, "2026-01-01T00:00:00Z")
+        eq(row.count("\t"), 5,
+           "%s must be six columns, like every other record shape" % name)
+        eq(len(row.splitlines()), 1, "%s wrote a row that splits" % name)
+        parsed = core.parse_record_row(row)
+        assert parsed is not None, name
+        got_type, rid, label, got, created, folder, custom, hidden = parsed
+        eq(got_type, name)
+        eq(rid, "7")
+        eq(label, "a label")
+        eq(got, values, "%s did not round-trip its values" % name)
+        eq(created, "2026-01-01T00:00:00Z")
+        eq((folder, custom, hidden), ("", [], False))
+
+
+def t_record_row_keeps_the_secret_in_field_three():
+    # _describe_record and scan_broken_records both document that field 3 is
+    # where every record shape keeps its secret. A new shape that put the
+    # payload anywhere else would make both of them quietly wrong, for the new
+    # types only.
+    row = core.build_record_row("wifi", "1", "home",
+                                {"ssid": "home", "password": "hunter2"}, "t")
+    parts = row.split("\t")
+    assert "hunter2" not in parts[0] + parts[1] + parts[2] + parts[4], \
+        "a secret escaped field 3"
+    assert "hunter2" in base64.b64decode(parts[3]).decode("utf-8")
+
+
+def t_record_payload_is_validated():
+    raises(core.VaultError,
+           lambda: core.encode_record_payload("wifi", {"ssid": "n"}),
+           "a missing required field must refuse")
+    raises(core.VaultError,
+           lambda: core.encode_record_payload("wifi", {"ssid": "n", "password": " "}),
+           "whitespace must not satisfy a required field")
+    raises(core.VaultError,
+           lambda: core.encode_record_payload("wifi", {"ssid": "n", "password": "p",
+                                                       "typo": "x"}),
+           "an unknown field must refuse rather than be stored unrenderable")
+    raises(core.VaultError, lambda: core.record_schema("no-such-type"),
+           "an unknown type must refuse")
+    raises(core.VaultError,
+           lambda: core.encode_record_payload(
+               "wifi", {"ssid": "n", "password": "p",
+                        "security": "x" * (core.RECORD_VALUE_MAX + 1)}),
+           "an oversized value must refuse")
+
+
+def t_record_payload_is_order_independent():
+    a = core.encode_record_payload("wifi", {"ssid": "n", "password": "p",
+                                            "security": "WPA3"})
+    b = core.encode_record_payload("wifi", {"security": "WPA3", "password": "p",
+                                            "ssid": "n"})
+    eq(a, b, "encoding must not depend on the order the caller built its dict")
+
+
+def t_record_redaction_masks_every_secret():
+    values = {"cardholder": "A B", "number": "4111111111111111",
+              "cvv": "737", "pin": "0000", "brand": "visa"}
+    out = core.redact_record("credit-card", values)
+    for secret in core.record_secret_fields("credit-card"):
+        if values.get(secret):
+            eq(out[secret], core.SECRET_MASK, "%s was not masked" % secret)
+    eq(out["cardholder"], "A B", "a plain field must survive redaction")
+    eq(out["brand"], "visa")
+    # A mask that tracks the secret's length leaks the length, which for a CVV
+    # or a PIN is most of what there is to guess.
+    eq(len(core.redact_record("credit-card", {"cvv": "1"})["cvv"]),
+       len(core.redact_record("credit-card", {"cvv": "1" * 64})["cvv"]),
+       "the mask must not reveal how long the secret is")
+    for name in core.RECORD_TYPES:
+        filled = {f: "s" for f, _k, _w, _r in core.record_fields(name)}
+        masked = core.redact_record(name, filled)
+        for field, kind, _w, _r in core.record_fields(name):
+            if kind == core.FIELD_SECRET:
+                eq(masked[field], core.SECRET_MASK,
+                   "%s.%s is a secret and was not masked" % (name, field))
+
+
+def t_record_row_cannot_be_split_by_its_own_contents():
+    for ch in core.VAULT_BREAK_CHARS:
+        row = core.build_record_row("wifi", "1", "lab%sel" % ch,
+                                    {"ssid": "s%sid" % ch, "password": "p"}, "t")
+        eq(len(row.splitlines()), 1, "%r split a row through the label" % ch)
+        eq(row.count("\t"), 5, "%r added a column" % ch)
+        parsed = core.parse_record_row(row)
+        assert parsed is not None, ch
+        # The label is sanitised on the way in; the payload survives intact
+        # because base64 has no character that splitlines() honours.
+        eq(parsed[3]["ssid"], "s%sid" % ch,
+           "a payload value must survive a break character unchanged")
+
+
+def t_record_tolerates_what_a_newer_spm_wrote():
+    future = "REC:quantum-key\t9\tfuture record\tZXt9\t2026-01-01\t-"
+    assert core.parse_record_row(future) is None, \
+        "a type with no schema here must not be parsed"
+    eq(core._describe_record(future), ("QUANTUM-KEY", "9", "future record"),
+       "an unknown type must still be describable without decoding its payload")
+    counts, _dups, _empty = core.vault_counts(future)
+    eq(counts["records"], 1, "an unreadable record is still a record")
+    eq(counts["type:quantum-key"], 1)
+    assert core.looks_like_vault(future), "a vault of typed records is a vault"
+    # A key this build does not know is dropped rather than carried, so it
+    # cannot be re-encoded into a record whose own renderer cannot show it.
+    payload = base64.b64encode(
+        b'{"ssid":"n","password":"p","from_the_future":"x"}').decode("ascii")
+    eq(core.decode_record_payload("wifi", payload), {"ssid": "n", "password": "p"})
+
+
+def t_record_payload_never_raises_on_damage():
+    for damaged in ("", "-", "!!!!", "Zm9v", base64.b64encode(b"[1,2]").decode(),
+                    base64.b64encode(b'{"ssid":5}').decode()):
+        got = core.decode_record_payload("wifi", damaged)
+        assert isinstance(got, dict), damaged
+    eq(core.decode_record_payload("no-such-type", "Zm9v"), {},
+       "an unknown type must return nothing rather than raise")
+
+
+def t_record_counts_and_attributes():
+    rows = [core.build_record_row("wifi", "1", "home",
+                                  {"ssid": "h", "password": "p"}, "t",
+                                  folder="House", hidden=True,
+                                  fields=[("room", "loft")]),
+            core.build_record_row("server", "2", "web01",
+                                  {"hostname": "web01", "username": "root"}, "t")]
+    plaintext = core.stamp_version("\n".join(rows) + "\n")
+    counts, _dups, _empty = core.vault_counts(plaintext)
+    eq(counts["records"], 2)
+    eq(counts["type:wifi"], 1)
+    eq(counts["type:server"], 1)
+    eq(counts["type:credit-card"], 0, "an unused type must report zero, not be absent")
+    eq(counts["passwords"], 0, "a typed record must not be counted as a password")
+    for value in counts.values():
+        assert isinstance(value, int), "every count must stay an int"
+    # Folders, custom fields and hidden ride along for free, because a typed
+    # record carries the same attributes column every other record carries.
+    parsed = core.parse_record_row(rows[0])
+    eq(parsed[5], "House")
+    eq(parsed[6], [("room", "loft")])
+    eq(parsed[7], True)
+
+def t_record_survives_an_export_round_trip():
+    # The test 4.1.0 wished it had had. Twenty formats round-tripped the
+    # record count for years while losing the folder and every custom field,
+    # because nothing compared a record field by field against itself.
+    for name in core.RECORD_TYPES:
+        values = {f: "value-for-%s" % f
+                  for f, _k, _w, _r in core.record_fields(name)}
+        custom = [("my note", "keep me"), ("ticket", "SPM-42")]
+        row = core.build_record_row(name, "3", "a label", values,
+                                    "2026-01-01T00:00:00Z", folder="Work",
+                                    fields=custom, hidden=True)
+        rtype, rid, label, got, created, folder, gotc, hidden = \
+            core.parse_record_row(row)
+        exported = core.record_export_row(rtype, rid, label, got, created,
+                                          folder, gotc, hidden)
+        eq(sorted(exported), sorted(core.EXPORT_FIELDNAMES),
+           "%s must fill exactly the columns every export carries" % name)
+        eq(exported["hidden"], "1", "hidden must cross the export")
+        eq(exported["folder"], "Work", "the folder must cross the export")
+        back = core.record_from_export_row(exported)
+        assert back is not None, name
+        back_type, back_values, back_custom = back
+        eq(back_type, name)
+        eq(back_values, values, "%s lost a schema field across an export" % name)
+        eq(back_custom, custom, "%s lost a custom field across an export" % name)
+
+
+def t_record_export_adds_no_column():
+    # A thirteenth column would break every headerless and positional reader,
+    # which is the whole reason EXPORT_FIELDNAMES is one definition.
+    exported = core.record_export_row("wifi", "1", "home",
+                                      {"ssid": "h", "password": "p"}, "t")
+    eq(sorted(exported), sorted(core.EXPORT_FIELDNAMES))
+    eq(len(core.EXPORT_FIELDNAMES), 12, "the export column count moved")
+
+
+def t_custom_field_may_not_shadow_a_schema_field():
+    raises(core.VaultError,
+           lambda: core.build_record_row(
+               "wifi", "1", "home", {"ssid": "s", "password": "p"}, "t",
+               fields=[("password", "collides")]),
+           "a custom field taking a schema field's name must refuse")
+    # The name is only reserved on the type that defines it.
+    row = core.build_record_row("wifi", "1", "home",
+                                {"ssid": "s", "password": "p"}, "t",
+                                fields=[("hostname", "fine here")])
+    assert core.parse_record_row(row)[6] == [("hostname", "fine here")]
+
+
+def t_export_row_that_is_not_typed_is_left_alone():
+    eq(core.record_from_export_row({"type": "password", "id": "1"}), None,
+       "a password row must not be read as a typed record")
+    eq(core.record_from_export_row({"type": "", "id": "1"}), None)
+    eq(core.record_from_export_row({"type": "note", "id": "1"}), None)
+    eq(core.record_from_export_row({}), None)
+
+
+def t_import_keeps_a_field_this_build_does_not_know():
+    # A name this build has no schema entry for may be one a newer SPM added.
+    # Dropping it would make an export/import cycle on an older SPM a quiet
+    # way to lose data, which is the same failure the downgrade guard exists
+    # to prevent -- arriving through the import path instead.
+    exported = core.record_export_row("wifi", "1", "home",
+                                      {"ssid": "h", "password": "p"}, "t")
+    exported["fields"] = json.dumps([{"name": "ssid", "value": "h"},
+                                     {"name": "password", "value": "p"},
+                                     {"name": "from_a_newer_spm", "value": "kept"}])
+    _t, values, custom = core.record_from_export_row(exported)
+    eq(values, {"ssid": "h", "password": "p"})
+    eq(custom, [("from_a_newer_spm", "kept")],
+       "an unknown field must survive as a custom field")
+
+def t_json_line_safe_survives_a_line_based_export():
+    # json.dumps escapes every C0 control but leaves U+0085, U+2028 and U+2029
+    # literal, and those three are line terminators to str.splitlines(). The
+    # ndjson and jsonl exports put one record on one line and every reader
+    # splits before parsing, so a note holding one of them produced valid JSON
+    # that arrived as two invalid halves.
+    for ch in core.VAULT_BREAK_CHARS:
+        value = "before%safter" % ch
+        encoded = core.json_line_safe([{"name": "notes", "value": value}])
+        eq(len(encoded.splitlines()), 1,
+           "%r split a line that must stay one line" % ch)
+        eq(json.loads(encoded)[0]["value"], value,
+           "%r did not survive the escaping unchanged" % ch)
+
+
+def t_a_break_character_survives_an_export_round_trip():
+    # The regression suite drives this through all twenty formats; this pins
+    # the core's half so a failure names the layer it happened in.
+    values = {"ssid": "HomeNet", "password": "secret pw",
+              "notes": "line one\nline two line three"}
+    row = core.build_record_row("wifi", "1", "home", values, "t",
+                                fields=[("ticket", "SPM 42")])
+    rtype, rid, label, got, created, folder, custom, hidden = \
+        core.parse_record_row(row)
+    eq(got, values, "a break character did not survive the vault row")
+    exported = core.record_export_row(rtype, rid, label, got, created,
+                                      folder, custom, hidden)
+    eq(len(exported["fields"].splitlines()), 1,
+       "the fields column must stay on one line")
+    _t, back, back_custom = core.record_from_export_row(exported)
+    eq(back, values, "a break character did not survive the export")
+    eq(back_custom, [("ticket", "SPM 42")],
+       "a break character in a custom field did not survive the export")
+
+
+def t_custom_fields_are_line_safe_too():
+    # attrs_export_columns had the same hole before typed records existed: a
+    # custom field holding U+2028 broke ndjson on the way out. Same fix, and
+    # this is the test that would have caught it.
+    column = core.encode_attrs(fields=[("note", "a b"), ("x", "cd")])
+    exported = core.attrs_export_columns(column)
+    eq(len(exported["fields"].splitlines()), 1,
+       "a custom field split the export line")
+    eq(json.loads(exported["fields"]),
+       [{"name": "note", "value": "a b"},
+        {"name": "x", "value": "cd"}])
+
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):
         check(name[2:], fn)
