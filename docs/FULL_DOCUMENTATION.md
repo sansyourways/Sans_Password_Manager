@@ -47,6 +47,7 @@ Current release: **4.9.0**
   - [Doctor / Health Check](#doctor--health-check)
 - [Hidden entries](#hidden-entries)
 - [Security keys](#security-keys)
+- [Secret Key](#secret-key)
 - [How the vault is sealed](#how-the-vault-is-sealed)
 - [Languages](#languages)
 - [Split recovery](#split-recovery)
@@ -1157,6 +1158,103 @@ carry no device label and no record identity -- only what happened.
 It opens the vault on its own. That is the whole point of it and the whole cost
 of it. Losing it is not a lockout as long as you still know your master
 password; a key someone else has is a vault someone else has.
+
+## Secret Key
+
+A Secret Key is 128 random bits, generated once, kept off the vault file, and
+mixed into the key derivation alongside your master password. It is off by
+default; you turn it on per vault.
+
+```bash
+./spm.sh secret-key            # status: bound or not, and where the key is
+./spm.sh secret-key enable     # generate one and rewrap the vault under it
+./spm.sh secret-key show       # print it again (asks for the master password)
+./spm.sh secret-key import     # store it on a second machine
+./spm.sh secret-key rotate     # replace it; the old one stops working
+./spm.sh secret-key forget     # drop this machine's copy, vault stays bound
+./spm.sh secret-key disable    # go back to the master password alone
+```
+
+### What it is for
+
+Your vault legitimately leaves this machine. `sync` pushes it to a directory, a
+host over rsync, or an rclone remote. `save` and `portable` write it into a
+bundle. Every write leaves a `.bak` beside it and a snapshot in your history.
+If you run the Dashboard on a domain, the file is on a machine reachable from
+the internet.
+
+Any one of those copies, in the wrong hands, is a file someone can attack
+offline for as long as they like -- and the only thing standing in their way is
+how good your master password is. With a Secret Key there is nothing left in
+the file to guess at. A weak password and a strong one become equally
+unbreakable to whoever holds only the copy.
+
+### What it is not for
+
+It is no defence against a compromise of the machine that holds both. Anything
+that can read your vault can read the Secret Key beside it in the data
+directory -- malware, a stolen unlocked laptop, an attacker who reaches code
+execution through the Dashboard. It protects copies in transit and at rest
+elsewhere. It does not protect the machine they came from.
+
+### Where the key is kept
+
+Not beside the vault. `.recovery` and `.hardware` sit next to the vault file
+because they are useless to a thief on their own; a Secret Key is the opposite,
+and its whole value is that it does not travel with the copies. It lives under
+your data directory instead:
+
+```text
+~/.local/share/spm/secret-keys/<scope id>     mode 0600
+```
+
+Nothing that copies a vault reaches in there. The sync transports move one
+file. The bundle exporter writes the vault, not your data directory. `doctor`
+audits the file's permissions along with everything else sensitive.
+
+The binding is to the vault's path, so moving the vault means the stored key is
+not found at the new location. That is what `secret-key import` is for, and it
+is why `enable` prints the key and tells you to write it down: **the file is a
+convenience, the paper copy is the one that matters.**
+
+`SPM_SECRET_KEY` supplies it from the environment instead, for headless runs
+and for a machine that has the vault but not yet the key.
+
+### Losing it is not a lockout
+
+Recovery does not go through the master password at all. The recovery file
+seals the **vault key**, and split recovery reconstructs the **vault key**;
+neither derives anything from what you type. So a recovery file, or a threshold
+of Shamir shares, still opens a vault bound to a Secret Key you no longer have,
+and lets you rewrap it under a new password and a fresh key.
+
+An enrolled security key is the same: it wraps the vault key directly, so a
+security-key unlock does not need the Secret Key either. Worth knowing plainly
+-- enrolling a key creates a second door the Secret Key does not lock. The
+`.hardware` file lives beside the vault, so a copy of the vault alone still
+does not carry it.
+
+### How the vault records it
+
+One field on the header line that already carries the derivation parameters:
+
+```text
+KDF scrypt n=32768 r=8 p=1 salt=<base64> sk=1
+```
+
+Absent means no, which is what every vault written before 4.10.0 says by saying
+nothing -- so old vaults keep opening and nothing about the format version
+changes. The field is not authenticated, and like the cost parameters it fails
+closed: strip `sk=1` and the reader derives a different key, the envelope's tag
+rejects it, and you are told the secret does not open this vault. There is no
+downgrade to a weaker vault that still opens.
+
+### When it is missing
+
+A vault bound to a key this machine does not hold is a named state, never a
+wrong password. The CLI, the Dashboard and `doctor` all say so, and the
+Dashboard does not count it against the sign-in lockout -- retyping a password
+that was already correct cannot help.
 
 ## How the vault is sealed
 

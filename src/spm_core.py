@@ -76,6 +76,15 @@ class VaultSecretError(VaultError):
     """
 
 
+class VaultSecretKeyError(VaultError):
+    """This vault is bound to a Secret Key and this machine does not have it.
+
+    Deliberately not a VaultSecretError: nothing was typed wrong. Reporting a
+    missing Secret Key as "wrong master password" would send the user to retype
+    a password that was correct, which is the one response that cannot help.
+    """
+
+
 class VaultIntegrityError(VaultError):
     """The envelope opened but the sealed data failed authentication.
 
@@ -209,6 +218,30 @@ HARDWARE_SECRET_BYTES = 32
 HARDWARE_WRAP_INFO = b"SPM-HARDWARE-WRAP-v1"
 HARDWARE_SALT_BYTES = 32
 
+# ----- secret key ------------------------------------------------------------
+# 128 bits generated once per vault and kept off the vault file, mixed into the
+# KEK derivation alongside the master password. What it buys is one thing, and
+# only that one thing: a copy of the vault file -- on a sync target, in a
+# bundle, in somebody's backup -- stops being attackable offline, because there
+# is no longer anything in it to guess at. A weak master password and a strong
+# one become equally unbreakable to whoever holds only the file.
+#
+# What it does not buy is any defence against a compromise of the machine that
+# holds both, and the wording of every message here has to keep that honest.
+#
+# 128 rather than 256: both are unguessable, and only one of them is short
+# enough that a person will actually write it down. The value is worthless if
+# it is never transcribed, because then the only copy is on the disk it was
+# meant to be independent of.
+SECRET_KEY_BYTES = 16
+SECRET_KEY_INFO = b"SPM-SECRET-KEY-v1"
+SECRET_KEY_TAG = "S1"
+# Base32 rather than base64: the alphabet is A-Z and 2-7, so it survives being
+# read aloud, written on paper and typed back in a different case. The digits
+# it excludes are exactly the ones that look like letters -- there is no 0 to
+# confuse with O and no 1 to confuse with I or L.
+SECRET_KEY_GROUPS = (6, 5, 5, 5, 5)
+
 
 def _key_fd(key_text):
     """A read fd holding `key_text`, for openssl's -pass fd:.
@@ -302,8 +335,30 @@ def unseal(key_text, blob):
     return openssl_ctr(key_text, salt, iv, body[head:], decrypt=True)
 
 
-def derive_kek(master, salt, n=KDF_N, r=KDF_R, p=KDF_P):
-    """The key-encryption key for the master password, as openssl-safe text."""
+def bind_secret_key(master, secret):
+    """The password scrypt actually stretches, bound to a Secret Key.
+
+    One HMAC, with the Secret Key as the key and the password as the message.
+    That way round rather than the reverse: HMAC's security argument is about
+    an unknown key, and here the unknown value is the Secret Key -- the
+    password is the part an attacker is willing to enumerate.
+
+    The result is base64 so that everything downstream keeps handling text.
+    """
+    raw = hmac.new(secret_key_bytes(secret), master.encode("utf-8"),
+                   hashlib.sha256).digest()
+    return base64.b64encode(raw).decode("ascii")
+
+
+def derive_kek(master, salt, n=KDF_N, r=KDF_R, p=KDF_P, secret=""):
+    """The key-encryption key for the master password, as openssl-safe text.
+
+    `secret` is the vault's Secret Key when it has one. Empty means the vault
+    is sealed under the password alone, which is every vault written before
+    4.10.0 and every vault whose owner never enabled one.
+    """
+    if secret:
+        master = bind_secret_key(master, secret)
     raw = hashlib.scrypt(master.encode("utf-8"), salt=salt, n=n, r=r, p=p,
                          dklen=KDF_DKLEN, maxmem=KDF_MAXMEM)
     return base64.b64encode(raw).decode("ascii")
@@ -366,11 +421,24 @@ def new_vault_key():
 # stretching function is another format version; with it, it is a value the
 # reader already knows how to dispatch on.
 
-def build_container_aead(kdf_salt, envelope, cipher, n=KDF_N, r=KDF_R, p=KDF_P):
+def build_container_aead(kdf_salt, envelope, cipher, n=KDF_N, r=KDF_R, p=KDF_P,
+                         secret_key=False):
+    # sk announces that a Secret Key was mixed into the derivation. It is a
+    # field on a line that already carries the KDF's parameters, because that
+    # is what it is: without it the reader would derive from the password alone
+    # and report a correct password as wrong.
+    #
+    # Unauthenticated, like everything else in this header, and it fails closed
+    # for the same reason the cost parameters do. Stripping sk=1 does not
+    # downgrade the vault to a password-only one that opens; it produces a
+    # different KEK, the envelope's tag rejects it, and the reader says the
+    # secret does not open this vault. There is no weaker-but-working state to
+    # push a vault into.
     return (CONTAINER_MAGIC_AEAD +
             b"\nKDF " + KDF_NAME.encode("ascii") +
             b" n=%d r=%d p=%d salt=" % (n, r, p) +
             base64.b64encode(kdf_salt) +
+            (b" sk=1" if secret_key else b"") +
             b"\nKEY " + base64.b64encode(envelope) +
             b"\nDATA\n" + base64.b64encode(cipher) + b"\n")
 
@@ -393,6 +461,12 @@ def parse_container_aead(raw):
         kdf = {"name": name.decode("ascii"),
                "n": int(fields[b"n"]), "r": int(fields[b"r"]),
                "p": int(fields[b"p"]),
+               # Absent means no, which is what every vault written before
+               # 4.10.0 says by saying nothing. Read by name out of the same
+               # dict as the cost parameters, so an old reader meeting a new
+               # field ignores it and a new reader meeting an old header gets
+               # the right answer without a format bump.
+               "sk": fields.get(b"sk") == b"1",
                "salt": base64.b64decode(fields[b"salt"])}
         envelope = base64.b64decode(key_line[len(b"KEY "):])
         cipher = base64.b64decode(data)
@@ -430,8 +504,9 @@ def vault_seal_summary(vault_path):
     return backend, parse_container_aead(raw)[0]
 
 
-def unwrap_key_aead(kdf, envelope, master):
-    kek = derive_kek(master, kdf["salt"], kdf["n"], kdf["r"], kdf["p"])
+def unwrap_key_aead(kdf, envelope, master, secret=""):
+    kek = derive_kek(master, kdf["salt"], kdf["n"], kdf["r"], kdf["p"],
+                     secret=secret)
     try:
         return unseal(kek, envelope).decode("utf-8")
     except VaultError:
@@ -619,7 +694,7 @@ EVENT_RETENTION_DEFAULT = 500
 # attempts into one would be the log lying about the thing it is for.
 EVENT_COALESCE_DEFAULT = 60
 EVENT_KINDS = ("unlock", "write", "rewrap", "recover", "restore", "archive",
-               "hardware")
+               "hardware", "secret-key")
 EVENT_OUTCOMES = ("ok", "fail")
 # Details are key=value with both sides constrained, rather than free text.
 # Free text is how a label ends up in a log one day: someone adds a helpful
@@ -630,7 +705,8 @@ EVENT_DETAIL_KEYS = ("records", "format", "scope", "reason")
 # unlock failed. Constrained the same way and for the same reason: a
 # free-text detail is how a device label reaches the log in the clear.
 EVENT_REASONS = ("bad-master", "corrupt", "missing", "unreadable",
-                 "enrolled", "forgotten", "bad-secret", "vault-replaced")
+                 "enrolled", "forgotten", "bad-secret", "vault-replaced",
+                 "enabled", "disabled", "rotated", "imported")
 EVENT_SCOPES = ("live", "other")
 
 
@@ -1179,6 +1255,187 @@ def remove_hardware_key(vault_path, credential_id):
                if entry.get("credential_id") != credential_id]
     write_hardware(vault_path, current["salt"], entries)
     return {"salt": current["salt"] if entries else "", "keys": entries}
+
+
+# ----- the secret key on disk ------------------------------------------------
+# Not beside the vault. Every sidecar this file already defines -- .recovery,
+# .hardware -- sits next to the vault, and for those it is right: they are
+# useless to a thief on their own. A Secret Key is the opposite. Its entire
+# value is that it does not travel with the copies of the vault that leave this
+# machine, and "next to the vault" is precisely where a careless `cp
+# ~/.spm_vault.gpg*` or a directory-level backup would find it.
+#
+# So it lives in the data directory, keyed by the same scope id the history
+# uses. Nothing that copies a vault -- the sync transports, which move one
+# file; the bundle exporter; the .bak beside every write -- ever reaches in
+# here.
+#
+# The cost of that choice is that the binding is to the vault's path. Move the
+# vault and the scope id changes and the stored key is not found. That is why
+# `secret-key show` exists and why the enable path refuses to finish until the
+# key has been displayed: the file is a convenience, the transcription is the
+# copy that matters.
+
+def secret_key_dir():
+    return os.path.join(data_dir(), "secret-keys")
+
+
+def secret_key_path(vault_path):
+    return os.path.join(secret_key_dir(), vault_scope_id(vault_path))
+
+
+def new_secret_key():
+    """A fresh Secret Key in the grouped text form the user sees."""
+    return format_secret_key(os.urandom(SECRET_KEY_BYTES))
+
+
+def format_secret_key(raw):
+    """SECRET_KEY_BYTES of entropy as `S1-XXXXXX-XXXXX-...` text."""
+    if len(raw) != SECRET_KEY_BYTES:
+        raise VaultError("a Secret Key must be exactly %d bytes"
+                         % SECRET_KEY_BYTES)
+    body = base64.b32encode(bytes(raw)).decode("ascii").rstrip("=")
+    out, at = [SECRET_KEY_TAG], 0
+    for size in SECRET_KEY_GROUPS:
+        out.append(body[at:at + size])
+        at += size
+    # The groups are chosen to consume the encoding exactly. If they ever stop
+    # doing so the display would silently drop entropy, so it is checked rather
+    # than assumed.
+    if at != len(body):
+        raise VaultError("secret key grouping does not match its encoding")
+    return "-".join(out)
+
+
+def secret_key_bytes(text):
+    """The 16 raw bytes behind a Secret Key, however the user typed it.
+
+    Case, spacing and dashes are all discarded before decoding: this value is
+    read off paper and typed back by hand, and rejecting `s1 a3qk 7f...` for
+    its shape would be a refusal about presentation, not about the key.
+    """
+    if isinstance(text, (bytes, bytearray)):
+        raise VaultError("a Secret Key is text, not bytes")
+    cleaned = "".join(ch for ch in (text or "") if ch.isalnum()).upper()
+    if not cleaned.startswith(SECRET_KEY_TAG):
+        raise VaultError("that does not look like a Secret Key; it starts %s-"
+                         % SECRET_KEY_TAG)
+    body = cleaned[len(SECRET_KEY_TAG):]
+    expected = len(base64.b32encode(b"\0" * SECRET_KEY_BYTES).decode("ascii").rstrip("="))
+    if len(body) != expected:
+        raise VaultError("a Secret Key carries %d characters after %s-, not %d"
+                         % (expected, SECRET_KEY_TAG, len(body)))
+    padded = body + "=" * (-len(body) % 8)
+    try:
+        raw = base64.b32decode(padded)
+    except Exception as exc:
+        raise VaultError("that Secret Key contains characters it cannot") from exc
+    if len(raw) != SECRET_KEY_BYTES:
+        raise VaultError("that Secret Key decodes to the wrong length")
+    return raw
+
+
+def read_secret_key(vault_path):
+    """This vault's Secret Key, or "" when none is available here.
+
+    SPM_SECRET_KEY wins over the file. A vault carried to a second machine has
+    no file there yet, and the environment is how the key reaches a headless
+    run or a test without being written to a disk it does not belong on.
+    """
+    override = (os.environ.get("SPM_SECRET_KEY") or "").strip()
+    if override:
+        secret_key_bytes(override)
+        return override
+    target = secret_key_path(vault_path)
+    if not os.path.exists(target):
+        return ""
+    try:
+        with open(target, "r", encoding="utf-8") as handle:
+            stored = handle.read().strip()
+    except OSError as exc:
+        raise VaultError("the Secret Key file for this vault is unreadable") from exc
+    if not stored:
+        # An empty file is damage, not absence. Reporting it as "no Secret Key"
+        # would send a bound vault down the password-only path and report a
+        # correct password as wrong.
+        raise VaultError("the Secret Key file for this vault is empty")
+    secret_key_bytes(stored)
+    return stored
+
+
+def write_secret_key(vault_path, text):
+    """Store this vault's Secret Key durably, 0600, in the data directory."""
+    secret_key_bytes(text)
+    target = secret_key_path(vault_path)
+    directory = os.path.dirname(os.path.abspath(target)) or "."
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    handle, staged = tempfile.mkstemp(
+        prefix="." + os.path.basename(target) + ".stage.", dir=directory)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as out:
+            out.write(text.strip() + "\n")
+            out.flush()
+            os.fsync(out.fileno())
+        os.chmod(staged, 0o600)
+        os.replace(staged, target)
+        staged = ""
+        _fsync_dir(directory)
+    finally:
+        if staged and os.path.exists(staged):
+            os.remove(staged)
+    return target
+
+
+def remove_secret_key(vault_path):
+    """Forget the stored copy. Returns True when there was one."""
+    target = secret_key_path(vault_path)
+    if not os.path.exists(target):
+        return False
+    os.remove(target)
+    _fsync_dir(os.path.dirname(os.path.abspath(target)) or ".")
+    return True
+
+
+def vault_wants_secret_key(vault_path):
+    """True when this vault's header says it is bound to a Secret Key.
+
+    False for anything that is not an AEAD container, which is the honest
+    answer: the older formats have nowhere to record the binding, so they
+    cannot have one.
+    """
+    try:
+        with open(vault_path, "rb") as handle:
+            raw = handle.read()
+    except OSError:
+        return False
+    modern = parse_container_aead(raw) if is_container(raw) else None
+    return bool(modern and modern[0]["sk"])
+
+
+def secret_key_for_write(vault_path):
+    """The Secret Key a rewrite of this vault has to keep it bound to.
+
+    Every write goes through here rather than through "was one passed in",
+    because the failure mode of getting this wrong is silent: a save that
+    forgot the binding would produce a vault that still opens on this machine
+    and has quietly lost the protection its owner turned on.
+    """
+    if not vault_wants_secret_key(vault_path):
+        return ""
+    return require_secret_key(vault_path, {"sk": True})
+
+
+def require_secret_key(vault_path, kdf):
+    """The Secret Key this vault needs, or a refusal naming what is missing."""
+    if not kdf.get("sk"):
+        return ""
+    secret = read_secret_key(vault_path)
+    if not secret:
+        record_event("secret-key", "fail", "reason=missing", vault_path)
+        raise VaultSecretKeyError(
+            "this vault is bound to a Secret Key and none is stored for this "
+            "path; supply it with SPM_SECRET_KEY or run 'secret-key import'")
+    return secret
 
 
 def recovery_pubkey_pem(plaintext):
@@ -1949,7 +2206,8 @@ def unwrap_key(vault_path, master):
     modern = parse_container_aead(raw)
     if modern is not None:
         kdf, envelope, _ = modern
-        key = unwrap_key_aead(kdf, envelope, master)
+        key = unwrap_key_aead(kdf, envelope, master,
+                              require_secret_key(vault_path, kdf))
     else:
         parts = parse_container(raw)
         if parts is None:
@@ -1980,8 +2238,13 @@ def read_vault(vault_path, master):
     modern = parse_container_aead(raw)
     if modern is not None:
         kdf, envelope, cipher = modern
+        # Resolved before the attempt, and outside the handler below, because a
+        # missing Secret Key is not a wrong password. Letting it fall into that
+        # handler would log bad-master and tell the user to retype something
+        # they typed correctly.
+        secret = require_secret_key(vault_path, kdf)
         try:
-            key = unwrap_key_aead(kdf, envelope, master)
+            key = unwrap_key_aead(kdf, envelope, master, secret)
         except Exception:
             record_event("unlock", "fail", scope + ",reason=bad-master")
             raise
@@ -2110,8 +2373,11 @@ def write_vault(vault_path, master, plaintext, vault_key=None):
                                              kdf["n"], kdf["r"], kdf["p"])
         else:
             kdf_salt = os.urandom(KDF_SALT_BYTES)
-            envelope = seal(derive_kek(master, kdf_salt), vault_key.encode("utf-8"))
-            container = build_container_aead(kdf_salt, envelope, cipher)
+            secret = secret_key_for_write(vault_path)
+            envelope = seal(derive_kek(master, kdf_salt, secret=secret),
+                            vault_key.encode("utf-8"))
+            container = build_container_aead(kdf_salt, envelope, cipher,
+                                             secret_key=bool(secret))
         with open(tmp_path, "wb") as handle:
             handle.write(container)
 
@@ -2161,8 +2427,15 @@ def rewrap(vault_path, old_master, new_master):
     return rewrap_with_key(vault_path, key, new_master)
 
 
-def rewrap_with_key(vault_path, vault_key, new_master):
+def rewrap_with_key(vault_path, vault_key, new_master, secret=None):
     """Change only the master-password envelope, given the vault key.
+
+    `secret` is what the rewrapped vault should be bound to: None keeps
+    whatever binding the vault already has, which is what an ordinary password
+    change wants, and an explicit value -- a new Secret Key, or "" for none --
+    is how enabling and disabling one are expressed. Both are a rewrap of the
+    envelope and nothing else, so turning a Secret Key on costs the same as
+    changing a password rather than re-encrypting the vault.
 
     The vault ciphertext stays byte-identical -- for a vault already on the
     current format -- and the recovery file is not touched at all, because
@@ -2177,11 +2450,17 @@ def rewrap_with_key(vault_path, vault_key, new_master):
     with open(vault_path, "rb") as handle:
         raw = handle.read()
     key = vault_key
+    if secret is None:
+        secret = secret_key_for_write(vault_path)
+    elif secret:
+        secret_key_bytes(secret)
     kdf_salt = os.urandom(KDF_SALT_BYTES)
-    envelope = seal(derive_kek(new_master, kdf_salt), key.encode("utf-8"))
+    envelope = seal(derive_kek(new_master, kdf_salt, secret=secret),
+                    key.encode("utf-8"))
     modern = parse_container_aead(raw)
     if modern is not None:
-        updated = build_container_aead(kdf_salt, envelope, modern[2])
+        updated = build_container_aead(kdf_salt, envelope, modern[2],
+                                       secret_key=bool(secret))
     else:
         parts = parse_container(raw)
         if parts is None:
@@ -2196,7 +2475,8 @@ def rewrap_with_key(vault_path, vault_key, new_master):
         # them rather than lingering until a write happens to come along.
         updated = build_container_aead(
             kdf_salt, envelope,
-            seal(key, gpg_decrypt(key, parts[1])))
+            seal(key, gpg_decrypt(key, parts[1])),
+            secret_key=bool(secret))
 
     vault_dir = os.path.dirname(os.path.abspath(vault_path)) or "."
     fd, staged = tempfile.mkstemp(
@@ -2252,7 +2532,8 @@ def recover(vault_path, secret, out_path):
             # recovery files hold. A failure here is genuinely "this file does
             # not open this vault" rather than a guess between the two.
             try:
-                key = unwrap_key_aead(kdf, envelope, secret)
+                key = unwrap_key_aead(kdf, envelope, secret,
+                                      require_secret_key(vault_path, kdf))
             except VaultError:
                 raise VaultError("the recovery file does not open this vault")
             if not key:
@@ -2950,7 +3231,30 @@ def doctor_report(plaintext, vault_path, recovery_status="unchecked",
             "sealed with AES-256-CTR and HMAC-SHA256; key derivation %s "
             "n=%d r=%d p=%d" % (kdf["name"], kdf["n"], kdf["r"], kdf["p"]),
             backend=backend, kdf=kdf["name"],
-            kdf_n=kdf["n"], kdf_r=kdf["r"], kdf_p=kdf["p"]))
+            kdf_n=kdf["n"], kdf_r=kdf["r"], kdf_p=kdf["p"],
+            secret_key=bool(kdf["sk"])))
+        # Reported as a state, never as a fault. A vault without a Secret Key
+        # is the supported default and saying "warn" about it would train the
+        # reader to ignore the line. What does deserve a warning is a bound
+        # vault whose key this machine cannot find, because that is a lockout
+        # waiting for the next unlock rather than a preference.
+        if kdf["sk"]:
+            try:
+                held = bool(read_secret_key(vault_path))
+            except VaultError:
+                held = False
+            checks.append(_check(
+                "vault_secret_key", "ok" if held else "warn",
+                "bound to a Secret Key, and this machine holds it"
+                if held else
+                "bound to a Secret Key that this machine does not hold; "
+                "unlocking here needs SPM_SECRET_KEY or 'secret-key import'",
+                secret_key=True, held=held))
+        else:
+            checks.append(_check(
+                "vault_secret_key", "ok",
+                "no Secret Key; the master password alone opens this vault",
+                secret_key=False, held=False))
     elif backend == "gpg":
         checks.append(_check(
             "vault_cipher", "warn",
@@ -3087,6 +3391,125 @@ def main(argv):
             if not key:
                 raise VaultError("a vault key is required")
             rewrap_with_key(argv[2], key, new)
+        elif command == "secret-key":
+            # secret-key <op> <vault> ; ops below say what they read on stdin.
+            #
+            # Every op that changes the binding writes the key file BEFORE
+            # rewrapping and removes it AFTER. Order matters and only in one
+            # direction: a file naming a key the vault is not bound to is
+            # ignored by every reader, while a vault bound to a key no file
+            # names is a lockout.
+            op, vault = argv[2], argv[3]
+            if op == "path":
+                sys.stdout.write(secret_key_path(vault) + "\n")
+            elif op == "status":
+                bound = vault_wants_secret_key(vault)
+                override = bool((os.environ.get("SPM_SECRET_KEY") or "").strip())
+                stored = os.path.exists(secret_key_path(vault))
+                sys.stdout.write(json.dumps({
+                    "bound": bound,
+                    "stored": stored,
+                    "source": "env" if override else ("file" if stored else "none"),
+                    "path": secret_key_path(vault),
+                }) + "\n")
+            elif op == "show":
+                # stdin: master. The password is verified against the vault
+                # first: without that, anything able to run this command could
+                # read the key straight off the disk it is meant to protect.
+                (master,) = _secrets(1)
+                read_vault(vault, master)
+                secret = read_secret_key(vault)
+                if not secret:
+                    raise VaultError("no Secret Key is stored for this vault")
+                sys.stdout.write(secret + "\n")
+            elif op == "enable":
+                # stdin: master ; stdout: the new Secret Key
+                (master,) = _secrets(1)
+                if vault_wants_secret_key(vault):
+                    raise VaultError(
+                        "this vault already has a Secret Key; use rotate to "
+                        "replace it, or disable to remove it")
+                _plaintext, key = read_vault(vault, master)
+                if not key:
+                    raise VaultError(
+                        "this vault predates the key envelope and must be "
+                        "migrated before a Secret Key can be added")
+                fresh = new_secret_key()
+                write_secret_key(vault, fresh)
+                try:
+                    rewrap_with_key(vault, key, master, secret=fresh)
+                except Exception:
+                    remove_secret_key(vault)
+                    raise
+                record_event("secret-key", "ok", "reason=enabled", vault)
+                sys.stdout.write(fresh + "\n")
+            elif op == "rotate":
+                # stdin: master ; stdout: the replacement Secret Key
+                (master,) = _secrets(1)
+                if not vault_wants_secret_key(vault):
+                    raise VaultError("this vault has no Secret Key to rotate")
+                _plaintext, key = read_vault(vault, master)
+                previous = read_secret_key(vault)
+                fresh = new_secret_key()
+                write_secret_key(vault, fresh)
+                try:
+                    rewrap_with_key(vault, key, master, secret=fresh)
+                except Exception:
+                    if previous:
+                        write_secret_key(vault, previous)
+                    else:
+                        remove_secret_key(vault)
+                    raise
+                record_event("secret-key", "ok", "reason=rotated", vault)
+                sys.stdout.write(fresh + "\n")
+            elif op == "disable":
+                # stdin: master
+                (master,) = _secrets(1)
+                if not vault_wants_secret_key(vault):
+                    raise VaultError("this vault has no Secret Key")
+                _plaintext, key = read_vault(vault, master)
+                rewrap_with_key(vault, key, master, secret="")
+                remove_secret_key(vault)
+                record_event("secret-key", "ok", "reason=disabled", vault)
+            elif op == "import":
+                # stdin: master\nsecret key. Stores the key and nothing else --
+                # the vault is already bound, this machine simply did not have
+                # the key yet.
+                master, supplied = _secrets(2)
+                supplied = supplied.strip()
+                if not supplied:
+                    raise VaultError("a Secret Key is required")
+                secret_key_bytes(supplied)
+                if vault_wants_secret_key(vault):
+                    # Proven against the vault, not merely checked for shape.
+                    # A key that decodes but is not this vault's would store
+                    # cleanly and turn every later unlock into "wrong master
+                    # password" -- a diagnosis pointing at the wrong secret.
+                    with open(vault, "rb") as handle:
+                        probe = parse_container_aead(handle.read())
+                    if probe is None:
+                        raise VaultError("this vault has no key envelope")
+                    kdf, envelope, _cipher = probe
+                    try:
+                        proven = unwrap_key_aead(kdf, envelope, master, supplied)
+                    except VaultError:
+                        proven = ""
+                    if not proven:
+                        record_event("secret-key", "fail", "reason=bad-secret",
+                                     vault)
+                        raise VaultError(
+                            "that Secret Key and master password do not open "
+                            "this vault")
+                write_secret_key(vault, supplied)
+                record_event("secret-key", "ok", "reason=imported", vault)
+            elif op == "forget":
+                # Removes this machine's stored copy. The vault stays bound --
+                # this is for a machine that should no longer hold the key.
+                if not remove_secret_key(vault):
+                    raise VaultError("no Secret Key is stored for this vault")
+                record_event("secret-key", "ok", "reason=forgotten", vault)
+            else:
+                raise VaultError("unknown secret-key operation: %s" % op)
         elif command == "shares-split":
             # shares-split <vault> <threshold> <count> ; stdin: master
             # stdout: set id, then one share per line
@@ -3198,15 +3621,18 @@ def main(argv):
                     max(len(CONTAINER_MAGIC), len(CONTAINER_MAGIC_AEAD)) + 1)
             return 0 if is_container(head) else 1
         elif command == "seal-info":
-            # seal-info <vault> ; stdout: backend<TAB>kdf<TAB>n<TAB>r<TAB>p
+            # seal-info <vault> ; stdout: backend<TAB>kdf<TAB>n<TAB>r<TAB>p<TAB>sk
             # No secret is read: this describes the header, not the contents,
-            # so `doctor` can report it without holding the vault open.
+            # so `doctor` can report it without holding the vault open. sk is
+            # appended rather than inserted so a reader cutting fields 1-5
+            # keeps working.
             backend, kdf = vault_seal_summary(argv[2])
             if kdf:
-                sys.stdout.write("%s\t%s\t%d\t%d\t%d\n" % (
-                    backend, kdf["name"], kdf["n"], kdf["r"], kdf["p"]))
+                sys.stdout.write("%s\t%s\t%d\t%d\t%d\t%d\n" % (
+                    backend, kdf["name"], kdf["n"], kdf["r"], kdf["p"],
+                    1 if kdf["sk"] else 0))
             else:
-                sys.stdout.write("%s\t-\t-\t-\t-\n" % (backend or "legacy"))
+                sys.stdout.write("%s\t-\t-\t-\t-\t0\n" % (backend or "legacy"))
         elif command == "format-version":
             with open(argv[2], "r", encoding="utf-8", errors="ignore") as handle:
                 sys.stdout.write("%d\n" % format_version(handle.read()))
@@ -3359,6 +3785,13 @@ def main(argv):
         else:
             sys.stderr.write("unknown command: %s\n" % command)
             return 2
+    except VaultSecretKeyError as exc:
+        # 3, not 1. Every caller that reports a failed unlock says "wrong
+        # master password", and for this one failure that sentence is both
+        # false and useless. A separate status is what lets them say the true
+        # thing without parsing an error message.
+        sys.stderr.write("%s\n" % exc)
+        return 3
     except VaultError as exc:
         sys.stderr.write("%s\n" % exc)
         return 1

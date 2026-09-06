@@ -5788,5 +5788,256 @@ if grep -qi 'master password' "$TEST_ROOT/restore-empty.txt"; then
 fi
 printf '  restore: a bundle that will not open is refused; the replaced vault survives as .bak and a snapshot\n'
 
+# --- 4.10.0 the Secret Key ---------------------------------------------------
+printf 'Secret Key regression: a vault a stolen copy of cannot be attacked\n'
+sk_root="$TEST_ROOT/secret-key"
+sk_vault="$sk_root/vault.gpg"
+sk_plain="$sk_root/plain"
+sk_data="$sk_root/data"
+sk_master="Secret-Key-Regression-Master-7"
+mkdir -p "$sk_root" "$sk_data"
+{
+	printf 'META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n' "$TEST_RECOVERY_B64"
+	printf '1\tExample\tavery@example.invalid\tsecret-key-1\t-\t2025-01-01T00:00:00Z\t\t\n'
+} > "$sk_plain"
+sk_fail() { printf '%s\n' "$1" >&2; exit 1; }
+# One helper so every call below runs against the same isolated data directory.
+# The Secret Key lives there rather than beside the vault, so a test that let
+# SPM_DATA_DIR fall through to the harness default would be writing keys into
+# whatever directory the rest of the suite is using.
+# Goes through the script's own `core`, which is what stages the module and
+# sets SPM_CORE_PATH; reaching for that variable before anything has called it
+# would work only because of where this block happens to sit in the file.
+core self-test >/dev/null
+sk_core() { SPM_DATA_DIR="$sk_data" VAULT_FILE="$sk_vault" core "$@"; }
+printf '%s' "$sk_master" | sk_core write "$sk_vault" "$sk_plain" >/dev/null
+
+# The text form is read off paper and typed back, so what it must survive is
+# people: lower case, spaces instead of dashes, no separators at all.
+sk_generated="$(python3 - "$SPM_CORE_PATH" <<'SKPY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("core", sys.argv[1])
+core = importlib.util.module_from_spec(spec); spec.loader.exec_module(core)
+key = core.new_secret_key()
+raw = core.secret_key_bytes(key)
+assert len(raw) == 16, "a Secret Key must carry 128 bits"
+for variant in (key.lower(), key.replace("-", " "), key.replace("-", ""),
+                "  " + key.lower().replace("-", "  ") + "  "):
+    if core.secret_key_bytes(variant) != raw:
+        sys.exit("a Secret Key typed as %r did not decode to the same bytes" % variant)
+# Each refusal names what is wrong with the input. A key is typed off paper by
+# someone who cannot see it as they type, so "that is not a Secret Key" for a
+# dropped character is a refusal they cannot act on -- the message is the
+# feature here, not merely the rejection.
+for bad, why, says in (
+        ("X1-AAAAAA-AAAAA-AAAAA-AAAAA-AAAAA", "a wrong version tag", "S1-"),
+        ("S1-AAAAAA-AAAAA", "a short key", "26 characters"),
+        ("S1-AAAAAA-AAAAA-AAAAA-AAAAA-AAAAAA", "an over-long key", "26 characters"),
+        ("S1-011111-11111-11111-11111-11111", "digits base32 has no room for", ""),
+        ("", "an empty string", "")):
+    try:
+        core.secret_key_bytes(bad)
+    except core.VaultError as exc:
+        if says and says not in str(exc):
+            sys.exit("%s was refused as %r, which does not mention %r"
+                     % (why, str(exc), says))
+        continue
+    sys.exit("%s was accepted as a Secret Key" % why)
+print(key)
+SKPY
+)"
+[ -n "$sk_generated" ] || sk_fail 'the Secret Key codec produced nothing'
+
+sk_core secret-key status "$sk_vault" | grep -q '"bound": false' ||
+	sk_fail 'a fresh vault reports itself bound to a Secret Key'
+sk_key="$(printf '%s' "$sk_master" | sk_core secret-key enable "$sk_vault")"
+printf '%s' "$sk_key" | grep -Eq '^S1-[A-Z2-7]{6}(-[A-Z2-7]{5}){4}$' ||
+	sk_fail "enable printed something that is not a Secret Key: $sk_key"
+sed -n '2p' "$sk_vault" | grep -q ' sk=1$' ||
+	sk_fail 'the container header does not announce the Secret Key'
+
+# Where the key is NOT is the whole point of the feature. Beside the vault it
+# would travel with every copy the threat model is about.
+sk_path="$(sk_core secret-key path "$sk_vault")"
+case "$sk_path" in
+	"$sk_data"/*) ;;
+	*) sk_fail "the Secret Key was stored outside the data directory: $sk_path" ;;
+esac
+[ ! -e "$sk_vault.secret-key" ] ||
+	sk_fail 'the Secret Key was written beside the vault'
+[ "$(file_mode "$sk_path")" = "600" ] ||
+	sk_fail "the Secret Key file is mode $(file_mode "$sk_path"), not 600"
+
+sk_read() {
+	SPM_DATA_DIR="$sk_data" SPM_VAULT_PATH="$sk_vault" \
+		python3 "$SPM_CORE_PATH" read "$sk_vault" "$sk_root/out" \
+		<<< "$sk_master" >/dev/null 2>"$sk_root/err"
+}
+sk_read || sk_fail 'a bound vault does not open with its Secret Key present'
+grep -q 'secret-key-1' "$sk_root/out" || sk_fail 'the bound vault opened to the wrong contents'
+
+# An ordinary save must not quietly unbind the vault. This is the failure that
+# would leave the owner believing a protection they had switched off.
+printf '%s' "$sk_master" | sk_core write "$sk_vault" "$sk_plain" >/dev/null
+sed -n '2p' "$sk_vault" | grep -q ' sk=1$' ||
+	sk_fail 'an ordinary write dropped the Secret Key binding'
+# Nor may a password change.
+sk_vkey="$(printf '%s' "$sk_master" | sk_core read "$sk_vault" "$sk_root/out")"
+printf '%s\n%s' "$sk_vkey" "$sk_master-2" | sk_core rewrap-key "$sk_vault"
+sed -n '2p' "$sk_vault" | grep -q ' sk=1$' ||
+	sk_fail 'a password change dropped the Secret Key binding'
+printf '%s\n%s' "$sk_vkey" "$sk_master" | sk_core rewrap-key "$sk_vault"
+
+# Six is appended, so a reader cutting the first five fields still works.
+sk_info="$(sk_core seal-info "$sk_vault")"
+[ "$(printf '%s' "$sk_info" | cut -f1)" = "openssl" ] || sk_fail 'seal-info lost its backend field'
+[ "$(printf '%s' "$sk_info" | cut -f6)" = "1" ] || sk_fail 'seal-info does not report the binding'
+
+# Without the key: a refusal of its own, at its own exit status, saying nothing
+# about the password -- which was correct.
+mv "$sk_path" "$sk_root/key.keep"
+sk_rc=0
+sk_read || sk_rc=$?
+[ "$sk_rc" -eq 3 ] || sk_fail "a missing Secret Key exited $sk_rc, not 3"
+grep -qi 'secret key' "$sk_root/err" ||
+	sk_fail 'a missing Secret Key was not named in the refusal'
+if grep -qi 'master password' "$sk_root/err"; then
+	sk_fail 'a missing Secret Key was reported as a master-password problem'
+fi
+sk_core secret-key status "$sk_vault" | grep -q '"source": "none"' ||
+	sk_fail 'status does not notice that the key is gone'
+
+# The environment is how a vault reaches a machine that has no file yet.
+SPM_SECRET_KEY="$sk_key" SPM_DATA_DIR="$sk_data" SPM_VAULT_PATH="$sk_vault" \
+	python3 "$SPM_CORE_PATH" read "$sk_vault" "$sk_root/out" <<< "$sk_master" >/dev/null ||
+	sk_fail 'SPM_SECRET_KEY does not open a bound vault'
+mv "$sk_root/key.keep" "$sk_path"
+
+# Stripping the flag must not produce a vault that opens under the password
+# alone. There is no downgrade, only a break.
+python3 - "$sk_vault" "$sk_root/stripped.gpg" <<'SKPY'
+import sys
+raw = open(sys.argv[1], "rb").read()
+open(sys.argv[2], "wb").write(raw.replace(b" sk=1", b"", 1))
+SKPY
+sk_rc=0
+SPM_DATA_DIR="$sk_data" python3 "$SPM_CORE_PATH" read "$sk_root/stripped.gpg" \
+	"$sk_root/out" <<< "$sk_master" >/dev/null 2>&1 || sk_rc=$?
+[ "$sk_rc" -ne 0 ] || sk_fail 'stripping sk=1 downgraded the vault to one that opens'
+
+# A well-formed key that is not this vault's must be refused on import rather
+# than stored, or every later unlock would report a wrong master password.
+sk_other="$(python3 - "$SPM_CORE_PATH" <<'SKPY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("core", sys.argv[1])
+core = importlib.util.module_from_spec(spec); spec.loader.exec_module(core)
+print(core.new_secret_key())
+SKPY
+)"
+sk_rc=0
+printf '%s\n%s' "$sk_master" "$sk_other" | sk_core secret-key import "$sk_vault" \
+	>/dev/null 2>"$sk_root/err" || sk_rc=$?
+[ "$sk_rc" -ne 0 ] || sk_fail 'a Secret Key from another vault was imported'
+grep -qi 'do not open this vault' "$sk_root/err" ||
+	sk_fail 'importing a wrong Secret Key did not say why'
+sk_read || sk_fail 'a refused import damaged the stored Secret Key'
+
+# Rotation replaces it, and the replaced one stops working.
+sk_new="$(printf '%s' "$sk_master" | sk_core secret-key rotate "$sk_vault")"
+[ "$sk_new" != "$sk_key" ] || sk_fail 'rotate returned the same Secret Key'
+sk_read || sk_fail 'the vault does not open after rotation'
+sk_rc=0
+SPM_SECRET_KEY="$sk_key" SPM_DATA_DIR="$sk_data" python3 "$SPM_CORE_PATH" \
+	read "$sk_vault" "$sk_root/out" <<< "$sk_master" >/dev/null 2>&1 || sk_rc=$?
+[ "$sk_rc" -ne 0 ] || sk_fail 'the rotated-away Secret Key still opens the vault'
+
+# Enabling twice is a refusal, not a silent rotation: an owner who ran it by
+# mistake must not find the key they wrote down no longer works.
+sk_rc=0
+printf '%s' "$sk_master" | sk_core secret-key enable "$sk_vault" >/dev/null 2>&1 || sk_rc=$?
+[ "$sk_rc" -ne 0 ] || sk_fail 'enable silently rotated an existing Secret Key'
+
+# Nothing that copies a vault may carry the key. dir sync moves one file.
+mkdir -p "$sk_root/sync"
+(
+	export VAULT_FILE="$sk_vault"
+	export SPM_DATA_DIR="$sk_data"
+	cmd_sync push "$sk_root/sync" secretkey >/dev/null
+)
+[ -f "$sk_root/sync/spm-secretkey.gpg" ] || sk_fail 'the sync push wrote no vault'
+sk_carried="$(find "$sk_root/sync" -type f ! -name '*.gpg' | wc -l)"
+[ "$sk_carried" -eq 0 ] || sk_fail 'the sync push carried something besides the vault'
+if grep -rq "$sk_new" "$sk_root/sync"; then
+	sk_fail 'the sync target contains the Secret Key'
+fi
+
+# Events: recorded under a kind the vocabulary knows, or record_event drops
+# them silently -- which is exactly how the security-key events were lost.
+sk_core events "$sk_vault" 50 > "$sk_root/events.txt" 2>/dev/null || true
+grep -q 'secret-key' "$sk_root/events.txt" ||
+	sk_fail 'no secret-key event was recorded'
+
+# An empty key file is damage, not absence. Read as absence it would send a
+# bound vault down the password-only path and report a correct password wrong.
+sk_saved="$(cat "$sk_path" 2>/dev/null || true)"
+: > "$sk_path"
+sk_rc=0
+sk_read || sk_rc=$?
+[ "$sk_rc" -ne 0 ] || sk_fail 'an empty Secret Key file was read as having no Secret Key'
+grep -qi 'empty' "$sk_root/err" || sk_fail 'an empty Secret Key file was not named as such'
+printf '%s\n' "$sk_saved" > "$sk_path"
+chmod 600 "$sk_path"
+sk_read || sk_fail 'restoring the Secret Key file did not restore access'
+
+# The CLI must not translate this into "wrong master password" either. This is
+# the shell half of the same guard the exit status exists for.
+sk_cli="$sk_root/cli.txt"
+mv "$sk_path" "$sk_root/key.keep"
+(
+	export VAULT_FILE="$sk_vault" SPM_DATA_DIR="$sk_data" MASTER_PW="$sk_master" VAULT_KEY=""
+	decrypt_vault_to_file "$sk_root/cli-out"
+) >"$sk_cli" 2>&1 || true
+grep -qi 'secret key' "$sk_cli" || sk_fail 'the CLI did not name the Secret Key when it was missing'
+if grep -qi 'wrong master password' "$sk_cli"; then
+	sk_fail 'the CLI reported a missing Secret Key as a wrong master password'
+fi
+
+# And neither must the Dashboard -- where getting it wrong also spends one of
+# the five attempts that rate-limit real guessing.
+SK_PORT="$((WEB_PORT + 7))"
+SPM_VAULT_PATH="$sk_vault" SPM_DATA_DIR="$sk_data" SPM_WEB_BIND=127.0.0.1 \
+	SPM_WEB_PORT="$SK_PORT" SPM_VERSION="$VERSION" \
+	XDG_CONFIG_HOME="$sk_root/config" python3 "$web_script" \
+	>"$TEST_ROOT/secret-key-web.log" 2>&1 &
+SK_PID="$!"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+	curl -fsS -o /dev/null "http://127.0.0.1:$SK_PORT/login" 2>/dev/null && break
+	sleep 0.25
+done
+curl -fsS -o "$sk_root/web-login.html" -X POST \
+	--data-urlencode "password=$sk_master" "http://127.0.0.1:$SK_PORT/login" || true
+kill "$SK_PID" 2>/dev/null || true
+wait "$SK_PID" 2>/dev/null || true
+grep -qi 'Secret Key' "$sk_root/web-login.html" ||
+	sk_fail 'the Dashboard did not name the Secret Key when it was missing'
+if grep -qi 'Invalid master password' "$sk_root/web-login.html"; then
+	sk_fail 'the Dashboard reported a missing Secret Key as an invalid password'
+fi
+if grep -qi 'failed login' "$TEST_ROOT/secret-key-web.log"; then
+	sk_fail 'a missing Secret Key was counted against the login lockout'
+fi
+mv "$sk_root/key.keep" "$sk_path"
+
+# Disable puts it back the way it was, and says so in the header.
+printf '%s' "$sk_master" | sk_core secret-key disable "$sk_vault"
+if sed -n '2p' "$sk_vault" | grep -q ' sk=1$'; then
+	sk_fail 'disable left the binding in the header'
+fi
+[ ! -e "$sk_path" ] || sk_fail 'disable left the Secret Key file behind'
+sk_read || sk_fail 'the vault does not open on the master password after disable'
+sk_core secret-key status "$sk_vault" | grep -q '"bound": false' ||
+	sk_fail 'status still reports a binding after disable'
+printf '  secret key: binds, survives writes and password changes, fails closed when absent, and never leaves with a copy\n'
+
 printf 'SPM regression suite passed (%s formats plus web and advanced features).\n' \
 	"$(printf '%s\n' "$formats" | awk '{ print NF }')"

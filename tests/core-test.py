@@ -401,7 +401,19 @@ def t_command_interface_answers_for_both_backends():
     run(["is-container", modern], "")
     eq(run(["seal-info", modern], "").split("\t"),
        ["openssl", core.KDF_NAME, str(core.KDF_N), str(core.KDF_R),
-        str(core.KDF_P) + "\n"])
+        str(core.KDF_P), "0\n"])
+
+    # The Secret Key field is appended, never inserted: the shell cuts fields
+    # one to five out of this line, and a reader written before the field
+    # existed has to keep getting the same answers.
+    bound = fresh("cli-backends-sk")
+    core.write_vault(bound, MASTER, sample(), core.new_vault_key())
+    secret = core.new_secret_key()
+    core.rewrap_with_key(bound, core.unwrap_key(bound, MASTER), MASTER,
+                         secret=secret)
+    eq(run(["seal-info", bound], "").split("\t"),
+       ["openssl", core.KDF_NAME, str(core.KDF_N), str(core.KDF_R),
+        str(core.KDF_P), "1\n"])
 
     legacy = fresh("cli-backends-gpg")
     key = core.new_vault_key()

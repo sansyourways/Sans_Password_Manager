@@ -12576,6 +12576,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # produced; discarding it would make the first page render pay
                 # for the same unwrap a second time.
                 opened, opened_key = core.read_vault(VAULT_PATH, password)
+            except core.VaultSecretKeyError as exc:
+                # Not a failed attempt. Nothing was typed wrong, so this must
+                # not reach the user as "invalid master password" and must not
+                # count against the lockout -- someone locked out of their own
+                # vault by a missing Secret Key would have no way to tell that
+                # retyping was never going to help.
+                page = login_page(
+                    VERSION, "<div class='msg'>%s</div>" % html.escape(str(exc)))
+                self._send_html(200, page)
+                return
             except (subprocess.CalledProcessError, core.VaultError):
                 # Both, because the two vault backends refuse differently:
                 # gpg exits non-zero, the current format raises. Catching only
