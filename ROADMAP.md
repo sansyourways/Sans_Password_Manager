@@ -10,13 +10,13 @@ and cryptography in the smallest auditable component, and make the CLI, the SPM
 Dashboard, sync and the browser extension clients of that core rather than
 co-owners of it. That review is a design concept, not a formal security audit.
 
-## In flight — built, not released
+## Shipped in 4.10.0 — offline theft resistance
 
-- **A Secret Key.** 128 bits generated once per vault, kept in the data
-  directory rather than beside the vault, and mixed into the KEK derivation
-  alongside the master password. A copy of the vault file — on a sync target,
-  in a bundle, in a backup — stops being attackable offline, because there is
-  nothing left in it to guess at.
+- **A Secret Key — shipped in 4.10.0.** 128 bits generated once per vault,
+  kept in the data directory rather than beside the vault, and mixed into the
+  KEK derivation alongside the master password. A copy of the vault file — on
+  a sync target, in a bundle, in a backup — stops being attackable offline,
+  because there is nothing left in it to guess at.
 
   It came out of a ranking exercise rather than from the planning files, and it
   is the item that moves SPM up on offline-theft resistance: password strength
@@ -34,22 +34,23 @@ co-owners of it. That review is a design concept, not a formal security audit.
   directly. Recovery does too, so losing the Secret Key is not a lockout for
   anyone holding a recovery file or a threshold of shares.
 
-- **scrypt raised to n=2\*\*16.** 64 MiB and ~305 ms against 32 MiB and
-  ~124 ms; an offline guesser drops from about 8 attempts per second per core
-  to 3. This is what naming the KDF in the header was for: a vault written at
-  n=32768 keeps opening and moves up on its next write, with no format change
-  and no new vault key. 2\*\*17 was measured (128 MiB, ~547 ms) and declined —
-  scrypt's cost is memory, and SPM runs on phones under Termux, where a vault
-  that will not open on the device it lives on is worse than a slower guesser.
+- **scrypt raised to n=2\*\*16 — shipped in 4.10.0.** 64 MiB and ~305 ms
+  against 32 MiB and ~124 ms; an offline guesser drops from about 8 attempts
+  per second per core to 3. This is what naming the KDF in the header was for:
+  a vault written at n=32768 keeps opening and moves up on its next write,
+  with no format change and no new vault key. 2\*\*17 was measured (128 MiB,
+  ~547 ms) and declined — scrypt's cost is memory, and SPM runs on phones
+  under Termux, where a vault that will not open on the device it lives on is
+  worse than a slower guesser.
 
-- **The seal salt stays at 8 bytes**, which is the opposite of what was
-  planned. `openssl enc -S` answers "hex string is too long, ignoring excess",
-  and a 16-byte salt produces ciphertext byte-identical to its own first 8 —
-  so widening it would have reached the MAC key and nothing else while the
-  format claimed otherwise. Deriving the cipher key in Python would use the
-  full width but forces the raw key onto argv, which is world-readable. The
-  measurement is now in the source so the next person checks rather than
-  assumes.
+- **The seal salt stays at 8 bytes — measured for 4.10.0 and declined**,
+  which is the opposite of what was planned. `openssl enc -S` answers "hex
+  string is too long, ignoring excess", and a 16-byte salt produces ciphertext
+  byte-identical to its own first 8 — so widening it would have reached the
+  MAC key and nothing else while the format claimed otherwise. Deriving the
+  cipher key in Python would use the full width but forces the raw key onto
+  argv, which is world-readable. The measurement is now in the source so the
+  next person checks rather than assumes.
 
 ## Now — reliability and contributor foundations
 
