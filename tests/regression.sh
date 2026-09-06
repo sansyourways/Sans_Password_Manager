@@ -6028,6 +6028,43 @@ if grep -qi 'failed login' "$TEST_ROOT/secret-key-web.log"; then
 fi
 mv "$sk_root/key.keep" "$sk_path"
 
+# --- 4.10.0 raising the scrypt cost strands nothing ---------------------------
+# The whole point of naming the parameters in the header was that this number
+# could move later. Proven rather than asserted: a vault written at the old
+# cost has to keep opening on a build that writes the new one, and its next
+# write has to carry it up.
+sk_old="$sk_root/old-cost.gpg"
+python3 - "$SPM_CORE_PATH" "$sk_old" "$sk_plain" "$sk_master" <<'SKPY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("core", sys.argv[1])
+core = importlib.util.module_from_spec(spec); spec.loader.exec_module(core)
+path, plain, master = sys.argv[2], sys.argv[3], sys.argv[4]
+text = open(plain, encoding="utf-8").read()
+key = core.new_vault_key()
+salt = core.os.urandom(core.KDF_SALT_BYTES)
+# 2**15 explicitly: the constant this build ships has moved past it, and the
+# file has to be written the way the older release wrote it.
+old_n = 1 << 15
+envelope = core.seal(core.derive_kek(master, salt, old_n), key.encode("utf-8"))
+open(path, "wb").write(core.build_container_aead(
+    salt, envelope, core.seal(key, core.stamp_version(text).encode("utf-8")),
+    old_n))
+SKPY
+[ "$(sk_core seal-info "$sk_old" | cut -f3)" = "32768" ] ||
+	sk_fail 'the old-cost fixture was not written at n=32768'
+SPM_DATA_DIR="$sk_data" python3 "$SPM_CORE_PATH" read "$sk_old" "$sk_root/old-out" \
+	<<< "$sk_master" >/dev/null ||
+	sk_fail 'a vault written at the old scrypt cost no longer opens'
+grep -q 'secret-key-1' "$sk_root/old-out" || sk_fail 'the old-cost vault opened to the wrong contents'
+# The next write moves it up, without a format change and without a new key.
+sk_oldkey="$(SPM_DATA_DIR="$sk_data" python3 "$SPM_CORE_PATH" unwrap "$sk_old" <<< "$sk_master")"
+printf '%s' "$sk_master" | sk_core write "$sk_old" "$sk_plain" >/dev/null
+[ "$(sk_core seal-info "$sk_old" | cut -f3)" = "$(python3 -c 'print(1<<16)')" ] ||
+	sk_fail 'a write did not raise the vault to the current scrypt cost'
+[ "$(SPM_DATA_DIR="$sk_data" python3 "$SPM_CORE_PATH" unwrap "$sk_old" <<< "$sk_master")" = "$sk_oldkey" ] ||
+	sk_fail 'raising the scrypt cost minted a new vault key'
+printf '  scrypt cost: a vault at the old n still opens, and its next write carries it up without a new key\n'
+
 # Disable puts it back the way it was, and says so in the header.
 printf '%s' "$sk_master" | sk_core secret-key disable "$sk_vault"
 if sed -n '2p' "$sk_vault" | grep -q ' sk=1$'; then

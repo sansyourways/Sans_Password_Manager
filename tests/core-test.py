@@ -1846,9 +1846,26 @@ def t_key_material_must_be_a_single_ascii_line():
 
 
 def t_scrypt_known_answer():
-    eq(core.derive_kek("known-answer master", bytes(range(16))),
+    """Two assertions doing two different jobs.
+
+    The first pins the parameters, so it stays a real cross-platform vector: a
+    build whose scrypt disagrees fails here rather than writing vaults nothing
+    else can open. Tying it to KDF_N instead would mean regenerating the vector
+    every time the cost moves, and a vector regenerated from the thing it is
+    meant to check proves nothing.
+
+    The second is a tripwire on the shipped default. Raising the cost is fine
+    and the header makes it safe -- but it must be a deliberate edit here, not
+    something that changes under a reader who trusted the number.
+    """
+    eq(core.derive_kek("known-answer master", bytes(range(16)), 1 << 15),
        "sY/qpCGUjWtqIvzA9NiHoCRCrzQ3WbQ6TaNrJEwGr+E=",
-       "scrypt derived a different key-encryption key")
+       "scrypt derived a different key-encryption key at n=2**15")
+    eq((core.KDF_N, core.KDF_R, core.KDF_P), (1 << 16, 8, 1),
+       "the shipped key-derivation cost changed")
+    eq(core.derive_kek("known-answer master", bytes(range(16))),
+       "/tuAyk1EuKyMz5UHKWN6Ja9FeHRIWPrPvNy4NroJ72o=",
+       "scrypt derived a different key-encryption key at the shipped cost")
 
 
 def t_seal_roundtrip_and_freshness():

@@ -183,6 +183,16 @@ SEAL_MAGIC = b"SPMSEAL1"
 # looks stronger. The IV is separate and full width: a salt collision alone
 # must not repeat a CTR keystream, and an IV is not secret, so it is the one
 # value here that may travel in argv.
+#
+# Re-measured before 4.10.0, because "widen the salt to 16" reads like a free
+# improvement and is not one. `openssl enc -S` on 3.0.20 answers
+# "hex string is too long, ignoring excess" and a 16-byte salt produces
+# ciphertext identical to its own first 8 bytes -- so the widening would reach
+# the MAC key and nothing else, while the format claimed otherwise. Deriving
+# the cipher key in Python instead would use the full width, but openssl's CLI
+# can only take a raw key as -K on argv, and argv is world-readable; that is
+# the whole reason _key_fd exists. Eight stays, and this note is here so the
+# next person measures rather than assuming.
 SEAL_SALT_BYTES = 8
 SEAL_IV_BYTES = 16
 SEAL_TAG_BYTES = 32
@@ -191,10 +201,19 @@ SEAL_MAC_INFO = b"SPMSEAL1-mac"
 
 # The vault records the KDF by name and parameters, which is what turns a
 # later move to Argon2id into a value the reader dispatches on instead of
-# another format change. n=2**15 is 32 MiB and measures ~145 ms here, against
-# ~390 ms for the gpg envelope it replaces.
+# another format change. It is also what lets this number be raised without
+# stranding anything: the reader derives with the vault's own n, not this
+# build's, so a vault written at 2**15 keeps opening and moves up on its next
+# write.
+#
+# 2**16 is 64 MiB and measures ~305 ms on the reference machine, against
+# ~124 ms at 2**15 -- so an offline guesser drops from about 8 attempts per
+# second per core to about 3. 2**17 was measured too (128 MiB, ~547 ms) and
+# not taken: scrypt's cost is memory, and SPM runs on phones under Termux
+# where a transient 128 MiB allocation is a plausible failure and a vault that
+# cannot be opened on the device it lives on is worse than a slower guesser.
 KDF_NAME = "scrypt"
-KDF_N = 1 << 15
+KDF_N = 1 << 16
 KDF_R = 8
 KDF_P = 1
 KDF_SALT_BYTES = 16
