@@ -2175,6 +2175,53 @@ def t_doctor_names_the_backend_that_sealed_the_file():
     eq(entry["backend"], "gpg")
 
 
+def t_export_columns_stay_on_one_line():
+    # json.dumps escapes every C0 control but leaves U+0085, U+2028 and U+2029
+    # literal, because they are legal inside a JSON string. They are also three
+    # of the eleven characters str.splitlines() honours, and the ndjson, jsonl,
+    # yaml and fallback-toml readers all split before they parse -- so a custom
+    # field holding one exported as valid JSON and came back as two invalid
+    # halves, and `spm import ndjson` failed on the user's own backup.
+    #
+    # Everything a person would check agreed the file was fine: bash reads it
+    # as one line, wc -l counts one, json.loads parses it. Only splitlines()
+    # disagreed, and only the importer calls that.
+    separators = ["\u0085", "\u2028", "\u2029"]
+    for ch in separators:
+        column = core.encode_attrs(fields=[("recovery note", "before%safter" % ch)])
+        exported = core.attrs_export_columns(column)
+        eq(len(exported["fields"].splitlines()), 1,
+           "%r split the fields column across two lines" % ch)
+        eq(json.loads(exported["fields"]),
+           [{"name": "recovery note", "value": "before%safter" % ch}],
+           "%r did not survive the escaping unchanged" % ch)
+
+    # Everything else keeps travelling as it did; this is an escaping change,
+    # not a change to what an export contains.
+    plain = core.attrs_export_columns(
+        core.encode_attrs(folder="Work",
+                          fields=[("a", "one\ntwo"), ("b", "tab\there")],
+                          hidden=True))
+    eq(plain["folder"], "Work")
+    eq(plain["hidden"], "1")
+    eq(json.loads(plain["fields"]),
+       [{"name": "a", "value": "one\ntwo"}, {"name": "b", "value": "tab\there"}])
+
+
+def t_json_line_safe_is_lossless_for_every_break_character():
+    # Derived from Python rather than from a list anyone typed: the failure
+    # this guards is a value that splits a line when it is read back, and
+    # str.splitlines() is what decides that.
+    breaks = {chr(n) for n in range(0x2100)
+              if len(("a%sb" % chr(n)).splitlines()) > 1}
+    assert breaks, "no line terminators found; the probe is wrong"
+    for ch in sorted(breaks):
+        encoded = core.json_line_safe({"v": "x%sy" % ch})
+        eq(len(encoded.splitlines()), 1,
+           "%r survived into a line-based export" % ch)
+        eq(json.loads(encoded)["v"], "x%sy" % ch,
+           "%r was changed by the escaping" % ch)
+
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):
         check(name[2:], fn)

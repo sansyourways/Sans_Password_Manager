@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="4.10.0"
+VERSION="4.10.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -1653,14 +1653,43 @@ def export_row_from_values(values):
 # field, on all twenty formats, silently -- which is exactly the disagreement
 # between two surfaces that a shared core exists to make impossible.
 
+def json_line_safe(value):
+    """json.dumps for a value that will be written on one line.
+
+    json.dumps escapes every C0 control -- newline, tab, the record and group
+    separators -- but leaves U+0085, U+2028 and U+2029 as literal characters,
+    because they are legal inside a JSON string. They are also three of the
+    eleven characters str.splitlines() honours, and the exports that carry
+    this output are line-based: ndjson and jsonl put one record on one line,
+    and the ndjson, yaml and fallback-toml readers all split before parsing.
+
+    So a custom field holding U+2028 exported as valid JSON and came back as
+    two invalid halves. What made it hard to see is that everything a person
+    would check agreed the file was fine: bash reads it as one line, `wc -l`
+    counts one line, and json.loads parses it. Only str.splitlines() disagrees,
+    and only the importer calls that -- so the export looked correct right up
+    until the day someone needed it back.
+
+    Escaping the three keeps the JSON identical in meaning -- json.loads
+    returns exactly the same string -- while making it safe to put on a line.
+
+    The dashboard already did this for the same three characters when
+    embedding JSON in a <script>. The reason is the same and the definition
+    belongs in one place.
+    """
+    return (json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+            .replace(" ", "\\u2028")
+            .replace(" ", "\\u2029")
+            .replace("\x85", "\\u0085"))
+
+
 def attrs_export_columns(column):
     """The folder and fields columns an export carries for one record."""
     folder, fields, hidden = decode_attrs(column)
     return {
         "folder": folder,
-        "fields": json.dumps(
-            [{"name": n, "value": v} for n, v in fields],
-            separators=(",", ":"), ensure_ascii=False) if fields else "",
+        "fields": json_line_safe(
+            [{"name": n, "value": v} for n, v in fields]) if fields else "",
         "hidden": "1" if hidden else "",
     }
 
