@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="4.9.0"
+VERSION="4.10.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -199,6 +199,11 @@ sensitive_files() {
 	script_dir="$(dirname "$0")"
 	{
 		printf '%s\n' "$VAULT_FILE" "${VAULT_FILE}.bak" "$RECOVERY_FILE"
+		# The Secret Key lives in the data directory rather than beside the
+		# vault, so a directory listing of the vault's folder would never see
+		# it. Asked of the core rather than rebuilt here: the path is derived
+		# from a scope id and there must be exactly one implementation of it.
+		core secret-key path "$VAULT_FILE" 2>/dev/null || true
 		# The cwd and the vault's directory may sit outside $HOME entirely
 		# (portable bundle on removable media), so check them explicitly.
 		for d in "." "$vault_dir" "$script_dir"; do
@@ -833,10 +838,23 @@ decrypt_vault_to_file() {
 
 	ensure_master_password_loaded
 
-	if ! VAULT_KEY="$(printf '%s' "$MASTER_PW" | core read "$VAULT_FILE" "$out_file" 2>/dev/null)"; then
+	# Status 3 is the core saying "this vault is bound to a Secret Key and I
+	# cannot find it here". Collapsing it into the sentence below would send
+	# the user to retype a password that was right, which is the one response
+	# that cannot help.
+	local read_rc=0
+	VAULT_KEY="$(printf '%s' "$MASTER_PW" | core read "$VAULT_FILE" "$out_file" 2>/dev/null)" || read_rc=$?
+	if [ "$read_rc" -ne 0 ]; then
 		secure_wipe "$out_file"
 		MASTER_PW=""
 		VAULT_KEY=""
+		if [ "$read_rc" -eq 3 ]; then
+			if [ "$SPM_LANG" = "id" ]; then
+				die "Vault ini terikat pada Secret Key yang tidak ada di mesin ini. Jalankan '$0 secret-key import' atau set SPM_SECRET_KEY."
+			else
+				die "This vault is bound to a Secret Key this machine does not hold. Run '$0 secret-key import', or set SPM_SECRET_KEY."
+			fi
+		fi
 		if [ "$SPM_LANG" = "id" ]; then
 			die "Gagal mendekripsi vault. Kata sandi utama salah?"
 		else
@@ -1844,6 +1862,143 @@ cmd_edit() {
 	else
 		printf "Vault updated.\n"
 	fi
+}
+
+# ----- the Secret Key --------------------------------------------------------
+# 128 bits kept off the vault file and mixed into the key derivation. Its whole
+# purpose is the copies of the vault that leave this machine -- sync targets,
+# bundles, backups -- which stop being attackable offline once a vault is bound
+# to one. It does nothing about a compromise of the machine that holds both,
+# and every message below has to keep saying so.
+
+secret_key_read_typed() {
+	# Read one back off paper. Hidden, like every other secret this script
+	# prompts for: it is being typed into a terminal that may be shared or
+	# logged. A typo is not silently accepted -- the core proves the key
+	# against the vault before storing it -- so hiding it costs nothing that
+	# matters.
+	if [ "$SPM_LANG" = "id" ]; then
+		printf 'Masukkan Secret Key (S1-...): ' >&2
+	else
+		printf 'Enter the Secret Key (S1-...): ' >&2
+	fi
+	stty -echo 2>/dev/null || true
+	IFS= read -r SPM_TYPED_SECRET_KEY
+	stty echo 2>/dev/null || true
+	printf '\n' >&2
+}
+
+secret_key_announce() {
+	local key="$1"
+	printf '\n'
+	if [ "$SPM_LANG" = "id" ]; then
+		printf '  %s\n\n' "$key"
+		printf 'TULIS INI SEKARANG, di kertas, dan simpan terpisah dari vault.\n'
+		printf 'Tanpa kunci ini, salinan vault Anda di mesin lain tidak bisa dibuka --\n'
+		printf 'kata sandi utama saja tidak cukup lagi.\n'
+		printf 'Salinan tersimpan di: %s\n' "$(core secret-key path "$VAULT_FILE")"
+	else
+		printf '  %s\n\n' "$key"
+		printf 'WRITE THIS DOWN NOW, on paper, and keep it somewhere other than the vault.\n'
+		printf 'Without it your vault cannot be opened on another machine -- the master\n'
+		printf 'password alone is no longer enough.\n'
+		printf 'A copy is stored at: %s\n' "$(core secret-key path "$VAULT_FILE")"
+	fi
+	printf '\n'
+}
+
+cmd_secret_key() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local op="${1:-status}"
+	local out rc=0
+
+	case "$op" in
+	status)
+		core secret-key status "$VAULT_FILE" | python3 -c '
+import json, sys
+state = json.load(sys.stdin)
+if state["bound"]:
+    print("This vault is bound to a Secret Key.")
+    if state["source"] == "env":
+        print("The key is being supplied by SPM_SECRET_KEY.")
+    elif state["source"] == "file":
+        print("The key is stored at: %s" % state["path"])
+    else:
+        print("This machine does not hold the key. Unlocking here needs")
+        print("SPM_SECRET_KEY, or run: secret-key import")
+else:
+    print("This vault has no Secret Key.")
+    print("A copy of the vault file is protected by the master password alone.")
+    print("Run: secret-key enable")
+'
+		;;
+	enable)
+		ensure_master_password_loaded
+		out="$(printf '%s' "$MASTER_PW" | core secret-key enable "$VAULT_FILE")" || rc=$?
+		[ "$rc" -eq 0 ] || die "Could not enable a Secret Key. The vault was not changed."
+		if [ "$SPM_LANG" = "id" ]; then
+			printf 'Secret Key dibuat dan vault dibungkus ulang.\n'
+		else
+			printf 'Secret Key created, and the vault key envelope rewrapped.\n'
+		fi
+		secret_key_announce "$out"
+		;;
+	rotate)
+		ensure_master_password_loaded
+		out="$(printf '%s' "$MASTER_PW" | core secret-key rotate "$VAULT_FILE")" || rc=$?
+		[ "$rc" -eq 0 ] || die "Could not rotate the Secret Key. The vault was not changed."
+		if [ "$SPM_LANG" = "id" ]; then
+			printf 'Secret Key diganti. Kunci lama tidak lagi membuka vault ini.\n'
+		else
+			printf 'Secret Key replaced. The previous one no longer opens this vault.\n'
+		fi
+		secret_key_announce "$out"
+		;;
+	disable)
+		ensure_master_password_loaded
+		printf '%s' "$MASTER_PW" | core secret-key disable "$VAULT_FILE" || \
+			die "Could not remove the Secret Key. The vault was not changed."
+		if [ "$SPM_LANG" = "id" ]; then
+			printf 'Secret Key dihapus. Kata sandi utama kini satu-satunya penghalang\n'
+			printf 'bagi siapa pun yang memegang salinan file vault ini.\n'
+		else
+			printf 'Secret Key removed. The master password is now the only barrier\n'
+			printf 'for anyone holding a copy of this vault file.\n'
+		fi
+		;;
+	show)
+		re_verify_master_password
+		ensure_master_password_loaded
+		out="$(printf '%s' "$MASTER_PW" | core secret-key show "$VAULT_FILE")" || \
+			die "No Secret Key is stored for this vault."
+		secret_key_announce "$out"
+		;;
+	import)
+		ensure_master_password_loaded
+		secret_key_read_typed
+		printf '%s\n%s' "$MASTER_PW" "$SPM_TYPED_SECRET_KEY" \
+			| core secret-key import "$VAULT_FILE" || rc=$?
+		SPM_TYPED_SECRET_KEY=""
+		unset SPM_TYPED_SECRET_KEY 2>/dev/null || true
+		[ "$rc" -eq 0 ] || die "That Secret Key was not stored."
+		if [ "$SPM_LANG" = "id" ]; then
+			printf 'Secret Key tersimpan di mesin ini.\n'
+		else
+			printf 'Secret Key stored on this machine.\n'
+		fi
+		;;
+	forget)
+		core secret-key forget "$VAULT_FILE" || die "No Secret Key is stored for this vault."
+		if [ "$SPM_LANG" = "id" ]; then
+			printf 'Salinan lokal dihapus. Vault tetap terikat pada Secret Key itu.\n'
+		else
+			printf 'The local copy is gone. The vault is still bound to that Secret Key.\n'
+		fi
+		;;
+	*)
+		die "Usage: $0 secret-key [status|enable|rotate|disable|show|import|forget]"
+		;;
+	esac
 }
 
 cmd_change_master() {
@@ -4202,6 +4357,7 @@ cmd_doctor() {
 	seal_n="$(printf '%s' "$seal_info" | cut -f3)"
 	seal_r="$(printf '%s' "$seal_info" | cut -f4)"
 	seal_p="$(printf '%s' "$seal_info" | cut -f5)"
+	seal_sk="$(printf '%s' "$seal_info" | cut -f6)"
 	case "$seal_backend" in
 	openssl)
 		if [ "$SPM_LANG" = "id" ]; then
@@ -4212,6 +4368,22 @@ cmd_doctor() {
 			printf "[✔] Vault sealed with AES-256-CTR and HMAC-SHA256.\n"
 			printf "    Key derivation %s n=%s r=%s p=%s.\n" \
 				"$seal_kdf" "$seal_n" "$seal_r" "$seal_p"
+		fi
+		# Stated either way. "No Secret Key" is the supported default and is
+		# not a fault, but a reader who cannot tell which state a vault is in
+		# cannot act on either.
+		if [ "$seal_sk" = "1" ]; then
+			if [ "$SPM_LANG" = "id" ]; then
+				printf "    Terikat pada Secret Key: salinan file vault saja tidak bisa diserang offline.\n"
+			else
+				printf "    Bound to a Secret Key: a copy of the vault file alone cannot be attacked offline.\n"
+			fi
+		else
+			if [ "$SPM_LANG" = "id" ]; then
+				printf "    Tanpa Secret Key: kekuatan kata sandi utama adalah satu-satunya penghalang bagi salinan file ini.\n"
+			else
+				printf "    No Secret Key: master password strength is the only barrier for a copy of this file.\n"
+			fi
 		fi
 		;;
 	gpg|legacy)
@@ -5660,6 +5832,7 @@ Perintah utama (CLI):
   ./spm.sh edit            → Edit vault mentah dengan editor teks
   ./spm.sh delete <id>     → Hapus entry password
   ./spm.sh change-master   → Ganti kata sandi utama (re-encrypt vault)
+  ./spm.sh secret-key      → Secret Key: status|enable|rotate|disable|show|import|forget
   ./spm.sh portable [nama] → Buat bundle portable (script + vault + file pemulihan)
   ./spm.sh save [nama]     → Buat bundle portable lalu hapus vault lokal
   ./spm.sh restore         → Pindahkan vault bundle ke lokasi default (~/.spm_vault.gpg)
@@ -5777,6 +5950,7 @@ Main commands (CLI):
   ./spm.sh edit            → Edit raw vault with your editor
   ./spm.sh delete <id>     → Delete a password entry
   ./spm.sh change-master   → Change master password (re-encrypt vault)
+  ./spm.sh secret-key      → Secret Key: status|enable|rotate|disable|show|import|forget
   ./spm.sh portable [name] → Create portable bundle (script + vault + recovery files)
   ./spm.sh save [name]     → Create portable bundle and wipe local vault
   ./spm.sh restore         → Move bundle vault back to default location (~/.spm_vault.gpg)
@@ -7896,6 +8070,7 @@ main() {
 		edit)             cmd_edit "$@" ;;
 		delete)           cmd_delete "$@" ;;
 		change-master)    cmd_change_master "$@" ;;
+		secret-key)       cmd_secret_key "$@" ;;
 		portable)         cmd_portable "$@" ;;
 		save)             cmd_save "$@" ;;
 		restore)          cmd_restore "$@" ;;

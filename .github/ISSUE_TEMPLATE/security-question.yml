@@ -5,7 +5,7 @@ labels: [security]
 body:
   - type: markdown
     attributes:
-      value: "Do not disclose a vulnerability here. Use the repository Security tab or security@sansyourways.xyz for private reports."
+      value: "Do not disclose a vulnerability here. Use the repository Security tab or sans@silentprotocol.top for private reports."
   - type: textarea
     id: topic
     attributes:

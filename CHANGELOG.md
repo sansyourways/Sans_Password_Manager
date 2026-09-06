@@ -7,6 +7,66 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.10.0] - 2026-09-06
+
+A Secret Key, so a stolen copy of the vault file has nothing left in it to
+guess at, and the scrypt cost raised now that the header has proved it can be.
+
+### Added
+- **A Secret Key.** 128 bits generated once per vault, stored under the data
+  directory at mode 0600 rather than beside the vault, and mixed into the KEK
+  derivation alongside the master password. A copy of the vault file -- on a
+  sync target, in a bundle, in a backup -- stops being attackable offline: a
+  weak password and a strong one become equally unbreakable to whoever holds
+  only the file. Off by default, enabled per vault.
+- `spm secret-key [status|enable|rotate|disable|show|import|forget]`. Enabling
+  is a rewrap of the key envelope, so it costs what a password change costs
+  rather than re-encrypting the vault. `import` proves the key against the
+  vault before storing it, because a well-formed key that is not this vault's
+  would store cleanly and turn every later unlock into a wrong-password report.
+- One header field, `sk=1`, on the line that already carries the derivation
+  parameters. Absent means no, which is what every vault written before this
+  says by saying nothing, so old vaults keep opening and the format version
+  does not move.
+- The `secret-key` event kind, with reasons for enabled, disabled, rotated,
+  imported, missing and bad-secret.
+- `doctor` reports the binding either way, and audits the key file's mode.
+  `seal-info` gained a sixth field, appended so a reader cutting the first five
+  keeps working.
+
+### Changed
+- **scrypt raised to n=2\*\*16** -- 64 MiB and ~305 ms against 32 MiB and
+  ~124 ms, dropping an offline guesser from about 8 attempts per second per
+  core to 3. This is what naming the KDF in the header was for: a vault written
+  at n=32768 keeps opening and moves up on its next write, with no format
+  change and no new vault key. 2\*\*17 was measured (128 MiB, ~547 ms) and
+  declined, because scrypt's cost is memory and SPM runs on phones under
+  Termux.
+- The scrypt known-answer test now pins n=2\*\*15 for the cross-platform
+  vector and asserts the shipped cost separately. Tying the vector to `KDF_N`
+  meant regenerating it from the very constant it exists to check.
+- Security reports move to `sans@silentprotocol.top`.
+
+### Security
+- A missing Secret Key is a state of its own, never a wrong password. The core
+  exits 3 for it; the CLI, the Dashboard and `doctor` each say what is actually
+  missing, and the Dashboard does not spend one of the five sign-in attempts on
+  it -- retyping a password that was already correct cannot help.
+- Stripping `sk=1` does not downgrade a vault to one that opens. The derivation
+  differs, the envelope's tag rejects it, and the reader says the secret does
+  not open this vault.
+- An empty Secret Key file is damage, not absence. Read as absence it would
+  send a bound vault down the password-only path.
+- The seal salt stays at 8 bytes, which is the opposite of what was planned.
+  `openssl enc -S` answers "hex string is too long, ignoring excess", and a
+  16-byte salt produces ciphertext byte-identical to its own first 8 -- so
+  widening it would have reached the MAC key and nothing else while the format
+  claimed otherwise. The measurement is now beside the constant.
+- Losing the Secret Key is not a lockout: recovery files and Shamir shares both
+  seal the vault key, and neither derives anything from the master password. An
+  enrolled security key is likewise a second door the Secret Key does not lock,
+  which the manual says plainly rather than leaving implied.
+
 ## [4.9.0] - 2026-09-05
 
 Flags in the language picker, and the locale generator fixed for the first

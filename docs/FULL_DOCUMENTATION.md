@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **4.9.0**
+Current release: **4.10.0**
 
 ---
 
@@ -47,6 +47,7 @@ Current release: **4.9.0**
   - [Doctor / Health Check](#doctor--health-check)
 - [Hidden entries](#hidden-entries)
 - [Security keys](#security-keys)
+- [Secret Key](#secret-key)
 - [How the vault is sealed](#how-the-vault-is-sealed)
 - [Languages](#languages)
 - [Split recovery](#split-recovery)
@@ -279,7 +280,7 @@ filters and result count visible](docs/screenshots/web-v2.13.0/31-passwords-filt
 
 ### Encryption
 - **Vault:** AES-256-CTR, authenticated with HMAC-SHA256 (encrypt-then-MAC)
-- **Master password:** scrypt, n=32768, r=8, p=1, recorded in the vault header
+- **Master password:** scrypt, n=65536, r=8, p=1 (64 MiB), recorded in the vault header
 - **Vault key:** 256 random bits, sealed under the master password and not stretched
 - **Recovery:** RSA-2048 private/public key
 - **Notes:** Base64 + encrypted
@@ -344,7 +345,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 4.9.0
+bash install.sh --version 4.10.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -379,7 +380,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v4.9.0.zip \
+gh attestation verify Sans_Password_Manager_v4.10.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -395,9 +396,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v4.9.0
+git checkout v4.10.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v4.9.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v4.10.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -410,7 +411,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=4.9.0
+version=4.10.0
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -427,7 +428,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v4.9.0/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v4.10.0/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -449,7 +450,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 4.9.0 at /home/you/.local/bin/spm
+Installed SPM 4.10.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -1158,6 +1159,103 @@ It opens the vault on its own. That is the whole point of it and the whole cost
 of it. Losing it is not a lockout as long as you still know your master
 password; a key someone else has is a vault someone else has.
 
+## Secret Key
+
+A Secret Key is 128 random bits, generated once, kept off the vault file, and
+mixed into the key derivation alongside your master password. It is off by
+default; you turn it on per vault.
+
+```bash
+./spm.sh secret-key            # status: bound or not, and where the key is
+./spm.sh secret-key enable     # generate one and rewrap the vault under it
+./spm.sh secret-key show       # print it again (asks for the master password)
+./spm.sh secret-key import     # store it on a second machine
+./spm.sh secret-key rotate     # replace it; the old one stops working
+./spm.sh secret-key forget     # drop this machine's copy, vault stays bound
+./spm.sh secret-key disable    # go back to the master password alone
+```
+
+### What it is for
+
+Your vault legitimately leaves this machine. `sync` pushes it to a directory, a
+host over rsync, or an rclone remote. `save` and `portable` write it into a
+bundle. Every write leaves a `.bak` beside it and a snapshot in your history.
+If you run the Dashboard on a domain, the file is on a machine reachable from
+the internet.
+
+Any one of those copies, in the wrong hands, is a file someone can attack
+offline for as long as they like -- and the only thing standing in their way is
+how good your master password is. With a Secret Key there is nothing left in
+the file to guess at. A weak password and a strong one become equally
+unbreakable to whoever holds only the copy.
+
+### What it is not for
+
+It is no defence against a compromise of the machine that holds both. Anything
+that can read your vault can read the Secret Key beside it in the data
+directory -- malware, a stolen unlocked laptop, an attacker who reaches code
+execution through the Dashboard. It protects copies in transit and at rest
+elsewhere. It does not protect the machine they came from.
+
+### Where the key is kept
+
+Not beside the vault. `.recovery` and `.hardware` sit next to the vault file
+because they are useless to a thief on their own; a Secret Key is the opposite,
+and its whole value is that it does not travel with the copies. It lives under
+your data directory instead:
+
+```text
+~/.local/share/spm/secret-keys/<scope id>     mode 0600
+```
+
+Nothing that copies a vault reaches in there. The sync transports move one
+file. The bundle exporter writes the vault, not your data directory. `doctor`
+audits the file's permissions along with everything else sensitive.
+
+The binding is to the vault's path, so moving the vault means the stored key is
+not found at the new location. That is what `secret-key import` is for, and it
+is why `enable` prints the key and tells you to write it down: **the file is a
+convenience, the paper copy is the one that matters.**
+
+`SPM_SECRET_KEY` supplies it from the environment instead, for headless runs
+and for a machine that has the vault but not yet the key.
+
+### Losing it is not a lockout
+
+Recovery does not go through the master password at all. The recovery file
+seals the **vault key**, and split recovery reconstructs the **vault key**;
+neither derives anything from what you type. So a recovery file, or a threshold
+of Shamir shares, still opens a vault bound to a Secret Key you no longer have,
+and lets you rewrap it under a new password and a fresh key.
+
+An enrolled security key is the same: it wraps the vault key directly, so a
+security-key unlock does not need the Secret Key either. Worth knowing plainly
+-- enrolling a key creates a second door the Secret Key does not lock. The
+`.hardware` file lives beside the vault, so a copy of the vault alone still
+does not carry it.
+
+### How the vault records it
+
+One field on the header line that already carries the derivation parameters:
+
+```text
+KDF scrypt n=65536 r=8 p=1 salt=<base64> sk=1
+```
+
+Absent means no, which is what every vault written before 4.10.0 says by saying
+nothing -- so old vaults keep opening and nothing about the format version
+changes. The field is not authenticated, and like the cost parameters it fails
+closed: strip `sk=1` and the reader derives a different key, the envelope's tag
+rejects it, and you are told the secret does not open this vault. There is no
+downgrade to a weaker vault that still opens.
+
+### When it is missing
+
+A vault bound to a key this machine does not hold is a named state, never a
+wrong password. The CLI, the Dashboard and `doctor` all say so, and the
+Dashboard does not count it against the sign-in lockout -- retyping a password
+that was already correct cannot help.
+
 ## How the vault is sealed
 
 From 4.0.0 a vault is encrypted with **AES-256-CTR** and authenticated with
@@ -1168,7 +1266,7 @@ The file is still one file, with the same shape:
 
 ```text
 SPM-VAULT-AEAD1
-KDF scrypt n=32768 r=8 p=1 salt=<base64>
+KDF scrypt n=65536 r=8 p=1 salt=<base64>
 KEY <base64: the vault key, sealed under the master password>
 DATA
 <base64: the vault, sealed under the vault key>
@@ -1182,15 +1280,26 @@ SHA512 iterations each — which is right for a password someone can guess and
 pure waste for a value that is already uniformly random. Stretching now happens
 once, where the guessable secret is:
 
-| | before 4.0.0 | 4.0.0 |
-|---|---|---|
-| master password | SHA512 × 65,011,712 | scrypt, n=32768, r=8, p=1 (32 MiB) |
-| vault key → data | SHA512 × 65,011,712 | none needed |
-| cipher | AES-256 | AES-256-CTR |
-| authentication | none | HMAC-SHA256, encrypt-then-MAC |
+| | before 4.0.0 | 4.0.0 | 4.10.0 |
+|---|---|---|---|
+| master password | SHA512 × 65,011,712 | scrypt, n=32768, r=8, p=1 (32 MiB) | scrypt, n=65536, r=8, p=1 (64 MiB) |
+| vault key → data | SHA512 × 65,011,712 | none needed | none needed |
+| cipher | AES-256 | AES-256-CTR | AES-256-CTR |
+| authentication | none | HMAC-SHA256, encrypt-then-MAC | HMAC-SHA256, encrypt-then-MAC |
+| offline guessing | — | ~8 per second per core | ~3 per second per core |
 
-Measured on a 200-record vault, a cold read went from 663 ms to 168 ms, and a
-read with the vault key already held from 248 ms to 11 ms.
+Measured on a 200-record vault, a cold read went from 663 ms to 168 ms at
+4.0.0, and a read with the vault key already held from 248 ms to 11 ms.
+
+4.10.0 spends some of that back deliberately: doubling scrypt's memory adds
+roughly 180 ms to a cold read and costs an offline guesser rather more than it
+costs you, since you pay it once per unlock and they pay it once per attempt.
+Nothing is stranded by the change -- the header carries the parameters a vault
+was written with, so a vault written at n=32768 keeps opening and moves up on
+its next write, without a format change and without a new vault key. 2**17 was
+measured (128 MiB, ~547 ms) and not taken: scrypt's cost is memory, and SPM
+runs on phones under Termux where a vault that will not open on the device it
+lives on is worse than a slower guesser.
 
 The `KDF` line records the derivation **by name and by parameters**, and the
 unwrap uses the vault's own numbers rather than the running build's constants.
@@ -1227,7 +1336,7 @@ before the upgrade still opens under the same master password.
 
 ```text
 vault_cipher  ok    sealed with AES-256-CTR and HMAC-SHA256; key derivation
-                    scrypt n=32768 r=8 p=1
+                    scrypt n=65536 r=8 p=1
 ```
 
 **Do not downgrade to 3.15.0 or earlier after a vault has been upgraded.** Those
@@ -1840,7 +1949,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **4.9.0**
+Version: **4.10.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down

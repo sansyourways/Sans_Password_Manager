@@ -73,7 +73,7 @@ If you discover a potential security issue, follow these rules:
   assess.
 
 ### 📩 **Report via Email (only):**
-**security@sansyourways.xyz**
+**sans@silentprotocol.top**
 
 You should receive acknowledgment within **3 business days**.
 
@@ -172,7 +172,7 @@ obscurity is not part of the protection.
 ---
 
 ## 8. Contact Information
-Security issues: **security@sansyourways.xyz**
+Security issues: **sans@silentprotocol.top**
 General support: **support@sansyourways.xyz**
 Trademark and partnership questions: **business@sansyourways.xyz**
 
