@@ -7,6 +7,8 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.10.0] - 2026-09-06
+
 A Secret Key, so a stolen copy of the vault file has nothing left in it to
 guess at, and the scrypt cost raised now that the header has proved it can be.
 
