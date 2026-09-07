@@ -41,7 +41,7 @@ import urllib.request
 # without it -- quietly un-hiding an entry someone deliberately hid. Reading a
 # format-5 vault still works on 4.1.0; stamp_version is what stops it writing
 # one back.
-VAULT_FORMAT_VERSION = 5
+VAULT_FORMAT_VERSION = 6
 
 CONTAINER_MAGIC = b"SPM-VAULT-3"
 
@@ -826,6 +826,345 @@ def decode_attrs(column):
     return folder[:ATTRS_FOLDER_MAX], fields, payload.get("hidden") is True
 
 
+# ----- record sanitising -----------------------------------------------------
+# Every character str.splitlines() honours, which is eleven and not the three
+# people remember. A value carrying one of these is written as one record and
+# read back as two, so the tail becomes an orphan fragment no surface displays.
+#
+# This constant is here because there were two implementations of it and no
+# definition: `sanitize_field` in the shell collapses them with tr and sed,
+# `_vf` in the dashboard collapses them with a Python loop, and the pair of
+# them agreed only because someone kept them in step by hand. RECORD_BREAKS
+# below is a third list, for detection rather than prevention, and it omits
+# the structural three on purpose. A fourth writer -- typed records -- is what
+# made the absence of one definition worth fixing rather than noting.
+#
+# The shell keeps its own tr/sed rather than calling into here, because this
+# runs per field and a Python process per field is not free. The regression
+# suite feeds all eleven through both and fails if they disagree, which is the
+# guarantee that matters; sharing the code was never the point.
+VAULT_BREAK_CHARS = ("\t\r\n\v\f\x1c\x1d\x1e\x85"
+                     "\u2028\u2029")
+
+
+def sanitize_field(value):
+    """A value safe to write into one tab-separated, line-based record."""
+    text = "" if value is None else str(value)
+    for ch in VAULT_BREAK_CHARS:
+        text = text.replace(ch, " ")
+    return text
+
+
+# ----- typed records ---------------------------------------------------------
+# Seven record types were asked for at once -- API tokens, database
+# credentials, cards, identities, licences, Wi-Fi and servers -- and the way
+# this repository had added a record type before was a family of shell
+# commands, a set of web routes, a nav entry and a dashboard tile, per type.
+# `cmd_notes_add` through `cmd_notes_delete` is about 200 lines of shell for
+# one type; seven of those is 1,400 lines whose only difference is which
+# fields they prompt for, and seven more chances for the CLI and the Dashboard
+# to disagree about a record. 4.1.0 is what that disagreement costs: five
+# copies of the column order, all twenty export formats silently dropping
+# folders and custom fields, and no test failing because SPM was reading back
+# exactly what SPM wrote.
+#
+# So a type is data here, not code. A schema names its fields and says which
+# of them hold secrets; every surface -- add, list, view, edit, export,
+# redaction, the Security page -- reads the schema instead of knowing the
+# type. Adding an eighth type is a dict entry and its translations.
+#
+# The row is deliberately shaped like NOTE:
+#
+#     REC:<type>  <id>  <label>  <payload-b64>  <created>  <attrs>
+#
+# Six tab-separated columns, with the secret-bearing payload in field 3 --
+# where NOTE keeps its body and a password row keeps its password. That is not
+# cosmetic. `_describe_record` documents that it never reads field 3 because
+# every shape SPM writes keeps the secret there, and `scan_broken_records`
+# leans on the same column count. A seventh column, or a payload in field 2,
+# would have made both of those quietly wrong for the new types only.
+#
+# The type travels in the tag rather than inside the payload so that counting
+# records, listing one type, and describing a damaged row never require
+# decoding base64 -- and so a vault stays greppable by someone holding nothing
+# but the plaintext and `grep`.
+
+RECORD_TAG_PREFIX = "REC:"
+RECORD_TYPE_MAX = 32
+RECORD_PAYLOAD_MAX = 65536
+RECORD_VALUE_MAX = 8192
+
+# What a field is, rather than how it is drawn. "secret" is the only kind that
+# carries meaning below the interface: it decides redaction, what an export
+# masks, and what never reaches an event. Everything else is presentation.
+FIELD_PLAIN = "plain"
+FIELD_SECRET = "secret"
+
+# (name, kind, widget, required)
+RECORD_SCHEMAS = {
+    "api-token": {
+        "label": "API Token",
+        "icon": "token",
+        "fields": (
+            ("service", FIELD_PLAIN, "line", True),
+            ("token", FIELD_SECRET, "line", True),
+            ("username", FIELD_PLAIN, "line", False),
+            ("environment", FIELD_PLAIN, "line", False),
+            ("expires", FIELD_PLAIN, "date", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "db-credential": {
+        "label": "Database Credential",
+        "icon": "database",
+        "fields": (
+            ("engine", FIELD_PLAIN, "line", False),
+            ("host", FIELD_PLAIN, "line", True),
+            ("port", FIELD_PLAIN, "number", False),
+            ("database", FIELD_PLAIN, "line", False),
+            ("username", FIELD_PLAIN, "line", True),
+            ("password", FIELD_SECRET, "line", True),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "credit-card": {
+        "label": "Credit Card",
+        "icon": "card",
+        "fields": (
+            ("cardholder", FIELD_PLAIN, "line", True),
+            ("number", FIELD_SECRET, "line", True),
+            ("brand", FIELD_PLAIN, "line", False),
+            ("expiry", FIELD_PLAIN, "month", True),
+            ("cvv", FIELD_SECRET, "line", False),
+            ("pin", FIELD_SECRET, "line", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "identity": {
+        "label": "Identity Document",
+        "icon": "identity",
+        "fields": (
+            ("full_name", FIELD_PLAIN, "line", True),
+            ("document_type", FIELD_PLAIN, "line", False),
+            ("document_number", FIELD_SECRET, "line", True),
+            ("nationality", FIELD_PLAIN, "line", False),
+            ("issued", FIELD_PLAIN, "date", False),
+            ("expires", FIELD_PLAIN, "date", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "software-license": {
+        "label": "Software Licence",
+        "icon": "licence",
+        "fields": (
+            ("product", FIELD_PLAIN, "line", True),
+            ("license_key", FIELD_SECRET, "line", True),
+            ("version", FIELD_PLAIN, "line", False),
+            ("licensed_to", FIELD_PLAIN, "line", False),
+            ("seats", FIELD_PLAIN, "number", False),
+            ("purchased", FIELD_PLAIN, "date", False),
+            ("expires", FIELD_PLAIN, "date", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "wifi": {
+        "label": "Wi-Fi Network",
+        "icon": "wifi",
+        "fields": (
+            ("ssid", FIELD_PLAIN, "line", True),
+            ("password", FIELD_SECRET, "line", True),
+            ("security", FIELD_PLAIN, "line", False),
+            ("hidden_network", FIELD_PLAIN, "line", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "server": {
+        "label": "Server",
+        "icon": "server",
+        "fields": (
+            ("hostname", FIELD_PLAIN, "line", True),
+            ("address", FIELD_PLAIN, "line", False),
+            ("port", FIELD_PLAIN, "number", False),
+            ("username", FIELD_PLAIN, "line", True),
+            ("password", FIELD_SECRET, "line", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+}
+
+# Ordered, because a dict's order is an implementation detail and this decides
+# the order of a nav menu, a `--type` help listing and an export's rows. Sorted
+# rather than hand-listed so a new schema cannot be added to the registry and
+# forgotten here.
+RECORD_TYPES = tuple(sorted(RECORD_SCHEMAS))
+
+
+def record_tag(record_type):
+    """The row tag for a type. Raises on a type this build does not define."""
+    record_schema(record_type)
+    return RECORD_TAG_PREFIX + record_type
+
+
+def type_from_tag(tag):
+    """The type a row tag names, or "" when the tag is not a typed record.
+
+    Does not check the type against the registry: a vault written by a newer
+    SPM may hold a type this build has no schema for, and the honest answer is
+    its name rather than a refusal. Callers that need a schema ask for one.
+    """
+    if not tag.startswith(RECORD_TAG_PREFIX):
+        return ""
+    return tag[len(RECORD_TAG_PREFIX):]
+
+
+def record_schema(record_type):
+    """The schema for a type, or VaultError naming what is available."""
+    schema = RECORD_SCHEMAS.get(record_type)
+    if schema is None:
+        raise VaultError("unknown record type %r; known types are %s"
+                         % (record_type, ", ".join(RECORD_TYPES)))
+    return schema
+
+
+def record_fields(record_type):
+    """The ordered (name, kind, widget, required) tuples for a type."""
+    return record_schema(record_type)["fields"]
+
+
+def record_secret_fields(record_type):
+    """The field names that hold secrets, as a frozenset.
+
+    One definition, asked by redaction, by exports and by the event log. A
+    surface that decides for itself which of its fields are sensitive is the
+    shape of defect 4.1.0 found, and a secret is a worse thing to get wrong
+    than a folder.
+    """
+    return frozenset(name for name, kind, _w, _r in record_fields(record_type)
+                     if kind == FIELD_SECRET)
+
+
+def encode_record_payload(record_type, values):
+    """The payload column for a typed record.
+
+    Validates against the schema rather than trusting the caller: an unknown
+    field name is a typo that would otherwise be written, stored and never
+    displayed, because every surface renders the schema's fields and not the
+    payload's keys.
+    """
+    schema_fields = record_fields(record_type)
+    known = {name for name, _k, _w, _r in schema_fields}
+    values = {str(k): ("" if v is None else str(v)) for k, v in (values or {}).items()}
+    unknown = sorted(set(values) - known)
+    if unknown:
+        raise VaultError("record type %r has no field %s"
+                         % (record_type, ", ".join(repr(u) for u in unknown)))
+    for name, _kind, _widget, required in schema_fields:
+        value = values.get(name, "")
+        if required and not value.strip():
+            raise VaultError("record type %r requires a value for %r"
+                             % (record_type, name))
+        if len(value) > RECORD_VALUE_MAX:
+            raise VaultError("field %r is longer than %d characters"
+                             % (name, RECORD_VALUE_MAX))
+    # Written in schema order and skipping empties, so two records holding the
+    # same values encode to the same bytes whatever order the caller built its
+    # dict in. An export that round-trips must not change the vault.
+    payload = {name: values[name]
+               for name, _k, _w, _r in schema_fields
+               if values.get(name, "")}
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    encoded = base64.b64encode(raw.encode("utf-8")).decode("ascii")
+    if len(encoded) > RECORD_PAYLOAD_MAX:
+        raise VaultError("this record is larger than %d bytes encoded"
+                         % RECORD_PAYLOAD_MAX)
+    return encoded
+
+
+def decode_record_payload(record_type, column):
+    """{field: value} for a payload column. Never raises.
+
+    Same rule as decode_attrs: a row this build cannot fully read is still a
+    row the user should see. Refusing here would let one damaged record hide
+    every record of its type.
+
+    Unknown keys are dropped rather than kept. They can only come from a newer
+    SPM, and keeping one would let this build re-encode a record with a field
+    it cannot render -- which is the silent downgrade stamp_version exists to
+    prevent, arriving by another door.
+    """
+    try:
+        known = {name for name, _k, _w, _r in record_fields(record_type)}
+    except VaultError:
+        return {}
+    column = (column or "").strip()
+    if not column or column == "-":
+        return {}
+    try:
+        payload = json.loads(base64.b64decode(column, validate=True)
+                             .decode("utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {k: v for k, v in payload.items()
+            if k in known and isinstance(v, str)}
+
+
+SECRET_MASK = "********"
+
+
+def redact_record(record_type, values):
+    """A copy of `values` with every secret field replaced by a fixed mask.
+
+    A fixed mask rather than one sized to the value: a mask whose length
+    tracks the secret leaks the secret's length, which for a CVV or a PIN is
+    most of what there is to know.
+    """
+    secrets = record_secret_fields(record_type)
+    return {k: (SECRET_MASK if k in secrets and v else v)
+            for k, v in (values or {}).items()}
+
+
+
+def build_record_row(record_type, record_id, label, values, created,
+                     folder="", fields=None, hidden=False):
+    """One tab-separated typed-record row, sanitised and schema-checked."""
+    payload = encode_record_payload(record_type, values)
+    # A custom field may not take a schema field's name. Both cross an export
+    # in the same `fields` column and are told apart on the way back by
+    # whether the name is in the schema -- so a wifi record carrying a custom
+    # field called "password" would come back with one of the two silently
+    # gone. Refusing here is the only place that can still say which was meant.
+    shadowed = sorted({str(n).strip() for n, _v in (fields or [])}
+                      & {f for f, _k, _w, _r in record_fields(record_type)})
+    if shadowed:
+        raise VaultError(
+            "a custom field may not reuse the field name %s on a %s record"
+            % (", ".join(repr(name) for name in shadowed), record_type))
+    attrs = encode_attrs(folder=folder, fields=fields, hidden=hidden)
+    return "\t".join((record_tag(record_type), str(record_id),
+                      sanitize_field(label), payload, str(created),
+                      attrs or "-"))
+
+
+def parse_record_row(line):
+    """(type, id, label, values, created, folder, fields, hidden) or None.
+
+    None for any line that is not a typed record, so a caller can walk a whole
+    vault and let this decide.
+    """
+    parts = line.split("\t")
+    if len(parts) < 5:
+        return None
+    record_type = type_from_tag(parts[0])
+    if not record_type or record_type not in RECORD_SCHEMAS:
+        return None
+    values = decode_record_payload(record_type, parts[3])
+    folder, custom, hidden = decode_attrs(parts[5] if len(parts) > 5 else "")
+    return (record_type, parts[1], parts[2], values, parts[4],
+            folder, custom, hidden)
+
+
 # The column order every export writes and every headerless or positional
 # reader maps against. One ordered definition, because the places that had
 # their own each stopped at a different column: the SQL writer named eight
@@ -854,14 +1193,37 @@ def export_row_from_values(values):
 # field, on all twenty formats, silently -- which is exactly the disagreement
 # between two surfaces that a shared core exists to make impossible.
 
+def json_line_safe(value):
+    """json.dumps for a value that will be written on one line.
+
+    json.dumps escapes every C0 control -- newline, tab, the record and group
+    separators -- but leaves U+0085, U+2028 and U+2029 as literal characters,
+    because they are legal inside a JSON string. They are also three of the
+    eleven characters str.splitlines() honours, and the exports that carry
+    this output are line-based: ndjson and jsonl put one record on one line,
+    and every reader here splits on lines before parsing.
+
+    So a note holding U+2028 produced valid JSON that arrived as two invalid
+    halves. Escaping them keeps the JSON identical in meaning -- json.loads
+    returns exactly the same string -- while making it safe to put on a line.
+
+    The dashboard already did this for the same three characters when
+    embedding JSON in a <script>; the reason is the same and the definition
+    belongs in one place.
+    """
+    return (json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+            .replace(" ", "\\u2028")
+            .replace(" ", "\\u2029")
+            .replace("\x85", "\\u0085"))
+
+
 def attrs_export_columns(column):
     """The folder and fields columns an export carries for one record."""
     folder, fields, hidden = decode_attrs(column)
     return {
         "folder": folder,
-        "fields": json.dumps(
-            [{"name": n, "value": v} for n, v in fields],
-            separators=(",", ":"), ensure_ascii=False) if fields else "",
+        "fields": json_line_safe(
+            [{"name": n, "value": v} for n, v in fields]) if fields else "",
         "hidden": "1" if hidden else "",
     }
 
@@ -3064,6 +3426,73 @@ def security_report(plaintext, rotation_days=365, check_breaches=False,
     return report
 
 
+# ----- typed records across an export ----------------------------------------
+# A record that cannot leave is a record you do not own, and this project has
+# already paid for finding that out late: until 4.1.0 every one of the twenty
+# export formats dropped folders and custom fields silently, because the CLI
+# and the dashboard each had their own idea of the column order. So the
+# crossing is defined once, here, and both surfaces call it.
+#
+# No new column. A typed record's fields ride the `fields` column that custom
+# fields already use -- it is JSON name/value pairs, meant to be read in a
+# spreadsheet -- and the `type` column, which every export has always carried,
+# is what says whether to read them back as schema fields or as custom ones.
+# Adding a thirteenth column would have broken every headerless and positional
+# reader, which is exactly the class of defect EXPORT_FIELDNAMES exists to
+# prevent.
+
+def record_export_row(record_type, record_id, label, values, created,
+                      folder="", custom=None, hidden=False):
+    """One export row for a typed record.
+
+    Schema fields and custom fields are merged into `fields` in that order.
+    They can be told apart again on the way back because a schema field's name
+    is in the schema and a custom one's is not, which is why build_record_row
+    refuses a custom field that shadows a schema field name.
+    """
+    merged = [{"name": name, "value": values[name]}
+              for name, _k, _w, _r in record_fields(record_type)
+              if values.get(name)]
+    merged += [{"name": n, "value": v} for n, v in (custom or [])]
+    return {
+        "type": record_type,
+        "id": str(record_id),
+        "label": label,
+        "username": "",
+        "secret": "",
+        "notes": "",
+        "created": created,
+        "extra": "",
+        "url": "",
+        "folder": folder,
+        "fields": json_line_safe(merged) if merged else "",
+        "hidden": "1" if hidden else "",
+    }
+
+
+def record_from_export_row(row):
+    """(type, values, custom) for an export row, or None if it is not typed.
+
+    Tolerant in the same way attrs_from_export_row is, and for the same
+    reason: an import is where rows arrive from software that never heard of
+    this format. A value that does not belong to the schema becomes a custom
+    field rather than being dropped, because a name this build does not know
+    may be a field a newer SPM does.
+    """
+    record_type = str(row.get("type", "") or "").strip()
+    if record_type not in RECORD_SCHEMAS:
+        return None
+    _folder, pairs, _hidden = decode_attrs(attrs_from_export_row(row))
+    known = {name for name, _k, _w, _r in record_fields(record_type)}
+    values, custom = {}, []
+    for name, value in pairs:
+        if name in known:
+            values[name] = value
+        else:
+            custom.append((name, value))
+    return record_type, values, custom
+
+
 # ----- diagnostics -----------------------------------------------------------
 
 # Characters that splitlines() honours but a TAB-delimited, line-based record
@@ -3096,6 +3525,15 @@ def _describe_record(line):
                 parts[2] if len(parts) > 2 else "")
     if tag.isdigit():
         return "PASSWORD", tag, (parts[1] if len(parts) > 1 else "")
+    typed = type_from_tag(tag)
+    if typed:
+        # The type comes from the tag, so a damaged typed record is still
+        # described by what it is. Reading it out of the payload would mean
+        # decoding field 3, which is the one field this function must not
+        # touch.
+        return (typed.upper(),
+                parts[1] if len(parts) > 1 else "?",
+                parts[2] if len(parts) > 2 else "")
     return tag or "(unknown)", "?", ""
 
 
@@ -3151,7 +3589,8 @@ def looks_like_vault(plaintext):
     """
     for line in plaintext.split("\n"):
         tag = line.split("\t", 1)[0]
-        if tag.startswith("META_") or tag in _RECORD_TAGS or tag.isdigit():
+        if (tag.startswith("META_") or tag in _RECORD_TAGS or tag.isdigit()
+                or tag.startswith(RECORD_TAG_PREFIX)):
             return True
     return False
 
@@ -3159,9 +3598,17 @@ def looks_like_vault(plaintext):
 def vault_counts(plaintext):
     """Record counts, duplicate password ids and empty password fields."""
     counts = {"passwords": 0, "notes": 0, "passphrases": 0,
-              "backup_codes": 0, "authenticators": 0}
+              "backup_codes": 0, "authenticators": 0, "records": 0}
     by_tag = {"NOTE": "notes", "PASSPHRASE": "passphrases",
               "BACKUP_CODE": "backup_codes", "AUTH": "authenticators"}
+    # Per-type counts share the dict rather than becoming a fourth return
+    # value, and every value in it stays an int. A caller that asked for
+    # counts["passwords"] before still gets a number, and one that wants a
+    # breakdown asks for counts["type:wifi"]. A nested dict here would have
+    # made `counts` a mixed bag whose every consumer needs to know which keys
+    # are numbers.
+    for known in RECORD_TYPES:
+        counts["type:" + known] = 0
     seen, duplicates, empty = {}, [], 0
     for line in plaintext.splitlines():
         if not line or line.startswith("#"):
@@ -3170,6 +3617,14 @@ def vault_counts(plaintext):
         tag = parts[0]
         if tag in by_tag:
             counts[by_tag[tag]] += 1
+        elif tag.startswith(RECORD_TAG_PREFIX):
+            counts["records"] += 1
+            # Counted even when this build has no schema for it, because a
+            # vault written by a newer SPM holding six records this one cannot
+            # render still holds six records, and reporting five would be a
+            # lie told by a diagnostic.
+            key = "type:" + type_from_tag(tag)
+            counts[key] = counts.get(key, 0) + 1
         elif tag.isdigit():
             counts["passwords"] += 1
             seen[tag] = seen.get(tag, 0) + 1
@@ -3370,6 +3825,43 @@ def _secrets(count):
     return fields[:count]
 
 
+def _b64(text):
+    """base64 of a value, for the line-based shell interface."""
+    return base64.b64encode(("" if text is None else str(text))
+                            .encode("utf-8")).decode("ascii")
+
+
+def _flag_value(args, flag, default=""):
+    """The argument after `flag`, or `default` when it is absent."""
+    if flag in args:
+        index = args.index(flag) + 1
+        if index < len(args):
+            return args[index]
+    return default
+
+
+def _record_values_in():
+    """{field: value} from "field<TAB>base64(value)" lines on stdin.
+
+    A malformed line is refused rather than skipped. Skipping would drop a
+    field the user typed and report success, which for a record they will
+    later rely on is the worst of the available outcomes.
+    """
+    values = {}
+    for line in sys.stdin.read().split("\n"):
+        if not line.strip():
+            continue
+        if "\t" not in line:
+            raise VaultError("malformed field line: expected NAME<TAB>base64")
+        name, encoded = line.split("\t", 1)
+        try:
+            values[name] = base64.b64decode(encoded.strip(),
+                                            validate=True).decode("utf-8")
+        except Exception:
+            raise VaultError("field %r did not carry valid base64" % (name,))
+    return values
+
+
 def main(argv):
     if len(argv) < 2:
         sys.stderr.write("usage: spm_core.py <command> [args]\n")
@@ -3410,6 +3902,74 @@ def main(argv):
             if not key:
                 raise VaultError("a vault key is required")
             rewrap_with_key(argv[2], key, new)
+        elif command == "record":
+            # record <op> [args] -- how the shell reads a schema. The
+            # dashboard imports this module and calls the functions directly,
+            # so nothing here exists for its benefit.
+            #
+            # Output is tab-separated rather than JSON because the only caller
+            # is a POSIX shell, and a shell that has to parse JSON grows
+            # either a python dependency per field or a regex that is wrong
+            # for some input. Field values travel base64-encoded for the same
+            # reason the vault row does: a note legitimately holds newlines,
+            # and this is a line-based interface.
+            #
+            # No field value is ever an argument. A payload holds the record's
+            # secrets and argv is world-readable on Linux for the life of the
+            # process -- the same reason `_key_fd` exists rather than handing
+            # openssl a key with -K. Ids, labels and timestamps are not
+            # secrets and travel normally.
+            op = argv[2]
+            if op == "types":
+                for name in RECORD_TYPES:
+                    sys.stdout.write("%s\t%s\t%s\n" % (
+                        name, RECORD_SCHEMAS[name]["label"],
+                        RECORD_SCHEMAS[name].get("icon", "")))
+            elif op == "schema":
+                for field, kind, widget, required in record_fields(argv[3]):
+                    sys.stdout.write("%s\t%s\t%s\t%s\n" % (
+                        field, kind, widget, "1" if required else "0"))
+            elif op == "row":
+                # row <type> <id> <label> <created> [--folder F] [--hidden]
+                # stdin: "field<TAB>base64(value)" lines
+                # stdout: one vault row
+                sys.stdout.write(build_record_row(
+                    argv[3], argv[4], argv[5], _record_values_in(), argv[6],
+                    folder=_flag_value(argv[7:], "--folder"),
+                    hidden="--hidden" in argv[7:]) + "\n")
+            elif op == "parse":
+                # stdin: one vault row
+                # stdout: "field<TAB>base64(value)" lines, preceded by the
+                # meta lines .type/.id/.label/.created/.folder/.hidden. The
+                # dot prefix cannot collide with a field name, because a
+                # schema field name is an identifier.
+                #
+                # Nothing at all, and exit 0, when the line is not a typed
+                # record this build can read: "not a typed record" is an
+                # answer to the question, not a failure to answer it.
+                parsed = parse_record_row(sys.stdin.read().rstrip("\n"))
+                if parsed is None:
+                    return 0
+                rtype, rid, label, values, created, folder, _f, hidden = parsed
+                for key, value in ((".type", rtype), (".id", rid),
+                                   (".label", label), (".created", created),
+                                   (".folder", folder),
+                                   (".hidden", "1" if hidden else "0")):
+                    sys.stdout.write("%s\t%s\n" % (key, _b64(value)))
+                for field, _k, _w, _r in record_fields(rtype):
+                    if values.get(field):
+                        sys.stdout.write("%s\t%s\n" % (field, _b64(values[field])))
+            elif op == "redact":
+                # stdin: "field<TAB>base64(value)" lines ; stdout: the same,
+                # masked. A surface that shows a record without revealing it
+                # asks for this rather than deciding which of its fields are
+                # sensitive -- that decision belongs to the schema, once.
+                masked = redact_record(argv[3], _record_values_in())
+                for field, _k, _w, _r in record_fields(argv[3]):
+                    if masked.get(field):
+                        sys.stdout.write("%s\t%s\n" % (field, _b64(masked[field])))
+            else:
+                raise VaultError("unknown record op %r" % (op,))
         elif command == "secret-key":
             # secret-key <op> <vault> ; ops below say what they read on stdin.
             #

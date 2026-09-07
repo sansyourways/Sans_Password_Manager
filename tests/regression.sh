@@ -6076,5 +6076,215 @@ sk_core secret-key status "$sk_vault" | grep -q '"bound": false' ||
 	sk_fail 'status still reports a binding after disable'
 printf '  secret key: binds, survives writes and password changes, fails closed when absent, and never leaves with a copy\n'
 
+# ----- typed records ---------------------------------------------------------
+# One family of commands covers seven types, so these tests walk every type
+# rather than the one that happened to be written first: the risk in a
+# schema-driven design is a schema nobody exercises, not a code path nobody
+# runs.
+
+rec_fail() { printf 'typed records: %s\n' "$1" >&2; exit 1; }
+
+rec_vault="$TEST_ROOT/records.gpg"
+rec_plain="$TEST_ROOT/records-plain"
+rec_seed() {
+	# Every vault write needs a recovery pubkey row, so a fresh vault for
+	# these tests is seeded with the harness's own key rather than a bare
+	# version stamp.
+	printf 'META_VAULT_VERSION\t6\t-\t-\t-\t-\nMETA_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n' \
+		"$TEST_RECOVERY_B64" >"$rec_plain"
+	printf '%s\n' "$AUDIT_PASSWORD" | core write "$1" "$rec_plain" >/dev/null
+}
+rec_seed "$rec_vault"
+
+rec_core() { VAULT_FILE="$rec_vault" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY="" "$@"; }
+
+# every registered type must be listed, and the listing is what a user types
+rec_types="$(core record types | cut -f1)"
+[ "$(printf '%s\n' "$rec_types" | wc -l)" -ge 7 ] ||
+	rec_fail 'record types listed fewer than the seven shipped schemas'
+
+# Add one record of every type, driving the interactive prompts from the
+# schema exactly as a person would: label first, then each field in order.
+for rec_type in $rec_types; do
+	rec_in="$TEST_ROOT/rec-in-$rec_type"
+	{
+		printf 'Label for %s\n' "$rec_type"
+		core record schema "$rec_type" | while IFS="$(printf '\t')" read -r f _k _w _r; do
+			[ -n "$f" ] || continue
+			printf 'value-%s\n' "$f"
+		done
+	} >"$rec_in"
+	rec_core cmd_record_add "$rec_type" <"$rec_in" >/dev/null 2>&1 ||
+		rec_fail "adding a $rec_type record failed"
+done
+
+rec_check="$TEST_ROOT/rec-check"
+test_decrypt_vault "$rec_vault" "$AUDIT_PASSWORD" "$rec_check"
+for rec_type in $rec_types; do
+	grep -q "^REC:${rec_type}	1	" "$rec_check" ||
+		rec_fail "no $rec_type row was written"
+done
+[ "$(grep -c '^REC:' "$rec_check")" -eq "$(printf '%s\n' "$rec_types" | wc -l)" ] ||
+	rec_fail 'the number of typed rows does not match the number of types'
+
+# No secret may appear outside field 3. This is the rule _describe_record and
+# the listing both depend on, and it is worth asserting against real rows
+# rather than trusting the writer.
+if awk -F '\t' '/^REC:/ { $4=""; print }' "$rec_check" | grep -q 'value-password'; then
+	rec_fail 'a secret value appeared outside the payload column'
+fi
+
+# The default view redacts; --reveal does not. The list of which fields are
+# secret lives in the schema and nowhere else, so this asserts the behaviour
+# rather than a field name.
+rec_view="$(rec_core cmd_record_view wifi 1 2>&1)"
+printf '%s' "$rec_view" | grep -q 'value-ssid' ||
+	rec_fail 'view hid a field that is not a secret'
+if printf '%s' "$rec_view" | grep -q 'value-password'; then
+	rec_fail 'view printed a secret without --reveal'
+fi
+printf '%s' "$rec_view" | grep -q '\*\*\*\*\*\*\*\*' ||
+	rec_fail 'view did not mask the secret'
+# Captured before grepping, not piped into it. `grep -q` stops at the first
+# match and closes the pipe, so under `set -o pipefail` the producer dies of
+# SIGPIPE and the pipeline reports failure on the path where the test passed.
+rec_reveal="$(rec_core cmd_record_view wifi 1 --reveal 2>&1)"
+case "$rec_reveal" in
+	*value-password*) ;;
+	*) rec_fail '--reveal did not show the secret' ;;
+esac
+
+# Listing must name every type and never read the payload column.
+rec_list="$(rec_core cmd_record_list 2>&1)"
+for rec_type in $rec_types; do
+	printf '%s' "$rec_list" | grep -q "$rec_type" ||
+		rec_fail "list omitted $rec_type"
+done
+if printf '%s' "$rec_list" | grep -q 'value-password'; then
+	rec_fail 'list printed a secret'
+fi
+[ "$(rec_core cmd_record_list wifi 2>&1 | grep -c '^wifi ')" -eq 1 ] ||
+	rec_fail 'list --type did not filter to one type'
+
+# A value carrying any character splitlines() honours must not split the row.
+rec_break_in="$TEST_ROOT/rec-break"
+printf 'Label with a break\nHome%sNet\nsecret%spw\n\n\n\n' "$(printf '\302\205')" "$(printf '\342\200\250')" >"$rec_break_in"
+rec_core cmd_record_add wifi <"$rec_break_in" >/dev/null 2>&1 ||
+	rec_fail 'a record holding a break character was refused'
+test_decrypt_vault "$rec_vault" "$AUDIT_PASSWORD" "$rec_check"
+[ "$(grep -c '^REC:wifi' "$rec_check")" -eq 2 ] ||
+	rec_fail 'a break character split a typed record into two rows'
+awk -F '\t' '/^REC:wifi/ { if (NF != 6) exit 1 }' "$rec_check" ||
+	rec_fail 'a typed record row does not have six columns'
+
+# Export and re-import every format, then compare field by field rather than
+# by count. Counting is what let twenty formats drop folders and custom fields
+# until 4.1.0.
+for rec_fmt in csv json tsv ndjson yaml xml sql psv toml; do
+	rec_export="$TEST_ROOT/rec-export.$rec_fmt"
+	VAULT_FILE="$rec_vault" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY="" \
+		cmd_export "$rec_fmt" "$rec_export" >/dev/null
+	rec_reimport="$TEST_ROOT/rec-reimport-$rec_fmt.gpg"
+	rec_seed "$rec_reimport"
+	VAULT_FILE="$rec_reimport" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY="" \
+		RECOVERY_FILE="$rec_reimport.recovery" \
+		cmd_import "$rec_fmt" "$rec_export" >/dev/null 2>&1 ||
+		rec_fail "re-importing $rec_fmt failed"
+	rec_after="$TEST_ROOT/rec-after-$rec_fmt"
+	test_decrypt_vault "$rec_reimport" "$AUDIT_PASSWORD" "$rec_after"
+	for rec_type in $rec_types; do
+		grep -q "^REC:${rec_type}	" "$rec_after" ||
+			rec_fail "$rec_fmt lost every $rec_type record"
+	done
+	# field by field, through the core, for one fully populated type
+	rec_before_vals="$(grep -m1 '^REC:server	' "$rec_check" | core record parse | grep -v '^\.')"
+	rec_after_vals="$(grep -m1 '^REC:server	' "$rec_after" | core record parse | grep -v '^\.')"
+	[ "$rec_before_vals" = "$rec_after_vals" ] ||
+		rec_fail "$rec_fmt changed a typed record's fields across a round trip"
+done
+
+# Deleting removes exactly one record and leaves the rest.
+rec_before_count="$(grep -c '^REC:' "$rec_check")"
+rec_core cmd_record_delete wifi 1 >/dev/null 2>&1 || rec_fail 'delete failed'
+test_decrypt_vault "$rec_vault" "$AUDIT_PASSWORD" "$rec_check"
+[ "$(grep -c '^REC:' "$rec_check")" -eq "$((rec_before_count - 1))" ] ||
+	rec_fail 'delete removed the wrong number of records'
+grep -q '^REC:wifi	2	' "$rec_check" ||
+	rec_fail 'delete removed a record it was not asked to'
+
+# An unknown type must be refused before the vault is opened, and must name
+# what is available rather than only what is wrong.
+# In a subshell: cmd_record_add refuses through `die`, which exits, and this
+# suite runs the command in its own shell. Without the parentheses a passing
+# test would take the whole run down with it.
+if ( rec_core cmd_record_add not-a-type ) >/dev/null 2>&1; then
+	rec_fail 'an unknown record type was accepted'
+fi
+rec_unknown="$( ( rec_core cmd_record_add not-a-type ) 2>&1 || true)"
+case "$rec_unknown" in
+	*wifi*) ;;
+	*) rec_fail 'an unknown record type did not name the known ones' ;;
+esac
+
+# The Dashboard rewrites the whole vault on every save, so a row it does not
+# recognise is one edit away from being lost. parse_entries identifies a
+# password by "field 1 is a number" rather than by listing the other types,
+# and its own comment says anything added later is excluded by default -- this
+# asserts that the claim holds for typed records rather than trusting it.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$web_script" "$PASSWORD_VAULT" "$rec_check" <<'PYREC'
+import importlib.util, os, sys
+
+spec = importlib.util.spec_from_file_location("spmweb_rec", sys.argv[1])
+web = importlib.util.module_from_spec(spec)
+os.environ["SPM_VAULT_PATH"] = sys.argv[2]
+try:
+    spec.loader.exec_module(web)
+except SystemExit:
+    pass
+
+with open(sys.argv[3], "r", encoding="utf-8") as handle:
+    plaintext = handle.read()
+
+typed = [l for l in plaintext.splitlines() if l.startswith("REC:")]
+assert typed, "the fixture holds no typed records, so this proves nothing"
+
+lines, entries = web.parse_entries(plaintext)
+
+# 1. No typed record may be read as a password. Before parse_entries used an
+#    allowlist, ATTACHMENT and PASSKEY rows were listed as passwords with
+#    their base64 payload in the password column -- and counted in the
+#    security score.
+for _idx, parts in entries:
+    assert not parts[0].startswith("REC:"), \
+        "a typed record was read as a password: %r" % parts[0]
+
+# 2. Every typed row must survive the round trip the Dashboard performs when
+#    it saves: parse, rebuild from `lines`, write back.
+rebuilt = "\n".join(lines) + "\n"
+for row in typed:
+    assert row in rebuilt, "the Dashboard's rebuild dropped a typed record"
+
+# 3. A delete of an unrelated password must not touch them either. This is the
+#    exact loop the delete handler runs.
+ids_to_remove = {"1"}
+kept = []
+for line in lines:
+    if (not line or line.startswith("#") or line.startswith("META_")
+            or line.startswith("NOTE\t")):
+        kept.append(line)
+        continue
+    parts = line.split("\t")
+    if parts and parts[0] in ids_to_remove:
+        continue
+    kept.append(line)
+for row in typed:
+    assert row in kept, "deleting a password removed a typed record"
+
+sys.stdout.write("  dashboard: %d typed record(s) survive a save and a delete, "
+                 "and none is counted as a password\n" % len(typed))
+PYREC
+
+printf '  typed records: seven schemas add, list, view redacted, delete, and survive twenty formats field by field\n'
+
 printf 'SPM regression suite passed (%s formats plus web and advanced features).\n' \
 	"$(printf '%s\n' "$formats" | awk '{ print NF }')"
