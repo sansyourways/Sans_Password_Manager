@@ -2073,6 +2073,75 @@ def attrs_from_export_row(row):
         return ""
 
 
+def iter_records(plaintext, record_type=""):
+    """(line_index, parsed) for every typed record row, in vault order.
+
+    The index is the caller's half of a rewrite: the dashboard edits and
+    deletes by replacing one line of the plaintext it already holds, and a
+    surface that searched for its own row again by id would be a second
+    definition of which row an id names.
+
+    `record_type` narrows to one type. Ids are per type, so a caller holding
+    only an id is holding half an address; every route that takes one takes
+    the type with it.
+    """
+    for index, line in enumerate((plaintext or "").splitlines()):
+        if not line.startswith(RECORD_TAG_PREFIX):
+            continue
+        parsed = parse_record_row(line)
+        if parsed is None:
+            continue
+        if record_type and parsed[0] != record_type:
+            continue
+        yield index, parsed
+
+
+def find_record(plaintext, record_type, record_id):
+    """(line_index, parsed) for one record, or None.
+
+    Both halves of the address are required. A lookup by id alone would find
+    the wifi record when the caller meant the server one, because each type
+    counts from one.
+    """
+    for index, parsed in iter_records(plaintext, record_type):
+        if parsed[1] == str(record_id):
+            return index, parsed
+    return None
+
+
+def record_next_id(plaintext, record_type):
+    """The next free id for a type, as a string.
+
+    Ids are allocated per type, so wifi 1 and server 1 both exist and each
+    type counts from one. A single sequence across types would make an id
+    meaningless without its type anyway, and would renumber nothing while
+    looking like it might.
+
+    A row whose id is not a number is ignored rather than refused: it cannot
+    have been written by this code, and refusing here would mean one damaged
+    row stopped every new record of its type from being added.
+    """
+    highest = 0
+    for _index, parsed in iter_records(plaintext, record_type):
+        if parsed[1].isdigit():
+            highest = max(highest, int(parsed[1]))
+    return str(highest + 1)
+
+
+def record_counts(plaintext):
+    """{type: n} for the types present, plus "" -> the total.
+
+    The total is carried here rather than summed by each caller because the
+    nav badge and the overview tile disagreeing about how many records a
+    vault holds is the class of defect a shared core exists to prevent.
+    """
+    counts = {"": 0}
+    for _index, parsed in iter_records(plaintext):
+        counts[parsed[0]] = counts.get(parsed[0], 0) + 1
+        counts[""] += 1
+    return counts
+
+
 def record_folders(plaintext):
     """Every folder in use, sorted, without duplicates differing only in case."""
     seen = {}
@@ -2297,6 +2366,17 @@ def archive_generation(vault_path):
         os.chmod(target, 0o700)
         with open(vault_path, "rb") as handle:
             digest = hashlib.sha256(handle.read()).hexdigest()[:12]
+        # A snapshot is named for the ciphertext it captures, so an unchanged
+        # vault is one undo point however often it is archived. The name alone
+        # cannot enforce that: it also carries the second and the pid, so two
+        # archives of identical bytes that straddle a second tick used to land
+        # as two files. Retention counts files, so the duplicate evicts the
+        # oldest genuinely different generation -- history quietly gets
+        # shorter than it says it is. Match on the digest instead: it is the
+        # part of the name that means "this ciphertext".
+        if any(name.endswith(".%s.gpg" % digest) for name in os.listdir(target)):
+            _prune(target, ".gpg", _retention())
+            return
         stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
         snapshot = os.path.join(
             target, "%s.%d.%s.gpg" % (stamp, os.getpid(), digest))
@@ -4734,6 +4814,15 @@ def main(argv):
                 for field, kind, widget, required in record_fields(argv[3]):
                     sys.stdout.write("%s\t%s\t%s\t%s\n" % (
                         field, kind, widget, "1" if required else "0"))
+            elif op == "next-id":
+                # next-id <plainfile> <type>
+                #
+                # The shell allocated this with its own awk over the same
+                # rows. Two implementations of "which id is free" is how the
+                # CLI and the dashboard come to hand the same id to two
+                # records, so the rule lives with the rows it reads.
+                with open(argv[3], "r", encoding="utf-8") as handle:
+                    sys.stdout.write(record_next_id(handle.read(), argv[4]) + "\n")
             elif op == "row":
                 # row <type> <id> <label> <created> [--folder F] [--hidden]
                 # stdin: "field<TAB>base64(value)" lines
@@ -6670,24 +6759,11 @@ cmd_notes_delete() {
 # every decision about which values are secret comes from `core record`.
 
 next_record_id_from_vault() {
-	# Ids are allocated per type, so wifi 1 and server 1 both exist and each
-	# type counts from one. A single sequence across types would make an id
-	# meaningless without its type anyway, and would renumber nothing while
-	# looking like it might.
-	local file="$1" tag="$2"
-	if [ ! -s "$file" ]; then
-		printf '1\n'
-		return
-	fi
-	awk -F '\t' -v tag="$tag" '
-		$1==tag && $2 ~ /^[0-9]+$/ {
-			if ($2 + 0 > max) max = $2 + 0
-		}
-		END {
-			if (max == 0) print 1;
-			else print max + 1;
-		}
-	' "$file"
+	# The rule lives in the core, with the rows it reads: `spm record add`
+	# and the Dashboard both allocate here, and two implementations of which
+	# id is free is how they come to hand the same one to two records.
+	local file="$1" rtype="$2"
+	core record next-id "$file" "$rtype"
 }
 
 record_types_or_die() {
@@ -6789,7 +6865,7 @@ $(core record schema "$rtype")
 EOF
 
 	local rid created row
-	rid="$(next_record_id_from_vault "$tmp" "REC:${rtype}")"
+	rid="$(next_record_id_from_vault "$tmp" "$rtype")"
 	created="$(now_iso)"
 	row="$(core record row "$rtype" "$rid" "$(sanitize_field "$label")" \
 		"$created" <"$fields_tmp")" || {
@@ -12487,6 +12563,55 @@ WEB_CATALOGUES = {
         "hardware.nosupport": "This browser cannot talk to a security key.",
         "hardware.confirm_forget": "Remove this security key?",
         "hardware.forget_failed": "The security key could not be removed.",
+        "record.field.address": "Address",
+        "record.field.brand": "Brand",
+        "record.field.cardholder": "Cardholder",
+        "record.field.cvv": "CVV",
+        "record.field.database": "Database",
+        "record.field.document_number": "Document number",
+        "record.field.document_type": "Document type",
+        "record.field.engine": "Engine",
+        "record.field.environment": "Environment",
+        "record.field.expires": "Expires",
+        "record.field.expiry": "Expiry",
+        "record.field.full_name": "Full name",
+        "record.field.hidden_network": "Hidden network",
+        "record.field.host": "Host",
+        "record.field.hostname": "Hostname",
+        "record.field.issued": "Issued",
+        "record.field.license_key": "Licence key",
+        "record.field.licensed_to": "Licensed to",
+        "record.field.nationality": "Nationality",
+        "record.field.notes": "Notes",
+        "record.field.number": "Number",
+        "record.field.password": "Password",
+        "record.field.pin": "PIN",
+        "record.field.port": "Port",
+        "record.field.product": "Product",
+        "record.field.purchased": "Purchased",
+        "record.field.seats": "Seats",
+        "record.field.security": "Security",
+        "record.field.service": "Service",
+        "record.field.ssid": "Network name (SSID)",
+        "record.field.token": "Token",
+        "record.field.username": "Username",
+        "record.field.version": "Version",
+        "record.type.api-token": "API Token",
+        "record.type.credit-card": "Credit Card",
+        "record.type.db-credential": "Database Credential",
+        "record.type.identity": "Identity Document",
+        "record.type.server": "Server",
+        "record.type.software-license": "Software Licence",
+        "record.type.wifi": "Wi-Fi Network",
+        "nav.records": "Records",
+        "page.records.desc": "Typed records stored in the same encrypted vault.",
+        "btn.add_record": "+ Add Record",
+        "records.summary": "Detail",
+        "records.pick.title": "New record",
+        "records.pick.desc": "Choose what kind of thing this is. Every type is stored in the same encrypted vault.",
+        "empty.records.t": "No records yet",
+        "empty.records.d": "API tokens, database credentials, cards, identities, licences, Wi-Fi and servers live here.",
+        "confirm.delete_record": "Delete this record?",
     },
     "ar": {
         "nav.security": "\u0627\u0644\u0623\u0645\u0627\u0646",
@@ -12881,6 +13006,55 @@ WEB_CATALOGUES = {
         "hardware.nosupport": "\u0647\u0630\u0627 \u0627\u0644\u0645\u062a\u0635\u0641\u062d \u0644\u0627 \u064a\u0633\u062a\u0637\u064a\u0639 \u0627\u0644\u062a\u062e\u0627\u0637\u0628 \u0645\u0639 \u0645\u0641\u062a\u0627\u062d \u0623\u0645\u0627\u0646.",
         "hardware.confirm_forget": "\u0647\u0644 \u062a\u0631\u064a\u062f \u0625\u0632\u0627\u0644\u0629 \u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0623\u0645\u0627\u0646 \u0647\u0630\u0627\u061f",
         "hardware.forget_failed": "\u062a\u0639\u0630\u0651\u0631\u062a \u0625\u0632\u0627\u0644\u0629 \u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0623\u0645\u0627\u0646.",
+        "record.field.address": "\u0627\u0644\u0639\u0646\u0648\u0627\u0646",
+        "record.field.brand": "\u0646\u0648\u0639 \u0627\u0644\u0628\u0637\u0627\u0642\u0629",
+        "record.field.cardholder": "\u062d\u0627\u0645\u0644 \u0627\u0644\u0628\u0637\u0627\u0642\u0629",
+        "record.field.cvv": "\u0631\u0645\u0632 \u0627\u0644\u062a\u062d\u0642\u0642",
+        "record.field.database": "\u0642\u0627\u0639\u062f\u0629 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a",
+        "record.field.document_number": "\u0631\u0642\u0645 \u0627\u0644\u0645\u0633\u062a\u0646\u062f",
+        "record.field.document_type": "\u0646\u0648\u0639 \u0627\u0644\u0645\u0633\u062a\u0646\u062f",
+        "record.field.engine": "\u0627\u0644\u0645\u062d\u0631\u0643",
+        "record.field.environment": "\u0627\u0644\u0628\u064a\u0626\u0629",
+        "record.field.expires": "\u062a\u0646\u062a\u0647\u064a \u0641\u064a",
+        "record.field.expiry": "\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u0627\u0646\u062a\u0647\u0627\u0621",
+        "record.field.full_name": "\u0627\u0644\u0627\u0633\u0645 \u0627\u0644\u0643\u0627\u0645\u0644",
+        "record.field.hidden_network": "\u0634\u0628\u0643\u0629 \u0645\u062e\u0641\u064a\u0629",
+        "record.field.host": "\u0627\u0644\u0645\u0636\u064a\u0641",
+        "record.field.hostname": "\u0627\u0633\u0645 \u0627\u0644\u0645\u0636\u064a\u0641",
+        "record.field.issued": "\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u0625\u0635\u062f\u0627\u0631",
+        "record.field.license_key": "\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u062a\u0631\u062e\u064a\u0635",
+        "record.field.licensed_to": "\u0645\u0631\u062e\u0651\u0635 \u0644\u0640",
+        "record.field.nationality": "\u0627\u0644\u062c\u0646\u0633\u064a\u0629",
+        "record.field.notes": "\u0645\u0644\u0627\u062d\u0638\u0627\u062a",
+        "record.field.number": "\u0627\u0644\u0631\u0642\u0645",
+        "record.field.password": "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631",
+        "record.field.pin": "\u0631\u0645\u0632 PIN",
+        "record.field.port": "\u0627\u0644\u0645\u0646\u0641\u0630",
+        "record.field.product": "\u0627\u0644\u0645\u0646\u062a\u062c",
+        "record.field.purchased": "\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u0634\u0631\u0627\u0621",
+        "record.field.seats": "\u0639\u062f\u062f \u0627\u0644\u062a\u0631\u0627\u062e\u064a\u0635",
+        "record.field.security": "\u0646\u0648\u0639 \u0627\u0644\u062a\u0634\u0641\u064a\u0631",
+        "record.field.service": "\u0627\u0644\u062e\u062f\u0645\u0629",
+        "record.field.ssid": "\u0627\u0633\u0645 \u0627\u0644\u0634\u0628\u0643\u0629 (SSID)",
+        "record.field.token": "\u0627\u0644\u0631\u0645\u0632",
+        "record.field.username": "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645",
+        "record.field.version": "\u0627\u0644\u0625\u0635\u062f\u0627\u0631",
+        "record.type.api-token": "\u0631\u0645\u0632 API",
+        "record.type.credit-card": "\u0628\u0637\u0627\u0642\u0629 \u0627\u0626\u062a\u0645\u0627\u0646",
+        "record.type.db-credential": "\u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0639\u062a\u0645\u0627\u062f \u0642\u0627\u0639\u062f\u0629 \u0628\u064a\u0627\u0646\u0627\u062a",
+        "record.type.identity": "\u0648\u062b\u064a\u0642\u0629 \u0647\u0648\u064a\u0629",
+        "record.type.server": "\u062e\u0627\u062f\u0645",
+        "record.type.software-license": "\u062a\u0631\u062e\u064a\u0635 \u0628\u0631\u0645\u062c\u064a",
+        "record.type.wifi": "\u0634\u0628\u0643\u0629 Wi-Fi",
+        "nav.records": "\u0627\u0644\u0633\u062c\u0644\u0627\u062a",
+        "page.records.desc": "\u0633\u062c\u0644\u0627\u062a \u0645\u064f\u0635\u0646\u064e\u0651\u0641\u0629 \u0645\u062d\u0641\u0648\u0638\u0629 \u0641\u064a \u0627\u0644\u062e\u0632\u0646\u0629 \u0627\u0644\u0645\u0634\u0641\u0651\u0631\u0629 \u0646\u0641\u0633\u0647\u0627.",
+        "btn.add_record": "+ \u0625\u0636\u0627\u0641\u0629 \u0633\u062c\u0644",
+        "records.summary": "\u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644",
+        "records.pick.title": "\u0633\u062c\u0644 \u062c\u062f\u064a\u062f",
+        "records.pick.desc": "\u0627\u062e\u062a\u0631 \u0646\u0648\u0639 \u0627\u0644\u0633\u062c\u0644. \u0643\u0644 \u0627\u0644\u0623\u0646\u0648\u0627\u0639 \u062a\u064f\u062d\u0641\u0638 \u0641\u064a \u0627\u0644\u062e\u0632\u0646\u0629 \u0627\u0644\u0645\u0634\u0641\u0651\u0631\u0629 \u0646\u0641\u0633\u0647\u0627.",
+        "empty.records.t": "\u0644\u0627 \u062a\u0648\u062c\u062f \u0633\u062c\u0644\u0627\u062a \u0628\u0639\u062f",
+        "empty.records.d": "\u0631\u0645\u0648\u0632 API \u0648\u0628\u064a\u0627\u0646\u0627\u062a \u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0648\u0627\u0644\u0628\u0637\u0627\u0642\u0627\u062a \u0648\u0627\u0644\u0647\u0648\u064a\u0627\u062a \u0648\u0627\u0644\u062a\u0631\u0627\u062e\u064a\u0635 \u0648\u0634\u0628\u0643\u0627\u062a Wi-Fi \u0648\u0627\u0644\u062e\u0648\u0627\u062f\u0645 \u062a\u064f\u062d\u0641\u0638 \u0647\u0646\u0627.",
+        "confirm.delete_record": "\u062d\u0630\u0641 \u0647\u0630\u0627 \u0627\u0644\u0633\u062c\u0644\u061f",
     },
     "de": {
         "nav.security": "Sicherheit",
@@ -13275,6 +13449,55 @@ WEB_CATALOGUES = {
         "hardware.nosupport": "Dieser Browser kann nicht mit einem Sicherheitsschl\u00fcssel sprechen.",
         "hardware.confirm_forget": "Diesen Sicherheitsschl\u00fcssel entfernen?",
         "hardware.forget_failed": "Der Sicherheitsschl\u00fcssel konnte nicht entfernt werden.",
+        "record.field.address": "Adresse",
+        "record.field.brand": "Kartenanbieter",
+        "record.field.cardholder": "Karteninhaber",
+        "record.field.cvv": "Pr\u00fcfnummer",
+        "record.field.database": "Datenbank",
+        "record.field.document_number": "Dokumentnummer",
+        "record.field.document_type": "Dokumentart",
+        "record.field.engine": "System",
+        "record.field.environment": "Umgebung",
+        "record.field.expires": "G\u00fcltig bis",
+        "record.field.expiry": "Ablauf",
+        "record.field.full_name": "Vollst\u00e4ndiger Name",
+        "record.field.hidden_network": "Verstecktes Netzwerk",
+        "record.field.host": "Host",
+        "record.field.hostname": "Hostname",
+        "record.field.issued": "Ausgestellt am",
+        "record.field.license_key": "Lizenzschl\u00fcssel",
+        "record.field.licensed_to": "Lizenziert f\u00fcr",
+        "record.field.nationality": "Staatsangeh\u00f6rigkeit",
+        "record.field.notes": "Notizen",
+        "record.field.number": "Nummer",
+        "record.field.password": "Passwort",
+        "record.field.pin": "PIN",
+        "record.field.port": "Port",
+        "record.field.product": "Produkt",
+        "record.field.purchased": "Gekauft am",
+        "record.field.seats": "Lizenzpl\u00e4tze",
+        "record.field.security": "Verschl\u00fcsselung",
+        "record.field.service": "Dienst",
+        "record.field.ssid": "Netzwerkname (SSID)",
+        "record.field.token": "Token",
+        "record.field.username": "Benutzername",
+        "record.field.version": "Version",
+        "record.type.api-token": "API-Token",
+        "record.type.credit-card": "Kreditkarte",
+        "record.type.db-credential": "Datenbank-Zugang",
+        "record.type.identity": "Ausweisdokument",
+        "record.type.server": "Server",
+        "record.type.software-license": "Softwarelizenz",
+        "record.type.wifi": "WLAN-Netzwerk",
+        "nav.records": "Datens\u00e4tze",
+        "page.records.desc": "Strukturierte Datens\u00e4tze im selben verschl\u00fcsselten Tresor.",
+        "btn.add_record": "+ Datensatz",
+        "records.summary": "Detail",
+        "records.pick.title": "Neuer Datensatz",
+        "records.pick.desc": "W\u00e4hlen Sie die Art des Eintrags. Alle Arten liegen im selben verschl\u00fcsselten Tresor.",
+        "empty.records.t": "Noch keine Datens\u00e4tze",
+        "empty.records.d": "API-Token, Datenbank-Zug\u00e4nge, Karten, Ausweise, Lizenzen, WLAN und Server liegen hier.",
+        "confirm.delete_record": "Diesen Datensatz l\u00f6schen?",
     },
     "es": {
         "nav.security": "Seguridad",
@@ -13669,6 +13892,55 @@ WEB_CATALOGUES = {
         "hardware.nosupport": "Este navegador no puede comunicarse con una llave de seguridad.",
         "hardware.confirm_forget": "\u00bfQuitar esta llave de seguridad?",
         "hardware.forget_failed": "No se ha podido quitar la llave de seguridad.",
+        "record.field.address": "Direcci\u00f3n",
+        "record.field.brand": "Marca",
+        "record.field.cardholder": "Titular",
+        "record.field.cvv": "CVV",
+        "record.field.database": "Base de datos",
+        "record.field.document_number": "N\u00famero de documento",
+        "record.field.document_type": "Tipo de documento",
+        "record.field.engine": "Motor",
+        "record.field.environment": "Entorno",
+        "record.field.expires": "Caduca",
+        "record.field.expiry": "Vencimiento",
+        "record.field.full_name": "Nombre completo",
+        "record.field.hidden_network": "Red oculta",
+        "record.field.host": "Host",
+        "record.field.hostname": "Nombre de host",
+        "record.field.issued": "Expedido",
+        "record.field.license_key": "Clave de licencia",
+        "record.field.licensed_to": "Licenciado a",
+        "record.field.nationality": "Nacionalidad",
+        "record.field.notes": "Notas",
+        "record.field.number": "N\u00famero",
+        "record.field.password": "Contrase\u00f1a",
+        "record.field.pin": "PIN",
+        "record.field.port": "Puerto",
+        "record.field.product": "Producto",
+        "record.field.purchased": "Comprado",
+        "record.field.seats": "Licencias",
+        "record.field.security": "Seguridad",
+        "record.field.service": "Servicio",
+        "record.field.ssid": "Nombre de red (SSID)",
+        "record.field.token": "Token",
+        "record.field.username": "Usuario",
+        "record.field.version": "Versi\u00f3n",
+        "record.type.api-token": "Token de API",
+        "record.type.credit-card": "Tarjeta de cr\u00e9dito",
+        "record.type.db-credential": "Credencial de base de datos",
+        "record.type.identity": "Documento de identidad",
+        "record.type.server": "Servidor",
+        "record.type.software-license": "Licencia de software",
+        "record.type.wifi": "Red Wi-Fi",
+        "nav.records": "Registros",
+        "page.records.desc": "Registros tipificados guardados en la misma caja fuerte cifrada.",
+        "btn.add_record": "+ A\u00f1adir registro",
+        "records.summary": "Detalle",
+        "records.pick.title": "Nuevo registro",
+        "records.pick.desc": "Elija de qu\u00e9 tipo es. Todos los tipos se guardan en la misma caja fuerte cifrada.",
+        "empty.records.t": "A\u00fan no hay registros",
+        "empty.records.d": "Aqu\u00ed viven tokens de API, credenciales de base de datos, tarjetas, identidades, licencias, Wi-Fi y servidores.",
+        "confirm.delete_record": "\u00bfEliminar este registro?",
     },
     "fr": {
         "nav.security": "S\u00e9curit\u00e9",
@@ -14063,6 +14335,55 @@ WEB_CATALOGUES = {
         "hardware.nosupport": "Ce navigateur ne peut pas dialoguer avec une cl\u00e9 de s\u00e9curit\u00e9.",
         "hardware.confirm_forget": "Retirer cette cl\u00e9 de s\u00e9curit\u00e9 ?",
         "hardware.forget_failed": "La cl\u00e9 de s\u00e9curit\u00e9 n'a pas pu \u00eatre retir\u00e9e.",
+        "record.field.address": "Adresse",
+        "record.field.brand": "Marque",
+        "record.field.cardholder": "Titulaire",
+        "record.field.cvv": "Cryptogramme",
+        "record.field.database": "Base de donn\u00e9es",
+        "record.field.document_number": "Num\u00e9ro du document",
+        "record.field.document_type": "Type de document",
+        "record.field.engine": "Moteur",
+        "record.field.environment": "Environnement",
+        "record.field.expires": "Expire le",
+        "record.field.expiry": "Expiration",
+        "record.field.full_name": "Nom complet",
+        "record.field.hidden_network": "R\u00e9seau masqu\u00e9",
+        "record.field.host": "H\u00f4te",
+        "record.field.hostname": "Nom d'h\u00f4te",
+        "record.field.issued": "D\u00e9livr\u00e9 le",
+        "record.field.license_key": "Cl\u00e9 de licence",
+        "record.field.licensed_to": "Licenci\u00e9 \u00e0",
+        "record.field.nationality": "Nationalit\u00e9",
+        "record.field.notes": "Notes",
+        "record.field.number": "Num\u00e9ro",
+        "record.field.password": "Mot de passe",
+        "record.field.pin": "Code PIN",
+        "record.field.port": "Port",
+        "record.field.product": "Produit",
+        "record.field.purchased": "Achet\u00e9 le",
+        "record.field.seats": "Postes",
+        "record.field.security": "S\u00e9curit\u00e9",
+        "record.field.service": "Service",
+        "record.field.ssid": "Nom du r\u00e9seau (SSID)",
+        "record.field.token": "Jeton",
+        "record.field.username": "Nom d'utilisateur",
+        "record.field.version": "Version",
+        "record.type.api-token": "Jeton d'API",
+        "record.type.credit-card": "Carte bancaire",
+        "record.type.db-credential": "Identifiant de base de donn\u00e9es",
+        "record.type.identity": "Pi\u00e8ce d'identit\u00e9",
+        "record.type.server": "Serveur",
+        "record.type.software-license": "Licence logicielle",
+        "record.type.wifi": "R\u00e9seau Wi-Fi",
+        "nav.records": "Fiches",
+        "page.records.desc": "Fiches typ\u00e9es conserv\u00e9es dans le m\u00eame coffre chiffr\u00e9.",
+        "btn.add_record": "+ Ajouter une fiche",
+        "records.summary": "D\u00e9tail",
+        "records.pick.title": "Nouvelle fiche",
+        "records.pick.desc": "Choisissez de quoi il s'agit. Tous les types sont conserv\u00e9s dans le m\u00eame coffre chiffr\u00e9.",
+        "empty.records.t": "Aucune fiche",
+        "empty.records.d": "Jetons d'API, identifiants de base de donn\u00e9es, cartes, pi\u00e8ces d'identit\u00e9, licences, Wi-Fi et serveurs vivent ici.",
+        "confirm.delete_record": "Supprimer cette fiche ?",
     },
     "hi": {
         "nav.security": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e",
@@ -14457,6 +14778,55 @@ WEB_CATALOGUES = {
         "hardware.nosupport": "\u092f\u0939 \u092c\u094d\u0930\u093e\u0909\u091c\u093c\u0930 \u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u092c\u093e\u0924 \u0928\u0939\u0940\u0902 \u0915\u0930 \u0938\u0915\u0924\u093e\u0964",
         "hardware.confirm_forget": "\u0915\u094d\u092f\u093e \u092f\u0939 \u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u0939\u091f\u093e\u0928\u0940 \u0939\u0948?",
         "hardware.forget_failed": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u0939\u091f\u093e\u0908 \u0928\u0939\u0940\u0902 \u091c\u093e \u0938\u0915\u0940\u0964",
+        "record.field.address": "\u092a\u0924\u093e",
+        "record.field.brand": "\u0915\u093e\u0930\u094d\u0921 \u092c\u094d\u0930\u093e\u0902\u0921",
+        "record.field.cardholder": "\u0915\u093e\u0930\u094d\u0921\u0927\u093e\u0930\u0915",
+        "record.field.cvv": "CVV",
+        "record.field.database": "\u0921\u0947\u091f\u093e\u092c\u0947\u0938",
+        "record.field.document_number": "\u0926\u0938\u094d\u0924\u093e\u0935\u0947\u091c\u093c \u0938\u0902\u0916\u094d\u092f\u093e",
+        "record.field.document_type": "\u0926\u0938\u094d\u0924\u093e\u0935\u0947\u091c\u093c \u0915\u093e \u092a\u094d\u0930\u0915\u093e\u0930",
+        "record.field.engine": "\u0907\u0902\u091c\u0928",
+        "record.field.environment": "\u092a\u0930\u093f\u0935\u0947\u0936",
+        "record.field.expires": "\u0938\u092e\u093e\u092a\u094d\u0924\u093f",
+        "record.field.expiry": "\u0935\u0948\u0927\u0924\u093e",
+        "record.field.full_name": "\u092a\u0942\u0930\u093e \u0928\u093e\u092e",
+        "record.field.hidden_network": "\u091b\u093f\u092a\u093e \u0928\u0947\u091f\u0935\u0930\u094d\u0915",
+        "record.field.host": "\u0939\u094b\u0938\u094d\u091f",
+        "record.field.hostname": "\u0939\u094b\u0938\u094d\u091f\u0928\u093e\u092e",
+        "record.field.issued": "\u091c\u093e\u0930\u0940",
+        "record.field.license_key": "\u0932\u093e\u0907\u0938\u0947\u0902\u0938 \u0915\u0941\u0902\u091c\u0940",
+        "record.field.licensed_to": "\u0932\u093e\u0907\u0938\u0947\u0902\u0938\u0927\u093e\u0930\u0940",
+        "record.field.nationality": "\u0930\u093e\u0937\u094d\u091f\u094d\u0930\u0940\u092f\u0924\u093e",
+        "record.field.notes": "\u091f\u093f\u092a\u094d\u092a\u0923\u093f\u092f\u093e\u0901",
+        "record.field.number": "\u0938\u0902\u0916\u094d\u092f\u093e",
+        "record.field.password": "\u092a\u093e\u0938\u0935\u0930\u094d\u0921",
+        "record.field.pin": "\u092a\u093f\u0928",
+        "record.field.port": "\u092a\u094b\u0930\u094d\u091f",
+        "record.field.product": "\u0909\u0924\u094d\u092a\u093e\u0926",
+        "record.field.purchased": "\u0916\u0930\u0940\u0926",
+        "record.field.seats": "\u0938\u0940\u091f\u0947\u0902",
+        "record.field.security": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e",
+        "record.field.service": "\u0938\u0947\u0935\u093e",
+        "record.field.ssid": "\u0928\u0947\u091f\u0935\u0930\u094d\u0915 \u0928\u093e\u092e (SSID)",
+        "record.field.token": "\u091f\u094b\u0915\u0928",
+        "record.field.username": "\u0909\u092a\u092f\u094b\u0917\u0915\u0930\u094d\u0924\u093e \u0928\u093e\u092e",
+        "record.field.version": "\u0938\u0902\u0938\u094d\u0915\u0930\u0923",
+        "record.type.api-token": "API \u091f\u094b\u0915\u0928",
+        "record.type.credit-card": "\u0915\u094d\u0930\u0947\u0921\u093f\u091f \u0915\u093e\u0930\u094d\u0921",
+        "record.type.db-credential": "\u0921\u0947\u091f\u093e\u092c\u0947\u0938 \u0915\u094d\u0930\u0947\u0921\u0947\u0902\u0936\u093f\u092f\u0932",
+        "record.type.identity": "\u092a\u0939\u091a\u093e\u0928 \u0926\u0938\u094d\u0924\u093e\u0935\u0947\u091c\u093c",
+        "record.type.server": "\u0938\u0930\u094d\u0935\u0930",
+        "record.type.software-license": "\u0938\u0949\u092b\u093c\u094d\u091f\u0935\u0947\u092f\u0930 \u0932\u093e\u0907\u0938\u0947\u0902\u0938",
+        "record.type.wifi": "Wi-Fi \u0928\u0947\u091f\u0935\u0930\u094d\u0915",
+        "nav.records": "\u0930\u093f\u0915\u0949\u0930\u094d\u0921",
+        "page.records.desc": "\u0909\u0938\u0940 \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u0935\u0949\u0932\u094d\u091f \u092e\u0947\u0902 \u0930\u0916\u0947 \u091f\u093e\u0907\u092a \u0915\u093f\u090f \u0917\u090f \u0930\u093f\u0915\u0949\u0930\u094d\u0921\u0964",
+        "btn.add_record": "+ \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u091c\u094b\u0921\u093c\u0947\u0902",
+        "records.summary": "\u0935\u093f\u0935\u0930\u0923",
+        "records.pick.title": "\u0928\u092f\u093e \u0930\u093f\u0915\u0949\u0930\u094d\u0921",
+        "records.pick.desc": "\u091a\u0941\u0928\u0947\u0902 \u0915\u093f \u092f\u0939 \u0915\u093f\u0938 \u092a\u094d\u0930\u0915\u093e\u0930 \u0915\u093e \u0939\u0948\u0964 \u0939\u0930 \u092a\u094d\u0930\u0915\u093e\u0930 \u0909\u0938\u0940 \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u0935\u0949\u0932\u094d\u091f \u092e\u0947\u0902 \u0930\u0939\u0924\u093e \u0939\u0948\u0964",
+        "empty.records.t": "\u0905\u092d\u0940 \u0915\u094b\u0908 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0928\u0939\u0940\u0902",
+        "empty.records.d": "API \u091f\u094b\u0915\u0928, \u0921\u0947\u091f\u093e\u092c\u0947\u0938 \u0915\u094d\u0930\u0947\u0921\u0947\u0902\u0936\u093f\u092f\u0932, \u0915\u093e\u0930\u094d\u0921, \u092a\u0939\u091a\u093e\u0928, \u0932\u093e\u0907\u0938\u0947\u0902\u0938, Wi-Fi \u0914\u0930 \u0938\u0930\u094d\u0935\u0930 \u092f\u0939\u093e\u0901 \u0930\u0939\u0924\u0947 \u0939\u0948\u0902\u0964",
+        "confirm.delete_record": "\u092f\u0939 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0939\u091f\u093e\u090f\u0901?",
     },
     "id": {
         "nav.security": "Keamanan",
@@ -14851,6 +15221,55 @@ WEB_CATALOGUES = {
         "hardware.nosupport": "Peramban ini tidak dapat berbicara dengan kunci keamanan.",
         "hardware.confirm_forget": "Hapus kunci keamanan ini?",
         "hardware.forget_failed": "Kunci keamanan tidak dapat dihapus.",
+        "record.field.address": "Alamat",
+        "record.field.brand": "Merek",
+        "record.field.cardholder": "Nama pemegang kartu",
+        "record.field.cvv": "CVV",
+        "record.field.database": "Basis data",
+        "record.field.document_number": "Nomor dokumen",
+        "record.field.document_type": "Jenis dokumen",
+        "record.field.engine": "Mesin",
+        "record.field.environment": "Lingkungan",
+        "record.field.expires": "Berlaku sampai",
+        "record.field.expiry": "Masa berlaku",
+        "record.field.full_name": "Nama lengkap",
+        "record.field.hidden_network": "Jaringan tersembunyi",
+        "record.field.host": "Host",
+        "record.field.hostname": "Nama host",
+        "record.field.issued": "Diterbitkan",
+        "record.field.license_key": "Kunci lisensi",
+        "record.field.licensed_to": "Dilisensikan kepada",
+        "record.field.nationality": "Kewarganegaraan",
+        "record.field.notes": "Catatan",
+        "record.field.number": "Nomor",
+        "record.field.password": "Kata sandi",
+        "record.field.pin": "PIN",
+        "record.field.port": "Port",
+        "record.field.product": "Produk",
+        "record.field.purchased": "Dibeli",
+        "record.field.seats": "Jumlah lisensi",
+        "record.field.security": "Keamanan",
+        "record.field.service": "Layanan",
+        "record.field.ssid": "Nama jaringan (SSID)",
+        "record.field.token": "Token",
+        "record.field.username": "Nama pengguna",
+        "record.field.version": "Versi",
+        "record.type.api-token": "Token API",
+        "record.type.credit-card": "Kartu Kredit",
+        "record.type.db-credential": "Kredensial Basis Data",
+        "record.type.identity": "Dokumen Identitas",
+        "record.type.server": "Server",
+        "record.type.software-license": "Lisensi Perangkat Lunak",
+        "record.type.wifi": "Jaringan Wi-Fi",
+        "nav.records": "Record",
+        "page.records.desc": "Record bertipe yang disimpan di brankas terenkripsi yang sama.",
+        "btn.add_record": "+ Tambah Record",
+        "records.summary": "Rincian",
+        "records.pick.title": "Record baru",
+        "records.pick.desc": "Pilih jenisnya. Semua jenis disimpan di brankas terenkripsi yang sama.",
+        "empty.records.t": "Belum ada record",
+        "empty.records.d": "Token API, kredensial basis data, kartu, identitas, lisensi, Wi-Fi, dan server disimpan di sini.",
+        "confirm.delete_record": "Hapus record ini?",
     },
     "ja": {
         "nav.security": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3",
@@ -15245,6 +15664,55 @@ WEB_CATALOGUES = {
         "hardware.nosupport": "\u3053\u306e\u30d6\u30e9\u30a6\u30b6\u30fc\u306f\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u3068\u901a\u4fe1\u3067\u304d\u307e\u305b\u3093\u3002",
         "hardware.confirm_forget": "\u3053\u306e\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u3092\u524a\u9664\u3057\u307e\u3059\u304b\uff1f",
         "hardware.forget_failed": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u3092\u524a\u9664\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002",
+        "record.field.address": "\u4f4f\u6240",
+        "record.field.brand": "\u30d6\u30e9\u30f3\u30c9",
+        "record.field.cardholder": "\u540d\u7fa9\u4eba",
+        "record.field.cvv": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30b3\u30fc\u30c9",
+        "record.field.database": "\u30c7\u30fc\u30bf\u30d9\u30fc\u30b9",
+        "record.field.document_number": "\u8a3c\u660e\u66f8\u756a\u53f7",
+        "record.field.document_type": "\u8a3c\u660e\u66f8\u306e\u7a2e\u985e",
+        "record.field.engine": "\u30a8\u30f3\u30b8\u30f3",
+        "record.field.environment": "\u74b0\u5883",
+        "record.field.expires": "\u6709\u52b9\u671f\u9650",
+        "record.field.expiry": "\u6709\u52b9\u671f\u9650",
+        "record.field.full_name": "\u6c0f\u540d",
+        "record.field.hidden_network": "\u30b9\u30c6\u30eb\u30b9\u30cd\u30c3\u30c8\u30ef\u30fc\u30af",
+        "record.field.host": "\u30db\u30b9\u30c8",
+        "record.field.hostname": "\u30db\u30b9\u30c8\u540d",
+        "record.field.issued": "\u767a\u884c\u65e5",
+        "record.field.license_key": "\u30e9\u30a4\u30bb\u30f3\u30b9\u30ad\u30fc",
+        "record.field.licensed_to": "\u30e9\u30a4\u30bb\u30f3\u30b9\u540d\u7fa9",
+        "record.field.nationality": "\u56fd\u7c4d",
+        "record.field.notes": "\u30e1\u30e2",
+        "record.field.number": "\u756a\u53f7",
+        "record.field.password": "\u30d1\u30b9\u30ef\u30fc\u30c9",
+        "record.field.pin": "PIN",
+        "record.field.port": "\u30dd\u30fc\u30c8",
+        "record.field.product": "\u88fd\u54c1",
+        "record.field.purchased": "\u8cfc\u5165\u65e5",
+        "record.field.seats": "\u30e9\u30a4\u30bb\u30f3\u30b9\u6570",
+        "record.field.security": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u65b9\u5f0f",
+        "record.field.service": "\u30b5\u30fc\u30d3\u30b9",
+        "record.field.ssid": "\u30cd\u30c3\u30c8\u30ef\u30fc\u30af\u540d (SSID)",
+        "record.field.token": "\u30c8\u30fc\u30af\u30f3",
+        "record.field.username": "\u30e6\u30fc\u30b6\u30fc\u540d",
+        "record.field.version": "\u30d0\u30fc\u30b8\u30e7\u30f3",
+        "record.type.api-token": "API \u30c8\u30fc\u30af\u30f3",
+        "record.type.credit-card": "\u30af\u30ec\u30b8\u30c3\u30c8\u30ab\u30fc\u30c9",
+        "record.type.db-credential": "\u30c7\u30fc\u30bf\u30d9\u30fc\u30b9\u8a8d\u8a3c\u60c5\u5831",
+        "record.type.identity": "\u8eab\u5206\u8a3c\u660e\u66f8",
+        "record.type.server": "\u30b5\u30fc\u30d0\u30fc",
+        "record.type.software-license": "\u30bd\u30d5\u30c8\u30a6\u30a7\u30a2\u30e9\u30a4\u30bb\u30f3\u30b9",
+        "record.type.wifi": "Wi-Fi \u30cd\u30c3\u30c8\u30ef\u30fc\u30af",
+        "nav.records": "\u30ec\u30b3\u30fc\u30c9",
+        "page.records.desc": "\u540c\u3058\u6697\u53f7\u5316\u30dc\u30fc\u30eb\u30c8\u306b\u4fdd\u5b58\u3055\u308c\u308b\u578b\u4ed8\u304d\u30ec\u30b3\u30fc\u30c9\u3002",
+        "btn.add_record": "+ \u30ec\u30b3\u30fc\u30c9\u3092\u8ffd\u52a0",
+        "records.summary": "\u8a73\u7d30",
+        "records.pick.title": "\u65b0\u3057\u3044\u30ec\u30b3\u30fc\u30c9",
+        "records.pick.desc": "\u7a2e\u985e\u3092\u9078\u3093\u3067\u304f\u3060\u3055\u3044\u3002\u3069\u306e\u7a2e\u985e\u3082\u540c\u3058\u6697\u53f7\u5316\u30dc\u30fc\u30eb\u30c8\u306b\u4fdd\u5b58\u3055\u308c\u307e\u3059\u3002",
+        "empty.records.t": "\u30ec\u30b3\u30fc\u30c9\u306f\u307e\u3060\u3042\u308a\u307e\u305b\u3093",
+        "empty.records.d": "API \u30c8\u30fc\u30af\u30f3\u3001\u30c7\u30fc\u30bf\u30d9\u30fc\u30b9\u8a8d\u8a3c\u60c5\u5831\u3001\u30ab\u30fc\u30c9\u3001\u8eab\u5206\u8a3c\u660e\u66f8\u3001\u30e9\u30a4\u30bb\u30f3\u30b9\u3001Wi-Fi\u3001\u30b5\u30fc\u30d0\u30fc\u304c\u3053\u3053\u306b\u5165\u308a\u307e\u3059\u3002",
+        "confirm.delete_record": "\u3053\u306e\u30ec\u30b3\u30fc\u30c9\u3092\u524a\u9664\u3057\u307e\u3059\u304b\uff1f",
     },
     "ko": {
         "nav.security": "\ubcf4\uc548",
@@ -15639,6 +16107,55 @@ WEB_CATALOGUES = {
         "hardware.nosupport": "\uc774 \ube0c\ub77c\uc6b0\uc800\ub294 \ubcf4\uc548 \ud0a4\uc640 \ud1b5\uc2e0\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.",
         "hardware.confirm_forget": "\uc774 \ubcf4\uc548 \ud0a4\ub97c \uc0ad\uc81c\ud560\uae4c\uc694?",
         "hardware.forget_failed": "\ubcf4\uc548 \ud0a4\ub97c \uc0ad\uc81c\ud558\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4.",
+        "record.field.address": "\uc8fc\uc18c",
+        "record.field.brand": "\ube0c\ub79c\ub4dc",
+        "record.field.cardholder": "\uce74\ub4dc \uc18c\uc720\uc790",
+        "record.field.cvv": "CVC",
+        "record.field.database": "\ub370\uc774\ud130\ubca0\uc774\uc2a4",
+        "record.field.document_number": "\ubb38\uc11c \ubc88\ud638",
+        "record.field.document_type": "\ubb38\uc11c \uc885\ub958",
+        "record.field.engine": "\uc5d4\uc9c4",
+        "record.field.environment": "\ud658\uacbd",
+        "record.field.expires": "\ub9cc\ub8cc\uc77c",
+        "record.field.expiry": "\uc720\ud6a8\uae30\uac04",
+        "record.field.full_name": "\uc774\ub984",
+        "record.field.hidden_network": "\uc228\uae40 \ub124\ud2b8\uc6cc\ud06c",
+        "record.field.host": "\ud638\uc2a4\ud2b8",
+        "record.field.hostname": "\ud638\uc2a4\ud2b8 \uc774\ub984",
+        "record.field.issued": "\ubc1c\uae09\uc77c",
+        "record.field.license_key": "\ub77c\uc774\uc120\uc2a4 \ud0a4",
+        "record.field.licensed_to": "\ub77c\uc774\uc120\uc2a4 \uc18c\uc720\uc790",
+        "record.field.nationality": "\uad6d\uc801",
+        "record.field.notes": "\uba54\ubaa8",
+        "record.field.number": "\ubc88\ud638",
+        "record.field.password": "\ube44\ubc00\ubc88\ud638",
+        "record.field.pin": "PIN",
+        "record.field.port": "\ud3ec\ud2b8",
+        "record.field.product": "\uc81c\ud488",
+        "record.field.purchased": "\uad6c\ub9e4\uc77c",
+        "record.field.seats": "\uc0ac\uc6a9 \uc778\uc6d0",
+        "record.field.security": "\ubcf4\uc548 \ubc29\uc2dd",
+        "record.field.service": "\uc11c\ube44\uc2a4",
+        "record.field.ssid": "\ub124\ud2b8\uc6cc\ud06c \uc774\ub984 (SSID)",
+        "record.field.token": "\ud1a0\ud070",
+        "record.field.username": "\uc0ac\uc6a9\uc790 \uc774\ub984",
+        "record.field.version": "\ubc84\uc804",
+        "record.type.api-token": "API \ud1a0\ud070",
+        "record.type.credit-card": "\uc2e0\uc6a9\uce74\ub4dc",
+        "record.type.db-credential": "\ub370\uc774\ud130\ubca0\uc774\uc2a4 \uc790\uaca9 \uc99d\uba85",
+        "record.type.identity": "\uc2e0\ubd84\uc99d",
+        "record.type.server": "\uc11c\ubc84",
+        "record.type.software-license": "\uc18c\ud504\ud2b8\uc6e8\uc5b4 \ub77c\uc774\uc120\uc2a4",
+        "record.type.wifi": "Wi-Fi \ub124\ud2b8\uc6cc\ud06c",
+        "nav.records": "\ub808\ucf54\ub4dc",
+        "page.records.desc": "\uac19\uc740 \uc554\ud638\ud654 \ubcf4\uad00\ud568\uc5d0 \uc800\uc7a5\ub418\ub294 \uc720\ud615\ubcc4 \ub808\ucf54\ub4dc\uc785\ub2c8\ub2e4.",
+        "btn.add_record": "+ \ub808\ucf54\ub4dc \ucd94\uac00",
+        "records.summary": "\uc138\ubd80 \uc815\ubcf4",
+        "records.pick.title": "\uc0c8 \ub808\ucf54\ub4dc",
+        "records.pick.desc": "\uc5b4\ub5a4 \uc885\ub958\uc778\uc9c0 \uc120\ud0dd\ud558\uc138\uc694. \ubaa8\ub4e0 \uc885\ub958\uac00 \uac19\uc740 \uc554\ud638\ud654 \ubcf4\uad00\ud568\uc5d0 \uc800\uc7a5\ub429\ub2c8\ub2e4.",
+        "empty.records.t": "\uc544\uc9c1 \ub808\ucf54\ub4dc\uac00 \uc5c6\uc2b5\ub2c8\ub2e4",
+        "empty.records.d": "API \ud1a0\ud070, \ub370\uc774\ud130\ubca0\uc774\uc2a4 \uc790\uaca9 \uc99d\uba85, \uce74\ub4dc, \uc2e0\ubd84\uc99d, \ub77c\uc774\uc120\uc2a4, Wi-Fi, \uc11c\ubc84\uac00 \uc5ec\uae30\uc5d0 \uc800\uc7a5\ub429\ub2c8\ub2e4.",
+        "confirm.delete_record": "\uc774 \ub808\ucf54\ub4dc\ub97c \uc0ad\uc81c\ud560\uae4c\uc694?",
     },
     "pt-br": {
         "nav.security": "Seguran\u00e7a",
@@ -16033,6 +16550,55 @@ WEB_CATALOGUES = {
         "hardware.nosupport": "Este navegador n\u00e3o consegue conversar com uma chave de seguran\u00e7a.",
         "hardware.confirm_forget": "Remover esta chave de seguran\u00e7a?",
         "hardware.forget_failed": "A chave de seguran\u00e7a n\u00e3o p\u00f4de ser removida.",
+        "record.field.address": "Endere\u00e7o",
+        "record.field.brand": "Bandeira",
+        "record.field.cardholder": "Titular",
+        "record.field.cvv": "CVV",
+        "record.field.database": "Banco de dados",
+        "record.field.document_number": "N\u00famero do documento",
+        "record.field.document_type": "Tipo de documento",
+        "record.field.engine": "Motor",
+        "record.field.environment": "Ambiente",
+        "record.field.expires": "Expira em",
+        "record.field.expiry": "Validade",
+        "record.field.full_name": "Nome completo",
+        "record.field.hidden_network": "Rede oculta",
+        "record.field.host": "Host",
+        "record.field.hostname": "Nome do host",
+        "record.field.issued": "Emitido em",
+        "record.field.license_key": "Chave de licen\u00e7a",
+        "record.field.licensed_to": "Licenciado para",
+        "record.field.nationality": "Nacionalidade",
+        "record.field.notes": "Notas",
+        "record.field.number": "N\u00famero",
+        "record.field.password": "Senha",
+        "record.field.pin": "PIN",
+        "record.field.port": "Porta",
+        "record.field.product": "Produto",
+        "record.field.purchased": "Comprado em",
+        "record.field.seats": "Licen\u00e7as",
+        "record.field.security": "Seguran\u00e7a",
+        "record.field.service": "Servi\u00e7o",
+        "record.field.ssid": "Nome da rede (SSID)",
+        "record.field.token": "Token",
+        "record.field.username": "Usu\u00e1rio",
+        "record.field.version": "Vers\u00e3o",
+        "record.type.api-token": "Token de API",
+        "record.type.credit-card": "Cart\u00e3o de cr\u00e9dito",
+        "record.type.db-credential": "Credencial de banco de dados",
+        "record.type.identity": "Documento de identidade",
+        "record.type.server": "Servidor",
+        "record.type.software-license": "Licen\u00e7a de software",
+        "record.type.wifi": "Rede Wi-Fi",
+        "nav.records": "Registros",
+        "page.records.desc": "Registros tipados guardados no mesmo cofre criptografado.",
+        "btn.add_record": "+ Adicionar registro",
+        "records.summary": "Detalhe",
+        "records.pick.title": "Novo registro",
+        "records.pick.desc": "Escolha de que tipo \u00e9. Todos os tipos ficam no mesmo cofre criptografado.",
+        "empty.records.t": "Nenhum registro ainda",
+        "empty.records.d": "Tokens de API, credenciais de banco de dados, cart\u00f5es, identidades, licen\u00e7as, Wi-Fi e servidores ficam aqui.",
+        "confirm.delete_record": "Excluir este registro?",
     },
     "ru": {
         "nav.security": "\u0411\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c",
@@ -16427,6 +16993,55 @@ WEB_CATALOGUES = {
         "hardware.nosupport": "\u042d\u0442\u043e\u0442 \u0431\u0440\u0430\u0443\u0437\u0435\u0440 \u043d\u0435 \u0443\u043c\u0435\u0435\u0442 \u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c \u0441 \u043a\u043b\u044e\u0447\u043e\u043c \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438.",
         "hardware.confirm_forget": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u044d\u0442\u043e\u0442 \u043a\u043b\u044e\u0447 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438?",
         "hardware.forget_failed": "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u043a\u043b\u044e\u0447 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438.",
+        "record.field.address": "\u0410\u0434\u0440\u0435\u0441",
+        "record.field.brand": "\u041f\u043b\u0430\u0442\u0451\u0436\u043d\u0430\u044f \u0441\u0438\u0441\u0442\u0435\u043c\u0430",
+        "record.field.cardholder": "\u0414\u0435\u0440\u0436\u0430\u0442\u0435\u043b\u044c \u043a\u0430\u0440\u0442\u044b",
+        "record.field.cvv": "CVV",
+        "record.field.database": "\u0411\u0430\u0437\u0430 \u0434\u0430\u043d\u043d\u044b\u0445",
+        "record.field.document_number": "\u041d\u043e\u043c\u0435\u0440 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430",
+        "record.field.document_type": "\u0422\u0438\u043f \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430",
+        "record.field.engine": "\u0421\u0423\u0411\u0414",
+        "record.field.environment": "\u041e\u043a\u0440\u0443\u0436\u0435\u043d\u0438\u0435",
+        "record.field.expires": "\u0414\u0435\u0439\u0441\u0442\u0432\u0443\u0435\u0442 \u0434\u043e",
+        "record.field.expiry": "\u0421\u0440\u043e\u043a \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f",
+        "record.field.full_name": "\u041f\u043e\u043b\u043d\u043e\u0435 \u0438\u043c\u044f",
+        "record.field.hidden_network": "\u0421\u043a\u0440\u044b\u0442\u0430\u044f \u0441\u0435\u0442\u044c",
+        "record.field.host": "\u0425\u043e\u0441\u0442",
+        "record.field.hostname": "\u0418\u043c\u044f \u0445\u043e\u0441\u0442\u0430",
+        "record.field.issued": "\u0412\u044b\u0434\u0430\u043d",
+        "record.field.license_key": "\u041b\u0438\u0446\u0435\u043d\u0437\u0438\u043e\u043d\u043d\u044b\u0439 \u043a\u043b\u044e\u0447",
+        "record.field.licensed_to": "\u041b\u0438\u0446\u0435\u043d\u0437\u0438\u044f \u0432\u044b\u0434\u0430\u043d\u0430",
+        "record.field.nationality": "\u0413\u0440\u0430\u0436\u0434\u0430\u043d\u0441\u0442\u0432\u043e",
+        "record.field.notes": "\u0417\u0430\u043c\u0435\u0442\u043a\u0438",
+        "record.field.number": "\u041d\u043e\u043c\u0435\u0440",
+        "record.field.password": "\u041f\u0430\u0440\u043e\u043b\u044c",
+        "record.field.pin": "PIN",
+        "record.field.port": "\u041f\u043e\u0440\u0442",
+        "record.field.product": "\u041f\u0440\u043e\u0434\u0443\u043a\u0442",
+        "record.field.purchased": "\u041a\u0443\u043f\u043b\u0435\u043d\u043e",
+        "record.field.seats": "\u0427\u0438\u0441\u043b\u043e \u043b\u0438\u0446\u0435\u043d\u0437\u0438\u0439",
+        "record.field.security": "\u0422\u0438\u043f \u0437\u0430\u0449\u0438\u0442\u044b",
+        "record.field.service": "\u0421\u0435\u0440\u0432\u0438\u0441",
+        "record.field.ssid": "\u0418\u043c\u044f \u0441\u0435\u0442\u0438 (SSID)",
+        "record.field.token": "\u0422\u043e\u043a\u0435\u043d",
+        "record.field.username": "\u0418\u043c\u044f \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f",
+        "record.field.version": "\u0412\u0435\u0440\u0441\u0438\u044f",
+        "record.type.api-token": "\u0422\u043e\u043a\u0435\u043d API",
+        "record.type.credit-card": "\u0411\u0430\u043d\u043a\u043e\u0432\u0441\u043a\u0430\u044f \u043a\u0430\u0440\u0442\u0430",
+        "record.type.db-credential": "\u0414\u043e\u0441\u0442\u0443\u043f \u043a \u0431\u0430\u0437\u0435 \u0434\u0430\u043d\u043d\u044b\u0445",
+        "record.type.identity": "\u0423\u0434\u043e\u0441\u0442\u043e\u0432\u0435\u0440\u0435\u043d\u0438\u0435 \u043b\u0438\u0447\u043d\u043e\u0441\u0442\u0438",
+        "record.type.server": "\u0421\u0435\u0440\u0432\u0435\u0440",
+        "record.type.software-license": "\u041b\u0438\u0446\u0435\u043d\u0437\u0438\u044f \u043d\u0430 \u041f\u041e",
+        "record.type.wifi": "\u0421\u0435\u0442\u044c Wi-Fi",
+        "nav.records": "\u0417\u0430\u043f\u0438\u0441\u0438",
+        "page.records.desc": "\u0422\u0438\u043f\u0438\u0437\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u0432 \u0442\u043e\u043c \u0436\u0435 \u0437\u0430\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u043c \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435.",
+        "btn.add_record": "+ \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u044c",
+        "records.summary": "\u0414\u0435\u0442\u0430\u043b\u0438",
+        "records.pick.title": "\u041d\u043e\u0432\u0430\u044f \u0437\u0430\u043f\u0438\u0441\u044c",
+        "records.pick.desc": "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0442\u0438\u043f \u0437\u0430\u043f\u0438\u0441\u0438. \u0412\u0441\u0435 \u0442\u0438\u043f\u044b \u0445\u0440\u0430\u043d\u044f\u0442\u0441\u044f \u0432 \u043e\u0434\u043d\u043e\u043c \u0437\u0430\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u043c \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435.",
+        "empty.records.t": "\u0417\u0430\u043f\u0438\u0441\u0435\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442",
+        "empty.records.d": "\u0417\u0434\u0435\u0441\u044c \u0445\u0440\u0430\u043d\u044f\u0442\u0441\u044f \u0442\u043e\u043a\u0435\u043d\u044b API, \u0434\u043e\u0441\u0442\u0443\u043f\u044b \u043a \u0431\u0430\u0437\u0430\u043c \u0434\u0430\u043d\u043d\u044b\u0445, \u043a\u0430\u0440\u0442\u044b, \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b, \u043b\u0438\u0446\u0435\u043d\u0437\u0438\u0438, Wi-Fi \u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u044b.",
+        "confirm.delete_record": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u044d\u0442\u0443 \u0437\u0430\u043f\u0438\u0441\u044c?",
     },
     "zh-hans": {
         "nav.security": "\u5b89\u5168",
@@ -16821,6 +17436,55 @@ WEB_CATALOGUES = {
         "hardware.nosupport": "\u6b64\u6d4f\u89c8\u5668\u65e0\u6cd5\u4e0e\u5b89\u5168\u5bc6\u94a5\u901a\u4fe1\u3002",
         "hardware.confirm_forget": "\u8981\u79fb\u9664\u6b64\u5b89\u5168\u5bc6\u94a5\u5417\uff1f",
         "hardware.forget_failed": "\u65e0\u6cd5\u79fb\u9664\u6b64\u5b89\u5168\u5bc6\u94a5\u3002",
+        "record.field.address": "\u5730\u5740",
+        "record.field.brand": "\u5361\u7ec4\u7ec7",
+        "record.field.cardholder": "\u6301\u5361\u4eba",
+        "record.field.cvv": "\u5b89\u5168\u7801",
+        "record.field.database": "\u6570\u636e\u5e93",
+        "record.field.document_number": "\u8bc1\u4ef6\u53f7\u7801",
+        "record.field.document_type": "\u8bc1\u4ef6\u7c7b\u578b",
+        "record.field.engine": "\u6570\u636e\u5e93\u7c7b\u578b",
+        "record.field.environment": "\u73af\u5883",
+        "record.field.expires": "\u6709\u6548\u671f\u81f3",
+        "record.field.expiry": "\u6709\u6548\u671f",
+        "record.field.full_name": "\u59d3\u540d",
+        "record.field.hidden_network": "\u9690\u85cf\u7f51\u7edc",
+        "record.field.host": "\u4e3b\u673a",
+        "record.field.hostname": "\u4e3b\u673a\u540d",
+        "record.field.issued": "\u7b7e\u53d1\u65e5\u671f",
+        "record.field.license_key": "\u8bb8\u53ef\u8bc1\u5bc6\u94a5",
+        "record.field.licensed_to": "\u6388\u6743\u7ed9",
+        "record.field.nationality": "\u56fd\u7c4d",
+        "record.field.notes": "\u5907\u6ce8",
+        "record.field.number": "\u5361\u53f7",
+        "record.field.password": "\u5bc6\u7801",
+        "record.field.pin": "PIN \u7801",
+        "record.field.port": "\u7aef\u53e3",
+        "record.field.product": "\u4ea7\u54c1",
+        "record.field.purchased": "\u8d2d\u4e70\u65e5\u671f",
+        "record.field.seats": "\u6388\u6743\u6570\u91cf",
+        "record.field.security": "\u52a0\u5bc6\u65b9\u5f0f",
+        "record.field.service": "\u670d\u52a1",
+        "record.field.ssid": "\u7f51\u7edc\u540d\u79f0 (SSID)",
+        "record.field.token": "\u4ee4\u724c",
+        "record.field.username": "\u7528\u6237\u540d",
+        "record.field.version": "\u7248\u672c",
+        "record.type.api-token": "API \u4ee4\u724c",
+        "record.type.credit-card": "\u94f6\u884c\u5361",
+        "record.type.db-credential": "\u6570\u636e\u5e93\u51ed\u636e",
+        "record.type.identity": "\u8eab\u4efd\u8bc1\u4ef6",
+        "record.type.server": "\u670d\u52a1\u5668",
+        "record.type.software-license": "\u8f6f\u4ef6\u8bb8\u53ef\u8bc1",
+        "record.type.wifi": "Wi-Fi \u7f51\u7edc",
+        "nav.records": "\u8bb0\u5f55",
+        "page.records.desc": "\u4fdd\u5b58\u5728\u540c\u4e00\u52a0\u5bc6\u4fdd\u9669\u5e93\u4e2d\u7684\u7ed3\u6784\u5316\u8bb0\u5f55\u3002",
+        "btn.add_record": "+ \u6dfb\u52a0\u8bb0\u5f55",
+        "records.summary": "\u8be6\u60c5",
+        "records.pick.title": "\u65b0\u5efa\u8bb0\u5f55",
+        "records.pick.desc": "\u9009\u62e9\u8bb0\u5f55\u7c7b\u578b\u3002\u6240\u6709\u7c7b\u578b\u90fd\u4fdd\u5b58\u5728\u540c\u4e00\u4e2a\u52a0\u5bc6\u4fdd\u9669\u5e93\u4e2d\u3002",
+        "empty.records.t": "\u8fd8\u6ca1\u6709\u8bb0\u5f55",
+        "empty.records.d": "API \u4ee4\u724c\u3001\u6570\u636e\u5e93\u51ed\u636e\u3001\u94f6\u884c\u5361\u3001\u8eab\u4efd\u8bc1\u4ef6\u3001\u8bb8\u53ef\u8bc1\u3001Wi-Fi \u548c\u670d\u52a1\u5668\u90fd\u5b58\u653e\u5728\u8fd9\u91cc\u3002",
+        "confirm.delete_record": "\u5220\u9664\u8fd9\u6761\u8bb0\u5f55\uff1f",
     },
 }
 # --- END GENERATED LOCALES ---
@@ -17564,6 +18228,26 @@ textarea.input { min-height: 120px; resize: vertical; font-family: var(--mono); 
 .chip.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
 .chip.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .chip-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* Typed records. Four classes, because the section reuses the dashboard's
+   cards, fields, chips and empty states for everything else -- a new page
+   that needs a new visual language is usually a page that does not belong. */
+.type-grid { display: grid; gap: var(--sp-3);
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.type-tile { display: flex; flex-direction: column; align-items: center;
+  gap: var(--sp-2); padding: var(--sp-4) var(--sp-3); text-align: center;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  color: inherit; text-decoration: none; }
+.type-tile:hover, .type-tile:focus-visible { border-color: var(--accent); }
+.type-tile .type-ico { color: var(--accent); }
+.type-tile .type-name { font-weight: 600; }
+.type-tile .type-count { font-size: var(--fs-xs); color: var(--text-faint); }
+.chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.chips .chip { text-decoration: none; }
+.chip-n { margin-inline-start: 6px; opacity: 0.7; }
+/* A stored value shown rather than edited. Sized like an input so a view page
+   and its edit form do not jump when you move between them. */
+.ro { padding: 9px 0; color: var(--text); word-break: break-word; }
 
 /* Flash / alerts */
 .flash {
@@ -18503,6 +19187,17 @@ LOCKBAR_SCRIPT = """
 
 ICON_SPRITE = """
 <svg class="icon-sprite" aria-hidden="true" width="0" height="0" style="position:absolute;overflow:hidden">
+  <!-- Record-type icons. A schema names its icon and the sprite has to hold
+       it: an unresolved <use> renders nothing at all, so a missing symbol is
+       a blank square rather than an error anybody sees. -->
+  <symbol id="i-record" viewBox="0 0 24 24"><path d="M3.5 7.5h17v13h-17zM6.5 4.5h11M8 12h7M8 16h5"/></symbol>
+  <symbol id="i-token" viewBox="0 0 24 24"><path d="M20.5 3.5h-7l-10 10 7 7 10-10z"/><circle cx="17" cy="7" r="1.5"/></symbol>
+  <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v13c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-13M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3"/></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><path d="M2.5 5.5h19v13h-19zM2.5 10h19M6 14.5h4"/></symbol>
+  <symbol id="i-identity" viewBox="0 0 24 24"><path d="M2.5 4.5h19v15h-19z"/><circle cx="8.5" cy="10.5" r="2.5"/><path d="M4.5 16.5c0-2 1.8-3 4-3s4 1 4 3M14.5 9.5h4.5M14.5 13.5h4.5"/></symbol>
+  <symbol id="i-licence" viewBox="0 0 24 24"><path d="M4.5 3.5h15v11h-15zM8 7.5h8M8 11h5"/><circle cx="16.5" cy="17.5" r="3"/><path d="M14.5 20l-.5 2.5 2.5-1.2 2.5 1.2-.5-2.5"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 8.5c5.5-4.7 13.5-4.7 19 0M6 12.5c3.6-3 8.4-3 12 0M9.5 16.5c1.6-1.3 3.4-1.3 5 0"/><circle cx="12" cy="20" r="1"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><path d="M3.5 3.5h17v7h-17zM3.5 13.5h17v7h-17zM7 7h.01M7 17h.01M11 7h6M11 17h6"/></symbol>
   <symbol id="i-brand" viewBox="0 0 24 24"><path d="M4 6l5 6-5 6M12 18h8M12 6h8"/></symbol>
   <symbol id="i-overview" viewBox="0 0 24 24"><path d="M3.5 3.5h7v7h-7zM13.5 3.5h7v7h-7zM3.5 13.5h7v7h-7zM13.5 13.5h7v7h-7z"/></symbol>
   <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="4.5"/><path d="M12.5 12H21M17 12v3M20 12v2"/></symbol>
@@ -18596,6 +19291,11 @@ NAV_SECTIONS = [
         ("passphrases",    "/passphrases",    "phrase", "nav.passphrases",    "Passphrases",    "passphrases"),
         ("authenticators", "/authenticators", "authenticator", "nav.authenticators", "Authenticators", "authenticators"),
         ("backup-codes",   "/backup-codes",   "backup", "nav.backup_codes",   "Backup Codes",   "backups"),
+        # One entry for every typed record, not one per schema. Seven more
+        # rows here would make the sidebar longer than the vault is deep, and
+        # adding an eighth type would mean editing a menu -- which is the
+        # per-type work the schema engine exists to remove.
+        ("records",        "/records",        "record", "nav.records",        "Records",        "records"),
     ]),
     ("nav.group.tools", [
         ("security",  "/security",  "shield", "nav.security",  "Security",        None),
@@ -19440,6 +20140,9 @@ def overview_page(counts, recent):
         ("phrase", counts.get("passphrases", 0), "nav.passphrases", "Passphrases", "/passphrases"),
         ("authenticator", counts.get("authenticators", 0), "nav.authenticators", "Authenticators", "/authenticators"),
         ("backup", counts.get("backups", 0), "nav.backup_codes", "Backup Codes", "/backup-codes"),
+        # Records is a tile like the rest, not a special case. Leaving it out
+        # would make the overview count less of the vault than the vault holds.
+        ("record", counts.get("records", 0), "nav.records", "Records", "/records"),
     ]
     stats = "".join(
         f'<a class="stat" href="{href}">'
@@ -19523,7 +20226,8 @@ def overview_page(counts, recent):
 # --------------------------------------------------------------------------
 # Forms
 # --------------------------------------------------------------------------
-def _form_page(title, action, fields_html, message="", back="/", active="overview"):
+def _form_page(title, action, fields_html, message="", back="/", active="overview",
+               counts=None):
     msg = f'<div class="msg">{message}</div>' if message and "<div" not in message else (message or "")
     content = f"""
 <div class="page-head">
@@ -19544,7 +20248,8 @@ def _form_page(title, action, fields_html, message="", back="/", active="overvie
     </form>
   </div>
 </div>"""
-    return render_shell(content, active, VERSION, VAULT_PATH, title=title)
+    return render_shell(content, active, VERSION, VAULT_PATH, title=title,
+                        counts=counts or {})
 
 
 def _field(name, label_key, label, value="", ftype="text", placeholder_key=None, hint=None, required=False, rows=0):
@@ -21517,6 +22222,319 @@ def _load_core():
 core = _load_core()
 
 
+# --------------------------------------------------------------------------
+# Typed records
+# --------------------------------------------------------------------------
+# One family of pages for every schema in the core, not one family per type.
+# The dashboard already carries five of those families -- notes, passphrases,
+# authenticators, backup codes and passwords -- and each is about 200 lines
+# whose only difference is which fields it draws. Seven more would be seven
+# more chances for this surface and the CLI to disagree about a record, which
+# is the disagreement 4.1.0 cost a folder and every custom field on twenty
+# formats to discover.
+#
+# So nothing below names a field. The schema says what to draw, which values
+# are secret, and which are required; add a type to the core and it appears
+# here with its icon, its form, its list and its redaction already correct.
+#
+# A record is addressed by type *and* id, never by id alone: ids are per type,
+# so wifi 1 and server 1 both exist and a route holding only an id is holding
+# half an address.
+
+# Widget -> how to draw it. The schema names an intent ("date", "month") and
+# this is the only place that turns one into an <input type>. A widget this
+# build does not know falls back to a text box rather than vanishing: an unknown
+# widget can only come from a newer schema, and a plain box still lets the
+# value be read and edited.
+# What a hidden record shows instead of its label, on the record list and in
+# search alike. One definition for the two, because two would drift and the
+# failure would be a hidden name readable on whichever page forgot.
+#
+# This is not REDACTED above, and deliberately so: that one is "&bull;" for
+# the pages that drop it straight into markup, while these two hand their
+# label to _esc() or html.escape() on the way out. The entity form would
+# arrive there as the literal text "&bull;&bull;..." -- redaction that
+# announces itself as a bug. Same glyph, different side of the escaping.
+SEARCH_REDACTED = "•" * 8
+
+RECORD_WIDGET_TYPES = {
+    "line": "text",
+    "number": "number",
+    "date": "date",
+    "month": "month",
+}
+
+
+def record_type_label(record_type):
+    """The human name for a type, from the core's schema."""
+    try:
+        return core.record_schema(record_type)["label"]
+    except Exception:
+        return record_type
+
+
+def record_type_icon(record_type):
+    try:
+        return core.record_schema(record_type).get("icon", "record")
+    except Exception:
+        return "record"
+
+
+def _record_i18n(key):
+    """The i18n key for a schema name, so a locale can translate it.
+
+    Field names are shared across types on purpose -- "username" is one string
+    whether it sits on an api-token or a server -- so the key is the field
+    name, not the type and the field name. Thirty-three keys instead of
+    forty-seven, and a translator never sees the same word twice.
+    """
+    return "record.field." + key
+
+
+def _record_field_html(record_type, name, kind, widget, required, value):
+    """One control for one schema field."""
+    label_key = _record_i18n(name)
+    label = name.replace("_", " ").capitalize()
+    if widget == "multiline":
+        return _field(name, label_key, label, value, required=required, rows=6)
+    if kind == core.FIELD_SECRET:
+        # A secret gets the same masked box with a reveal control that the
+        # master password and the entry password get, rather than a plain text
+        # input: these are read over a shoulder exactly as easily.
+        field_id = "field-%s" % name
+        req = " required" if required else ""
+        ctrl = _password_input(
+            field_id, name,
+            'value="%s" autocomplete="off"%s' % (html.escape(value), req))
+        return (f'<div class="field"><label for="{field_id}" '
+                f'data-i18n="{label_key}">{label}</label>{ctrl}</div>')
+    return _field(name, label_key, label, value,
+                  ftype=RECORD_WIDGET_TYPES.get(widget, "text"),
+                  required=required)
+
+
+def build_record_form(record_type, action, values=None, custom=None,
+                      folder="", hidden=False, label="", known_folders=(),
+                      message="", record_id="", counts=None):
+    """The add and edit form for any type, drawn from its schema."""
+    values = values or {}
+    parts = [_field("label", "table.label", "Label", label, required=True)]
+    for name, kind, widget, required in core.record_fields(record_type):
+        parts.append(_record_field_html(record_type, name, kind, widget,
+                                        required, values.get(name, "")))
+    parts.append(_folder_field(folder, known_folders))
+    parts.append(_custom_fields_block(custom))
+    parts.append(_hidden_field(hidden))
+    extra = '<input type="hidden" name="type" value="%s">' % html.escape(record_type)
+    if record_id:
+        extra += '<input type="hidden" name="id" value="%s">' % html.escape(record_id)
+    title = record_type_label(record_type)
+    return _form_page(title, action, extra + "".join(parts), message,
+                      "/records?type=" + urllib.parse.quote(record_type),
+                      "records", counts=counts)
+
+
+def build_record_picker(counts):
+    """The page shown by /records-add with no type: which kind is this?
+
+    A <select> of seven names would ask the user to already know what SPM
+    calls the thing in their hand. Tiles carry the icon and the name together,
+    which is what tells someone holding a Wi-Fi password which one to press.
+    """
+    tiles = []
+    for record_type in core.RECORD_TYPES:
+        label = record_type_label(record_type)
+        tiles.append(
+            '<a class="type-tile" href="/records-add?type=%s">'
+            '<span class="type-ico" aria-hidden="true">%s</span>'
+            '<span class="type-name" data-i18n="record.type.%s">%s</span>'
+            '<span class="type-count">%s</span></a>'
+            % (urllib.parse.quote(record_type),
+               _icon(record_type_icon(record_type), "icon icon-lg"),
+               record_type, html.escape(label),
+               counts.get(record_type, 0) or ""))
+    content = f"""
+<div class="page-head">
+  <div>
+    <h1 class="page-title" data-i18n="records.pick.title">New record</h1>
+    <div class="page-sub" data-i18n="records.pick.desc">Choose what kind of thing this is. Every type is stored in the same encrypted vault.</div>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-ghost" href="/records" data-i18n="form.back_list">Back to list</a>
+  </div>
+</div>
+<div class="card"><div class="card-body">
+  <div class="type-grid">{"".join(tiles)}</div>
+</div></div>"""
+    return render_shell(content, "records", VERSION, VAULT_PATH,
+                        title="New record", counts=counts)
+
+
+def _record_type_chips(active, counts):
+    """The type filter. Also the only place a type's count is shown per type."""
+    out = ['<a class="chip%s" href="/records" data-i18n="tags.all">All</a>'
+           % ("" if active else " chip-on")]
+    for record_type in core.RECORD_TYPES:
+        n = counts.get(record_type, 0)
+        if not n and record_type != active:
+            # A type nobody uses is not a filter worth offering. It is still
+            # on the picker, which is where a type is chosen.
+            continue
+        out.append(
+            '<a class="chip%s" href="/records?type=%s" data-i18n="record.type.%s">%s'
+            '<span class="chip-n">%d</span></a>'
+            % (" chip-on" if record_type == active else "",
+               urllib.parse.quote(record_type), record_type,
+               html.escape(record_type_label(record_type)), n))
+    return '<div class="chips" role="group" aria-label="Filter by type">%s</div>' % "".join(out)
+
+
+def build_records_page(plaintext, active_type="", counts=None):
+    """The list. One table for every type, because a record is a record."""
+    counts = counts or core.record_counts(plaintext)
+    rows = []
+    for _index, parsed in core.iter_records(plaintext, active_type):
+        record_type, record_id, label, values, created, folder, _custom, hidden = parsed
+        shown = SEARCH_REDACTED if hidden else html.escape(label)
+        href = "/records-view?type=%s&amp;id=%s" % (
+            urllib.parse.quote(record_type), urllib.parse.quote(record_id))
+        edit = "/records-edit?type=%s&amp;id=%s" % (
+            urllib.parse.quote(record_type), urllib.parse.quote(record_id))
+        # The summary is the first non-secret value the schema declares, so a
+        # list of api-tokens shows the service and a list of servers shows the
+        # hostname -- without this file knowing either word. A secret never
+        # reaches it: redact_record has already replaced them.
+        summary = ""
+        for name, kind, _w, _r in core.record_fields(record_type):
+            if kind != core.FIELD_SECRET and values.get(name):
+                summary = values[name]
+                break
+        rows.append(f"""
+        <tr data-row>
+          <td><span class="nav-ico" aria-hidden="true">{_icon(record_type_icon(record_type), "icon icon-sm")}</span>
+              <span data-i18n="record.type.{record_type}">{html.escape(record_type_label(record_type))}</span></td>
+          <td><a href="{href}">{shown}</a></td>
+          <td>{"" if hidden else html.escape(summary[:60])}</td>
+          <td>{html.escape(folder)}</td>
+          <td style="text-align:end">
+            <a class="icon-btn" href="{href}" aria-label="View">{_icon("view", "icon icon-sm")}</a>
+            <a class="icon-btn" href="{edit}" aria-label="Edit">{_icon("edit", "icon icon-sm")}</a>
+            <form method="post" action="/records-delete" style="display:inline"
+                  onsubmit="return confirm(spmT('confirm.delete_record','Delete this record?'))">
+              <input type="hidden" name="type" value="{html.escape(record_type)}">
+              <input type="hidden" name="id" value="{html.escape(record_id)}">
+              <button class="icon-btn" type="submit" aria-label="Delete">{_icon("trash", "icon icon-sm")}</button>
+            </form>
+          </td>
+        </tr>""")
+    if not rows:
+        rows.append(f"""
+        <tr><td colspan="5"><div class="empty">
+          <div class="empty-ico">{_icon("record", "icon icon-lg")}</div>
+          <div class="empty-t" data-i18n="empty.records.t">No records yet</div>
+          <div class="empty-d" data-i18n="empty.records.d">API tokens, database credentials, cards, identities, licences, Wi-Fi and servers live here.</div>
+        </div></td></tr>""")
+    headers = [("search.kind", "Type", ""), ("table.label", "Label", ""),
+               ("records.summary", "Detail", ""),
+               ("view.label.folder", "Folder", ""),
+               ("table.actions", "Actions", "act")]
+    body = list_page("nav.records", "Records", "page.records.desc",
+                     "Typed records stored in the same encrypted vault.",
+                     "/records-add", "btn.add_record", "+ Add Record",
+                     headers, "".join(rows))
+    body = body.replace('<div class="card" data-searchable>',
+                        _record_type_chips(active_type, counts)
+                        + '<div class="card" data-searchable>', 1)
+    return render_shell(body + RECORD_CONFIRM_SCRIPT, "records", VERSION,
+                        VAULT_PATH, title="Records", counts=counts,
+                        searchable=True)
+
+
+RECORD_CONFIRM_SCRIPT = """
+<script>
+/* The delete confirmation is translated, and a confirm() written inline in
+   the row would ship the English string to every locale. */
+function spmT(key, fallback) {
+  return (window.SPM_I18N && window.SPM_I18N.t) ? window.SPM_I18N.t(key, fallback) : fallback;
+}
+</script>
+"""
+
+
+def build_record_view(parsed, counts=None):
+    """One record, secrets masked until asked for.
+
+    Redaction comes from the core rather than from a list here: a surface that
+    decides for itself which of its fields are sensitive is exactly the shape
+    of the defect this engine exists to prevent, and a secret is a worse thing
+    to get wrong than a folder.
+    """
+    record_type, record_id, label, values, created, folder, custom, hidden = parsed
+    blocks = []
+    for name, kind, widget, _required in core.record_fields(record_type):
+        value = values.get(name, "")
+        if not value:
+            continue
+        label_key = _record_i18n(name)
+        pretty = name.replace("_", " ").capitalize()
+        if kind == core.FIELD_SECRET:
+            blocks.append(_secret_block(value, label_key, pretty,
+                                        "rec-%s" % name))
+        else:
+            blocks.append(
+                '<div class="field"><label data-i18n="%s">%s</label>'
+                '<div class="ro">%s</div></div>'
+                % (label_key, pretty, html.escape(value).replace("\n", "<br>")))
+    for name, value in custom or []:
+        blocks.append('<div class="field"><label>%s</label><div class="ro">%s</div></div>'
+                      % (html.escape(name), html.escape(value)))
+    if folder:
+        blocks.append('<div class="field"><label data-i18n="view.label.folder">Folder</label>'
+                      '<div class="ro">%s</div></div>' % html.escape(folder))
+    blocks.append('<div class="field"><label data-i18n="view.label.created">Created at</label>'
+                  '<div class="ro">%s</div></div>' % html.escape(created))
+    back = "/records?type=" + urllib.parse.quote(record_type)
+    edit = "/records-edit?type=%s&amp;id=%s" % (urllib.parse.quote(record_type),
+                                            urllib.parse.quote(record_id))
+    content = f"""
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{html.escape(label)}</h1>
+    <div class="page-sub" data-i18n="record.type.{record_type}">{html.escape(record_type_label(record_type))}</div>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-primary" href="{edit}" data-i18n="btn.edit">Edit</a>
+    <a class="btn btn-ghost" href="{back}" data-i18n="form.back_list">Back to list</a>
+  </div>
+</div>
+<div class="card" style="max-width:640px"><div class="card-body">{"".join(blocks)}</div></div>
+{REVEAL_SCRIPT}"""
+    return render_shell(content, "records", VERSION, VAULT_PATH,
+                        title=label, counts=counts or {})
+
+
+def posted_record_values(record_type, data):
+    """{field: value} for a submitted form, and nothing the schema does not name.
+
+    Reading the schema rather than the form means a field a page never drew
+    cannot arrive from a crafted POST and be stored where no surface will ever
+    show it back.
+    """
+    values = {}
+    for name, _kind, widget, _required in core.record_fields(record_type):
+        value = (data.get(name) or [""])[0]
+        if widget != "multiline":
+            # Every non-multiline control is a single-line input, so a newline
+            # or a tab arriving in one came from a script, not from typing.
+            # Folding here keeps a value the form can show and edit back.
+            value = " ".join(value.split())
+        else:
+            value = value.replace("\r\n", "\n").replace("\r", "\n")
+        if value:
+            values[name] = value
+    return values
+
+
 def url_problem(raw):
     """Why this URL field cannot be used, or "" when it can.
 
@@ -22757,6 +23775,38 @@ def search_vault(plaintext, term):
             label = p[2] if len(p) > 2 else ""
             if needle in (rid + " " + label).lower():
                 out.append((kind_key, kind, rid, label, href + urllib.parse.quote(rid)))
+    # Typed records. This page says it looks "across every record type", and
+    # until they were listed here it did not -- a wifi record could not be
+    # found by its own name from the search box.
+    #
+    # Non-secret schema values are matched for the same reason a password
+    # entry's username and url are: they are not secrets, they are already on
+    # the record's page, and matching them is how you find the server you are
+    # looking at. Secret fields stay unsearched, or the result count would
+    # answer "is this string in the vault?" for anyone reaching an unlocked
+    # session. The row only ever shows the label, so a matched value never
+    # reaches the screen -- and a hidden record keeps its redaction here, the
+    # way it does on the security page, rather than making search the one
+    # place a hidden name can be read.
+    for _index, parsed in core.iter_records(plaintext):
+        record_type, rid, label, values, _created, folder, custom, hidden = parsed
+        secrets_of = core.record_secret_fields(record_type)
+        haystack = [rid, label, folder]
+        haystack += [v for k, v in values.items() if k not in secrets_of]
+        haystack += [n for n, _v in custom or []]
+        if needle in " ".join(haystack).lower():
+            # The kind column carries the type's own key, not a generic
+            # "Records": every other page names the type, and a translated
+            # locale is the one place where a wrong key is invisible in
+            # English. The href is written escaped because it lands in an
+            # attribute unaltered -- a bare & there starts a character
+            # reference.
+            out.append(("record.type." + record_type,
+                        record_type_label(record_type), rid,
+                        SEARCH_REDACTED if hidden else label,
+                        "/records-view?type=%s&amp;id=%s"
+                        % (urllib.parse.quote(record_type),
+                           urllib.parse.quote(rid))))
     return out
 
 
@@ -23009,11 +24059,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         _, passphrases = parse_passphrases(plaintext)
         _, backups = parse_backup_codes(plaintext)
         _, auths = parse_authenticators(plaintext)
-        return {
+        # The typed-record counts come back keyed by type as well as totalled
+        # under "", so the badge and the type chips are counting the same rows.
+        record_counts = core.record_counts(plaintext)
+        counts = {
             "passwords": len(entries), "notes": len(notes),
             "passphrases": len(passphrases), "backups": len(backups),
             "authenticators": len(auths),
+            "records": record_counts.get("", 0),
         }
+        counts.update({k: v for k, v in record_counts.items() if k})
+        return counts
 
     def _add_cors(self):
         origin = self.headers.get("Origin", "")
@@ -23871,11 +24927,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             _, passphrases = parse_passphrases(plaintext)
             _, backups = parse_backup_codes(plaintext)
             _, auths = parse_authenticators(plaintext)
-            counts = {
-                "passwords": len(entries), "notes": len(notes),
-                "passphrases": len(passphrases), "backups": len(backups),
-                "authenticators": len(auths),
-            }
+            counts = self._counts(plaintext)
             audit = compute_security(entries, plaintext)
             counts["security_score"] = audit["score"]
             counts["aging"] = len(audit["old"])
@@ -24035,11 +25087,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             _, passphrases = parse_passphrases(plaintext)
             _, backups = parse_backup_codes(plaintext)
             _, auths = parse_authenticators(plaintext)
-            counts = {
-                "passwords": len(entries), "notes": len(notes),
-                "passphrases": len(passphrases), "backups": len(backups),
-                "authenticators": len(auths),
-            }
+            counts = self._counts(plaintext)
             password_rows = entries
             password_filters = ""
             if path == "/passwords":
@@ -24210,6 +25258,54 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             page = view_entry_page(found, core.password_history(plaintext, entry_id))
             self._send_html(200, page)
+            return
+
+        # ----- typed records ------------------------------------------------
+        # Four routes for every schema. The type is half of a record's address
+        # and is validated against the core on every one of them: a route that
+        # accepted an unknown type would render a page with no fields and then
+        # write a row no surface can read back.
+        if path in ("/records", "/records-add", "/records-edit", "/records-view"):
+            plaintext = load_vault(master, self._session_rec)
+            counts = self._counts(plaintext)
+            wanted = (query.get("type") or [""])[0]
+            if wanted and wanted not in core.RECORD_TYPES:
+                self.send_error(404, "Unknown record type")
+                return
+
+            if path == "/records":
+                self._send_html(200, build_records_page(plaintext, wanted, counts))
+                return
+
+            if path == "/records-add":
+                if not wanted:
+                    self._send_html(200, build_record_picker(counts))
+                    return
+                self._send_html(200, build_record_form(
+                    wanted, "/records-add",
+                    known_folders=core.record_folders(plaintext), counts=counts))
+                return
+
+            record_id = (query.get("id") or [""])[0]
+            if not wanted or not record_id:
+                self.send_error(400, "Missing type or id")
+                return
+            found = core.find_record(plaintext, wanted, record_id)
+            if not found:
+                self.send_error(404, "Record not found")
+                return
+            _index, parsed = found
+            rtype, rid, label, values, _created, folder, custom, hidden = parsed
+
+            if path == "/records-view":
+                self._send_html(200, build_record_view(parsed, counts))
+                return
+
+            self._send_html(200, build_record_form(
+                rtype, "/records-edit", values=values, custom=custom,
+                folder=folder, hidden=hidden, label=label,
+                known_folders=core.record_folders(plaintext),
+                record_id=rid, counts=counts))
             return
 
         if path == "/notes-add":
@@ -25041,6 +26137,100 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             self.send_response(302)
             self.send_header("Location", "/history?flash=restored")
+            self.end_headers()
+            return
+
+        # ----- typed records ------------------------------------------------
+        # Add and edit share one body, because two would drift and the failure
+        # would be a record whose custom fields survive an edit but not a
+        # create -- silent either way. The only difference is which row the
+        # result replaces.
+        if path in ("/records-add", "/records-edit"):
+            record_type = (data.get("type") or [""])[0]
+            if record_type not in core.RECORD_TYPES:
+                self.send_error(400, "Unknown record type")
+                return
+            label = (data.get("label") or [""])[0].strip()
+            record_id = (data.get("id") or [""])[0].strip()
+            values = posted_record_values(record_type, data)
+            folder, pairs, attrs_error = posted_attrs(data)
+            hidden = _hidden_from_form(data)
+            plaintext = load_vault(master, self._session_rec)
+
+            def _again(problem):
+                self._send_html(200, build_record_form(
+                    record_type,
+                    "/records-edit" if record_id else "/records-add",
+                    values=values, custom=pairs, folder=folder, hidden=hidden,
+                    label=label, known_folders=core.record_folders(plaintext),
+                    message="<div class='msg'>%s</div>" % html.escape(problem),
+                    record_id=record_id, counts=self._counts(plaintext)))
+
+            if not label:
+                _again("A label is required.")
+                return
+            if attrs_error:
+                _again(attrs_error)
+                return
+
+            index = None
+            created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            if record_id:
+                found = core.find_record(plaintext, record_type, record_id)
+                if not found:
+                    self.send_error(404, "Record not found")
+                    return
+                # The created stamp belongs to the record, not to this edit.
+                index, existing = found
+                created = existing[4]
+            else:
+                record_id = core.record_next_id(plaintext, record_type)
+
+            # The core validates: a missing required field, a value too long,
+            # or a custom field shadowing a schema name. Its message is shown
+            # rather than a generic one, because it is the only text that can
+            # say which field and why.
+            try:
+                row = core.build_record_row(record_type, record_id, label,
+                                            values, created, folder=folder,
+                                            fields=pairs, hidden=hidden)
+            except Exception as problem:
+                _again(str(problem))
+                return
+
+            lines = plaintext.splitlines()
+            if index is None:
+                lines.append(row)
+            else:
+                lines[index] = row
+            save_vault(master, "\n".join(lines) + "\n", self._session_rec)
+            self.send_response(302)
+            self.send_header("Location", "/records-view?type=%s&id=%s"
+                             % (urllib.parse.quote(record_type),
+                                urllib.parse.quote(record_id)))
+            self.end_headers()
+            return
+
+        if path == "/records-delete":
+            record_type = (data.get("type") or [""])[0]
+            record_id = (data.get("id") or [""])[0]
+            if record_type not in core.RECORD_TYPES or not record_id:
+                self.send_error(400, "Missing type or id")
+                return
+            plaintext = load_vault(master, self._session_rec)
+            found = core.find_record(plaintext, record_type, record_id)
+            if not found:
+                self.send_error(404, "Record not found")
+                return
+            index, _parsed = found
+            lines = plaintext.splitlines()
+            # By index, from the core's own walk of the rows. Rebuilding the
+            # match here with a startswith and a split is how a delete comes to
+            # remove the wrong row when a label happens to contain a tab.
+            del lines[index]
+            save_vault(master, "\n".join(lines) + "\n", self._session_rec)
+            self.send_response(302)
+            self.send_header("Location", "/records?type=" + urllib.parse.quote(record_type))
             self.end_headers()
             return
 

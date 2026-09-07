@@ -336,6 +336,35 @@ def t_archive_snapshots_and_prunes():
         eq(len(os.listdir(core.history_dir(path))), 1,
            "identical generations must not be archived twice")
 
+        # And not because the two calls happened to land in the same second.
+        # The name carries the clock as well as the digest, so a dedup that
+        # relied on the whole name split into two files whenever the calls
+        # straddled a tick -- rare enough to pass most runs, and retention
+        # counts files, so each duplicate evicted a real generation.
+        real_time = core.time
+
+        class TickingClock:
+            """Every reading is a second later than the one before it."""
+
+            def __init__(self):
+                self.seconds = 0
+
+            def gmtime(self, *args):
+                self.seconds += 1
+                return real_time.gmtime(real_time.time() + self.seconds)
+
+            def __getattr__(self, name):
+                return getattr(real_time, name)
+
+        core.time = TickingClock()
+        try:
+            core.archive_generation(path)
+            core.archive_generation(path)
+        finally:
+            core.time = real_time
+        eq(len(os.listdir(core.history_dir(path))), 1,
+           "an unchanged vault archived across a second tick made two snapshots")
+
         # Distinct generations accumulate, then prune to the retention limit.
         for n in range(6):
             with open(path, "ab") as handle:
@@ -2539,6 +2568,90 @@ def t_json_line_safe_is_lossless_for_every_break_character():
            "%r survived into a line-based export" % ch)
         eq(json.loads(encoded)["v"], "x%sy" % ch,
            "%r was changed by the escaping" % ch)
+
+
+def _vault_with(rows):
+    return "\n".join(["META_VAULT_VERSION\t%d\t-\t-\t-\t-" % core.VAULT_FORMAT_VERSION]
+                     + list(rows)) + "\n"
+
+
+def t_iter_records_walks_only_typed_rows():
+    # The dashboard rewrites the whole vault on every save and addresses a row
+    # by the index this yields, so a walk that counted a password or a NOTE as
+    # a record would have the dashboard overwrite the wrong line.
+    rows = [
+        "1\tBank\tuser@example.invalid\tsecret\tnote\t2025-01-01T00:00:00Z\t\t-",
+        "NOTE\t1\tA note\tYm9keQ==\t2025-01-01T00:00:00Z\t-",
+        core.build_record_row("wifi", "1", "Home",
+                              {"ssid": "HomeNet", "password": "pw"}, "t"),
+        "REC:not-a-type\t1\tx\t-\tt\t-",
+        core.build_record_row("server", "1", "Box",
+                              {"hostname": "box", "username": "root"}, "t"),
+    ]
+    plaintext = _vault_with(rows)
+    walked = [(index, parsed[0], parsed[1])
+              for index, parsed in core.iter_records(plaintext)]
+    eq(walked, [(3, "wifi", "1"), (5, "server", "1")],
+       "the walk did not name exactly the typed rows, at their own indexes")
+    # And the index is the caller's: the row at it must be the row it found.
+    for index, parsed in core.iter_records(plaintext):
+        eq(plaintext.splitlines()[index].split("\t")[0],
+           core.record_tag(parsed[0]),
+           "the index does not point at the row it described")
+    eq([parsed[0] for _i, parsed in core.iter_records(plaintext, "wifi")],
+       ["wifi"], "narrowing to one type returned another")
+
+
+def t_find_record_needs_both_halves_of_the_address():
+    # Ids are per type, so wifi 1 and server 1 both exist. A lookup by id
+    # alone would find whichever came first in the file.
+    plaintext = _vault_with([
+        core.build_record_row("wifi", "1", "Home",
+                              {"ssid": "HomeNet", "password": "pw"}, "t"),
+        core.build_record_row("server", "1", "Box",
+                              {"hostname": "box", "username": "root"}, "t"),
+    ])
+    _index, wifi = core.find_record(plaintext, "wifi", "1")
+    _index, server = core.find_record(plaintext, "server", "1")
+    eq(wifi[2], "Home")
+    eq(server[2], "Box", "an id without its type found the wrong record")
+    eq(core.find_record(plaintext, "wifi", "2"), None)
+    eq(core.find_record(plaintext, "credit-card", "1"), None)
+
+
+def t_record_next_id_counts_per_type():
+    plaintext = _vault_with([
+        core.build_record_row("wifi", "1", "a", {"ssid": "a", "password": "p"}, "t"),
+        core.build_record_row("wifi", "4", "b", {"ssid": "b", "password": "p"}, "t"),
+    ])
+    eq(core.record_next_id(plaintext, "wifi"), "5",
+       "the next id must clear the highest in use, not count the rows")
+    eq(core.record_next_id(plaintext, "server"), "1",
+       "a type with no records starts at one")
+    eq(core.record_next_id("", "wifi"), "1")
+
+    # One row with a damaged id must not stop every new record of its type.
+    damaged = plaintext + "REC:wifi\tnot-a-number\tx\t-\tt\t-\n"
+    eq(core.record_next_id(damaged, "wifi"), "5",
+       "a row with an unreadable id blocked the next allocation")
+
+
+def t_record_counts_totals_what_it_lists():
+    # The nav badge reads the total and the type chips read the per-type
+    # numbers. A badge that disagreed with the page it links to is the class
+    # of defect one shared count exists to prevent.
+    rows = [core.build_record_row("wifi", str(n), "w%d" % n,
+                                  {"ssid": "s", "password": "p"}, "t")
+            for n in (1, 2, 3)]
+    rows.append(core.build_record_row("server", "1", "s",
+                                      {"hostname": "h", "username": "u"}, "t"))
+    counts = core.record_counts(_vault_with(rows))
+    eq(counts["wifi"], 3)
+    eq(counts["server"], 1)
+    eq(counts[""], 4, "the total must be the sum of the types")
+    eq(counts[""], sum(v for k, v in counts.items() if k),
+       "the total and the per-type counts disagree")
+    eq(core.record_counts("")[""], 0)
 
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):

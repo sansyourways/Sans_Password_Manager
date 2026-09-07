@@ -43,6 +43,7 @@ Current release: **4.10.1**
   - [Install the browser extension](#install-the-browser-extension)
   - [CLI Commands](#cli-commands)
   - [Secure Notes](#secure-notes)
+  - [Typed records](#typed-records)
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
   - [Doctor / Health Check](#doctor--health-check)
 - [Hidden entries](#hidden-entries)
@@ -856,6 +857,11 @@ tab. The address shown here is your own host — the example below is redacted.
 ./spm.sh backup-codes-list
 ./spm.sh backup-codes-view <id>
 ./spm.sh backup-codes-delete <id>
+./spm.sh record types
+./spm.sh record add <type>
+./spm.sh record list [type]
+./spm.sh record view <type> <id> [--reveal]
+./spm.sh record delete <type> <id>
 ./spm.sh doctor
 ./spm.sh web
 ```
@@ -872,6 +878,106 @@ tab. The address shown here is your own host — the example below is redacted.
 ```
 
 Stored inside encrypted vault.
+
+---
+
+## Typed records
+
+A password is one shape: a service, a username and a secret. Most of what
+people keep in a password manager is not that shape. An API token has an
+environment and an expiry. A database credential has a host, a port and an
+engine. A Wi-Fi network has an SSID and a security mode. Putting any of them
+in a password entry means the extra parts go in the notes field, where nothing
+can search them, redact them or check them.
+
+SPM stores seven of those shapes properly:
+
+| Type | What it is for |
+|---|---|
+| `api-token` | Service tokens, with the environment and expiry that decide when to rotate |
+| `db-credential` | Engine, host, port, database, user and password for one connection |
+| `credit-card` | Cardholder, number, expiry, CVV and PIN |
+| `identity` | A passport, licence or national ID, with its issue and expiry dates |
+| `software-license` | A licence key, who it is licensed to, and how many seats |
+| `wifi` | Network name, password and security mode |
+| `server` | Hostname, address, port and the account you log in with |
+
+### From the command line
+
+```bash
+./spm.sh record types
+./spm.sh record add wifi
+./spm.sh record list
+./spm.sh record list wifi
+./spm.sh record view wifi 1
+./spm.sh record view wifi 1 --reveal
+./spm.sh record delete wifi 1
+```
+
+`record add` reads the schema and prompts for its fields in order. Secret
+fields turn the echo off the way the master password prompt does; a notes
+field reads until Ctrl+D.
+
+`record view` masks every secret field by default and prints them only with
+`--reveal`, so reading a record over a shared screen does not put its secrets
+in the scrollback.
+
+Ids are allocated per type, so `wifi 1` and `server 1` both exist and each type
+counts from one. Every command that takes an id takes the type with it — an id
+on its own is half an address.
+
+### In the Dashboard
+
+**Records** in the sidebar lists every typed record in the vault, with chips to
+narrow the list to one type. **+ Add Record** asks which kind of thing this is
+and then draws the form for that type. A record's page shows its fields with
+every secret masked behind the same reveal-and-copy control the password pages
+use, and it can be edited or deleted from there.
+
+The list, the forms, the masking and the type filter are all drawn from the
+same schema the CLI prompts from. Neither surface has its own list of fields,
+which is what keeps them from disagreeing about a record.
+
+Records are counted on the overview beside the other kinds of entry, and the
+search box finds them by label, id, folder, any non-secret field, or the name
+of a custom field. Secret fields are deliberately not searched: if a query
+could match a password, the number of results would answer "is this string in
+the vault?" for anyone who reached an unlocked session. Password entries
+follow the same rule. A hidden record shows as dots in search results, the way
+it does everywhere else.
+
+### What a typed record is, in the vault
+
+One row, shaped like a secure note:
+
+```
+REC:<type>	<id>	<label>	<payload-b64>	<created>	<attrs>
+```
+
+Six tab-separated columns, with the secret-bearing payload in field 3 — where a
+note keeps its body and a password entry keeps its password. The payload is the
+record's fields as JSON, base64-encoded, so a value holding a newline stays one
+value and one row.
+
+The type travels in the row tag rather than inside the payload, so counting
+records, listing one type, or describing a damaged row never requires decoding
+anything — and a vault stays greppable by someone holding nothing but the
+plaintext and `grep`.
+
+Typed records carry folders, custom fields and the hidden flag exactly as
+password entries do, and they cross all twenty export formats in the same
+`fields` column. A custom field may not reuse a schema field's name: both
+travel in that one column and are told apart on the way back by whether the
+name is in the schema, so SPM refuses the collision rather than letting one of
+the two disappear.
+
+### Adding a type
+
+A type is data, not code. `RECORD_SCHEMAS` in the trusted core names a type's
+fields, says which of them hold secrets and which are required, and gives it an
+icon. Everything else — the CLI prompts, the Dashboard form, the list, the
+redaction, the exports — reads that. Adding an eighth type is a dictionary
+entry, an icon in the sprite and its translations.
 
 ---
 
