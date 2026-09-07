@@ -7535,6 +7535,222 @@ cmd_ssh_public() {
 	printf '%s\n' "$line"
 }
 
+# ----- the SSH agent -----------------------------------------------------------
+# A key in the vault is a key you still have to get to ssh, and the usual way
+# is `ssh-add ~/.ssh/id_ed25519` -- which is a key that lives on disk. These
+# commands hand the stored key straight to the agent instead: the private half
+# goes over a pipe, never to a file and never onto a command line, and it
+# leaves the agent again on a timer.
+#
+# SPM does not start an agent. If one is not running that is a fact about the
+# session, and launching a background process the user did not ask for and
+# cannot see is not this program's business.
+
+SSH_AGENT_DEFAULT_MINUTES=15
+
+ssh_agent_probe() {
+	# `ssh-add -l` answers three different questions with three statuses:
+	# 0 the agent is up and holding keys, 1 it is up and empty, 2 there is no
+	# agent to talk to. Only 2 is a problem, and collapsing 1 into "broken"
+	# would refuse to load the first key into a fresh agent.
+	local rc=0
+	ssh-add -l >/dev/null 2>&1 || rc=$?
+	printf '%s' "$rc"
+}
+
+ssh_require_agent() {
+	require_cmd ssh-add
+	[ "$(ssh_agent_probe)" != "2" ] || die "No ssh-agent is reachable. Start one with: eval \"\$(ssh-agent -s)\""
+}
+
+ssh_agent_askpass() {
+	# ssh-add asks for a passphrase by running SSH_ASKPASS and reading its
+	# stdout. The helper is `cat <&3`: the passphrase arrives on a descriptor
+	# the caller inherited, so the helper file holds no secret, the passphrase
+	# is never an argument to anything, and nothing of it reaches disk.
+	# SSH_ASKPASS_REQUIRE=force is what makes ssh-add consult the helper on a
+	# terminal, where it would otherwise prompt.
+	local helper
+	helper="$(make_tmp)"
+	printf '#!/bin/sh\ncat <&3\n' >"$helper"
+	chmod 700 "$helper" 2>/dev/null || true
+	printf '%s' "$helper"
+}
+
+ssh_agent_add() {
+	# The key arrives on stdin; $1 is the lifetime in seconds, 0 for none.
+	# This exists so the two call sites do not have to build an argument list
+	# -- an empty array expanded under `set -u` is an error on the bash 3.2
+	# that macOS still ships, and nothing else in this program uses arrays.
+	if [ "$1" = "0" ]; then
+		ssh-add -
+	else
+		ssh-add -t "$1" -
+	fi
+}
+
+ssh_record_key_and_derived() {
+	# Both halves of what every agent command needs, read in one decryption:
+	# the key still base64 on line 1, and the derived facts from line 2 on.
+	local file="$1" rid="$2" parsed comment keyb64
+	parsed="$(record_find_row "$file" "ssh-key" "$rid" | core record parse)"
+	comment="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="comment"{print $2}' | base64 -d 2>/dev/null)"
+	keyb64="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="private_key"{print $2}')"
+	printf '%s\n' "$keyb64"
+	ssh_derived "$keyb64" "$comment"
+}
+
+cmd_ssh_load() {
+	local rid="${1:-}" minutes="${2:-$SSH_AGENT_DEFAULT_MINUTES}"
+	[ -n "$rid" ] || die "Usage: $0 ssh load <id> [minutes]"
+	case "$minutes" in
+		''|*[!0-9]*) die "Minutes must be a whole number (0 means no expiry)." ;;
+	esac
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	ssh_require_agent
+
+	local tmp both keyb64 derived
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+	ssh_require_key_record "$tmp" "$rid"
+	both="$(ssh_record_key_and_derived "$tmp" "$rid")"
+	secure_wipe "$tmp"
+	keyb64="$(printf '%s\n' "$both" | sed -n '1p')"
+	derived="$(printf '%s\n' "$both" | sed -n '2,$p')"
+
+	# A key SPM cannot parse is a key it cannot describe, and feeding unknown
+	# bytes to ssh-add would make the agent the thing that finds out.
+	local fingerprint
+	fingerprint="$(ssh_derived_field "$derived" fingerprint)"
+	[ -n "$fingerprint" ] \
+		|| die "SPM cannot read this key, so it will not load it: $(ssh_derived_field "$derived" problem)"
+
+	local seconds=0
+	[ "$minutes" = "0" ] || seconds="$((minutes * 60))"
+
+	local rc=0
+	if [ "$(ssh_derived_field "$derived" encrypted)" = "1" ]; then
+		# The container said this key is sealed, so a passphrase is asked for
+		# because the key needs one -- not because SPM guessed, and not after
+		# ssh-add has already refused once.
+		local pass helper
+		printf 'Passphrase for ssh-key %s: ' "$rid"
+		stty -echo 2>/dev/null || true
+		IFS= read -r pass
+		stty echo 2>/dev/null || true
+		printf '\n'
+		helper="$(ssh_agent_askpass)"
+		# The environment for ssh-add is set inside a subshell rather than as
+		# a prefix, because a `VAR=x func` prefix on a shell function leaves
+		# VAR set in the caller -- SSH_ASKPASS is not a setting this command
+		# should hand to whatever runs next.
+		#
+		# `printf` in the process substitution is a shell builtin, so the
+		# passphrase is never in any process's argv and never in a file: it
+		# exists as bytes in a pipe on fd 3 and nowhere else.
+		printf '%s' "$keyb64" | base64 -d | (
+			export SSH_ASKPASS="$helper" SSH_ASKPASS_REQUIRE=force
+			export DISPLAY="${DISPLAY:-:0}"
+			ssh_agent_add "$seconds"
+		) 3< <(printf '%s\n' "$pass") >/dev/null 2>&1 || rc=$?
+		pass=""
+		secure_wipe "$helper"
+	else
+		printf '%s' "$keyb64" | base64 -d \
+			| ssh_agent_add "$seconds" >/dev/null 2>&1 || rc=$?
+	fi
+	keyb64=""
+
+	[ "$rc" -eq 0 ] || die "The agent refused the key. If it is passphrase-protected, the passphrase did not match."
+
+	if [ "$minutes" = "0" ]; then
+		printf '\nLoaded %s into the agent, with no expiry.\n' "$fingerprint"
+		printf '  Remove it with: %s ssh unload %s\n\n' "$0" "$rid"
+	else
+		printf '\nLoaded %s into the agent for %s minute(s).\n\n' "$fingerprint" "$minutes"
+	fi
+}
+
+cmd_ssh_unload() {
+	local rid="${1:-}"
+	[ -n "$rid" ] || die "Usage: $0 ssh unload <id|--all>"
+	ssh_require_agent
+
+	if [ "$rid" = "--all" ]; then
+		ssh-add -D >/dev/null 2>&1 \
+			|| die "The agent would not drop its identities."
+		printf '\nThe agent is empty.\n\n'
+		return
+	fi
+
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp both derived line
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+	ssh_require_key_record "$tmp" "$rid"
+	both="$(ssh_record_key_and_derived "$tmp" "$rid")"
+	secure_wipe "$tmp"
+	derived="$(printf '%s\n' "$both" | sed -n '2,$p')"
+
+	line="$(ssh_derived_field "$derived" public)"
+	[ -n "$line" ] \
+		|| die "SPM cannot derive this key's public half, so it cannot name it to the agent."
+
+	# Unloading names the key by its public half, which was never a secret.
+	# The private key is not read, not decoded and not handed to anything --
+	# taking a key out of the agent needs no more than its name.
+	printf '%s\n' "$line" | ssh-add -d - >/dev/null 2>&1 \
+		|| die "The agent is not holding that key."
+	printf '\nRemoved %s from the agent.\n\n' "$(ssh_derived_field "$derived" fingerprint)"
+}
+
+cmd_ssh_agent() {
+	ssh_require_agent
+	local probe
+	probe="$(ssh_agent_probe)"
+	if [ "$probe" = "1" ]; then
+		printf '\nThe agent is running and holding nothing.\n\n'
+		return
+	fi
+
+	# Every fingerprint the vault can derive, so the listing can say which of
+	# the agent's keys SPM knows about. The comparison is on fingerprints,
+	# which are derived at both ends from the same bytes -- a key renamed in
+	# either place still matches.
+	local tmp known=""
+	if [ -f "$VAULT_FILE" ]; then
+		tmp="$(make_tmp)"
+		decrypt_vault_to_file "$tmp"
+		local rid
+		for rid in $(awk -F '\t' '$1=="REC:ssh-key"{print $2}' "$tmp"); do
+			local both derived fp
+			both="$(ssh_record_key_and_derived "$tmp" "$rid")"
+			derived="$(printf '%s\n' "$both" | sed -n '2,$p')"
+			fp="$(ssh_derived_field "$derived" fingerprint)"
+			[ -n "$fp" ] && known="$known$fp $rid"$'\n'
+		done
+		secure_wipe "$tmp"
+	fi
+
+	printf '\n%-10s %-10s %-52s %s\n' "IN VAULT" "TYPE" "FINGERPRINT" "COMMENT"
+	# `ssh-add -l` prints "<bits> <fingerprint> <comment...> (<TYPE>)", and a
+	# comment may hold spaces, so the type is taken from the end and the
+	# comment is whatever lies between -- rather than reading the comment as
+	# one field and printing "(ED25519)" as part of somebody's email address.
+	ssh-add -l | awk '{
+		fp = $2; type = $NF; gsub(/[()]/, "", type)
+		comment = ""
+		for (i = 3; i < NF; i++) comment = (comment == "" ? $i : comment " " $i)
+		printf "%s\t%s\t%s\n", fp, type, comment
+	}' | while IFS="$(printf '\t')" read -r fp type comment; do
+		local rid
+		rid="$(printf '%s' "$known" | awk -v want="$fp" '$1==want{print $2; exit}')"
+		[ -n "$rid" ] && rid="ssh-key $rid" || rid="-"
+		printf '%-10s %-10s %-52s %s\n' "$rid" "$type" "$fp" "$comment"
+	done
+	printf '\n'
+}
+
 cmd_ssh() {
 	local op="${1:-}"
 	[ $# -gt 0 ] && shift
@@ -7543,8 +7759,11 @@ cmd_ssh() {
 		list)   cmd_ssh_list "$@" ;;
 		show)   cmd_ssh_show "$@" ;;
 		public) cmd_ssh_public "$@" ;;
+		load)   cmd_ssh_load "$@" ;;
+		unload) cmd_ssh_unload "$@" ;;
+		agent)  cmd_ssh_agent "$@" ;;
 		*)
-			printf 'Usage: %s ssh <import|list|show|public> [args]\n' "$0" >&2
+			printf 'Usage: %s ssh <import|list|show|public|load|unload|agent> [args]\n' "$0" >&2
 			exit 1
 			;;
 	esac
@@ -11211,6 +11430,10 @@ Kunci SSH:
   ./spm.sh ssh list                → Semua kunci tersimpan beserta fingerprint
   ./spm.sh ssh show <id>           → Jenis, ukuran, fingerprint, dan public key
   ./spm.sh ssh public <id>         → Hanya baris authorized_keys
+  ./spm.sh ssh load <id> [menit]   → Serahkan kunci ke ssh-agent yang berjalan
+                                     (bawaan 15 menit; 0 berarti tanpa batas)
+  ./spm.sh ssh unload <id|--all>   → Keluarkan kembali dari agent
+  ./spm.sh ssh agent               → Isi agent, dan mana yang dari vault ini
   (jenis, ukuran, fingerprint, dan public key diturunkan dari kunci yang
    tersimpan, jadi tidak mungkin berbeda dengan kunci yang dijelaskannya)
 
@@ -11346,6 +11569,12 @@ SSH keys:
   ./spm.sh ssh public <id>         → Just the authorized_keys line
   (type, size, fingerprint and the public key are derived from the stored
    key itself, so none of them can disagree with the key they describe)
+  ./spm.sh ssh load <id> [minutes] → Hand the key to the running ssh-agent
+                                     (default 15 minutes; 0 means no expiry)
+  ./spm.sh ssh unload <id|--all>   → Take it back out again
+  ./spm.sh ssh agent               → What the agent holds, and which of it
+                                     came from this vault
+  (the key reaches the agent over a pipe: never a file, never a command line)
 
 Secure Notes:
   ./spm.sh notes-add       → Add secure note

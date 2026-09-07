@@ -6631,7 +6631,8 @@ if command -v ssh-keygen >/dev/null 2>&1; then
 	SSH_LAB="$TEST_ROOT/sshkeys"
 	mkdir -p "$SSH_LAB"
 	ssh-keygen -t ed25519 -N "" -C "plain@spm.test" -f "$SSH_LAB/plain" -q
-	ssh-keygen -t ed25519 -N "regression-passphrase" -C "sealed@spm.test" \
+	SSH_SEALED_PASSPHRASE="regression-passphrase"
+	ssh-keygen -t ed25519 -N "$SSH_SEALED_PASSPHRASE" -C "sealed@spm.test" \
 		-f "$SSH_LAB/sealed" -q
 	ssh-keygen -t rsa -b 2048 -N "" -C "rsa@spm.test" -f "$SSH_LAB/rsa" -q
 
@@ -6768,6 +6769,149 @@ if command -v ssh-keygen >/dev/null 2>&1; then
 	)
 	printf '  ssh keys: 3 key types fingerprinted exactly as ssh-keygen prints '
 	printf 'them, sealed key included, and no private key reaches a screen\n'
+
+	# ----- the agent ------------------------------------------------------
+	# The claim here is narrower than it looks: the key reaches ssh-agent
+	# without becoming a file and without becoming an argument, it leaves on a
+	# timer, and taking it back out needs only the public half. An agent is
+	# the only thing that can confirm any of that, so this drives a real one.
+	if command -v ssh-add >/dev/null 2>&1 && command -v ssh-agent >/dev/null 2>&1; then
+		(
+			export VAULT_FILE="$SSH_VAULT" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY=""
+			export RECOVERY_FILE="$SSH_VAULT.recovery"
+
+			# Before any agent exists, `load` must refuse. Starting one on the
+			# user's behalf would leave a process they did not ask for and
+			# cannot see, holding a key, for as long as the session lives.
+			if ( SSH_AUTH_SOCK="" cmd_ssh load 1 ) >/dev/null 2>&1; then
+				printf 'ssh: load succeeded with no agent to load into\n' >&2
+				exit 1
+			fi
+
+			eval "$(ssh-agent -s)" >/dev/null
+			# shellcheck disable=SC2064
+			trap "ssh-agent -k >/dev/null 2>&1 || true" EXIT
+
+			# Only fingerprint lines. An empty agent prints "The agent has
+			# no identities." on stdout and exits 1, so a bare $2 would
+			# report the word "agent" as a loaded key and the non-zero
+			# status would abort an assignment under errexit.
+			agent_fp() { ssh-add -l 2>/dev/null | awk '/SHA256:/{print $2}' || true; }
+
+			cmd_ssh load 1 5 >/dev/null
+			case "$(agent_fp)" in
+				*"$(ssh_truth_fp "$SSH_LAB/plain")"*) ;;
+				*) printf 'ssh: the agent is not holding the key that was loaded\n' >&2
+				   exit 1 ;;
+			esac
+
+			# The listing has to recognise its own key: the fingerprint in the
+			# agent and the fingerprint in the vault are derived from the same
+			# bytes at both ends, so a match here is the whole point.
+			ssh_agent_view="$(cmd_ssh agent)"
+			case "$ssh_agent_view" in
+				*"ssh-key 1"*) ;;
+				*) printf 'ssh: agent listing did not match the key to its record\n' >&2
+				   exit 1 ;;
+			esac
+
+			# The sealed key needs its passphrase, and the passphrase must not
+			# reach a file or a command line to get there.
+			printf '%s\n' "$SSH_SEALED_PASSPHRASE" | cmd_ssh load 2 5 >/dev/null
+			case "$(agent_fp)" in
+				*"$(ssh_truth_fp "$SSH_LAB/sealed")"*) ;;
+				*) printf 'ssh: the sealed key did not reach the agent\n' >&2
+				   exit 1 ;;
+			esac
+
+			# Unloading names the key by its public half. If this ever needs
+			# the private key, that is a regression in what unload costs.
+			cmd_ssh unload 2 >/dev/null
+			case "$(agent_fp)" in
+				*"$(ssh_truth_fp "$SSH_LAB/sealed")"*)
+					printf 'ssh: unload left the key in the agent\n' >&2
+					exit 1 ;;
+			esac
+
+			# A wrong passphrase is refused, and leaves the agent as it was.
+			before="$(agent_fp)"
+			if ( printf 'not-the-passphrase\n' | cmd_ssh load 2 5 ) >/dev/null 2>&1; then
+				printf 'ssh: a wrong passphrase loaded the key anyway\n' >&2
+				exit 1
+			fi
+			[ "$(agent_fp)" = "$before" ] || {
+				printf 'ssh: a refused load changed what the agent holds\n' >&2
+				exit 1
+			}
+
+			cmd_ssh unload --all >/dev/null
+			[ -z "$(agent_fp)" ] || {
+				printf 'ssh: --all left something in the agent\n' >&2
+				exit 1
+			}
+
+			# Two things about the load the agent cannot be asked about
+			# afterwards: what lifetime it was given, and whether the key
+			# arrived as bytes or as a path. `ssh-add -l` reports neither, and
+			# waiting out a real expiry would mean sleeping a minute. So this
+			# puts a recording ssh-add in front on PATH and reads the argv
+			# SPM actually built -- which is the thing being claimed.
+			shim="$TEST_ROOT/ssh-add-shim"
+			mkdir -p "$shim"
+			cat > "$shim/ssh-add" <<'SHIM'
+#!/usr/bin/env bash
+# Drain stdin so the writer never sees SIGPIPE, then record the argument list.
+cat >/dev/null
+printf '%s\n' "$*" >> "$SSH_ADD_ARGV_LOG"
+exit 0
+SHIM
+			chmod 755 "$shim/ssh-add"
+			export SSH_ADD_ARGV_LOG="$TEST_ROOT/ssh-add-argv"
+			: > "$SSH_ADD_ARGV_LOG"
+			PATH="$shim:$PATH" cmd_ssh load 1 5 >/dev/null 2>&1
+			argv="$(cat "$SSH_ADD_ARGV_LOG")"
+			case "$argv" in
+				*"-t 300"*) ;;
+				*) printf 'ssh: load did not ask for a 5 minute lifetime (argv: %s)\n' \
+					"$argv" >&2
+				   exit 1 ;;
+			esac
+			# The last argument must be "-": anything else is a filename, and
+			# a filename means the private key was written to disk to get here.
+			case "$argv" in
+				*" -") ;;
+				*) printf 'ssh: the key did not reach ssh-add on stdin (argv: %s)\n' \
+					"$argv" >&2
+				   exit 1 ;;
+			esac
+			# 0 minutes means no expiry, and no expiry means no -t at all --
+			# not `-t 0`, which ssh-add would read as "expire immediately".
+			: > "$SSH_ADD_ARGV_LOG"
+			PATH="$shim:$PATH" cmd_ssh load 1 0 >/dev/null 2>&1
+			case "$(cat "$SSH_ADD_ARGV_LOG")" in
+				*-t*) printf 'ssh: a no-expiry load still passed a lifetime\n' >&2
+				      exit 1 ;;
+			esac
+			unset SSH_ADD_ARGV_LOG
+
+			# Nothing any of these printed may contain the key. `load` and
+			# `unload` both hold it -- one decodes it, the other derives from
+			# it -- so this is the assertion that they hold it quietly.
+			secret_line="$(sed -n '2p' "$SSH_LAB/plain")"
+			cmd_ssh load 1 5 > "$TEST_ROOT/agent-out" 2>&1
+			cmd_ssh agent >> "$TEST_ROOT/agent-out" 2>&1
+			cmd_ssh unload 1 >> "$TEST_ROOT/agent-out" 2>&1
+			if grep -q -e "$secret_line" -e "PRIVATE KEY" "$TEST_ROOT/agent-out"; then
+				printf 'ssh: an agent command printed the private key\n' >&2
+				exit 1
+			fi
+		)
+		printf '  ssh agent: a key loads over a pipe with a lifetime, is matched '
+		printf 'back to its record, unloads by its public half, and a wrong '
+		printf 'passphrase changes nothing\n'
+	else
+		printf '  ssh agent: skipped, no ssh-agent on this machine\n'
+	fi
 else
 	printf '  ssh keys: skipped, no ssh-keygen to check SPM against\n'
 fi

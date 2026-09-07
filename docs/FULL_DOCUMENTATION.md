@@ -266,6 +266,9 @@ filters and result count visible](docs/screenshots/web-v2.13.0/31-passwords-filt
   and public key derived from the stored key rather than typed in — read
   straight out of the `openssh-key-v1` container, without the passphrase,
   without a temporary file, and without shelling out to `ssh-keygen`
+- Stored SSH keys handed to `ssh-agent` over a pipe with a bounded lifetime,
+  never as a file or a command-line argument, with the passphrase delivered
+  over an inherited descriptor and unloading done by the public half alone
 - A URL on every password record, scheme-restricted to `http(s)`, used to bind
   a credential to a site for the browser extension
 - Encrypted history, verified manual/automatic backups, and confirmed rollback,
@@ -871,6 +874,9 @@ tab. The address shown here is your own host — the example below is redacted.
 ./spm.sh ssh list
 ./spm.sh ssh show <id>
 ./spm.sh ssh public <id>
+./spm.sh ssh load <id> [minutes]
+./spm.sh ssh unload <id|--all>
+./spm.sh ssh agent
 ./spm.sh doctor
 ./spm.sh web
 ```
@@ -1011,6 +1017,10 @@ everything about it except the key itself.
 ./spm.sh ssh list
 ./spm.sh ssh show 1
 ./spm.sh ssh public 1          # the authorized_keys line, to paste on a server
+./spm.sh ssh load 1            # hand it to the running ssh-agent for 15 minutes
+./spm.sh ssh load 1 60         # or for an hour
+./spm.sh ssh agent             # what the agent holds, and what came from here
+./spm.sh ssh unload 1
 ```
 
 `ssh import` reads the key file, and reads the comment from the matching
@@ -1069,6 +1079,67 @@ gives the reason.
 Old PEM keys (`-----BEGIN RSA PRIVATE KEY-----` and friends) are stored and
 recognised as keys, but their public half is inside the encoding rather than
 beside it, so nothing is derived from them.
+
+### Handing a key to ssh-agent
+
+A key in the vault is still a key you have to get to `ssh`, and the usual way
+to do that is `ssh-add ~/.ssh/id_ed25519` — which is a key that lives on disk.
+`ssh load` hands the stored key straight to the agent instead:
+
+```bash
+./spm.sh ssh load 1        # 15 minutes
+./spm.sh ssh load 1 60     # an hour
+./spm.sh ssh load 1 0      # until the agent dies
+./spm.sh ssh unload 1
+./spm.sh ssh unload --all
+./spm.sh ssh agent
+```
+
+The key travels over a pipe. It is never written to a file, and it is never an
+argument to anything — `ssh-add` reads it on stdin, which is what the trailing
+`-` in `ssh-add -t 900 -` means. There is no moment during a load when the
+private key exists anywhere a second process could read it.
+
+**The default lifetime is 15 minutes**, and it is not an arbitrary number: it
+is the longest idle lock the Dashboard offers. A key you loaded and forgot is
+the same problem as a vault you unlocked and walked away from, so it expires
+on the same terms. `0` means no expiry, and has to be typed.
+
+**A passphrase is asked for only when the key has one.** The container says
+whether it is sealed, so SPM knows before it asks — it does not prompt for a
+passphrase a key does not have, and does not discover the need for one by
+watching `ssh-add` fail. When it does ask, the passphrase reaches `ssh-add`
+through `SSH_ASKPASS`, over an inherited file descriptor, from a shell
+builtin: not a file, not an argument, not an environment variable.
+
+**Unloading never touches the private key.** `ssh-add -d` names a key by its
+*public* half, and SPM derives that already — so taking a key out of the agent
+costs nothing more than the string you would have put in `authorized_keys`.
+
+**SPM will not start an agent.** If none is running, `ssh load` says so and
+stops. Launching a background process the user did not ask for and cannot see,
+which then holds a private key for as long as the session lives, is not a
+password manager's decision to make.
+
+`ssh agent` lists what the agent holds and marks which of it came from this
+vault. The match is on fingerprints, derived at both ends from the same bytes,
+so a key relabelled in either place still lines up.
+
+#### Why the Dashboard has no Load button
+
+Every other thing an SSH key record can do is on both surfaces. The agent is
+the exception, deliberately.
+
+An `ssh-agent` belongs to a session on a machine, not to a vault. The Dashboard
+is a server, and it can be [published on a domain](#publish-the-spm-dashboard-on-a-domain-with-https)
+and reached from a different machine entirely — where "load this key into the
+agent" would load it into the agent of the *host*, not of the person clicking.
+That is not what the button appears to say, and a control that quietly acts on
+the wrong machine is worse than one that is not there.
+
+So the agent is driven from the terminal, where "the agent" means the one in
+front of you. The Dashboard still shows everything about the key that does not
+depend on where you are standing.
 
 ### In the Dashboard
 
