@@ -938,6 +938,14 @@ The list, the forms, the masking and the type filter are all drawn from the
 same schema the CLI prompts from. Neither surface has its own list of fields,
 which is what keeps them from disagreeing about a record.
 
+Records are counted on the overview beside the other kinds of entry, and the
+search box finds them by label, id, folder, any non-secret field, or the name
+of a custom field. Secret fields are deliberately not searched: if a query
+could match a password, the number of results would answer "is this string in
+the vault?" for anyone who reached an unlocked session. Password entries
+follow the same rule. A hidden record shows as dots in search results, the way
+it does everywhere else.
+
 ### What a typed record is, in the vault
 
 One row, shaped like a secure note:
