@@ -20140,6 +20140,9 @@ def overview_page(counts, recent):
         ("phrase", counts.get("passphrases", 0), "nav.passphrases", "Passphrases", "/passphrases"),
         ("authenticator", counts.get("authenticators", 0), "nav.authenticators", "Authenticators", "/authenticators"),
         ("backup", counts.get("backups", 0), "nav.backup_codes", "Backup Codes", "/backup-codes"),
+        # Records is a tile like the rest, not a special case. Leaving it out
+        # would make the overview count less of the vault than the vault holds.
+        ("record", counts.get("records", 0), "nav.records", "Records", "/records"),
     ]
     stats = "".join(
         f'<a class="stat" href="{href}">'
@@ -22243,6 +22246,11 @@ core = _load_core()
 # build does not know falls back to a text box rather than vanishing: an unknown
 # widget can only come from a newer schema, and a plain box still lets the
 # value be read and edited.
+# What a hidden record shows instead of its label, on the list and in search
+# alike. One definition: two would drift, and the failure would be a hidden
+# name readable on whichever page forgot.
+SEARCH_REDACTED = "•" * 8
+
 RECORD_WIDGET_TYPES = {
     "line": "text",
     "number": "number",
@@ -22381,7 +22389,7 @@ def build_records_page(plaintext, active_type="", counts=None):
     rows = []
     for _index, parsed in core.iter_records(plaintext, active_type):
         record_type, record_id, label, values, created, folder, _custom, hidden = parsed
-        shown = "•" * 8 if hidden else html.escape(label)
+        shown = SEARCH_REDACTED if hidden else html.escape(label)
         href = "/records-view?type=%s&amp;id=%s" % (
             urllib.parse.quote(record_type), urllib.parse.quote(record_id))
         edit = "/records-edit?type=%s&amp;id=%s" % (
@@ -23761,6 +23769,38 @@ def search_vault(plaintext, term):
             label = p[2] if len(p) > 2 else ""
             if needle in (rid + " " + label).lower():
                 out.append((kind_key, kind, rid, label, href + urllib.parse.quote(rid)))
+    # Typed records. This page says it looks "across every record type", and
+    # until they were listed here it did not -- a wifi record could not be
+    # found by its own name from the search box.
+    #
+    # Non-secret schema values are matched for the same reason a password
+    # entry's username and url are: they are not secrets, they are already on
+    # the record's page, and matching them is how you find the server you are
+    # looking at. Secret fields stay unsearched, or the result count would
+    # answer "is this string in the vault?" for anyone reaching an unlocked
+    # session. The row only ever shows the label, so a matched value never
+    # reaches the screen -- and a hidden record keeps its redaction here, the
+    # way it does on the security page, rather than making search the one
+    # place a hidden name can be read.
+    for _index, parsed in core.iter_records(plaintext):
+        record_type, rid, label, values, _created, folder, custom, hidden = parsed
+        secrets_of = core.record_secret_fields(record_type)
+        haystack = [rid, label, folder]
+        haystack += [v for k, v in values.items() if k not in secrets_of]
+        haystack += [n for n, _v in custom or []]
+        if needle in " ".join(haystack).lower():
+            # The kind column carries the type's own key, not a generic
+            # "Records": every other page names the type, and a translated
+            # locale is the one place where a wrong key is invisible in
+            # English. The href is written escaped because it lands in an
+            # attribute unaltered -- a bare & there starts a character
+            # reference.
+            out.append(("record.type." + record_type,
+                        record_type_label(record_type), rid,
+                        SEARCH_REDACTED if hidden else label,
+                        "/records-view?type=%s&amp;id=%s"
+                        % (urllib.parse.quote(record_type),
+                           urllib.parse.quote(rid))))
     return out
 
 

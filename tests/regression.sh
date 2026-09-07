@@ -6447,6 +6447,34 @@ one = get("/records?type=wifi")
 assert "web wifi" in one, "the wifi filter hid the wifi record"
 assert "web server" not in one, "the wifi filter showed a server record"
 
+# The search page says it looks "across every record type". Until typed records
+# were listed there it did not, and a wifi record could not be found by its own
+# name from the search box.
+found = get("/search?q=" + urllib.parse.quote("web wifi"))
+assert "web wifi" in found, "search cannot find a typed record by its label"
+# The href lands in an attribute unaltered, so it has to arrive escaped: a
+# bare & there starts a character reference, which is how the record list
+# lost its links once already.
+assert "/records-view?type=wifi&amp;id=" in found, \
+    "the search result does not link to the record with an escaped href"
+# The kind column names the type, so a translated locale still says which
+# kind of record matched rather than the generic word.
+assert 'data-i18n="record.type.wifi"' in found, \
+    "the search result does not name the record's type"
+# A non-secret schema value is matched the way a password's username is.
+found = get("/search?q=" + urllib.parse.quote("sample-value-ssid"))
+assert "web wifi" in found, "search cannot find a typed record by a plain field"
+# A secret is not, or the result count would answer "is this string in the
+# vault?" for anyone who reached an unlocked session.
+secret_field = sorted(core.record_secret_fields("wifi"))[0]
+found = get("/search?q=" + urllib.parse.quote("sample-value-" + secret_field))
+assert "web wifi" not in found, \
+    "search matched a secret field, which makes it a confirmation oracle"
+
+# The overview counts records with the rest of the vault.
+overview = get("/")
+assert 'href="/records"' in overview, "the overview has no records tile"
+
 # The CLI reads what the Dashboard wrote. This is the assertion the whole
 # engine exists to make true, and it is the one 4.1.0 could not have made.
 plaintext = vault_plaintext()
