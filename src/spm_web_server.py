@@ -10193,9 +10193,15 @@ core = _load_core()
 # build does not know falls back to a text box rather than vanishing: an unknown
 # widget can only come from a newer schema, and a plain box still lets the
 # value be read and edited.
-# What a hidden record shows instead of its label, on the list and in search
-# alike. One definition: two would drift, and the failure would be a hidden
-# name readable on whichever page forgot.
+# What a hidden record shows instead of its label, on the record list and in
+# search alike. One definition for the two, because two would drift and the
+# failure would be a hidden name readable on whichever page forgot.
+#
+# This is not REDACTED above, and deliberately so: that one is "&bull;" for
+# the pages that drop it straight into markup, while these two hand their
+# label to _esc() or html.escape() on the way out. The entity form would
+# arrive there as the literal text "&bull;&bull;..." -- redaction that
+# announces itself as a bug. Same glyph, different side of the escaping.
 SEARCH_REDACTED = "•" * 8
 
 RECORD_WIDGET_TYPES = {
