@@ -336,6 +336,35 @@ def t_archive_snapshots_and_prunes():
         eq(len(os.listdir(core.history_dir(path))), 1,
            "identical generations must not be archived twice")
 
+        # And not because the two calls happened to land in the same second.
+        # The name carries the clock as well as the digest, so a dedup that
+        # relied on the whole name split into two files whenever the calls
+        # straddled a tick -- rare enough to pass most runs, and retention
+        # counts files, so each duplicate evicted a real generation.
+        real_time = core.time
+
+        class TickingClock:
+            """Every reading is a second later than the one before it."""
+
+            def __init__(self):
+                self.seconds = 0
+
+            def gmtime(self, *args):
+                self.seconds += 1
+                return real_time.gmtime(real_time.time() + self.seconds)
+
+            def __getattr__(self, name):
+                return getattr(real_time, name)
+
+        core.time = TickingClock()
+        try:
+            core.archive_generation(path)
+            core.archive_generation(path)
+        finally:
+            core.time = real_time
+        eq(len(os.listdir(core.history_dir(path))), 1,
+           "an unchanged vault archived across a second tick made two snapshots")
+
         # Distinct generations accumulate, then prune to the retention limit.
         for n in range(6):
             with open(path, "ab") as handle:

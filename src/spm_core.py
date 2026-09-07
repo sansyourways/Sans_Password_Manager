@@ -1567,6 +1567,17 @@ def archive_generation(vault_path):
         os.chmod(target, 0o700)
         with open(vault_path, "rb") as handle:
             digest = hashlib.sha256(handle.read()).hexdigest()[:12]
+        # A snapshot is named for the ciphertext it captures, so an unchanged
+        # vault is one undo point however often it is archived. The name alone
+        # cannot enforce that: it also carries the second and the pid, so two
+        # archives of identical bytes that straddle a second tick used to land
+        # as two files. Retention counts files, so the duplicate evicts the
+        # oldest genuinely different generation -- history quietly gets
+        # shorter than it says it is. Match on the digest instead: it is the
+        # part of the name that means "this ciphertext".
+        if any(name.endswith(".%s.gpg" % digest) for name in os.listdir(target)):
+            _prune(target, ".gpg", _retention())
+            return
         stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
         snapshot = os.path.join(
             target, "%s.%d.%s.gpg" % (stamp, os.getpid(), digest))
