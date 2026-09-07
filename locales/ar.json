@@ -448,6 +448,19 @@
     "records.pick.desc": "اختر نوع السجل. كل الأنواع تُحفظ في الخزنة المشفّرة نفسها.",
     "empty.records.t": "لا توجد سجلات بعد",
     "empty.records.d": "رموز API وبيانات قواعد البيانات والبطاقات والهويات والتراخيص وشبكات Wi-Fi والخوادم تُحفظ هنا.",
-    "confirm.delete_record": "حذف هذا السجل؟"
+    "confirm.delete_record": "حذف هذا السجل؟",
+    "record.field.private_key": "المفتاح الخاص",
+    "record.field.passphrase": "عبارة المرور",
+    "record.field.hosts": "المضيفات",
+    "record.field.comment": "تعليق",
+    "record.type.ssh-key": "مفتاح SSH",
+    "ssh.derived.t": "مشتق من المفتاح",
+    "ssh.derived.d": "محسوب من المفتاح المخزَّن بدلاً من كتابته يدويًا، لذا لا يمكن أن يخالف المفتاح الذي يصفه.",
+    "ssh.type": "النوع",
+    "ssh.bits": "الحجم",
+    "ssh.fingerprint": "البصمة",
+    "ssh.public": "المفتاح العام",
+    "ssh.sealed": "الجزء الخاص محمي بعبارة مرور",
+    "ssh.unreadable": "لا يستطيع SPM اشتقاق أي شيء من هذا المفتاح"
   }
 }

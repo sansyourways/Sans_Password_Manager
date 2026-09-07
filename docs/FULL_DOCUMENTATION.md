@@ -44,6 +44,7 @@ Current release: **4.10.1**
   - [CLI Commands](#cli-commands)
   - [Secure Notes](#secure-notes)
   - [Typed records](#typed-records)
+  - [SSH keys](#ssh-keys)
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
   - [Doctor / Health Check](#doctor--health-check)
 - [Hidden entries](#hidden-entries)
@@ -261,6 +262,10 @@ filters and result count visible](docs/screenshots/web-v2.13.0/31-passwords-filt
   records, plus an opt-in k-anonymous Pwned Passwords review that sends only
   five-character SHA-1 prefixes and lists affected record IDs
 - Cross-type search and `#hashtag` tags across every record type
+- SSH private keys as a record type, with the fingerprint, key type, size
+  and public key derived from the stored key rather than typed in — read
+  straight out of the `openssh-key-v1` container, without the passphrase,
+  without a temporary file, and without shelling out to `ssh-keygen`
 - A URL on every password record, scheme-restricted to `http(s)`, used to bind
   a credential to a site for the browser extension
 - Encrypted history, verified manual/automatic backups, and confirmed rollback,
@@ -862,6 +867,10 @@ tab. The address shown here is your own host — the example below is redacted.
 ./spm.sh record list [type]
 ./spm.sh record view <type> <id> [--reveal]
 ./spm.sh record delete <type> <id>
+./spm.sh ssh import <keyfile> [label]
+./spm.sh ssh list
+./spm.sh ssh show <id>
+./spm.sh ssh public <id>
 ./spm.sh doctor
 ./spm.sh web
 ```
@@ -890,7 +899,7 @@ engine. A Wi-Fi network has an SSID and a security mode. Putting any of them
 in a password entry means the extra parts go in the notes field, where nothing
 can search them, redact them or check them.
 
-SPM stores seven of those shapes properly:
+SPM stores eight of those shapes properly:
 
 | Type | What it is for |
 |---|---|
@@ -901,6 +910,7 @@ SPM stores seven of those shapes properly:
 | `software-license` | A licence key, who it is licensed to, and how many seats |
 | `wifi` | Network name, password and security mode |
 | `server` | Hostname, address, port and the account you log in with |
+| `ssh-key` | A private key, its passphrase, and the hosts it opens |
 
 ### From the command line
 
@@ -976,8 +986,117 @@ the two disappear.
 A type is data, not code. `RECORD_SCHEMAS` in the trusted core names a type's
 fields, says which of them hold secrets and which are required, and gives it an
 icon. Everything else — the CLI prompts, the Dashboard form, the list, the
-redaction, the exports — reads that. Adding an eighth type is a dictionary
+redaction, the exports — reads that. Adding a ninth type is a dictionary
 entry, an icon in the sprite and its translations.
+
+A schema may also name a *deriver*: a function that reads the record's own
+fields and returns facts about them. `ssh-key` uses one; see below.
+
+---
+
+## SSH keys
+
+An SSH private key is a password by another name: it opens accounts on
+machines, it is long-lived, and losing control of it is losing the machines.
+It is usually kept as a file in `~/.ssh`, at whatever permissions the last
+tool to touch it left behind, backed up by whatever backs up the home
+directory, and copied between laptops by hand.
+
+SPM stores it as a record like any other — encrypted with the rest of the
+vault, masked on screen, carried across exports, hideable, and searchable by
+everything about it except the key itself.
+
+```bash
+./spm.sh ssh import ~/.ssh/id_ed25519 "work laptop"
+./spm.sh ssh list
+./spm.sh ssh show 1
+./spm.sh ssh public 1          # the authorized_keys line, to paste on a server
+```
+
+`ssh import` reads the key file, and reads the comment from the matching
+`.pub` file beside it when there is one. It refuses a file that is not a
+private key, so pointing it at a `.pub` by mistake is an error rather than a
+record whose secret field holds something public.
+
+`ssh list` prints one line per stored key with its type, size and fingerprint.
+`ssh show` prints those plus the full public key. Neither prints the private
+key, and neither has a `--reveal`: to see the private half you read it as the
+record it is, with `./spm.sh record view ssh-key 1 --reveal`.
+
+### The public half is derived, never typed
+
+SPM does not ask you for the fingerprint or the public key, and does not store
+either one. It computes them from the stored private key every time it shows
+them.
+
+This is possible without the passphrase because of how OpenSSH writes keys. An
+`openssh-key-v1` file is a container: a magic string, the cipher and KDF used
+to protect the private half, and then **the public key in the clear**,
+followed by the encrypted private section. Encrypting a key protects the part
+that signs; the part that identifies was never secret — it is the same string
+you put in `authorized_keys`. So SPM parses the container, takes the public
+blob, and hashes it:
+
+```
+SHA256:<base64(sha256(public blob)) without padding>
+```
+
+which is exactly what `ssh-keygen -l` prints. The regression suite compares
+the two on every run when `ssh-keygen` is installed, for ed25519, RSA and
+passphrase-protected keys.
+
+The point of deriving rather than storing is that a stored fingerprint is a
+claim, and claims drift. If someone edits the private key field, a stored
+fingerprint keeps describing the key that used to be there — and a fingerprint
+is precisely the thing you check when you want to know *which key this is*. A
+derived one cannot be wrong about its own key: if it renders at all, it is the
+fingerprint of the bytes in the record.
+
+RSA sizes are counted in bits from the modulus, not in bytes of the field. A
+2048-bit modulus is often stored with a leading zero byte, and counting bytes
+would report it as 2056-bit — a number that would look plausible and be wrong.
+
+### What SPM will not do with a key it cannot read
+
+If the key is not a format SPM understands, or the container is truncated, or
+the algorithm named on a public line disagrees with the blob underneath it,
+SPM derives nothing and says so. It does **not** guess, and it does **not**
+refuse to store the record — the key is still your key, and a manager that
+drops a secret because it cannot describe it is worse than one that keeps it
+quietly. The record's page says SPM cannot derive anything from this key, and
+gives the reason.
+
+Old PEM keys (`-----BEGIN RSA PRIVATE KEY-----` and friends) are stored and
+recognised as keys, but their public half is inside the encoding rather than
+beside it, so nothing is derived from them.
+
+### In the Dashboard
+
+An SSH key record looks like every other typed record: **+ Add Record** →
+**SSH Key**, with the private key and passphrase as masked secret fields
+behind the same reveal-and-copy control the password pages use.
+
+Below the fields, the record page shows a **Derived from the key** panel —
+type, size, fingerprint and public key, in monospace, as read-only text.
+Nothing in that panel is editable, because nothing in it is stored: it is
+recomputed from the private key field each time the page is drawn. A sealed
+key adds a line saying the private half is passphrase-protected, which SPM
+knows from the container's cipher name without ever attempting the passphrase.
+
+The panel is not special-cased for SSH. A schema names a deriver, the record
+page asks the core for that record's derived rows, and renders whatever comes
+back. A future type that has facts worth computing gets the same panel by
+adding one dictionary entry.
+
+### Where the key goes
+
+Nowhere it was not already. The private key is a secret field of a record:
+it is in the vault ciphertext, and it reaches the Dashboard page only inside
+the reveal control, exactly like a password. It is never written to a
+temporary file, never passed as a command-line argument — argv is readable by
+every process on the machine — and never handed to `ssh-keygen` or any other
+external program to be parsed. Everything SPM says about a key, it works out
+itself, from bytes it already has decrypted in memory.
 
 ---
 

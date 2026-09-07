@@ -448,6 +448,19 @@
     "records.pick.desc": "Choisissez de quoi il s'agit. Tous les types sont conservés dans le même coffre chiffré.",
     "empty.records.t": "Aucune fiche",
     "empty.records.d": "Jetons d'API, identifiants de base de données, cartes, pièces d'identité, licences, Wi-Fi et serveurs vivent ici.",
-    "confirm.delete_record": "Supprimer cette fiche ?"
+    "confirm.delete_record": "Supprimer cette fiche ?",
+    "record.field.private_key": "Clé privée",
+    "record.field.passphrase": "Phrase secrète",
+    "record.field.hosts": "Hôtes",
+    "record.field.comment": "Commentaire",
+    "record.type.ssh-key": "Clé SSH",
+    "ssh.derived.t": "Dérivé de la clé",
+    "ssh.derived.d": "Calculé à partir de la clé stockée plutôt que saisi à côté, il ne peut donc pas la contredire.",
+    "ssh.type": "Type",
+    "ssh.bits": "Taille",
+    "ssh.fingerprint": "Empreinte",
+    "ssh.public": "Clé publique",
+    "ssh.sealed": "La partie privée est protégée par une phrase secrète",
+    "ssh.unreadable": "SPM ne peut rien dériver de cette clé"
   }
 }

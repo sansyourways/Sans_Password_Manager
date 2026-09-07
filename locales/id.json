@@ -448,6 +448,19 @@
     "records.pick.desc": "Pilih jenisnya. Semua jenis disimpan di brankas terenkripsi yang sama.",
     "empty.records.t": "Belum ada record",
     "empty.records.d": "Token API, kredensial basis data, kartu, identitas, lisensi, Wi-Fi, dan server disimpan di sini.",
-    "confirm.delete_record": "Hapus record ini?"
+    "confirm.delete_record": "Hapus record ini?",
+    "record.field.private_key": "Kunci privat",
+    "record.field.passphrase": "Frasa sandi",
+    "record.field.hosts": "Host",
+    "record.field.comment": "Komentar",
+    "record.type.ssh-key": "Kunci SSH",
+    "ssh.derived.t": "Diturunkan dari kunci",
+    "ssh.derived.d": "Dihitung dari kunci yang tersimpan, bukan diketik, jadi tidak mungkin berbeda dengan kunci yang dijelaskannya.",
+    "ssh.type": "Jenis",
+    "ssh.bits": "Ukuran",
+    "ssh.fingerprint": "Fingerprint",
+    "ssh.public": "Kunci publik",
+    "ssh.sealed": "Bagian privat dilindungi frasa sandi",
+    "ssh.unreadable": "SPM tidak dapat menurunkan apa pun dari kunci ini"
   }
 }

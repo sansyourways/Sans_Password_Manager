@@ -2653,6 +2653,195 @@ def t_record_counts_totals_what_it_lists():
        "the total and the per-type counts disagree")
     eq(core.record_counts("")[""], 0)
 
+# ----- SSH keys --------------------------------------------------------------
+# Two real public keys, pinned with the fingerprints `ssh-keygen -l` printed
+# for them. A public key is not a secret, so these can live here; no private
+# key material is checked in, and the private-key tests below build their own
+# containers byte by byte instead.
+SSH_ED25519_PUB = (
+    "ssh-ed25519 "
+    "AAAAC3NzaC1lZDI1NTE5AAAAIPlrtDmgZLIIUtf3kVUZW+av5Uc8iYx8DN+p2wE1l+D2 "
+    "plain@example")
+SSH_ED25519_FP = "SHA256:9EpxP+yevzSl5u0d7qRfo/Hpc2xnpm/f4FwuIw5aT7c"
+SSH_RSA_PUB = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCOkVnIH3rJO3nuKyuLcsjtkI4k4BxW2+FqCUjehfKdliieKXCVq8fTWv8pgl9n1eAm2MJoEpB+J1Kl5p/IDrhBlJaIAWUahSLIsGSTrfwZbldMTTfdCe9q0FPWifRJlXdqFAemkX8JL9HNxETtMhhOuzpqtxka/7YRdP6PqEZ/44Z7JXckqVg9DFYMxIvYbyFvsXThd5okq8eIZchwJ3eKqJx/KwcEgA0yJcfr5RJXu3gXJD7ManjphoDmyBF9XxVGcNFz6s+/GxjYDmg/PflCqHn7HFamOuwGacKhaQfIo967W3UN8IsWx7BTyaaGTf9lP0g6OGRRjufkvwi4/WGn rsa@example"
+SSH_RSA_FP = "SHA256:BFjxBp/dsjhbRn3XPZKr8FU4N/cpCnOq73UjFm7rLBM"
+
+
+def _ssh_len(raw):
+    return len(raw).to_bytes(4, "big") + raw
+
+
+def _ssh_private_container(public_blob, cipher=b"none", count=1):
+    """An openssh-key-v1 file around a public blob, built here byte by byte.
+
+    Synthesised rather than generated so the tests carry no private key, and
+    so a field can be made wrong on purpose -- a real ssh-keygen will not
+    produce a container that declares no keys.
+    """
+    raw = (b"openssh-key-v1\x00"
+           + _ssh_len(cipher) + _ssh_len(b"none") + _ssh_len(b"")
+           + count.to_bytes(4, "big")
+           + _ssh_len(public_blob)
+           + _ssh_len(b"\x00" * 16))
+    body = base64.b64encode(raw).decode("ascii")
+    lines = [body[i:i + 70] for i in range(0, len(body), 70)]
+    return ("-----BEGIN OPENSSH PRIVATE KEY-----\n"
+            + "\n".join(lines)
+            + "\n-----END OPENSSH PRIVATE KEY-----\n")
+
+
+def t_ssh_fingerprint_is_the_one_ssh_keygen_prints():
+    # A known-answer test against the tool everyone else compares against.
+    # SPM derives fingerprints itself rather than shelling out, so nothing in
+    # the running system would notice if the derivation drifted -- a wrong
+    # fingerprint looks exactly like a right one.
+    for line, expect_fp, expect_type, expect_bits in (
+            (SSH_ED25519_PUB, SSH_ED25519_FP, "ssh-ed25519", 256),
+            (SSH_RSA_PUB, SSH_RSA_FP, "ssh-rsa", 2048)):
+        info = core.ssh_key_info(line)
+        eq(info["fingerprint"], expect_fp, "the fingerprint moved")
+        eq(info["type"], expect_type)
+        eq(info["bits"], expect_bits, "the reported key size is wrong")
+        eq(info["format"], core.SSH_FORMAT_PUBLIC)
+        eq(info["problem"], "")
+
+
+def t_ssh_rsa_size_counts_bits_not_bytes():
+    # An RSA modulus carries a leading zero byte whenever its top bit is set,
+    # so counting bytes reports 2056 bits for a 2048-bit key -- close enough
+    # to look plausible on screen and wrong in the one place it is quoted.
+    blob = core.ssh_public_blob_from_line(SSH_RSA_PUB)
+    eq(core.ssh_key_bits(blob), 2048)
+    eq(core.ssh_key_bits(blob) % 8, 0)
+
+
+def t_ssh_public_half_is_readable_without_the_passphrase():
+    # The reason the fingerprint can be derived at all: openssh-key-v1 keeps
+    # the public key in the clear even when the private half is sealed. A
+    # passphrase-protected key is the one whose bytes an owner is least able
+    # to check by hand, so it is the one that most needs this to work.
+    blob = core.ssh_public_blob_from_line(SSH_ED25519_PUB)
+    sealed = _ssh_private_container(blob, cipher=b"aes256-ctr")
+    plain = _ssh_private_container(blob, cipher=b"none")
+
+    sealed_info = core.ssh_key_info(sealed)
+    eq(sealed_info["fingerprint"], SSH_ED25519_FP,
+       "a sealed key did not yield the fingerprint its public half implies")
+    eq(sealed_info["encrypted"], True, "a sealed key was reported unsealed")
+    eq(core.ssh_key_info(plain)["encrypted"], False,
+       "an unsealed key was reported sealed")
+    # Both halves of the same key agree, which is the property that lets the
+    # agent decide whether it needs a passphrase before asking for one.
+    eq(sealed_info["fingerprint"], core.ssh_key_info(plain)["fingerprint"])
+
+
+def t_ssh_private_and_public_forms_describe_one_key():
+    # The record stores a private key and the surfaces show a public one.
+    # If those two derivations disagreed, the fingerprint on screen would not
+    # be the fingerprint of the key that authenticates.
+    blob = core.ssh_public_blob_from_line(SSH_ED25519_PUB)
+    private = core.ssh_key_info(_ssh_private_container(blob))
+    public = core.ssh_key_info(SSH_ED25519_PUB)
+    for field in ("fingerprint", "type", "bits"):
+        eq(private[field], public[field],
+           "the private and public forms disagree about %s" % field)
+    # And the line SPM builds is the line ssh-keygen would have written.
+    eq(core.ssh_key_info(_ssh_private_container(blob),
+                         comment="plain@example")["public"],
+       SSH_ED25519_PUB, "the rebuilt authorized_keys line is not the original")
+
+
+def t_ssh_a_key_it_cannot_read_is_still_kept():
+    # SPM stores what it is given. A key in a format this build cannot parse
+    # is still a key its owner wants, so an unreadable one reports a reason
+    # and never raises -- a record that refused to render would lose access
+    # to the key it holds.
+    for text, expect_format in (
+            ("", core.SSH_FORMAT_UNKNOWN),
+            ("neither a key nor a line", core.SSH_FORMAT_UNKNOWN),
+            ("-----BEGIN RSA PRIVATE KEY-----\nMIIB\n"
+             "-----END RSA PRIVATE KEY-----", core.SSH_FORMAT_PEM),
+            ("-----BEGIN OPENSSH PRIVATE KEY-----\n!!!not base64!!!\n"
+             "-----END OPENSSH PRIVATE KEY-----", core.SSH_FORMAT_UNKNOWN),
+            ("ssh-ed25519 !!!not-base64!!!", core.SSH_FORMAT_UNKNOWN)):
+        info = core.ssh_key_info(text)
+        eq(info["format"], expect_format, "wrong format for %r" % text[:30])
+        assert info["problem"], \
+            "an unreadable key gave no reason: %r" % text[:30]
+        eq(info["fingerprint"], "",
+           "a key that could not be read produced a fingerprint anyway")
+
+
+def t_ssh_a_truncated_key_is_refused_not_sliced():
+    # These bytes come out of a vault, but a vault holds what a user pasted.
+    # A length header trusted blindly turns a truncated key into a slice of
+    # whatever follows it rather than an error.
+    blob = core.ssh_public_blob_from_line(SSH_ED25519_PUB)
+    good = _ssh_private_container(blob)
+    body = "".join(l for l in good.splitlines() if "-----" not in l)
+    raw = base64.b64decode(body)
+
+    def truncated_to(length):
+        chopped = base64.b64encode(raw[:length]).decode("ascii")
+        return core.ssh_key_info(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n%s\n"
+            "-----END OPENSSH PRIVATE KEY-----\n" % chopped)
+
+    # Where the public blob ends is the boundary that matters, so the test
+    # names it rather than guessing at offsets.
+    ends = raw.index(blob) + len(blob)
+    for cut in (20, 40, ends - 1):
+        info = truncated_to(cut)
+        eq(info["fingerprint"], "",
+           "a key truncated at %d still produced a fingerprint" % cut)
+        assert info["problem"], "a truncated key gave no reason"
+
+    # Past that boundary the public half is whole, and the honest answer is
+    # the real fingerprint: what is damaged is the private section, which
+    # this derivation never reads. A key whose private half is corrupt is
+    # still identifiable, and refusing to name it would help nobody.
+    eq(truncated_to(ends)["fingerprint"], SSH_ED25519_FP,
+       "a key whose public half survived was refused a fingerprint")
+
+    # A container that declares no keys must not be read as holding one.
+    empty = _ssh_private_container(blob, count=0)
+    eq(core.ssh_key_info(empty)["fingerprint"], "",
+       "a container declaring no keys yielded a fingerprint")
+
+
+def t_ssh_a_public_line_must_agree_with_its_own_blob():
+    # A line names its algorithm twice, once as text and once inside the
+    # blob. A line whose halves disagree would fingerprint as one key while
+    # reading as another, which is exactly the confusion a fingerprint exists
+    # to prevent.
+    field = SSH_ED25519_PUB.split()[1]
+    lying = "ssh-rsa %s liar@example" % field
+    info = core.ssh_key_info(lying)
+    eq(info["fingerprint"], "", "a mislabelled key line was accepted")
+    assert info["problem"], "a mislabelled key line was refused without a reason"
+
+
+def t_ssh_key_is_a_record_type_like_any_other():
+    # The point of the schema engine: a new type is a dictionary entry, and
+    # every surface picks it up without naming it.
+    assert "ssh-key" in core.RECORD_TYPES, "ssh-key is not a record type"
+    eq(sorted(core.record_secret_fields("ssh-key")),
+       ["passphrase", "private_key"],
+       "the private key or its passphrase is not marked secret")
+    # A record round-trips through the vault row like every other type.
+    blob = core.ssh_public_blob_from_line(SSH_ED25519_PUB)
+    private = _ssh_private_container(blob)
+    row = core.build_record_row("ssh-key", "1", "Deploy key",
+                                {"private_key": private, "hosts": "git.example",
+                                 "comment": "plain@example"}, "t")
+    parsed = core.parse_record_row(row)
+    eq(parsed[0], "ssh-key")
+    eq(parsed[3]["private_key"], private,
+       "the key did not survive the vault row unchanged")
+    eq(core.ssh_key_info(parsed[3]["private_key"])["fingerprint"],
+       SSH_ED25519_FP, "the stored key no longer fingerprints as itself")
+
+
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):
         check(name[2:], fn)

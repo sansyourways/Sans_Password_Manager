@@ -448,6 +448,19 @@
     "records.pick.desc": "Choose what kind of thing this is. Every type is stored in the same encrypted vault.",
     "empty.records.t": "No records yet",
     "empty.records.d": "API tokens, database credentials, cards, identities, licences, Wi-Fi and servers live here.",
-    "confirm.delete_record": "Delete this record?"
+    "confirm.delete_record": "Delete this record?",
+    "record.field.private_key": "Private key",
+    "record.field.passphrase": "Passphrase",
+    "record.field.hosts": "Hosts",
+    "record.field.comment": "Comment",
+    "record.type.ssh-key": "SSH Key",
+    "ssh.derived.t": "Derived from the key",
+    "ssh.derived.d": "Computed from the stored key rather than typed beside it, so it cannot disagree with the key it describes.",
+    "ssh.type": "Type",
+    "ssh.bits": "Size",
+    "ssh.fingerprint": "Fingerprint",
+    "ssh.public": "Public key",
+    "ssh.sealed": "The private half is passphrase-protected",
+    "ssh.unreadable": "SPM cannot derive anything from this key"
   }
 }

@@ -448,6 +448,19 @@
     "records.pick.desc": "種類を選んでください。どの種類も同じ暗号化ボールトに保存されます。",
     "empty.records.t": "レコードはまだありません",
     "empty.records.d": "API トークン、データベース認証情報、カード、身分証明書、ライセンス、Wi-Fi、サーバーがここに入ります。",
-    "confirm.delete_record": "このレコードを削除しますか？"
+    "confirm.delete_record": "このレコードを削除しますか？",
+    "record.field.private_key": "秘密鍵",
+    "record.field.passphrase": "パスフレーズ",
+    "record.field.hosts": "ホスト",
+    "record.field.comment": "コメント",
+    "record.type.ssh-key": "SSH 鍵",
+    "ssh.derived.t": "鍵から導出",
+    "ssh.derived.d": "保存された鍵から計算されるため、その鍵と食い違うことはありません。",
+    "ssh.type": "種類",
+    "ssh.bits": "鍵長",
+    "ssh.fingerprint": "フィンガープリント",
+    "ssh.public": "公開鍵",
+    "ssh.sealed": "秘密鍵はパスフレーズで保護されています",
+    "ssh.unreadable": "SPM はこの鍵から何も導出できません"
   }
 }

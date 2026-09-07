@@ -448,6 +448,19 @@
     "records.pick.desc": "选择记录类型。所有类型都保存在同一个加密保险库中。",
     "empty.records.t": "还没有记录",
     "empty.records.d": "API 令牌、数据库凭据、银行卡、身份证件、许可证、Wi-Fi 和服务器都存放在这里。",
-    "confirm.delete_record": "删除这条记录？"
+    "confirm.delete_record": "删除这条记录？",
+    "record.field.private_key": "私钥",
+    "record.field.passphrase": "密码短语",
+    "record.field.hosts": "主机",
+    "record.field.comment": "注释",
+    "record.type.ssh-key": "SSH 密钥",
+    "ssh.derived.t": "由密钥推导",
+    "ssh.derived.d": "由存储的密钥计算得出，而非手工填写，因此不会与它所描述的密钥不符。",
+    "ssh.type": "类型",
+    "ssh.bits": "长度",
+    "ssh.fingerprint": "指纹",
+    "ssh.public": "公钥",
+    "ssh.sealed": "私钥部分受密码短语保护",
+    "ssh.unreadable": "SPM 无法从该密钥推导出任何信息"
   }
 }

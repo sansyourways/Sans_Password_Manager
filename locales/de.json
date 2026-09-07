@@ -448,6 +448,19 @@
     "records.pick.desc": "Wählen Sie die Art des Eintrags. Alle Arten liegen im selben verschlüsselten Tresor.",
     "empty.records.t": "Noch keine Datensätze",
     "empty.records.d": "API-Token, Datenbank-Zugänge, Karten, Ausweise, Lizenzen, WLAN und Server liegen hier.",
-    "confirm.delete_record": "Diesen Datensatz löschen?"
+    "confirm.delete_record": "Diesen Datensatz löschen?",
+    "record.field.private_key": "Privater Schlüssel",
+    "record.field.passphrase": "Passphrase",
+    "record.field.hosts": "Hosts",
+    "record.field.comment": "Kommentar",
+    "record.type.ssh-key": "SSH-Schlüssel",
+    "ssh.derived.t": "Aus dem Schlüssel abgeleitet",
+    "ssh.derived.d": "Aus dem gespeicherten Schlüssel berechnet statt daneben eingetragen und kann ihm daher nicht widersprechen.",
+    "ssh.type": "Typ",
+    "ssh.bits": "Größe",
+    "ssh.fingerprint": "Fingerabdruck",
+    "ssh.public": "Öffentlicher Schlüssel",
+    "ssh.sealed": "Der private Teil ist mit einer Passphrase geschützt",
+    "ssh.unreadable": "SPM kann aus diesem Schlüssel nichts ableiten"
   }
 }

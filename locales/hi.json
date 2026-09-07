@@ -448,6 +448,19 @@
     "records.pick.desc": "चुनें कि यह किस प्रकार का है। हर प्रकार उसी एन्क्रिप्टेड वॉल्ट में रहता है।",
     "empty.records.t": "अभी कोई रिकॉर्ड नहीं",
     "empty.records.d": "API टोकन, डेटाबेस क्रेडेंशियल, कार्ड, पहचान, लाइसेंस, Wi-Fi और सर्वर यहाँ रहते हैं।",
-    "confirm.delete_record": "यह रिकॉर्ड हटाएँ?"
+    "confirm.delete_record": "यह रिकॉर्ड हटाएँ?",
+    "record.field.private_key": "निजी कुंजी",
+    "record.field.passphrase": "पासफ़्रेज़",
+    "record.field.hosts": "होस्ट",
+    "record.field.comment": "टिप्पणी",
+    "record.type.ssh-key": "SSH कुंजी",
+    "ssh.derived.t": "कुंजी से व्युत्पन्न",
+    "ssh.derived.d": "संग्रहीत कुंजी से गणना किया गया, अलग से टाइप नहीं किया गया, इसलिए यह उस कुंजी से भिन्न नहीं हो सकता।",
+    "ssh.type": "प्रकार",
+    "ssh.bits": "आकार",
+    "ssh.fingerprint": "फ़िंगरप्रिंट",
+    "ssh.public": "सार्वजनिक कुंजी",
+    "ssh.sealed": "निजी भाग पासफ़्रेज़ से सुरक्षित है",
+    "ssh.unreadable": "SPM इस कुंजी से कुछ भी व्युत्पन्न नहीं कर सकता"
   }
 }
