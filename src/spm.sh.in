@@ -2278,24 +2278,11 @@ cmd_notes_delete() {
 # every decision about which values are secret comes from `core record`.
 
 next_record_id_from_vault() {
-	# Ids are allocated per type, so wifi 1 and server 1 both exist and each
-	# type counts from one. A single sequence across types would make an id
-	# meaningless without its type anyway, and would renumber nothing while
-	# looking like it might.
-	local file="$1" tag="$2"
-	if [ ! -s "$file" ]; then
-		printf '1\n'
-		return
-	fi
-	awk -F '\t' -v tag="$tag" '
-		$1==tag && $2 ~ /^[0-9]+$/ {
-			if ($2 + 0 > max) max = $2 + 0
-		}
-		END {
-			if (max == 0) print 1;
-			else print max + 1;
-		}
-	' "$file"
+	# The rule lives in the core, with the rows it reads: `spm record add`
+	# and the Dashboard both allocate here, and two implementations of which
+	# id is free is how they come to hand the same one to two records.
+	local file="$1" rtype="$2"
+	core record next-id "$file" "$rtype"
 }
 
 record_types_or_die() {
@@ -2397,7 +2384,7 @@ $(core record schema "$rtype")
 EOF
 
 	local rid created row
-	rid="$(next_record_id_from_vault "$tmp" "REC:${rtype}")"
+	rid="$(next_record_id_from_vault "$tmp" "$rtype")"
 	created="$(now_iso)"
 	row="$(core record row "$rtype" "$rid" "$(sanitize_field "$label")" \
 		"$created" <"$fields_tmp")" || {

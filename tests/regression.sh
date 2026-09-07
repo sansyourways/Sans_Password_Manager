@@ -6285,6 +6285,259 @@ sys.stdout.write("  dashboard: %d typed record(s) survive a save and a delete, "
 PYREC
 
 printf '  typed records: seven schemas add, list, view redacted, delete, and survive twenty formats field by field\n'
+
+# ----- typed records in the Dashboard ----------------------------------------
+# The CLI half of this shipped first and the Dashboard could only preserve the
+# rows it did not understand. This drives the web half over real HTTP -- add,
+# list, view, edit, delete, for every schema the core defines -- and then reads
+# the same vault back through the CLI, because "both surfaces agree" is the
+# only claim worth making about a record engine and it cannot be made by
+# testing one of them.
+#
+# Nothing below names a field. The schema supplies the fields, so adding an
+# eighth type extends this test rather than breaking it.
+
+python3 - "$web_script" "$ROOT_DIR" "$WEB_PORT" "$AUDIT_PASSWORD" \
+	"$PASSWORD_VAULT" "$TEST_ROOT/webrec-plain" <<'PYWEBREC'
+import http.cookiejar
+import os
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+web_script, root, port, password, vault, plainfile = sys.argv[1:7]
+BASE = "http://127.0.0.1:%s" % port
+sys.path.insert(0, os.path.join(root, "src"))
+import spm_core as core
+
+jar = http.cookiejar.CookieJar()
+opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+
+def get(path):
+    with opener.open(BASE + path, timeout=20) as response:
+        return response.read().decode("utf-8")
+
+
+def refused(path, code):
+    """A route that must not answer. Reaching the page at all is the failure."""
+    try:
+        opener.open(BASE + path, timeout=20)
+    except urllib.error.HTTPError as failure:
+        assert failure.code == code, \
+            "GET %s returned %d, wanted %d" % (path, failure.code, code)
+        return
+    raise AssertionError("GET %s was served; it should have been %d" % (path, code))
+
+
+def vault_plaintext():
+    """The vault as the CLI reads it, through the core the CLI runs."""
+    done = subprocess.run(
+        [sys.executable, os.path.join(root, "src", "spm_core.py"), "read",
+         vault, plainfile],
+        input=password.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert done.returncode == 0, done.stderr.decode()
+    with open(plainfile, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def post(path, fields, page_for_token):
+    """Submit a form the way a browser does, token and Origin included."""
+    token = re.search(r'name="csrf" value="([^"]+)"', page_for_token)
+    assert token, "the served form carried no CSRF token"
+    body = list(fields) + [("csrf", token.group(1))]
+    request = urllib.request.Request(
+        BASE + path, data=urllib.parse.urlencode(body).encode("utf-8"),
+        method="POST")
+    request.add_header("Content-Type", "application/x-www-form-urlencoded")
+    request.add_header("Origin", BASE)
+    with opener.open(request, timeout=20) as response:
+        return response.geturl(), response.read().decode("utf-8")
+
+
+# The login POST is exempt from the token check -- there is no session to
+# carry one yet -- so it is submitted without.
+request = urllib.request.Request(
+    BASE + "/login",
+    data=urllib.parse.urlencode({"password": password}).encode(),
+    method="POST")
+request.add_header("Content-Type", "application/x-www-form-urlencoded")
+request.add_header("Origin", BASE)
+opener.open(request, timeout=20)
+
+# Every schema icon must resolve. An unresolved <use> renders nothing at all,
+# so a type whose icon is missing from the sprite is a blank square that no
+# error anywhere reports.
+sprite = re.search(r'ICON_SPRITE\s*=\s*"""(.*?)"""',
+                   open(web_script, encoding="utf-8").read(), re.S)
+assert sprite, "the page carries no icon sprite"
+symbols = set(re.findall(r'id="i-([a-z0-9-]+)"', sprite.group(1)))
+for record_type in core.RECORD_TYPES:
+    icon = core.RECORD_SCHEMAS[record_type].get("icon", "")
+    assert icon in symbols, \
+        "%s names icon %r and the sprite has no such symbol" % (record_type, icon)
+
+listing = get("/records")
+assert 'data-i18n="nav.records"' in listing, "the sidebar has no Records entry"
+# The empty state is asserted against the vault rather than assumed: this
+# fixture has carried other rows through the suite before reaching here.
+before = sum(1 for _i, _p in core.iter_records(vault_plaintext()))
+assert (('data-i18n="empty.records.t"' in listing) == (before == 0)), \
+    "the empty state and the vault disagree about whether there are records"
+
+# The picker offers every type, by name and by link.
+picker = get("/records-add")
+for record_type in core.RECORD_TYPES:
+    assert "/records-add?type=%s" % urllib.parse.quote(record_type) in picker, \
+        "the picker does not offer %s" % record_type
+
+# A type the core does not define must not render a form. Without this a
+# crafted link produces a page with no fields that writes a row no surface
+# can read back.
+refused("/records-add?type=not-a-type", 404)
+refused("/records?type=not-a-type", 404)
+refused("/records-view?type=wifi&id=999999", 404)
+
+sample = {"line": "sample-value", "number": "42", "date": "2027-01-31",
+          "month": "2027-01", "multiline": "first line\nsecond line"}
+made = []
+for record_type in core.RECORD_TYPES:
+    form = get("/records-add?type=%s" % urllib.parse.quote(record_type))
+    fields = [("type", record_type), ("label", "web %s" % record_type)]
+    expect = {}
+    for name, kind, widget, _required in core.record_fields(record_type):
+        # A distinct value per field, so a form that writes the right number
+        # of values into the wrong boxes still fails.
+        value = "%s-%s" % (sample.get(widget, "sample-value"), name)
+        assert 'name="%s"' % name in form, \
+            "the %s form has no control for %r" % (record_type, name)
+        fields.append((name, value))
+        expect[name] = value
+    fields += [("folder", "Web"), ("cf_name_0", "ticket"),
+               ("cf_value_0", "SPM 42")]
+    url, view = post("/records-add", fields, form)
+    assert "/records-view?type=%s" % urllib.parse.quote(record_type) in url, \
+        "adding a %s did not land on the record: %s" % (record_type, url)
+    made.append((record_type, url.rsplit("id=", 1)[1]))
+
+    secrets_here = core.record_secret_fields(record_type)
+    assert secrets_here, "%s declares no secret; this assertion proves nothing" \
+        % record_type
+    for name, value in expect.items():
+        if name in secrets_here:
+            # The value may be in the page as data for the reveal control, but
+            # it must never be the text that is rendered.
+            assert ">%s<" % value not in view, \
+                "%s showed its %s in the open" % (record_type, name)
+        else:
+            assert value.split("\n")[0] in view, \
+                "%s lost its %s on the view page" % (record_type, name)
+    assert "SPM 42" in view, "%s lost its custom field" % record_type
+
+# The list shows them all, and the type filter narrows to one.
+listing = get("/records")
+for record_type, record_id in made:
+    assert "/records-view?type=%s&amp;id=%s" % (
+        urllib.parse.quote(record_type), record_id) in listing, \
+        "%s %s is missing from the list" % (record_type, record_id)
+one = get("/records?type=wifi")
+assert "web wifi" in one, "the wifi filter hid the wifi record"
+assert "web server" not in one, "the wifi filter showed a server record"
+
+# The CLI reads what the Dashboard wrote. This is the assertion the whole
+# engine exists to make true, and it is the one 4.1.0 could not have made.
+plaintext = vault_plaintext()
+for record_type, record_id in made:
+    found = core.find_record(plaintext, record_type, record_id)
+    assert found, "the CLI cannot find the %s the Dashboard wrote" % record_type
+    _index, parsed = found
+    assert parsed[5] == "Web", "the folder did not reach the vault"
+    assert parsed[6] == [("ticket", "SPM 42")], \
+        "the custom field did not reach the vault"
+    for name, kind, _w, _r in core.record_fields(record_type):
+        assert parsed[3].get(name), \
+            "%s reached the vault without its %s" % (record_type, name)
+
+# An edit keeps the id and the created stamp. A created stamp that moved on
+# every edit would quietly make "oldest first" mean "least recently touched".
+edit_type, edit_id = made[0]
+_index, before = core.find_record(plaintext, edit_type, edit_id)
+form = get("/records-edit?type=%s&id=%s" % (urllib.parse.quote(edit_type), edit_id))
+assert "web %s" % edit_type in form, "the edit form did not load the record"
+fields = [("type", edit_type), ("id", edit_id), ("label", "web %s edited" % edit_type)]
+for name, _k, widget, _r in core.record_fields(edit_type):
+    fields.append((name, "%s-%s" % (sample.get(widget, "sample-value"), name)))
+fields += [("folder", "Web"), ("cf_name_0", "ticket"), ("cf_value_0", "SPM 43")]
+fields += [("environment_that_is_not_a_field", "smuggled")]
+url, view = post("/records-edit", fields, form)
+assert "web %s edited" % edit_type in view, "the edit did not take"
+
+_index, after = core.find_record(vault_plaintext(), edit_type, edit_id)
+# The created stamp belongs to the record, not to the edit. One that moved on
+# every change would quietly turn "oldest first" into "least recently touched",
+# and the rotation warnings read that column.
+assert after[4] == before[4], \
+    "the edit rewrote the created stamp: %r -> %r" % (before[4], after[4])
+assert after[1] == edit_id, "the edit changed the record's id"
+# A field name the schema does not define must not be stored. It could only
+# arrive from a crafted post, and a value no surface draws is a value nobody
+# can ever see, check or delete.
+assert "smuggled" not in "".join(after[3].values()), \
+    "a field the schema does not name was written into the record"
+assert not any(n == "environment_that_is_not_a_field" for n, _v in after[6]), \
+    "an unknown form field was stored as a custom field"
+
+# A custom field may not take a schema field's name: both cross an export in
+# one column and are told apart by whether the name is in the schema, so one
+# of the two would silently disappear. The core refuses, and the form has to
+# show its reason rather than a generic failure.
+shadow = sorted(core.record_secret_fields(edit_type))[0]
+form = get("/records-edit?type=%s&id=%s" % (urllib.parse.quote(edit_type), edit_id))
+fields = [("type", edit_type), ("id", edit_id), ("label", "shadowed")]
+for name, _k, widget, _r in core.record_fields(edit_type):
+    fields.append((name, "%s-%s" % (sample.get(widget, "sample-value"), name)))
+fields += [("cf_name_0", shadow), ("cf_value_0", "collides")]
+_url, refused = post("/records-edit", fields, form)
+assert shadow in refused and "may not reuse" in refused, \
+    "a custom field shadowing %r was accepted, or refused without saying why" % shadow
+
+# A required field left blank is refused by the core, and the form comes back
+# with what was typed rather than empty.
+form = get("/records-add?type=%s" % urllib.parse.quote(edit_type))
+required = [n for n, _k, _w, r in core.record_fields(edit_type) if r]
+assert required, "%s has no required field; this proves nothing" % edit_type
+fields = [("type", edit_type), ("label", "missing required")]
+for name, _k, widget, is_required in core.record_fields(edit_type):
+    if name == required[0]:
+        continue
+    fields.append((name, "%s-%s" % (sample.get(widget, "sample-value"), name)))
+_url, refused = post("/records-add", fields, form)
+assert "requires a value" in refused, "a missing required field was accepted"
+assert "missing required" in refused, "the refused form lost what was typed"
+
+# Delete every record this test made, and prove each one is gone from both
+# surfaces rather than only from the page that deleted it.
+listing = get("/records")
+for record_type, record_id in made:
+    post("/records-delete", [("type", record_type), ("id", record_id)], listing)
+final = get("/records")
+for record_type, record_id in made:
+    assert "/records-view?type=%s&amp;id=%s" % (
+        urllib.parse.quote(record_type), record_id) not in final, \
+        "%s %s survived its delete" % (record_type, record_id)
+
+plaintext = vault_plaintext()
+for record_type, record_id in made:
+    assert core.find_record(plaintext, record_type, record_id) is None, \
+        "the CLI still sees the %s the Dashboard deleted" % record_type
+
+sys.stdout.write("  dashboard records: %d schemas add, list, filter, view "
+                 "redacted, edit, refuse and delete over HTTP, and the CLI "
+                 "reads back every one\n" % len(core.RECORD_TYPES))
+PYWEBREC
 # ----- line terminators in an exported custom field --------------------------
 # A custom field holding U+0085, U+2028 or U+2029 exported as valid JSON and
 # would not import back: those three are legal inside a JSON string and are

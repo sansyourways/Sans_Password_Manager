@@ -1274,6 +1274,75 @@ def attrs_from_export_row(row):
         return ""
 
 
+def iter_records(plaintext, record_type=""):
+    """(line_index, parsed) for every typed record row, in vault order.
+
+    The index is the caller's half of a rewrite: the dashboard edits and
+    deletes by replacing one line of the plaintext it already holds, and a
+    surface that searched for its own row again by id would be a second
+    definition of which row an id names.
+
+    `record_type` narrows to one type. Ids are per type, so a caller holding
+    only an id is holding half an address; every route that takes one takes
+    the type with it.
+    """
+    for index, line in enumerate((plaintext or "").splitlines()):
+        if not line.startswith(RECORD_TAG_PREFIX):
+            continue
+        parsed = parse_record_row(line)
+        if parsed is None:
+            continue
+        if record_type and parsed[0] != record_type:
+            continue
+        yield index, parsed
+
+
+def find_record(plaintext, record_type, record_id):
+    """(line_index, parsed) for one record, or None.
+
+    Both halves of the address are required. A lookup by id alone would find
+    the wifi record when the caller meant the server one, because each type
+    counts from one.
+    """
+    for index, parsed in iter_records(plaintext, record_type):
+        if parsed[1] == str(record_id):
+            return index, parsed
+    return None
+
+
+def record_next_id(plaintext, record_type):
+    """The next free id for a type, as a string.
+
+    Ids are allocated per type, so wifi 1 and server 1 both exist and each
+    type counts from one. A single sequence across types would make an id
+    meaningless without its type anyway, and would renumber nothing while
+    looking like it might.
+
+    A row whose id is not a number is ignored rather than refused: it cannot
+    have been written by this code, and refusing here would mean one damaged
+    row stopped every new record of its type from being added.
+    """
+    highest = 0
+    for _index, parsed in iter_records(plaintext, record_type):
+        if parsed[1].isdigit():
+            highest = max(highest, int(parsed[1]))
+    return str(highest + 1)
+
+
+def record_counts(plaintext):
+    """{type: n} for the types present, plus "" -> the total.
+
+    The total is carried here rather than summed by each caller because the
+    nav badge and the overview tile disagreeing about how many records a
+    vault holds is the class of defect a shared core exists to prevent.
+    """
+    counts = {"": 0}
+    for _index, parsed in iter_records(plaintext):
+        counts[parsed[0]] = counts.get(parsed[0], 0) + 1
+        counts[""] += 1
+    return counts
+
+
 def record_folders(plaintext):
     """Every folder in use, sorted, without duplicates differing only in case."""
     seen = {}
@@ -3935,6 +4004,15 @@ def main(argv):
                 for field, kind, widget, required in record_fields(argv[3]):
                     sys.stdout.write("%s\t%s\t%s\t%s\n" % (
                         field, kind, widget, "1" if required else "0"))
+            elif op == "next-id":
+                # next-id <plainfile> <type>
+                #
+                # The shell allocated this with its own awk over the same
+                # rows. Two implementations of "which id is free" is how the
+                # CLI and the dashboard come to hand the same id to two
+                # records, so the rule lives with the rows it reads.
+                with open(argv[3], "r", encoding="utf-8") as handle:
+                    sys.stdout.write(record_next_id(handle.read(), argv[4]) + "\n")
             elif op == "row":
                 # row <type> <id> <label> <created> [--folder F] [--hidden]
                 # stdin: "field<TAB>base64(value)" lines
