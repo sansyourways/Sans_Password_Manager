@@ -6285,6 +6285,92 @@ sys.stdout.write("  dashboard: %d typed record(s) survive a save and a delete, "
 PYREC
 
 printf '  typed records: seven schemas add, list, view redacted, delete, and survive twenty formats field by field\n'
+# ----- line terminators in an exported custom field --------------------------
+# A custom field holding U+0085, U+2028 or U+2029 exported as valid JSON and
+# would not import back: those three are legal inside a JSON string and are
+# also line terminators to str.splitlines(), which the ndjson, jsonl, yaml and
+# fallback-toml readers all call before they parse. `spm import ndjson` failed
+# on the user's own backup with an unterminated-string error.
+#
+# The export looked correct by every check a person would run -- one line to
+# bash, one line to wc, and json.loads parsed it -- so this drives the whole
+# round trip rather than inspecting the file.
+
+lt_fail() { printf 'line terminators: %s\n' "$1" >&2; exit 1; }
+
+lt_vault="$TEST_ROOT/lineterm.gpg"
+lt_plain="$TEST_ROOT/lineterm-plain"
+lt_attrs="$(python3 - <<'PYLT'
+import base64, json
+payload = {"folder": "Work",
+           "fields": [{"name": "recovery note",
+                       "value": "before after"},
+                      {"name": "nel", "value": "ab"},
+                      {"name": "para", "value": "c d"}]}
+print(base64.b64encode(json.dumps(payload, separators=(",", ":"),
+                                  ensure_ascii=False).encode()).decode())
+PYLT
+)"
+{
+	printf 'META_VAULT_VERSION\t5\t-\t-\t-\t-\n'
+	printf 'META_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n' "$TEST_RECOVERY_B64"
+	printf '1\tBank\tuser@example.invalid\tDemoSecret42\tnote\t2025-01-01T00:00:00Z\thttps://example.invalid\t%s\n' "$lt_attrs"
+} >"$lt_plain"
+printf '%s\n' "$AUDIT_PASSWORD" | core write "$lt_vault" "$lt_plain" >/dev/null
+
+for lt_fmt in ndjson jsonl yaml toml json csv tsv; do
+	lt_export="$TEST_ROOT/lineterm.$lt_fmt"
+	VAULT_FILE="$lt_vault" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY="" \
+		cmd_export "$lt_fmt" "$lt_export" >/dev/null ||
+		lt_fail "exporting $lt_fmt failed"
+
+	# The whole file must survive being split the way every reader splits it.
+	python3 - "$lt_export" "$lt_fmt" <<'PYLT' || lt_fail "the $lt_fmt export carries a raw line terminator"
+import sys
+raw = open(sys.argv[1], "r", encoding="utf-8").read()
+bad = [hex(ord(c)) for c in ("", " ", " ") if c in raw]
+if bad:
+    sys.stderr.write("%s export holds raw %s\n" % (sys.argv[2], ", ".join(bad)))
+    sys.exit(1)
+PYLT
+
+	lt_reimport="$TEST_ROOT/lineterm-back-$lt_fmt.gpg"
+	printf '%s\n' "$AUDIT_PASSWORD" | core write "$lt_reimport" "$lt_plain" >/dev/null
+	( VAULT_FILE="$lt_reimport" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY="" \
+		RECOVERY_FILE="$lt_reimport.recovery" \
+		cmd_import "$lt_fmt" "$lt_export" ) >/dev/null 2>&1 ||
+		lt_fail "re-importing $lt_fmt failed -- the export could not be read back"
+
+	# Field by field, not by count: the value must come back byte-identical.
+	lt_after="$TEST_ROOT/lineterm-after-$lt_fmt"
+	test_decrypt_vault "$lt_reimport" "$AUDIT_PASSWORD" "$lt_after"
+	python3 - "$lt_after" "$lt_fmt" "$ROOT_DIR" <<'PYLT' || lt_fail "$lt_fmt changed a custom field across the round trip"
+import os
+import sys
+sys.path.insert(0, os.path.join(sys.argv[3], "src"))
+import spm_core as core
+want = {"recovery note": "before after", "nel": "ab", "para": "c d"}
+found = None
+for line in open(sys.argv[1], "r", encoding="utf-8").read().split("\n"):
+    parts = line.split("\t")
+    if parts and parts[0].isdigit() and len(parts) > 7:
+        folder, fields, hidden = core.decode_attrs(parts[7])
+        got = dict(fields)
+        if set(want) <= set(got):
+            found = got
+            break
+if found is None:
+    sys.stderr.write("%s: no record carried the custom fields back\n" % sys.argv[2])
+    sys.exit(1)
+for name, value in want.items():
+    if found.get(name) != value:
+        sys.stderr.write("%s: %r came back as %r, wanted %r\n"
+                         % (sys.argv[2], name, found.get(name), value))
+        sys.exit(1)
+PYLT
+done
+
+printf '  line terminators: a custom field holding U+0085, U+2028 or U+2029 exports and imports back unchanged\n'
 
 printf 'SPM regression suite passed (%s formats plus web and advanced features).\n' \
 	"$(printf '%s\n' "$formats" | awk '{ print NF }')"

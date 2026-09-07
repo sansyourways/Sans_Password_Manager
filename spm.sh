@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="4.10.0"
+VERSION="4.10.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -2000,14 +2000,20 @@ def json_line_safe(value):
     because they are legal inside a JSON string. They are also three of the
     eleven characters str.splitlines() honours, and the exports that carry
     this output are line-based: ndjson and jsonl put one record on one line,
-    and every reader here splits on lines before parsing.
+    and the ndjson, yaml and fallback-toml readers all split before parsing.
 
-    So a note holding U+2028 produced valid JSON that arrived as two invalid
-    halves. Escaping them keeps the JSON identical in meaning -- json.loads
+    So a custom field holding U+2028 exported as valid JSON and came back as
+    two invalid halves. What made it hard to see is that everything a person
+    would check agreed the file was fine: bash reads it as one line, `wc -l`
+    counts one line, and json.loads parses it. Only str.splitlines() disagrees,
+    and only the importer calls that -- so the export looked correct right up
+    until the day someone needed it back.
+
+    Escaping the three keeps the JSON identical in meaning -- json.loads
     returns exactly the same string -- while making it safe to put on a line.
 
     The dashboard already did this for the same three characters when
-    embedding JSON in a <script>; the reason is the same and the definition
+    embedding JSON in a <script>. The reason is the same and the definition
     belongs in one place.
     """
     return (json.dumps(value, separators=(",", ":"), ensure_ascii=False)

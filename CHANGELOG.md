@@ -7,6 +7,41 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [4.10.1] - 2026-09-06
+
+A custom field could hold a character that made your own export refuse to
+import. One escaping fix; nothing else changed, and the vault format did not
+move.
+
+### Fixed
+- **An export carrying U+0085, U+2028 or U+2029 in a custom field could not be
+  imported back.** Those three are legal inside a JSON string, so
+  `json.dumps` left them as literal characters -- but they are also three of
+  the eleven characters `str.splitlines()` treats as line breaks, and the
+  ndjson, jsonl, yaml and fallback-toml readers all split a file into lines
+  before they parse it. One record arrived as two invalid halves and
+  `spm import ndjson` stopped with an unterminated-string error.
+
+  What made this hard to see is that everything a person would check agreed
+  the file was fine. Bash reads the export as one line, `wc -l` counts one
+  line, and `json.loads` parses it without complaint. Only `splitlines()`
+  disagrees, and only the importer calls it -- so the export looked correct
+  right up until the day someone needed it back, which for a backup is the
+  worst possible moment to find out.
+
+  Values are unchanged: the three are now written as `\u0085`, `\u2028` and
+  `\u2029` escapes, which JSON defines as the same string, so `json.loads`
+  returns exactly what went in. Exports written by 4.10.0 and earlier that
+  already refused to import are readable again by re-exporting from the
+  vault; the vault itself was never affected, because a vault row stores
+  these values base64-encoded.
+
+  These characters arrive by pasting from PDFs and word processors, which is
+  a normal way for a recovery note to reach a password manager.
+
+  The fix lives in the trusted core, so the CLI and the SPM Dashboard get it
+  from the same definition.
+
 ## [4.10.0] - 2026-09-06
 
 A Secret Key, so a stolen copy of the vault file has nothing left in it to
