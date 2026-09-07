@@ -559,6 +559,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "No records yet",
         "empty.records.d": "API tokens, database credentials, cards, identities, licences, Wi-Fi and servers live here.",
         "confirm.delete_record": "Delete this record?",
+        "record.field.private_key": "Private key",
+        "record.field.passphrase": "Passphrase",
+        "record.field.hosts": "Hosts",
+        "record.field.comment": "Comment",
+        "record.type.ssh-key": "SSH Key",
+        "ssh.derived.t": "Derived from the key",
+        "ssh.derived.d": "Computed from the stored key rather than typed beside it, so it cannot disagree with the key it describes.",
+        "ssh.type": "Type",
+        "ssh.bits": "Size",
+        "ssh.fingerprint": "Fingerprint",
+        "ssh.public": "Public key",
+        "ssh.sealed": "The private half is passphrase-protected",
+        "ssh.unreadable": "SPM cannot derive anything from this key",
     },
     "ar": {
         "nav.security": "\u0627\u0644\u0623\u0645\u0627\u0646",
@@ -1002,6 +1015,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "\u0644\u0627 \u062a\u0648\u062c\u062f \u0633\u062c\u0644\u0627\u062a \u0628\u0639\u062f",
         "empty.records.d": "\u0631\u0645\u0648\u0632 API \u0648\u0628\u064a\u0627\u0646\u0627\u062a \u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0648\u0627\u0644\u0628\u0637\u0627\u0642\u0627\u062a \u0648\u0627\u0644\u0647\u0648\u064a\u0627\u062a \u0648\u0627\u0644\u062a\u0631\u0627\u062e\u064a\u0635 \u0648\u0634\u0628\u0643\u0627\u062a Wi-Fi \u0648\u0627\u0644\u062e\u0648\u0627\u062f\u0645 \u062a\u064f\u062d\u0641\u0638 \u0647\u0646\u0627.",
         "confirm.delete_record": "\u062d\u0630\u0641 \u0647\u0630\u0627 \u0627\u0644\u0633\u062c\u0644\u061f",
+        "record.field.private_key": "\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u062e\u0627\u0635",
+        "record.field.passphrase": "\u0639\u0628\u0627\u0631\u0629 \u0627\u0644\u0645\u0631\u0648\u0631",
+        "record.field.hosts": "\u0627\u0644\u0645\u0636\u064a\u0641\u0627\u062a",
+        "record.field.comment": "\u062a\u0639\u0644\u064a\u0642",
+        "record.type.ssh-key": "\u0645\u0641\u062a\u0627\u062d SSH",
+        "ssh.derived.t": "\u0645\u0634\u062a\u0642 \u0645\u0646 \u0627\u0644\u0645\u0641\u062a\u0627\u062d",
+        "ssh.derived.d": "\u0645\u062d\u0633\u0648\u0628 \u0645\u0646 \u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0645\u062e\u0632\u064e\u0651\u0646 \u0628\u062f\u0644\u0627\u064b \u0645\u0646 \u0643\u062a\u0627\u0628\u062a\u0647 \u064a\u062f\u0648\u064a\u064b\u0627\u060c \u0644\u0630\u0627 \u0644\u0627 \u064a\u0645\u0643\u0646 \u0623\u0646 \u064a\u062e\u0627\u0644\u0641 \u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0630\u064a \u064a\u0635\u0641\u0647.",
+        "ssh.type": "\u0627\u0644\u0646\u0648\u0639",
+        "ssh.bits": "\u0627\u0644\u062d\u062c\u0645",
+        "ssh.fingerprint": "\u0627\u0644\u0628\u0635\u0645\u0629",
+        "ssh.public": "\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0639\u0627\u0645",
+        "ssh.sealed": "\u0627\u0644\u062c\u0632\u0621 \u0627\u0644\u062e\u0627\u0635 \u0645\u062d\u0645\u064a \u0628\u0639\u0628\u0627\u0631\u0629 \u0645\u0631\u0648\u0631",
+        "ssh.unreadable": "\u0644\u0627 \u064a\u0633\u062a\u0637\u064a\u0639 SPM \u0627\u0634\u062a\u0642\u0627\u0642 \u0623\u064a \u0634\u064a\u0621 \u0645\u0646 \u0647\u0630\u0627 \u0627\u0644\u0645\u0641\u062a\u0627\u062d",
     },
     "de": {
         "nav.security": "Sicherheit",
@@ -1445,6 +1471,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "Noch keine Datens\u00e4tze",
         "empty.records.d": "API-Token, Datenbank-Zug\u00e4nge, Karten, Ausweise, Lizenzen, WLAN und Server liegen hier.",
         "confirm.delete_record": "Diesen Datensatz l\u00f6schen?",
+        "record.field.private_key": "Privater Schl\u00fcssel",
+        "record.field.passphrase": "Passphrase",
+        "record.field.hosts": "Hosts",
+        "record.field.comment": "Kommentar",
+        "record.type.ssh-key": "SSH-Schl\u00fcssel",
+        "ssh.derived.t": "Aus dem Schl\u00fcssel abgeleitet",
+        "ssh.derived.d": "Aus dem gespeicherten Schl\u00fcssel berechnet statt daneben eingetragen und kann ihm daher nicht widersprechen.",
+        "ssh.type": "Typ",
+        "ssh.bits": "Gr\u00f6\u00dfe",
+        "ssh.fingerprint": "Fingerabdruck",
+        "ssh.public": "\u00d6ffentlicher Schl\u00fcssel",
+        "ssh.sealed": "Der private Teil ist mit einer Passphrase gesch\u00fctzt",
+        "ssh.unreadable": "SPM kann aus diesem Schl\u00fcssel nichts ableiten",
     },
     "es": {
         "nav.security": "Seguridad",
@@ -1888,6 +1927,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "A\u00fan no hay registros",
         "empty.records.d": "Aqu\u00ed viven tokens de API, credenciales de base de datos, tarjetas, identidades, licencias, Wi-Fi y servidores.",
         "confirm.delete_record": "\u00bfEliminar este registro?",
+        "record.field.private_key": "Clave privada",
+        "record.field.passphrase": "Frase de contrase\u00f1a",
+        "record.field.hosts": "Hosts",
+        "record.field.comment": "Comentario",
+        "record.type.ssh-key": "Clave SSH",
+        "ssh.derived.t": "Derivado de la clave",
+        "ssh.derived.d": "Calculado a partir de la clave guardada en lugar de escribirse aparte, por lo que no puede contradecirla.",
+        "ssh.type": "Tipo",
+        "ssh.bits": "Tama\u00f1o",
+        "ssh.fingerprint": "Huella",
+        "ssh.public": "Clave p\u00fablica",
+        "ssh.sealed": "La mitad privada est\u00e1 protegida con una frase de contrase\u00f1a",
+        "ssh.unreadable": "SPM no puede derivar nada de esta clave",
     },
     "fr": {
         "nav.security": "S\u00e9curit\u00e9",
@@ -2331,6 +2383,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "Aucune fiche",
         "empty.records.d": "Jetons d'API, identifiants de base de donn\u00e9es, cartes, pi\u00e8ces d'identit\u00e9, licences, Wi-Fi et serveurs vivent ici.",
         "confirm.delete_record": "Supprimer cette fiche ?",
+        "record.field.private_key": "Cl\u00e9 priv\u00e9e",
+        "record.field.passphrase": "Phrase secr\u00e8te",
+        "record.field.hosts": "H\u00f4tes",
+        "record.field.comment": "Commentaire",
+        "record.type.ssh-key": "Cl\u00e9 SSH",
+        "ssh.derived.t": "D\u00e9riv\u00e9 de la cl\u00e9",
+        "ssh.derived.d": "Calcul\u00e9 \u00e0 partir de la cl\u00e9 stock\u00e9e plut\u00f4t que saisi \u00e0 c\u00f4t\u00e9, il ne peut donc pas la contredire.",
+        "ssh.type": "Type",
+        "ssh.bits": "Taille",
+        "ssh.fingerprint": "Empreinte",
+        "ssh.public": "Cl\u00e9 publique",
+        "ssh.sealed": "La partie priv\u00e9e est prot\u00e9g\u00e9e par une phrase secr\u00e8te",
+        "ssh.unreadable": "SPM ne peut rien d\u00e9river de cette cl\u00e9",
     },
     "hi": {
         "nav.security": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e",
@@ -2774,6 +2839,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "\u0905\u092d\u0940 \u0915\u094b\u0908 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0928\u0939\u0940\u0902",
         "empty.records.d": "API \u091f\u094b\u0915\u0928, \u0921\u0947\u091f\u093e\u092c\u0947\u0938 \u0915\u094d\u0930\u0947\u0921\u0947\u0902\u0936\u093f\u092f\u0932, \u0915\u093e\u0930\u094d\u0921, \u092a\u0939\u091a\u093e\u0928, \u0932\u093e\u0907\u0938\u0947\u0902\u0938, Wi-Fi \u0914\u0930 \u0938\u0930\u094d\u0935\u0930 \u092f\u0939\u093e\u0901 \u0930\u0939\u0924\u0947 \u0939\u0948\u0902\u0964",
         "confirm.delete_record": "\u092f\u0939 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0939\u091f\u093e\u090f\u0901?",
+        "record.field.private_key": "\u0928\u093f\u091c\u0940 \u0915\u0941\u0902\u091c\u0940",
+        "record.field.passphrase": "\u092a\u093e\u0938\u092b\u093c\u094d\u0930\u0947\u091c\u093c",
+        "record.field.hosts": "\u0939\u094b\u0938\u094d\u091f",
+        "record.field.comment": "\u091f\u093f\u092a\u094d\u092a\u0923\u0940",
+        "record.type.ssh-key": "SSH \u0915\u0941\u0902\u091c\u0940",
+        "ssh.derived.t": "\u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u0935\u094d\u092f\u0941\u0924\u094d\u092a\u0928\u094d\u0928",
+        "ssh.derived.d": "\u0938\u0902\u0917\u094d\u0930\u0939\u0940\u0924 \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u0917\u0923\u0928\u093e \u0915\u093f\u092f\u093e \u0917\u092f\u093e, \u0905\u0932\u0917 \u0938\u0947 \u091f\u093e\u0907\u092a \u0928\u0939\u0940\u0902 \u0915\u093f\u092f\u093e \u0917\u092f\u093e, \u0907\u0938\u0932\u093f\u090f \u092f\u0939 \u0909\u0938 \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u092d\u093f\u0928\u094d\u0928 \u0928\u0939\u0940\u0902 \u0939\u094b \u0938\u0915\u0924\u093e\u0964",
+        "ssh.type": "\u092a\u094d\u0930\u0915\u093e\u0930",
+        "ssh.bits": "\u0906\u0915\u093e\u0930",
+        "ssh.fingerprint": "\u092b\u093c\u093f\u0902\u0917\u0930\u092a\u094d\u0930\u093f\u0902\u091f",
+        "ssh.public": "\u0938\u093e\u0930\u094d\u0935\u091c\u0928\u093f\u0915 \u0915\u0941\u0902\u091c\u0940",
+        "ssh.sealed": "\u0928\u093f\u091c\u0940 \u092d\u093e\u0917 \u092a\u093e\u0938\u092b\u093c\u094d\u0930\u0947\u091c\u093c \u0938\u0947 \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0939\u0948",
+        "ssh.unreadable": "SPM \u0907\u0938 \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u0915\u0941\u091b \u092d\u0940 \u0935\u094d\u092f\u0941\u0924\u094d\u092a\u0928\u094d\u0928 \u0928\u0939\u0940\u0902 \u0915\u0930 \u0938\u0915\u0924\u093e",
     },
     "id": {
         "nav.security": "Keamanan",
@@ -3217,6 +3295,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "Belum ada record",
         "empty.records.d": "Token API, kredensial basis data, kartu, identitas, lisensi, Wi-Fi, dan server disimpan di sini.",
         "confirm.delete_record": "Hapus record ini?",
+        "record.field.private_key": "Kunci privat",
+        "record.field.passphrase": "Frasa sandi",
+        "record.field.hosts": "Host",
+        "record.field.comment": "Komentar",
+        "record.type.ssh-key": "Kunci SSH",
+        "ssh.derived.t": "Diturunkan dari kunci",
+        "ssh.derived.d": "Dihitung dari kunci yang tersimpan, bukan diketik, jadi tidak mungkin berbeda dengan kunci yang dijelaskannya.",
+        "ssh.type": "Jenis",
+        "ssh.bits": "Ukuran",
+        "ssh.fingerprint": "Fingerprint",
+        "ssh.public": "Kunci publik",
+        "ssh.sealed": "Bagian privat dilindungi frasa sandi",
+        "ssh.unreadable": "SPM tidak dapat menurunkan apa pun dari kunci ini",
     },
     "ja": {
         "nav.security": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3",
@@ -3660,6 +3751,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "\u30ec\u30b3\u30fc\u30c9\u306f\u307e\u3060\u3042\u308a\u307e\u305b\u3093",
         "empty.records.d": "API \u30c8\u30fc\u30af\u30f3\u3001\u30c7\u30fc\u30bf\u30d9\u30fc\u30b9\u8a8d\u8a3c\u60c5\u5831\u3001\u30ab\u30fc\u30c9\u3001\u8eab\u5206\u8a3c\u660e\u66f8\u3001\u30e9\u30a4\u30bb\u30f3\u30b9\u3001Wi-Fi\u3001\u30b5\u30fc\u30d0\u30fc\u304c\u3053\u3053\u306b\u5165\u308a\u307e\u3059\u3002",
         "confirm.delete_record": "\u3053\u306e\u30ec\u30b3\u30fc\u30c9\u3092\u524a\u9664\u3057\u307e\u3059\u304b\uff1f",
+        "record.field.private_key": "\u79d8\u5bc6\u9375",
+        "record.field.passphrase": "\u30d1\u30b9\u30d5\u30ec\u30fc\u30ba",
+        "record.field.hosts": "\u30db\u30b9\u30c8",
+        "record.field.comment": "\u30b3\u30e1\u30f3\u30c8",
+        "record.type.ssh-key": "SSH \u9375",
+        "ssh.derived.t": "\u9375\u304b\u3089\u5c0e\u51fa",
+        "ssh.derived.d": "\u4fdd\u5b58\u3055\u308c\u305f\u9375\u304b\u3089\u8a08\u7b97\u3055\u308c\u308b\u305f\u3081\u3001\u305d\u306e\u9375\u3068\u98df\u3044\u9055\u3046\u3053\u3068\u306f\u3042\u308a\u307e\u305b\u3093\u3002",
+        "ssh.type": "\u7a2e\u985e",
+        "ssh.bits": "\u9375\u9577",
+        "ssh.fingerprint": "\u30d5\u30a3\u30f3\u30ac\u30fc\u30d7\u30ea\u30f3\u30c8",
+        "ssh.public": "\u516c\u958b\u9375",
+        "ssh.sealed": "\u79d8\u5bc6\u9375\u306f\u30d1\u30b9\u30d5\u30ec\u30fc\u30ba\u3067\u4fdd\u8b77\u3055\u308c\u3066\u3044\u307e\u3059",
+        "ssh.unreadable": "SPM \u306f\u3053\u306e\u9375\u304b\u3089\u4f55\u3082\u5c0e\u51fa\u3067\u304d\u307e\u305b\u3093",
     },
     "ko": {
         "nav.security": "\ubcf4\uc548",
@@ -4103,6 +4207,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "\uc544\uc9c1 \ub808\ucf54\ub4dc\uac00 \uc5c6\uc2b5\ub2c8\ub2e4",
         "empty.records.d": "API \ud1a0\ud070, \ub370\uc774\ud130\ubca0\uc774\uc2a4 \uc790\uaca9 \uc99d\uba85, \uce74\ub4dc, \uc2e0\ubd84\uc99d, \ub77c\uc774\uc120\uc2a4, Wi-Fi, \uc11c\ubc84\uac00 \uc5ec\uae30\uc5d0 \uc800\uc7a5\ub429\ub2c8\ub2e4.",
         "confirm.delete_record": "\uc774 \ub808\ucf54\ub4dc\ub97c \uc0ad\uc81c\ud560\uae4c\uc694?",
+        "record.field.private_key": "\uac1c\uc778 \ud0a4",
+        "record.field.passphrase": "\uc554\ud638 \ubb38\uad6c",
+        "record.field.hosts": "\ud638\uc2a4\ud2b8",
+        "record.field.comment": "\uc8fc\uc11d",
+        "record.type.ssh-key": "SSH \ud0a4",
+        "ssh.derived.t": "\ud0a4\uc5d0\uc11c \ub3c4\ucd9c\ub428",
+        "ssh.derived.d": "\uc800\uc7a5\ub41c \ud0a4\uc5d0\uc11c \uacc4\uc0b0\ub418\ubbc0\ub85c \uc124\uba85\ud558\ub294 \ud0a4\uc640 \uc5b4\uae0b\ub0a0 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "ssh.type": "\uc885\ub958",
+        "ssh.bits": "\ud06c\uae30",
+        "ssh.fingerprint": "\uc9c0\ubb38",
+        "ssh.public": "\uacf5\uac1c \ud0a4",
+        "ssh.sealed": "\uac1c\uc778 \ud0a4\uac00 \uc554\ud638 \ubb38\uad6c\ub85c \ubcf4\ud638\ub418\uc5b4 \uc788\uc2b5\ub2c8\ub2e4",
+        "ssh.unreadable": "SPM\uc740 \uc774 \ud0a4\uc5d0\uc11c \uc544\ubb34\uac83\ub3c4 \ub3c4\ucd9c\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4",
     },
     "pt-br": {
         "nav.security": "Seguran\u00e7a",
@@ -4546,6 +4663,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "Nenhum registro ainda",
         "empty.records.d": "Tokens de API, credenciais de banco de dados, cart\u00f5es, identidades, licen\u00e7as, Wi-Fi e servidores ficam aqui.",
         "confirm.delete_record": "Excluir este registro?",
+        "record.field.private_key": "Chave privada",
+        "record.field.passphrase": "Frase secreta",
+        "record.field.hosts": "Hosts",
+        "record.field.comment": "Coment\u00e1rio",
+        "record.type.ssh-key": "Chave SSH",
+        "ssh.derived.t": "Derivado da chave",
+        "ssh.derived.d": "Calculado a partir da chave armazenada em vez de digitado ao lado, portanto n\u00e3o pode divergir dela.",
+        "ssh.type": "Tipo",
+        "ssh.bits": "Tamanho",
+        "ssh.fingerprint": "Impress\u00e3o digital",
+        "ssh.public": "Chave p\u00fablica",
+        "ssh.sealed": "A metade privada est\u00e1 protegida por frase secreta",
+        "ssh.unreadable": "O SPM n\u00e3o consegue derivar nada desta chave",
     },
     "ru": {
         "nav.security": "\u0411\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c",
@@ -4989,6 +5119,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "\u0417\u0430\u043f\u0438\u0441\u0435\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442",
         "empty.records.d": "\u0417\u0434\u0435\u0441\u044c \u0445\u0440\u0430\u043d\u044f\u0442\u0441\u044f \u0442\u043e\u043a\u0435\u043d\u044b API, \u0434\u043e\u0441\u0442\u0443\u043f\u044b \u043a \u0431\u0430\u0437\u0430\u043c \u0434\u0430\u043d\u043d\u044b\u0445, \u043a\u0430\u0440\u0442\u044b, \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b, \u043b\u0438\u0446\u0435\u043d\u0437\u0438\u0438, Wi-Fi \u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u044b.",
         "confirm.delete_record": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u044d\u0442\u0443 \u0437\u0430\u043f\u0438\u0441\u044c?",
+        "record.field.private_key": "\u0417\u0430\u043a\u0440\u044b\u0442\u044b\u0439 \u043a\u043b\u044e\u0447",
+        "record.field.passphrase": "\u041f\u0430\u0440\u043e\u043b\u044c\u043d\u0430\u044f \u0444\u0440\u0430\u0437\u0430",
+        "record.field.hosts": "\u0425\u043e\u0441\u0442\u044b",
+        "record.field.comment": "\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439",
+        "record.type.ssh-key": "SSH-\u043a\u043b\u044e\u0447",
+        "ssh.derived.t": "\u0412\u044b\u0447\u0438\u0441\u043b\u0435\u043d\u043e \u0438\u0437 \u043a\u043b\u044e\u0447\u0430",
+        "ssh.derived.d": "\u0412\u044b\u0447\u0438\u0441\u043b\u044f\u0435\u0442\u0441\u044f \u0438\u0437 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d\u043d\u043e\u0433\u043e \u043a\u043b\u044e\u0447\u0430, \u0430 \u043d\u0435 \u0432\u0432\u043e\u0434\u0438\u0442\u0441\u044f \u0440\u044f\u0434\u043e\u043c, \u0438 \u043f\u043e\u0442\u043e\u043c\u0443 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0441 \u043d\u0438\u043c \u0440\u0430\u0441\u0445\u043e\u0434\u0438\u0442\u044c\u0441\u044f.",
+        "ssh.type": "\u0422\u0438\u043f",
+        "ssh.bits": "\u0420\u0430\u0437\u043c\u0435\u0440",
+        "ssh.fingerprint": "\u041e\u0442\u043f\u0435\u0447\u0430\u0442\u043e\u043a",
+        "ssh.public": "\u041e\u0442\u043a\u0440\u044b\u0442\u044b\u0439 \u043a\u043b\u044e\u0447",
+        "ssh.sealed": "\u0417\u0430\u043a\u0440\u044b\u0442\u0430\u044f \u0447\u0430\u0441\u0442\u044c \u0437\u0430\u0449\u0438\u0449\u0435\u043d\u0430 \u043f\u0430\u0440\u043e\u043b\u044c\u043d\u043e\u0439 \u0444\u0440\u0430\u0437\u043e\u0439",
+        "ssh.unreadable": "SPM \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u043d\u0438\u0447\u0435\u0433\u043e \u0432\u044b\u0447\u0438\u0441\u043b\u0438\u0442\u044c \u0438\u0437 \u044d\u0442\u043e\u0433\u043e \u043a\u043b\u044e\u0447\u0430",
     },
     "zh-hans": {
         "nav.security": "\u5b89\u5168",
@@ -5432,6 +5575,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "\u8fd8\u6ca1\u6709\u8bb0\u5f55",
         "empty.records.d": "API \u4ee4\u724c\u3001\u6570\u636e\u5e93\u51ed\u636e\u3001\u94f6\u884c\u5361\u3001\u8eab\u4efd\u8bc1\u4ef6\u3001\u8bb8\u53ef\u8bc1\u3001Wi-Fi \u548c\u670d\u52a1\u5668\u90fd\u5b58\u653e\u5728\u8fd9\u91cc\u3002",
         "confirm.delete_record": "\u5220\u9664\u8fd9\u6761\u8bb0\u5f55\uff1f",
+        "record.field.private_key": "\u79c1\u94a5",
+        "record.field.passphrase": "\u5bc6\u7801\u77ed\u8bed",
+        "record.field.hosts": "\u4e3b\u673a",
+        "record.field.comment": "\u6ce8\u91ca",
+        "record.type.ssh-key": "SSH \u5bc6\u94a5",
+        "ssh.derived.t": "\u7531\u5bc6\u94a5\u63a8\u5bfc",
+        "ssh.derived.d": "\u7531\u5b58\u50a8\u7684\u5bc6\u94a5\u8ba1\u7b97\u5f97\u51fa\uff0c\u800c\u975e\u624b\u5de5\u586b\u5199\uff0c\u56e0\u6b64\u4e0d\u4f1a\u4e0e\u5b83\u6240\u63cf\u8ff0\u7684\u5bc6\u94a5\u4e0d\u7b26\u3002",
+        "ssh.type": "\u7c7b\u578b",
+        "ssh.bits": "\u957f\u5ea6",
+        "ssh.fingerprint": "\u6307\u7eb9",
+        "ssh.public": "\u516c\u94a5",
+        "ssh.sealed": "\u79c1\u94a5\u90e8\u5206\u53d7\u5bc6\u7801\u77ed\u8bed\u4fdd\u62a4",
+        "ssh.unreadable": "SPM \u65e0\u6cd5\u4ece\u8be5\u5bc6\u94a5\u63a8\u5bfc\u51fa\u4efb\u4f55\u4fe1\u606f",
     },
 }
 # --- END GENERATED LOCALES ---
@@ -6195,6 +6351,14 @@ textarea.input { min-height: 120px; resize: vertical; font-family: var(--mono); 
 /* A stored value shown rather than edited. Sized like an input so a view page
    and its edit form do not jump when you move between them. */
 .ro { padding: 9px 0; color: var(--text); word-break: break-word; }
+.derived { margin-top: 18px; padding: 14px 16px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--surface-2); }
+.derived-head { margin-bottom: 6px; }
+.derived-head span { font-weight: 600; font-size: var(--fs-sm); }
+.derived-head p { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--text-dim);
+  max-width: 62ch; }
+.derived .field { margin-top: 10px; }
+.ro.mono { font-family: var(--mono); font-size: var(--fs-xs); }
 
 /* Flash / alerts */
 .flash {
@@ -7145,6 +7309,7 @@ ICON_SPRITE = """
   <symbol id="i-licence" viewBox="0 0 24 24"><path d="M4.5 3.5h15v11h-15zM8 7.5h8M8 11h5"/><circle cx="16.5" cy="17.5" r="3"/><path d="M14.5 20l-.5 2.5 2.5-1.2 2.5 1.2-.5-2.5"/></symbol>
   <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 8.5c5.5-4.7 13.5-4.7 19 0M6 12.5c3.6-3 8.4-3 12 0M9.5 16.5c1.6-1.3 3.4-1.3 5 0"/><circle cx="12" cy="20" r="1"/></symbol>
   <symbol id="i-server" viewBox="0 0 24 24"><path d="M3.5 3.5h17v7h-17zM3.5 13.5h17v7h-17zM7 7h.01M7 17h.01M11 7h6M11 17h6"/></symbol>
+  <symbol id="i-ssh" viewBox="0 0 24 24"><path d="M3.5 4.5h17v15h-17zM7 9.5l3 2.5-3 2.5M12.5 15h5"/></symbol>
   <symbol id="i-brand" viewBox="0 0 24 24"><path d="M4 6l5 6-5 6M12 18h8M12 6h8"/></symbol>
   <symbol id="i-overview" viewBox="0 0 24 24"><path d="M3.5 3.5h7v7h-7zM13.5 3.5h7v7h-7zM3.5 13.5h7v7h-7zM13.5 13.5h7v7h-7z"/></symbol>
   <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="4.5"/><path d="M12.5 12H21M17 12v3M20 12v2"/></symbol>
@@ -10440,6 +10605,35 @@ def build_record_view(parsed, counts=None):
                       '<div class="ro">%s</div></div>' % html.escape(folder))
     blocks.append('<div class="field"><label data-i18n="view.label.created">Created at</label>'
                   '<div class="ro">%s</div></div>' % html.escape(created))
+
+    # What the record can work out about itself. The type is never named here:
+    # the schema says whether it derives anything and the core says what, so
+    # the next type that computes something reaches this page without it
+    # changing. Nothing in here is a secret -- a fingerprint and a public key
+    # exist to be handed out, which is what makes deriving them worth doing --
+    # so it is rendered in the open rather than behind a reveal control.
+    derived = core.record_derived(record_type, values)
+    if derived:
+        rows = "".join(
+            ('<div class="field"><label data-i18n="%s">%s</label>'
+             '<div class="ro mono">%s</div></div>'
+             % (key, html.escape(english), html.escape(value)))
+            if value else
+            ('<div class="field"><div class="ro" data-i18n="%s">%s</div></div>'
+             % (key, html.escape(english)))
+            for key, english, value in derived)
+        # The panel is titled for what it was derived from, so the key comes
+        # from the schema's deriver name rather than being spelled "ssh" here.
+        # Nothing in this function knows what an SSH key is, and the next type
+        # that derives something gets its own heading without touching it.
+        derive = core.record_derive_name(record_type)
+        blocks.append(
+            '<div class="derived"><div class="derived-head">'
+            '<span data-i18n="%s.derived.t">Derived from the key</span>'
+            '<p data-i18n="%s.derived.d">Computed from the stored key rather '
+            'than typed beside it, so it cannot disagree with the key it '
+            'describes.</p></div>%s</div>' % (derive, derive, rows))
+
     back = "/records?type=" + urllib.parse.quote(record_type)
     edit = "/records-edit?type=%s&amp;id=%s" % (urllib.parse.quote(record_type),
                                             urllib.parse.quote(record_id))

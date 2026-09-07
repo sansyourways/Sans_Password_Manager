@@ -448,6 +448,19 @@
     "records.pick.desc": "Escolha de que tipo é. Todos os tipos ficam no mesmo cofre criptografado.",
     "empty.records.t": "Nenhum registro ainda",
     "empty.records.d": "Tokens de API, credenciais de banco de dados, cartões, identidades, licenças, Wi-Fi e servidores ficam aqui.",
-    "confirm.delete_record": "Excluir este registro?"
+    "confirm.delete_record": "Excluir este registro?",
+    "record.field.private_key": "Chave privada",
+    "record.field.passphrase": "Frase secreta",
+    "record.field.hosts": "Hosts",
+    "record.field.comment": "Comentário",
+    "record.type.ssh-key": "Chave SSH",
+    "ssh.derived.t": "Derivado da chave",
+    "ssh.derived.d": "Calculado a partir da chave armazenada em vez de digitado ao lado, portanto não pode divergir dela.",
+    "ssh.type": "Tipo",
+    "ssh.bits": "Tamanho",
+    "ssh.fingerprint": "Impressão digital",
+    "ssh.public": "Chave pública",
+    "ssh.sealed": "A metade privada está protegida por frase secreta",
+    "ssh.unreadable": "O SPM não consegue derivar nada desta chave"
   }
 }

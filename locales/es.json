@@ -448,6 +448,19 @@
     "records.pick.desc": "Elija de qué tipo es. Todos los tipos se guardan en la misma caja fuerte cifrada.",
     "empty.records.t": "Aún no hay registros",
     "empty.records.d": "Aquí viven tokens de API, credenciales de base de datos, tarjetas, identidades, licencias, Wi-Fi y servidores.",
-    "confirm.delete_record": "¿Eliminar este registro?"
+    "confirm.delete_record": "¿Eliminar este registro?",
+    "record.field.private_key": "Clave privada",
+    "record.field.passphrase": "Frase de contraseña",
+    "record.field.hosts": "Hosts",
+    "record.field.comment": "Comentario",
+    "record.type.ssh-key": "Clave SSH",
+    "ssh.derived.t": "Derivado de la clave",
+    "ssh.derived.d": "Calculado a partir de la clave guardada en lugar de escribirse aparte, por lo que no puede contradecirla.",
+    "ssh.type": "Tipo",
+    "ssh.bits": "Tamaño",
+    "ssh.fingerprint": "Huella",
+    "ssh.public": "Clave pública",
+    "ssh.sealed": "La mitad privada está protegida con una frase de contraseña",
+    "ssh.unreadable": "SPM no puede derivar nada de esta clave"
   }
 }

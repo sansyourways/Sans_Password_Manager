@@ -2558,6 +2558,216 @@ cmd_record() {
 	esac
 }
 
+# ----- SSH keys --------------------------------------------------------------
+# `record add ssh-key` already works -- the schema engine gives every type its
+# prompts -- but nobody types a private key at a prompt. These commands are the
+# ergonomics around that same record: `import` reads a key file, and everything
+# else reads back what the core derives from the stored bytes rather than
+# anything a user was asked to type. A fingerprint on screen here is computed
+# from the key it names, so it cannot be stale and cannot be wrong.
+
+ssh_key_b64_of() {
+	# The private_key value of one ssh-key record, still base64. It is never
+	# decoded into a variable on the way past: this is the record's secret,
+	# and the only thing that needs it in the clear is the core.
+	local file="$1" rid="$2"
+	record_find_row "$file" "ssh-key" "$rid" \
+		| core record parse \
+		| awk -F '\t' '$1=="private_key"{print $2; exit}'
+}
+
+ssh_derived() {
+	# "name<TAB>value" of everything the core can derive, decoded for display.
+	local keyb64="$1" comment="${2:-}" k v
+	printf '%s\n' "$keyb64" | core ssh info "$comment" \
+		| while IFS="$(printf '\t')" read -r k v; do
+			printf '%s\t%s\n' "$k" "$(printf '%s' "$v" | base64 -d 2>/dev/null)"
+		done
+}
+
+ssh_derived_field() {
+	printf '%s\n' "$1" | awk -F '\t' -v want="$2" '$1==want{print $2; exit}'
+}
+
+ssh_require_key_record() {
+	# A record id that is not an ssh-key is a different record entirely, and
+	# deriving a fingerprint from whatever it happens to hold would be worse
+	# than refusing.
+	local file="$1" rid="$2"
+	[ -n "$(record_find_row "$file" "ssh-key" "$rid")" ] \
+		|| { secure_wipe "$file"; die "No ssh-key record with ID $rid."; }
+}
+
+cmd_ssh_import() {
+	local keyfile="${1:-}" label="${2:-}"
+	[ -n "$keyfile" ] || die "Usage: $0 ssh import <keyfile> [label]"
+	[ -f "$keyfile" ] || die "No such key file: $keyfile"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	[ -n "$label" ] || label="$(basename "$keyfile")"
+
+	local keyb64 comment
+	keyb64="$(base64 <"$keyfile" | tr -d '\n')"
+	# A key file's comment lives in its .pub sibling, not in the private half
+	# -- and for a passphrase-protected key it is inside the encrypted
+	# section, unreachable. Reading it here is the difference between a
+	# record labelled with the key's own comment and one labelled by hand.
+	comment=""
+	[ -f "${keyfile}.pub" ] && comment="$(awk 'NR==1{ $1=""; $2=""; sub(/^[ \t]+/, ""); print }' "${keyfile}.pub")"
+
+	local derived fingerprint problem format
+	derived="$(ssh_derived "$keyb64" "$comment")"
+	problem="$(ssh_derived_field "$derived" problem)"
+	fingerprint="$(ssh_derived_field "$derived" fingerprint)"
+	format="$(ssh_derived_field "$derived" format)"
+	# A public key fingerprints perfectly well, so the fingerprint test below
+	# would wave one through and file it as the private half of a key -- a
+	# secret field holding something that was never secret, and a record that
+	# cannot do the one thing an ssh-key record is for. The .pub is also the
+	# easy file to reach for by mistake, since it sits next to the real key
+	# and is the one people are used to copying around.
+	[ "$format" != "public" ] \
+		|| die "That is a public key. Import the private half instead: ${keyfile%.pub}"
+	# A file that is not a key at all is refused here rather than stored: an
+	# import is the one moment SPM is looking at the bytes and can say so.
+	# A key it merely cannot fingerprint is still imported -- see below.
+	[ -n "$fingerprint" ] || [ "$format" = "pem" ] \
+		|| die "That file does not look like an SSH key: $problem"
+
+	local tmp fields_tmp rid created row
+	tmp="$(make_tmp)"
+	fields_tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	printf 'private_key\t%s\n' "$keyb64" >"$fields_tmp"
+	[ -n "$comment" ] && printf 'comment\t%s\n' \
+		"$(printf '%s' "$comment" | base64 | tr -d '\n')" >>"$fields_tmp"
+
+	rid="$(next_record_id_from_vault "$tmp" "ssh-key")"
+	created="$(now_iso)"
+	row="$(core record row "ssh-key" "$rid" "$(sanitize_field "$label")" \
+		"$created" <"$fields_tmp")" || {
+		secure_wipe "$tmp"; secure_wipe "$fields_tmp"
+		die "The key was refused."
+	}
+	printf '%s\n' "$row" >>"$tmp"
+	encrypt_file_to_vault "$tmp"
+	secure_wipe "$tmp"
+	secure_wipe "$fields_tmp"
+
+	printf '\nssh-key added with ID %s.\n' "$rid"
+	if [ -n "$fingerprint" ]; then
+		printf '  %s %s\n' "$(ssh_derived_field "$derived" type)" "$fingerprint"
+		[ "$(ssh_derived_field "$derived" encrypted)" = "1" ] \
+			&& printf '  the private half is passphrase-protected\n'
+	else
+		printf '  stored, but SPM cannot derive a fingerprint: %s\n' "$problem"
+	fi
+	printf '\n'
+}
+
+cmd_ssh_list() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	local rows
+	rows="$(awk -F '\t' '$1=="REC:ssh-key"{print $2}' "$tmp")"
+	if [ -z "$rows" ]; then
+		secure_wipe "$tmp"
+		printf '\nNo SSH keys stored. Add one with: %s ssh import <keyfile>\n\n' "$0"
+		return 0
+	fi
+
+	printf '\n%-5s %-24s %-20s %s\n' "ID" "LABEL" "TYPE" "FINGERPRINT"
+	local rid row label derived
+	printf '%s\n' "$rows" | while read -r rid; do
+		[ -n "$rid" ] || continue
+		row="$(record_find_row "$tmp" "ssh-key" "$rid" | core record parse)"
+		label="$(printf '%s\n' "$row" | awk -F '\t' '$1==".label"{print $2}' | base64 -d 2>/dev/null)"
+		derived="$(ssh_derived "$(printf '%s\n' "$row" | awk -F '\t' '$1=="private_key"{print $2}')")"
+		printf '%-5s %-24s %-20s %s\n' "$rid" "$label" \
+			"$(ssh_derived_field "$derived" type)" \
+			"$(ssh_derived_field "$derived" fingerprint)"
+	done
+	printf '\n'
+	secure_wipe "$tmp"
+}
+
+cmd_ssh_show() {
+	local rid="${1:-}"
+	[ -n "$rid" ] || die "Usage: $0 ssh show <id>"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+	ssh_require_key_record "$tmp" "$rid"
+
+	local parsed label comment hosts derived
+	parsed="$(record_find_row "$tmp" "ssh-key" "$rid" | core record parse)"
+	label="$(printf '%s\n' "$parsed" | awk -F '\t' '$1==".label"{print $2}' | base64 -d 2>/dev/null)"
+	comment="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="comment"{print $2}' | base64 -d 2>/dev/null)"
+	hosts="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="hosts"{print $2}' | base64 -d 2>/dev/null)"
+	derived="$(ssh_derived "$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="private_key"{print $2}')" "$comment")"
+	secure_wipe "$tmp"
+
+	printf '\nssh-key %s\n' "$rid"
+	printf '  label        %s\n' "$label"
+	[ -n "$hosts" ] && printf '  hosts        %s\n' "$hosts"
+	[ -n "$comment" ] && printf '  comment      %s\n' "$comment"
+	printf '\n'
+	# Everything below is derived from the stored key, not stored beside it.
+	local bits
+	bits="$(ssh_derived_field "$derived" bits)"
+	printf '  type         %s\n' "$(ssh_derived_field "$derived" type)"
+	[ "$bits" != "0" ] && printf '  bits         %s\n' "$bits"
+	printf '  fingerprint  %s\n' "$(ssh_derived_field "$derived" fingerprint)"
+	printf '  format       %s\n' "$(ssh_derived_field "$derived" format)"
+	[ "$(ssh_derived_field "$derived" encrypted)" = "1" ] \
+		&& printf '  passphrase   the private half is protected\n'
+	local problem
+	problem="$(ssh_derived_field "$derived" problem)"
+	[ -n "$problem" ] && printf '  note         %s\n' "$problem"
+	printf '\n'
+	printf '  public key\n    %s\n\n' "$(ssh_derived_field "$derived" public)"
+}
+
+cmd_ssh_public() {
+	# Just the authorized_keys line, so it can be piped somewhere useful.
+	local rid="${1:-}"
+	[ -n "$rid" ] || die "Usage: $0 ssh public <id>"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp parsed comment derived line
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+	ssh_require_key_record "$tmp" "$rid"
+	parsed="$(record_find_row "$tmp" "ssh-key" "$rid" | core record parse)"
+	comment="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="comment"{print $2}' | base64 -d 2>/dev/null)"
+	derived="$(ssh_derived "$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="private_key"{print $2}')" "$comment")"
+	secure_wipe "$tmp"
+
+	line="$(ssh_derived_field "$derived" public)"
+	[ -n "$line" ] || die "No public key could be derived: $(ssh_derived_field "$derived" problem)"
+	printf '%s\n' "$line"
+}
+
+cmd_ssh() {
+	local op="${1:-}"
+	[ $# -gt 0 ] && shift
+	case "$op" in
+		import) cmd_ssh_import "$@" ;;
+		list)   cmd_ssh_list "$@" ;;
+		show)   cmd_ssh_show "$@" ;;
+		public) cmd_ssh_public "$@" ;;
+		*)
+			printf 'Usage: %s ssh <import|list|show|public> [args]\n' "$0" >&2
+			exit 1
+			;;
+	esac
+}
+
 cmd_passphrase_add() {
 	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
 
@@ -6205,6 +6415,23 @@ Fitur lokal 2.10:
   ./spm.sh emergency-create <id> <public.pem> <YYYY-MM-DD> [arsip]
   ./spm.sh emergency-open <arsip> <private.pem> [output.json]
 
+Catatan Bertipe (token API, kartu, server, kunci SSH, dan lainnya):
+  ./spm.sh record types            → Jenis catatan yang dikenal build ini
+  ./spm.sh record add <type>       → Tambah satu, dipandu skemanya sendiri
+  ./spm.sh record list [type]      → List catatan, semua jenis atau satu
+  ./spm.sh record view <type> <id> [--reveal]
+                                   → Lihat catatan, rahasia disamarkan
+  ./spm.sh record delete <type> <id>
+
+Kunci SSH:
+  ./spm.sh ssh import <keyfile> [label]
+                                   → Simpan private key dari sebuah berkas
+  ./spm.sh ssh list                → Semua kunci tersimpan beserta fingerprint
+  ./spm.sh ssh show <id>           → Jenis, ukuran, fingerprint, dan public key
+  ./spm.sh ssh public <id>         → Hanya baris authorized_keys
+  (jenis, ukuran, fingerprint, dan public key diturunkan dari kunci yang
+   tersimpan, jadi tidak mungkin berbeda dengan kunci yang dijelaskannya)
+
 Catatan Aman (Secure Notes):
   ./spm.sh notes-add       → Tambah catatan aman
   ./spm.sh notes-list      → List catatan aman
@@ -6320,6 +6547,23 @@ Local-first 2.10 capabilities:
   ./spm.sh sync status|push|pull <directory> [channel]
   ./spm.sh emergency-create <id> <public.pem> <YYYY-MM-DD> [archive]
   ./spm.sh emergency-open <archive> <private.pem> [output.json]
+
+Typed records (API tokens, cards, servers, SSH keys and more):
+  ./spm.sh record types            → What kinds of record this build knows
+  ./spm.sh record add <type>       → Add one, prompted from its own schema
+  ./spm.sh record list [type]      → List records, all types or one
+  ./spm.sh record view <type> <id> [--reveal]
+                                   → Show a record, secrets masked by default
+  ./spm.sh record delete <type> <id>
+
+SSH keys:
+  ./spm.sh ssh import <keyfile> [label]
+                                   → Store a private key from a file
+  ./spm.sh ssh list                → Every stored key, with its fingerprint
+  ./spm.sh ssh show <id>           → Type, size, fingerprint and public key
+  ./spm.sh ssh public <id>         → Just the authorized_keys line
+  (type, size, fingerprint and the public key are derived from the stored
+   key itself, so none of them can disagree with the key they describe)
 
 Secure Notes:
   ./spm.sh notes-add       → Add secure note
@@ -8437,6 +8681,7 @@ main() {
 		emergency-open)  cmd_emergency_open "$@" ;;
 		generate|password-generate) cmd_generate_password "$@" ;;
 		record)           cmd_record "$@" ;;
+		ssh)              cmd_ssh "$@" ;;
 		notes-add)        cmd_notes_add "$@" ;;
 		notes-list)       cmd_notes_list "$@" ;;
 		notes-view)       cmd_notes_view "$@" ;;

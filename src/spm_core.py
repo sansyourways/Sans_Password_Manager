@@ -978,6 +978,30 @@ RECORD_SCHEMAS = {
             ("notes", FIELD_PLAIN, "multiline", False),
         ),
     },
+    "ssh-key": {
+        "label": "SSH Key",
+        "icon": "ssh",
+        # Facts this type computes from its own values -- see record_derived.
+        # A name rather than a function, because the schemas are read before
+        # the derivations are defined and because a type staying data is the
+        # whole point of this engine.
+        "derive": "ssh",
+        "fields": (
+            # The private key is the record. Its type, size, fingerprint and
+            # public half are derived from these bytes rather than stored
+            # beside them -- see ssh_key_info -- so the record cannot come to
+            # disagree with the key it describes.
+            ("private_key", FIELD_SECRET, "multiline", True),
+            # Held so the agent can load a sealed key without prompting. A
+            # key whose passphrase lives in the same vault is no better
+            # protected than the vault, which is the trade the user makes by
+            # filling this in; leaving it empty means ssh-add asks.
+            ("passphrase", FIELD_SECRET, "line", False),
+            ("hosts", FIELD_PLAIN, "line", False),
+            ("comment", FIELD_PLAIN, "line", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
     "server": {
         "label": "Server",
         "icon": "server",
@@ -1180,6 +1204,260 @@ def export_row_from_values(values):
     return {name: (values[index] if index < len(values) else "")
             for index, name in enumerate(EXPORT_FIELDNAMES)}
 
+
+# ----- SSH keys --------------------------------------------------------------
+# What SPM can say about a stored SSH key without being handed its passphrase.
+#
+# The roadmap asks for the public key, the fingerprint and the key type to be
+# stored beside the private key. They are derived here instead. A fingerprint
+# is the one field a user cannot check by eye -- it exists to be compared
+# against what a server presents -- and a typed one that is wrong is worse
+# than none at all, because it confirms the wrong key. Deriving it means the
+# record cannot disagree with the key it describes.
+#
+# openssh-key-v1 makes that cheap. The container keeps the public key in the
+# clear even when the private half is sealed, so the fingerprint of a
+# passphrase-protected key is readable without the passphrase -- the case that
+# matters most, since that is the key whose bytes an owner is least able to
+# inspect by hand. No ssh-keygen, no temporary file, no prompt: the derivation
+# is arithmetic over bytes the vault already holds.
+
+SSH_MAGIC = b"openssh-key-v1\x00"
+SSH_OPENSSH_HEAD = "-----BEGIN OPENSSH PRIVATE KEY-----"
+SSH_PEM_HEADS = (
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "-----BEGIN DSA PRIVATE KEY-----",
+    "-----BEGIN EC PRIVATE KEY-----",
+    "-----BEGIN PRIVATE KEY-----",
+    "-----BEGIN ENCRYPTED PRIVATE KEY-----",
+)
+# The prefixes an authorized_keys line starts with. sk- covers the FIDO2
+# resident keys OpenSSH 8.2 added, which are public keys like any other here.
+SSH_PUBLIC_PREFIXES = ("ssh-", "ecdsa-", "sk-")
+
+SSH_FORMAT_OPENSSH = "openssh"
+SSH_FORMAT_PEM = "pem"
+SSH_FORMAT_PUBLIC = "public"
+SSH_FORMAT_UNKNOWN = "unknown"
+
+
+def _ssh_field(blob, offset):
+    """One length-prefixed field of an SSH structure, and the offset past it.
+
+    Every length is checked against what is actually there. These bytes come
+    out of a vault, but a vault holds what a user pasted into it, and a length
+    header trusted blindly is how a truncated key becomes a slice of unrelated
+    memory rather than an error message.
+    """
+    if offset + 4 > len(blob):
+        raise ValueError("truncated SSH key structure")
+    length = int.from_bytes(blob[offset:offset + 4], "big")
+    offset += 4
+    if length > len(blob) - offset:
+        raise ValueError("truncated SSH key structure")
+    return blob[offset:offset + length], offset + length
+
+
+def ssh_public_blob(private_key):
+    """(public blob, cipher name) from an OpenSSH private key, undecrypted.
+
+    The cipher is "none" for a key stored in the clear; anything else names
+    what the private half is sealed under, which is how the agent path decides
+    whether it needs a passphrase before it asks for one.
+    """
+    body = "".join(line.strip() for line in (private_key or "").splitlines()
+                   if "-----" not in line)
+    raw = base64.b64decode(body)
+    if not raw.startswith(SSH_MAGIC):
+        raise ValueError("not an openssh-key-v1 private key")
+    offset = len(SSH_MAGIC)
+    cipher, offset = _ssh_field(raw, offset)
+    _kdf, offset = _ssh_field(raw, offset)
+    _kdf_options, offset = _ssh_field(raw, offset)
+    if offset + 4 > len(raw):
+        raise ValueError("truncated SSH key structure")
+    count = int.from_bytes(raw[offset:offset + 4], "big")
+    offset += 4
+    if count < 1:
+        raise ValueError("the key file declares no keys")
+    public, _offset = _ssh_field(raw, offset)
+    return public, cipher.decode("ascii", "replace")
+
+
+def ssh_public_blob_from_line(line):
+    """The blob inside an authorized_keys line, checked against its own name.
+
+    A line names its algorithm twice -- once as text and once inside the blob
+    -- and they have to agree. A line whose halves disagree would fingerprint
+    as one key while reading as another.
+    """
+    parts = (line or "").split()
+    if len(parts) < 2:
+        raise ValueError("not an SSH public key line")
+    blob = base64.b64decode(parts[1])
+    named, _offset = _ssh_field(blob, 0)
+    if named.decode("ascii", "replace") != parts[0]:
+        raise ValueError("the key line and the key data name different types")
+    return blob
+
+
+def ssh_fingerprint(public_blob):
+    """The SHA256 fingerprint, in the form `ssh-keygen -l` prints it."""
+    digest = hashlib.sha256(public_blob).digest()
+    return "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
+
+
+def ssh_key_type(public_blob):
+    """The algorithm named inside a public blob."""
+    algorithm, _offset = _ssh_field(public_blob, 0)
+    return algorithm.decode("ascii", "replace")
+
+
+def ssh_key_bits(public_blob):
+    """The size `ssh-keygen -l` reports, or 0 for a type not known here.
+
+    Zero is a real answer rather than a failure: a key type this build has
+    never heard of still has a fingerprint, and reporting no size is honest
+    where guessing one is not.
+    """
+    algorithm, offset = _ssh_field(public_blob, 0)
+    name = algorithm.decode("ascii", "replace")
+    if name in ("ssh-ed25519", "sk-ssh-ed25519@openssh.com"):
+        return 256
+    if name == "ssh-dss":
+        return 1024
+    if name.startswith("ecdsa-sha2-nistp"):
+        digits = name[len("ecdsa-sha2-nistp"):].split("@")[0]
+        return int(digits) if digits.isdigit() else 0
+    if name == "ssh-rsa":
+        _exponent, offset = _ssh_field(public_blob, offset)
+        modulus, _offset = _ssh_field(public_blob, offset)
+        # The bit length of the modulus, not its byte count: an RSA modulus
+        # carries a leading zero byte whenever its top bit is set, and
+        # counting bytes would report 2056 bits for a 2048-bit key.
+        return int.from_bytes(modulus, "big").bit_length()
+    return 0
+
+
+def ssh_public_line(public_blob, comment=""):
+    """The one-line authorized_keys form of a public key."""
+    line = "%s %s" % (ssh_key_type(public_blob),
+                      base64.b64encode(public_blob).decode("ascii"))
+    comment = " ".join((comment or "").split())
+    return line + (" " + comment if comment else "")
+
+
+def ssh_key_info(text, comment=""):
+    """Everything SPM can derive from a stored SSH key, without a passphrase.
+
+    Every key of the result is always present, even when it could not be
+    filled in, so a surface renders one shape instead of testing for absent
+    keys. An unreadable key is not an error either: SPM stores what it is
+    given, and a key in a format this build cannot parse is still a key its
+    owner wants kept. `problem` says why a field is empty, so the answer on
+    screen is a reason rather than a blank.
+    """
+    info = {"format": SSH_FORMAT_UNKNOWN, "type": "", "bits": 0,
+            "fingerprint": "", "public": "", "encrypted": False,
+            "problem": ""}
+    text = (text or "").strip()
+    if not text:
+        info["problem"] = "no key stored"
+        return info
+    try:
+        if text.startswith(SSH_PUBLIC_PREFIXES):
+            blob = ssh_public_blob_from_line(text)
+            info["format"] = SSH_FORMAT_PUBLIC
+        elif SSH_OPENSSH_HEAD in text:
+            blob, cipher = ssh_public_blob(text)
+            info["format"] = SSH_FORMAT_OPENSSH
+            info["encrypted"] = cipher != "none"
+        elif text.startswith(SSH_PEM_HEADS):
+            info["format"] = SSH_FORMAT_PEM
+            # A PEM key hides its public half behind the same encryption as
+            # its private one, so there is nothing to derive without the
+            # passphrase. Said plainly rather than reported as corruption:
+            # the key is fine, this format just does not answer the question.
+            info["encrypted"] = ("ENCRYPTED" in text.split("\n", 1)[0]
+                                 or "Proc-Type: 4,ENCRYPTED" in text)
+            info["problem"] = ("a PEM key does not carry its public half in "
+                               "the clear; convert it with "
+                               "`ssh-keygen -p -m RFC4716` to derive one")
+            return info
+        else:
+            info["problem"] = "unrecognised SSH key format"
+            return info
+    except Exception as failure:                      # noqa: BLE001
+        # Anything a malformed key can raise -- bad base64, a truncated
+        # structure, a length that overruns -- is the same answer to the
+        # caller: this text is not a key SPM can read.
+        info["problem"] = str(failure) or "the key could not be read"
+        return info
+    info["type"] = ssh_key_type(blob)
+    info["bits"] = ssh_key_bits(blob)
+    info["fingerprint"] = ssh_fingerprint(blob)
+    info["public"] = ssh_public_line(blob, comment)
+    return info
+
+
+# ----- derived record facts ---------------------------------------------------
+# Some record types can say more about themselves than they were told. An SSH
+# key knows its own type, size and fingerprint; a surface should be able to
+# show that without knowing what an SSH key is.
+#
+# A type opts in with a "derive" name in its schema and the function lands in
+# the registry below, so this stays a dictionary lookup rather than a branch
+# per type -- the same rule the rest of the engine follows, and the reason
+# adding a type is still a dictionary entry.
+
+
+def _derived_ssh(values):
+    info = ssh_key_info(values.get("private_key", ""),
+                        comment=values.get("comment", ""))
+    rows = []
+    if info["type"]:
+        rows.append(("ssh.type", "Type", info["type"]))
+    if info["bits"]:
+        rows.append(("ssh.bits", "Size", "%d" % info["bits"]))
+    if info["fingerprint"]:
+        rows.append(("ssh.fingerprint", "Fingerprint", info["fingerprint"]))
+    if info["public"]:
+        rows.append(("ssh.public", "Public key", info["public"]))
+    if info["encrypted"]:
+        rows.append(("ssh.sealed",
+                     "The private half is passphrase-protected", ""))
+    if info["problem"]:
+        rows.append(("ssh.unreadable",
+                     "SPM cannot derive anything from this key",
+                     info["problem"]))
+    return rows
+
+
+RECORD_DERIVERS = {"ssh": _derived_ssh}
+
+
+def record_derived(record_type, values):
+    """(i18n key, English label, value) rows computed from a record's values.
+
+    Never a secret. Everything here is derived from a secret but is itself
+    publishable -- a fingerprint and a public key are meant to be handed out,
+    which is what makes deriving them worth doing. A deriver that wanted to
+    return a secret would be returning the stored value with extra steps.
+    """
+    deriver = RECORD_DERIVERS.get(record_derive_name(record_type))
+    return deriver(values or {}) if deriver else []
+
+
+def record_derive_name(record_type):
+    """The deriver a type opts into, or "" for a type that derives nothing.
+
+    Surfaces need this as well as the rows: the panel they draw is titled for
+    the thing it was derived from, and "Derived from the key" is the SSH
+    wording, not a universal one. Reading the name here keeps the title a
+    lookup like everything else, so the next deriver is still one dictionary
+    entry and its translations.
+    """
+    return RECORD_SCHEMAS.get(record_type, {}).get("derive", "")
 
 # ----- attributes across an export -------------------------------------------
 # A folder and its custom fields cross an export as their own readable columns
@@ -4065,6 +4343,29 @@ def main(argv):
                         sys.stdout.write("%s\t%s\n" % (field, _b64(masked[field])))
             else:
                 raise VaultError("unknown record op %r" % (op,))
+        elif command == "ssh":
+            # ssh <op> [args] -- what the CLI asks about a stored SSH key.
+            #
+            # The key arrives on stdin, base64-encoded, for the same reason a
+            # record's field values do: it is the record's secret, and argv is
+            # world-readable on Linux for the life of the process. The comment
+            # is not a secret and travels normally.
+            op = argv[2]
+            if op == "info":
+                # info [comment]
+                # stdin:  base64 of the key text
+                # stdout: "name<TAB>base64(value)" lines
+                key_text = base64.b64decode(
+                    sys.stdin.read().strip() or "").decode("utf-8", "replace")
+                info = ssh_key_info(key_text, comment=argv[3] if len(argv) > 3 else "")
+                for name in ("format", "type", "bits", "fingerprint",
+                             "public", "encrypted", "problem"):
+                    value = info[name]
+                    if isinstance(value, bool):
+                        value = "1" if value else "0"
+                    sys.stdout.write("%s\t%s\n" % (name, _b64(str(value))))
+            else:
+                raise VaultError("unknown ssh op %r" % (op,))
         elif command == "secret-key":
             # secret-key <op> <vault> ; ops below say what they read on stdin.
             #

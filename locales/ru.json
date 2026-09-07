@@ -448,6 +448,19 @@
     "records.pick.desc": "Выберите тип записи. Все типы хранятся в одном зашифрованном хранилище.",
     "empty.records.t": "Записей пока нет",
     "empty.records.d": "Здесь хранятся токены API, доступы к базам данных, карты, документы, лицензии, Wi-Fi и серверы.",
-    "confirm.delete_record": "Удалить эту запись?"
+    "confirm.delete_record": "Удалить эту запись?",
+    "record.field.private_key": "Закрытый ключ",
+    "record.field.passphrase": "Парольная фраза",
+    "record.field.hosts": "Хосты",
+    "record.field.comment": "Комментарий",
+    "record.type.ssh-key": "SSH-ключ",
+    "ssh.derived.t": "Вычислено из ключа",
+    "ssh.derived.d": "Вычисляется из сохранённого ключа, а не вводится рядом, и потому не может с ним расходиться.",
+    "ssh.type": "Тип",
+    "ssh.bits": "Размер",
+    "ssh.fingerprint": "Отпечаток",
+    "ssh.public": "Открытый ключ",
+    "ssh.sealed": "Закрытая часть защищена парольной фразой",
+    "ssh.unreadable": "SPM не может ничего вычислить из этого ключа"
   }
 }

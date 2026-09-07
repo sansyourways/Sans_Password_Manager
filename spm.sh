@@ -1777,6 +1777,30 @@ RECORD_SCHEMAS = {
             ("notes", FIELD_PLAIN, "multiline", False),
         ),
     },
+    "ssh-key": {
+        "label": "SSH Key",
+        "icon": "ssh",
+        # Facts this type computes from its own values -- see record_derived.
+        # A name rather than a function, because the schemas are read before
+        # the derivations are defined and because a type staying data is the
+        # whole point of this engine.
+        "derive": "ssh",
+        "fields": (
+            # The private key is the record. Its type, size, fingerprint and
+            # public half are derived from these bytes rather than stored
+            # beside them -- see ssh_key_info -- so the record cannot come to
+            # disagree with the key it describes.
+            ("private_key", FIELD_SECRET, "multiline", True),
+            # Held so the agent can load a sealed key without prompting. A
+            # key whose passphrase lives in the same vault is no better
+            # protected than the vault, which is the trade the user makes by
+            # filling this in; leaving it empty means ssh-add asks.
+            ("passphrase", FIELD_SECRET, "line", False),
+            ("hosts", FIELD_PLAIN, "line", False),
+            ("comment", FIELD_PLAIN, "line", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
     "server": {
         "label": "Server",
         "icon": "server",
@@ -1979,6 +2003,260 @@ def export_row_from_values(values):
     return {name: (values[index] if index < len(values) else "")
             for index, name in enumerate(EXPORT_FIELDNAMES)}
 
+
+# ----- SSH keys --------------------------------------------------------------
+# What SPM can say about a stored SSH key without being handed its passphrase.
+#
+# The roadmap asks for the public key, the fingerprint and the key type to be
+# stored beside the private key. They are derived here instead. A fingerprint
+# is the one field a user cannot check by eye -- it exists to be compared
+# against what a server presents -- and a typed one that is wrong is worse
+# than none at all, because it confirms the wrong key. Deriving it means the
+# record cannot disagree with the key it describes.
+#
+# openssh-key-v1 makes that cheap. The container keeps the public key in the
+# clear even when the private half is sealed, so the fingerprint of a
+# passphrase-protected key is readable without the passphrase -- the case that
+# matters most, since that is the key whose bytes an owner is least able to
+# inspect by hand. No ssh-keygen, no temporary file, no prompt: the derivation
+# is arithmetic over bytes the vault already holds.
+
+SSH_MAGIC = b"openssh-key-v1\x00"
+SSH_OPENSSH_HEAD = "-----BEGIN OPENSSH PRIVATE KEY-----"
+SSH_PEM_HEADS = (
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "-----BEGIN DSA PRIVATE KEY-----",
+    "-----BEGIN EC PRIVATE KEY-----",
+    "-----BEGIN PRIVATE KEY-----",
+    "-----BEGIN ENCRYPTED PRIVATE KEY-----",
+)
+# The prefixes an authorized_keys line starts with. sk- covers the FIDO2
+# resident keys OpenSSH 8.2 added, which are public keys like any other here.
+SSH_PUBLIC_PREFIXES = ("ssh-", "ecdsa-", "sk-")
+
+SSH_FORMAT_OPENSSH = "openssh"
+SSH_FORMAT_PEM = "pem"
+SSH_FORMAT_PUBLIC = "public"
+SSH_FORMAT_UNKNOWN = "unknown"
+
+
+def _ssh_field(blob, offset):
+    """One length-prefixed field of an SSH structure, and the offset past it.
+
+    Every length is checked against what is actually there. These bytes come
+    out of a vault, but a vault holds what a user pasted into it, and a length
+    header trusted blindly is how a truncated key becomes a slice of unrelated
+    memory rather than an error message.
+    """
+    if offset + 4 > len(blob):
+        raise ValueError("truncated SSH key structure")
+    length = int.from_bytes(blob[offset:offset + 4], "big")
+    offset += 4
+    if length > len(blob) - offset:
+        raise ValueError("truncated SSH key structure")
+    return blob[offset:offset + length], offset + length
+
+
+def ssh_public_blob(private_key):
+    """(public blob, cipher name) from an OpenSSH private key, undecrypted.
+
+    The cipher is "none" for a key stored in the clear; anything else names
+    what the private half is sealed under, which is how the agent path decides
+    whether it needs a passphrase before it asks for one.
+    """
+    body = "".join(line.strip() for line in (private_key or "").splitlines()
+                   if "-----" not in line)
+    raw = base64.b64decode(body)
+    if not raw.startswith(SSH_MAGIC):
+        raise ValueError("not an openssh-key-v1 private key")
+    offset = len(SSH_MAGIC)
+    cipher, offset = _ssh_field(raw, offset)
+    _kdf, offset = _ssh_field(raw, offset)
+    _kdf_options, offset = _ssh_field(raw, offset)
+    if offset + 4 > len(raw):
+        raise ValueError("truncated SSH key structure")
+    count = int.from_bytes(raw[offset:offset + 4], "big")
+    offset += 4
+    if count < 1:
+        raise ValueError("the key file declares no keys")
+    public, _offset = _ssh_field(raw, offset)
+    return public, cipher.decode("ascii", "replace")
+
+
+def ssh_public_blob_from_line(line):
+    """The blob inside an authorized_keys line, checked against its own name.
+
+    A line names its algorithm twice -- once as text and once inside the blob
+    -- and they have to agree. A line whose halves disagree would fingerprint
+    as one key while reading as another.
+    """
+    parts = (line or "").split()
+    if len(parts) < 2:
+        raise ValueError("not an SSH public key line")
+    blob = base64.b64decode(parts[1])
+    named, _offset = _ssh_field(blob, 0)
+    if named.decode("ascii", "replace") != parts[0]:
+        raise ValueError("the key line and the key data name different types")
+    return blob
+
+
+def ssh_fingerprint(public_blob):
+    """The SHA256 fingerprint, in the form `ssh-keygen -l` prints it."""
+    digest = hashlib.sha256(public_blob).digest()
+    return "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
+
+
+def ssh_key_type(public_blob):
+    """The algorithm named inside a public blob."""
+    algorithm, _offset = _ssh_field(public_blob, 0)
+    return algorithm.decode("ascii", "replace")
+
+
+def ssh_key_bits(public_blob):
+    """The size `ssh-keygen -l` reports, or 0 for a type not known here.
+
+    Zero is a real answer rather than a failure: a key type this build has
+    never heard of still has a fingerprint, and reporting no size is honest
+    where guessing one is not.
+    """
+    algorithm, offset = _ssh_field(public_blob, 0)
+    name = algorithm.decode("ascii", "replace")
+    if name in ("ssh-ed25519", "sk-ssh-ed25519@openssh.com"):
+        return 256
+    if name == "ssh-dss":
+        return 1024
+    if name.startswith("ecdsa-sha2-nistp"):
+        digits = name[len("ecdsa-sha2-nistp"):].split("@")[0]
+        return int(digits) if digits.isdigit() else 0
+    if name == "ssh-rsa":
+        _exponent, offset = _ssh_field(public_blob, offset)
+        modulus, _offset = _ssh_field(public_blob, offset)
+        # The bit length of the modulus, not its byte count: an RSA modulus
+        # carries a leading zero byte whenever its top bit is set, and
+        # counting bytes would report 2056 bits for a 2048-bit key.
+        return int.from_bytes(modulus, "big").bit_length()
+    return 0
+
+
+def ssh_public_line(public_blob, comment=""):
+    """The one-line authorized_keys form of a public key."""
+    line = "%s %s" % (ssh_key_type(public_blob),
+                      base64.b64encode(public_blob).decode("ascii"))
+    comment = " ".join((comment or "").split())
+    return line + (" " + comment if comment else "")
+
+
+def ssh_key_info(text, comment=""):
+    """Everything SPM can derive from a stored SSH key, without a passphrase.
+
+    Every key of the result is always present, even when it could not be
+    filled in, so a surface renders one shape instead of testing for absent
+    keys. An unreadable key is not an error either: SPM stores what it is
+    given, and a key in a format this build cannot parse is still a key its
+    owner wants kept. `problem` says why a field is empty, so the answer on
+    screen is a reason rather than a blank.
+    """
+    info = {"format": SSH_FORMAT_UNKNOWN, "type": "", "bits": 0,
+            "fingerprint": "", "public": "", "encrypted": False,
+            "problem": ""}
+    text = (text or "").strip()
+    if not text:
+        info["problem"] = "no key stored"
+        return info
+    try:
+        if text.startswith(SSH_PUBLIC_PREFIXES):
+            blob = ssh_public_blob_from_line(text)
+            info["format"] = SSH_FORMAT_PUBLIC
+        elif SSH_OPENSSH_HEAD in text:
+            blob, cipher = ssh_public_blob(text)
+            info["format"] = SSH_FORMAT_OPENSSH
+            info["encrypted"] = cipher != "none"
+        elif text.startswith(SSH_PEM_HEADS):
+            info["format"] = SSH_FORMAT_PEM
+            # A PEM key hides its public half behind the same encryption as
+            # its private one, so there is nothing to derive without the
+            # passphrase. Said plainly rather than reported as corruption:
+            # the key is fine, this format just does not answer the question.
+            info["encrypted"] = ("ENCRYPTED" in text.split("\n", 1)[0]
+                                 or "Proc-Type: 4,ENCRYPTED" in text)
+            info["problem"] = ("a PEM key does not carry its public half in "
+                               "the clear; convert it with "
+                               "`ssh-keygen -p -m RFC4716` to derive one")
+            return info
+        else:
+            info["problem"] = "unrecognised SSH key format"
+            return info
+    except Exception as failure:                      # noqa: BLE001
+        # Anything a malformed key can raise -- bad base64, a truncated
+        # structure, a length that overruns -- is the same answer to the
+        # caller: this text is not a key SPM can read.
+        info["problem"] = str(failure) or "the key could not be read"
+        return info
+    info["type"] = ssh_key_type(blob)
+    info["bits"] = ssh_key_bits(blob)
+    info["fingerprint"] = ssh_fingerprint(blob)
+    info["public"] = ssh_public_line(blob, comment)
+    return info
+
+
+# ----- derived record facts ---------------------------------------------------
+# Some record types can say more about themselves than they were told. An SSH
+# key knows its own type, size and fingerprint; a surface should be able to
+# show that without knowing what an SSH key is.
+#
+# A type opts in with a "derive" name in its schema and the function lands in
+# the registry below, so this stays a dictionary lookup rather than a branch
+# per type -- the same rule the rest of the engine follows, and the reason
+# adding a type is still a dictionary entry.
+
+
+def _derived_ssh(values):
+    info = ssh_key_info(values.get("private_key", ""),
+                        comment=values.get("comment", ""))
+    rows = []
+    if info["type"]:
+        rows.append(("ssh.type", "Type", info["type"]))
+    if info["bits"]:
+        rows.append(("ssh.bits", "Size", "%d" % info["bits"]))
+    if info["fingerprint"]:
+        rows.append(("ssh.fingerprint", "Fingerprint", info["fingerprint"]))
+    if info["public"]:
+        rows.append(("ssh.public", "Public key", info["public"]))
+    if info["encrypted"]:
+        rows.append(("ssh.sealed",
+                     "The private half is passphrase-protected", ""))
+    if info["problem"]:
+        rows.append(("ssh.unreadable",
+                     "SPM cannot derive anything from this key",
+                     info["problem"]))
+    return rows
+
+
+RECORD_DERIVERS = {"ssh": _derived_ssh}
+
+
+def record_derived(record_type, values):
+    """(i18n key, English label, value) rows computed from a record's values.
+
+    Never a secret. Everything here is derived from a secret but is itself
+    publishable -- a fingerprint and a public key are meant to be handed out,
+    which is what makes deriving them worth doing. A deriver that wanted to
+    return a secret would be returning the stored value with extra steps.
+    """
+    deriver = RECORD_DERIVERS.get(record_derive_name(record_type))
+    return deriver(values or {}) if deriver else []
+
+
+def record_derive_name(record_type):
+    """The deriver a type opts into, or "" for a type that derives nothing.
+
+    Surfaces need this as well as the rows: the panel they draw is titled for
+    the thing it was derived from, and "Derived from the key" is the SSH
+    wording, not a universal one. Reading the name here keeps the title a
+    lookup like everything else, so the next deriver is still one dictionary
+    entry and its translations.
+    """
+    return RECORD_SCHEMAS.get(record_type, {}).get("derive", "")
 
 # ----- attributes across an export -------------------------------------------
 # A folder and its custom fields cross an export as their own readable columns
@@ -4864,6 +5142,29 @@ def main(argv):
                         sys.stdout.write("%s\t%s\n" % (field, _b64(masked[field])))
             else:
                 raise VaultError("unknown record op %r" % (op,))
+        elif command == "ssh":
+            # ssh <op> [args] -- what the CLI asks about a stored SSH key.
+            #
+            # The key arrives on stdin, base64-encoded, for the same reason a
+            # record's field values do: it is the record's secret, and argv is
+            # world-readable on Linux for the life of the process. The comment
+            # is not a secret and travels normally.
+            op = argv[2]
+            if op == "info":
+                # info [comment]
+                # stdin:  base64 of the key text
+                # stdout: "name<TAB>base64(value)" lines
+                key_text = base64.b64decode(
+                    sys.stdin.read().strip() or "").decode("utf-8", "replace")
+                info = ssh_key_info(key_text, comment=argv[3] if len(argv) > 3 else "")
+                for name in ("format", "type", "bits", "fingerprint",
+                             "public", "encrypted", "problem"):
+                    value = info[name]
+                    if isinstance(value, bool):
+                        value = "1" if value else "0"
+                    sys.stdout.write("%s\t%s\n" % (name, _b64(str(value))))
+            else:
+                raise VaultError("unknown ssh op %r" % (op,))
         elif command == "secret-key":
             # secret-key <op> <vault> ; ops below say what they read on stdin.
             #
@@ -7034,6 +7335,216 @@ cmd_record() {
 		delete) cmd_record_delete "$@" ;;
 		*)
 			printf 'Usage: %s record <types|add|list|view|delete> [args]\n' "$0" >&2
+			exit 1
+			;;
+	esac
+}
+
+# ----- SSH keys --------------------------------------------------------------
+# `record add ssh-key` already works -- the schema engine gives every type its
+# prompts -- but nobody types a private key at a prompt. These commands are the
+# ergonomics around that same record: `import` reads a key file, and everything
+# else reads back what the core derives from the stored bytes rather than
+# anything a user was asked to type. A fingerprint on screen here is computed
+# from the key it names, so it cannot be stale and cannot be wrong.
+
+ssh_key_b64_of() {
+	# The private_key value of one ssh-key record, still base64. It is never
+	# decoded into a variable on the way past: this is the record's secret,
+	# and the only thing that needs it in the clear is the core.
+	local file="$1" rid="$2"
+	record_find_row "$file" "ssh-key" "$rid" \
+		| core record parse \
+		| awk -F '\t' '$1=="private_key"{print $2; exit}'
+}
+
+ssh_derived() {
+	# "name<TAB>value" of everything the core can derive, decoded for display.
+	local keyb64="$1" comment="${2:-}" k v
+	printf '%s\n' "$keyb64" | core ssh info "$comment" \
+		| while IFS="$(printf '\t')" read -r k v; do
+			printf '%s\t%s\n' "$k" "$(printf '%s' "$v" | base64 -d 2>/dev/null)"
+		done
+}
+
+ssh_derived_field() {
+	printf '%s\n' "$1" | awk -F '\t' -v want="$2" '$1==want{print $2; exit}'
+}
+
+ssh_require_key_record() {
+	# A record id that is not an ssh-key is a different record entirely, and
+	# deriving a fingerprint from whatever it happens to hold would be worse
+	# than refusing.
+	local file="$1" rid="$2"
+	[ -n "$(record_find_row "$file" "ssh-key" "$rid")" ] \
+		|| { secure_wipe "$file"; die "No ssh-key record with ID $rid."; }
+}
+
+cmd_ssh_import() {
+	local keyfile="${1:-}" label="${2:-}"
+	[ -n "$keyfile" ] || die "Usage: $0 ssh import <keyfile> [label]"
+	[ -f "$keyfile" ] || die "No such key file: $keyfile"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	[ -n "$label" ] || label="$(basename "$keyfile")"
+
+	local keyb64 comment
+	keyb64="$(base64 <"$keyfile" | tr -d '\n')"
+	# A key file's comment lives in its .pub sibling, not in the private half
+	# -- and for a passphrase-protected key it is inside the encrypted
+	# section, unreachable. Reading it here is the difference between a
+	# record labelled with the key's own comment and one labelled by hand.
+	comment=""
+	[ -f "${keyfile}.pub" ] && comment="$(awk 'NR==1{ $1=""; $2=""; sub(/^[ \t]+/, ""); print }' "${keyfile}.pub")"
+
+	local derived fingerprint problem format
+	derived="$(ssh_derived "$keyb64" "$comment")"
+	problem="$(ssh_derived_field "$derived" problem)"
+	fingerprint="$(ssh_derived_field "$derived" fingerprint)"
+	format="$(ssh_derived_field "$derived" format)"
+	# A public key fingerprints perfectly well, so the fingerprint test below
+	# would wave one through and file it as the private half of a key -- a
+	# secret field holding something that was never secret, and a record that
+	# cannot do the one thing an ssh-key record is for. The .pub is also the
+	# easy file to reach for by mistake, since it sits next to the real key
+	# and is the one people are used to copying around.
+	[ "$format" != "public" ] \
+		|| die "That is a public key. Import the private half instead: ${keyfile%.pub}"
+	# A file that is not a key at all is refused here rather than stored: an
+	# import is the one moment SPM is looking at the bytes and can say so.
+	# A key it merely cannot fingerprint is still imported -- see below.
+	[ -n "$fingerprint" ] || [ "$format" = "pem" ] \
+		|| die "That file does not look like an SSH key: $problem"
+
+	local tmp fields_tmp rid created row
+	tmp="$(make_tmp)"
+	fields_tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	printf 'private_key\t%s\n' "$keyb64" >"$fields_tmp"
+	[ -n "$comment" ] && printf 'comment\t%s\n' \
+		"$(printf '%s' "$comment" | base64 | tr -d '\n')" >>"$fields_tmp"
+
+	rid="$(next_record_id_from_vault "$tmp" "ssh-key")"
+	created="$(now_iso)"
+	row="$(core record row "ssh-key" "$rid" "$(sanitize_field "$label")" \
+		"$created" <"$fields_tmp")" || {
+		secure_wipe "$tmp"; secure_wipe "$fields_tmp"
+		die "The key was refused."
+	}
+	printf '%s\n' "$row" >>"$tmp"
+	encrypt_file_to_vault "$tmp"
+	secure_wipe "$tmp"
+	secure_wipe "$fields_tmp"
+
+	printf '\nssh-key added with ID %s.\n' "$rid"
+	if [ -n "$fingerprint" ]; then
+		printf '  %s %s\n' "$(ssh_derived_field "$derived" type)" "$fingerprint"
+		[ "$(ssh_derived_field "$derived" encrypted)" = "1" ] \
+			&& printf '  the private half is passphrase-protected\n'
+	else
+		printf '  stored, but SPM cannot derive a fingerprint: %s\n' "$problem"
+	fi
+	printf '\n'
+}
+
+cmd_ssh_list() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	local rows
+	rows="$(awk -F '\t' '$1=="REC:ssh-key"{print $2}' "$tmp")"
+	if [ -z "$rows" ]; then
+		secure_wipe "$tmp"
+		printf '\nNo SSH keys stored. Add one with: %s ssh import <keyfile>\n\n' "$0"
+		return 0
+	fi
+
+	printf '\n%-5s %-24s %-20s %s\n' "ID" "LABEL" "TYPE" "FINGERPRINT"
+	local rid row label derived
+	printf '%s\n' "$rows" | while read -r rid; do
+		[ -n "$rid" ] || continue
+		row="$(record_find_row "$tmp" "ssh-key" "$rid" | core record parse)"
+		label="$(printf '%s\n' "$row" | awk -F '\t' '$1==".label"{print $2}' | base64 -d 2>/dev/null)"
+		derived="$(ssh_derived "$(printf '%s\n' "$row" | awk -F '\t' '$1=="private_key"{print $2}')")"
+		printf '%-5s %-24s %-20s %s\n' "$rid" "$label" \
+			"$(ssh_derived_field "$derived" type)" \
+			"$(ssh_derived_field "$derived" fingerprint)"
+	done
+	printf '\n'
+	secure_wipe "$tmp"
+}
+
+cmd_ssh_show() {
+	local rid="${1:-}"
+	[ -n "$rid" ] || die "Usage: $0 ssh show <id>"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+	ssh_require_key_record "$tmp" "$rid"
+
+	local parsed label comment hosts derived
+	parsed="$(record_find_row "$tmp" "ssh-key" "$rid" | core record parse)"
+	label="$(printf '%s\n' "$parsed" | awk -F '\t' '$1==".label"{print $2}' | base64 -d 2>/dev/null)"
+	comment="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="comment"{print $2}' | base64 -d 2>/dev/null)"
+	hosts="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="hosts"{print $2}' | base64 -d 2>/dev/null)"
+	derived="$(ssh_derived "$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="private_key"{print $2}')" "$comment")"
+	secure_wipe "$tmp"
+
+	printf '\nssh-key %s\n' "$rid"
+	printf '  label        %s\n' "$label"
+	[ -n "$hosts" ] && printf '  hosts        %s\n' "$hosts"
+	[ -n "$comment" ] && printf '  comment      %s\n' "$comment"
+	printf '\n'
+	# Everything below is derived from the stored key, not stored beside it.
+	local bits
+	bits="$(ssh_derived_field "$derived" bits)"
+	printf '  type         %s\n' "$(ssh_derived_field "$derived" type)"
+	[ "$bits" != "0" ] && printf '  bits         %s\n' "$bits"
+	printf '  fingerprint  %s\n' "$(ssh_derived_field "$derived" fingerprint)"
+	printf '  format       %s\n' "$(ssh_derived_field "$derived" format)"
+	[ "$(ssh_derived_field "$derived" encrypted)" = "1" ] \
+		&& printf '  passphrase   the private half is protected\n'
+	local problem
+	problem="$(ssh_derived_field "$derived" problem)"
+	[ -n "$problem" ] && printf '  note         %s\n' "$problem"
+	printf '\n'
+	printf '  public key\n    %s\n\n' "$(ssh_derived_field "$derived" public)"
+}
+
+cmd_ssh_public() {
+	# Just the authorized_keys line, so it can be piped somewhere useful.
+	local rid="${1:-}"
+	[ -n "$rid" ] || die "Usage: $0 ssh public <id>"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp parsed comment derived line
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+	ssh_require_key_record "$tmp" "$rid"
+	parsed="$(record_find_row "$tmp" "ssh-key" "$rid" | core record parse)"
+	comment="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="comment"{print $2}' | base64 -d 2>/dev/null)"
+	derived="$(ssh_derived "$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="private_key"{print $2}')" "$comment")"
+	secure_wipe "$tmp"
+
+	line="$(ssh_derived_field "$derived" public)"
+	[ -n "$line" ] || die "No public key could be derived: $(ssh_derived_field "$derived" problem)"
+	printf '%s\n' "$line"
+}
+
+cmd_ssh() {
+	local op="${1:-}"
+	[ $# -gt 0 ] && shift
+	case "$op" in
+		import) cmd_ssh_import "$@" ;;
+		list)   cmd_ssh_list "$@" ;;
+		show)   cmd_ssh_show "$@" ;;
+		public) cmd_ssh_public "$@" ;;
+		*)
+			printf 'Usage: %s ssh <import|list|show|public> [args]\n' "$0" >&2
 			exit 1
 			;;
 	esac
@@ -10686,6 +11197,23 @@ Fitur lokal 2.10:
   ./spm.sh emergency-create <id> <public.pem> <YYYY-MM-DD> [arsip]
   ./spm.sh emergency-open <arsip> <private.pem> [output.json]
 
+Catatan Bertipe (token API, kartu, server, kunci SSH, dan lainnya):
+  ./spm.sh record types            → Jenis catatan yang dikenal build ini
+  ./spm.sh record add <type>       → Tambah satu, dipandu skemanya sendiri
+  ./spm.sh record list [type]      → List catatan, semua jenis atau satu
+  ./spm.sh record view <type> <id> [--reveal]
+                                   → Lihat catatan, rahasia disamarkan
+  ./spm.sh record delete <type> <id>
+
+Kunci SSH:
+  ./spm.sh ssh import <keyfile> [label]
+                                   → Simpan private key dari sebuah berkas
+  ./spm.sh ssh list                → Semua kunci tersimpan beserta fingerprint
+  ./spm.sh ssh show <id>           → Jenis, ukuran, fingerprint, dan public key
+  ./spm.sh ssh public <id>         → Hanya baris authorized_keys
+  (jenis, ukuran, fingerprint, dan public key diturunkan dari kunci yang
+   tersimpan, jadi tidak mungkin berbeda dengan kunci yang dijelaskannya)
+
 Catatan Aman (Secure Notes):
   ./spm.sh notes-add       → Tambah catatan aman
   ./spm.sh notes-list      → List catatan aman
@@ -10801,6 +11329,23 @@ Local-first 2.10 capabilities:
   ./spm.sh sync status|push|pull <directory> [channel]
   ./spm.sh emergency-create <id> <public.pem> <YYYY-MM-DD> [archive]
   ./spm.sh emergency-open <archive> <private.pem> [output.json]
+
+Typed records (API tokens, cards, servers, SSH keys and more):
+  ./spm.sh record types            → What kinds of record this build knows
+  ./spm.sh record add <type>       → Add one, prompted from its own schema
+  ./spm.sh record list [type]      → List records, all types or one
+  ./spm.sh record view <type> <id> [--reveal]
+                                   → Show a record, secrets masked by default
+  ./spm.sh record delete <type> <id>
+
+SSH keys:
+  ./spm.sh ssh import <keyfile> [label]
+                                   → Store a private key from a file
+  ./spm.sh ssh list                → Every stored key, with its fingerprint
+  ./spm.sh ssh show <id>           → Type, size, fingerprint and public key
+  ./spm.sh ssh public <id>         → Just the authorized_keys line
+  (type, size, fingerprint and the public key are derived from the stored
+   key itself, so none of them can disagree with the key they describe)
 
 Secure Notes:
   ./spm.sh notes-add       → Add secure note
@@ -12612,6 +13157,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "No records yet",
         "empty.records.d": "API tokens, database credentials, cards, identities, licences, Wi-Fi and servers live here.",
         "confirm.delete_record": "Delete this record?",
+        "record.field.private_key": "Private key",
+        "record.field.passphrase": "Passphrase",
+        "record.field.hosts": "Hosts",
+        "record.field.comment": "Comment",
+        "record.type.ssh-key": "SSH Key",
+        "ssh.derived.t": "Derived from the key",
+        "ssh.derived.d": "Computed from the stored key rather than typed beside it, so it cannot disagree with the key it describes.",
+        "ssh.type": "Type",
+        "ssh.bits": "Size",
+        "ssh.fingerprint": "Fingerprint",
+        "ssh.public": "Public key",
+        "ssh.sealed": "The private half is passphrase-protected",
+        "ssh.unreadable": "SPM cannot derive anything from this key",
     },
     "ar": {
         "nav.security": "\u0627\u0644\u0623\u0645\u0627\u0646",
@@ -13055,6 +13613,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "\u0644\u0627 \u062a\u0648\u062c\u062f \u0633\u062c\u0644\u0627\u062a \u0628\u0639\u062f",
         "empty.records.d": "\u0631\u0645\u0648\u0632 API \u0648\u0628\u064a\u0627\u0646\u0627\u062a \u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0648\u0627\u0644\u0628\u0637\u0627\u0642\u0627\u062a \u0648\u0627\u0644\u0647\u0648\u064a\u0627\u062a \u0648\u0627\u0644\u062a\u0631\u0627\u062e\u064a\u0635 \u0648\u0634\u0628\u0643\u0627\u062a Wi-Fi \u0648\u0627\u0644\u062e\u0648\u0627\u062f\u0645 \u062a\u064f\u062d\u0641\u0638 \u0647\u0646\u0627.",
         "confirm.delete_record": "\u062d\u0630\u0641 \u0647\u0630\u0627 \u0627\u0644\u0633\u062c\u0644\u061f",
+        "record.field.private_key": "\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u062e\u0627\u0635",
+        "record.field.passphrase": "\u0639\u0628\u0627\u0631\u0629 \u0627\u0644\u0645\u0631\u0648\u0631",
+        "record.field.hosts": "\u0627\u0644\u0645\u0636\u064a\u0641\u0627\u062a",
+        "record.field.comment": "\u062a\u0639\u0644\u064a\u0642",
+        "record.type.ssh-key": "\u0645\u0641\u062a\u0627\u062d SSH",
+        "ssh.derived.t": "\u0645\u0634\u062a\u0642 \u0645\u0646 \u0627\u0644\u0645\u0641\u062a\u0627\u062d",
+        "ssh.derived.d": "\u0645\u062d\u0633\u0648\u0628 \u0645\u0646 \u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0645\u062e\u0632\u064e\u0651\u0646 \u0628\u062f\u0644\u0627\u064b \u0645\u0646 \u0643\u062a\u0627\u0628\u062a\u0647 \u064a\u062f\u0648\u064a\u064b\u0627\u060c \u0644\u0630\u0627 \u0644\u0627 \u064a\u0645\u0643\u0646 \u0623\u0646 \u064a\u062e\u0627\u0644\u0641 \u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0630\u064a \u064a\u0635\u0641\u0647.",
+        "ssh.type": "\u0627\u0644\u0646\u0648\u0639",
+        "ssh.bits": "\u0627\u0644\u062d\u062c\u0645",
+        "ssh.fingerprint": "\u0627\u0644\u0628\u0635\u0645\u0629",
+        "ssh.public": "\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0639\u0627\u0645",
+        "ssh.sealed": "\u0627\u0644\u062c\u0632\u0621 \u0627\u0644\u062e\u0627\u0635 \u0645\u062d\u0645\u064a \u0628\u0639\u0628\u0627\u0631\u0629 \u0645\u0631\u0648\u0631",
+        "ssh.unreadable": "\u0644\u0627 \u064a\u0633\u062a\u0637\u064a\u0639 SPM \u0627\u0634\u062a\u0642\u0627\u0642 \u0623\u064a \u0634\u064a\u0621 \u0645\u0646 \u0647\u0630\u0627 \u0627\u0644\u0645\u0641\u062a\u0627\u062d",
     },
     "de": {
         "nav.security": "Sicherheit",
@@ -13498,6 +14069,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "Noch keine Datens\u00e4tze",
         "empty.records.d": "API-Token, Datenbank-Zug\u00e4nge, Karten, Ausweise, Lizenzen, WLAN und Server liegen hier.",
         "confirm.delete_record": "Diesen Datensatz l\u00f6schen?",
+        "record.field.private_key": "Privater Schl\u00fcssel",
+        "record.field.passphrase": "Passphrase",
+        "record.field.hosts": "Hosts",
+        "record.field.comment": "Kommentar",
+        "record.type.ssh-key": "SSH-Schl\u00fcssel",
+        "ssh.derived.t": "Aus dem Schl\u00fcssel abgeleitet",
+        "ssh.derived.d": "Aus dem gespeicherten Schl\u00fcssel berechnet statt daneben eingetragen und kann ihm daher nicht widersprechen.",
+        "ssh.type": "Typ",
+        "ssh.bits": "Gr\u00f6\u00dfe",
+        "ssh.fingerprint": "Fingerabdruck",
+        "ssh.public": "\u00d6ffentlicher Schl\u00fcssel",
+        "ssh.sealed": "Der private Teil ist mit einer Passphrase gesch\u00fctzt",
+        "ssh.unreadable": "SPM kann aus diesem Schl\u00fcssel nichts ableiten",
     },
     "es": {
         "nav.security": "Seguridad",
@@ -13941,6 +14525,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "A\u00fan no hay registros",
         "empty.records.d": "Aqu\u00ed viven tokens de API, credenciales de base de datos, tarjetas, identidades, licencias, Wi-Fi y servidores.",
         "confirm.delete_record": "\u00bfEliminar este registro?",
+        "record.field.private_key": "Clave privada",
+        "record.field.passphrase": "Frase de contrase\u00f1a",
+        "record.field.hosts": "Hosts",
+        "record.field.comment": "Comentario",
+        "record.type.ssh-key": "Clave SSH",
+        "ssh.derived.t": "Derivado de la clave",
+        "ssh.derived.d": "Calculado a partir de la clave guardada en lugar de escribirse aparte, por lo que no puede contradecirla.",
+        "ssh.type": "Tipo",
+        "ssh.bits": "Tama\u00f1o",
+        "ssh.fingerprint": "Huella",
+        "ssh.public": "Clave p\u00fablica",
+        "ssh.sealed": "La mitad privada est\u00e1 protegida con una frase de contrase\u00f1a",
+        "ssh.unreadable": "SPM no puede derivar nada de esta clave",
     },
     "fr": {
         "nav.security": "S\u00e9curit\u00e9",
@@ -14384,6 +14981,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "Aucune fiche",
         "empty.records.d": "Jetons d'API, identifiants de base de donn\u00e9es, cartes, pi\u00e8ces d'identit\u00e9, licences, Wi-Fi et serveurs vivent ici.",
         "confirm.delete_record": "Supprimer cette fiche ?",
+        "record.field.private_key": "Cl\u00e9 priv\u00e9e",
+        "record.field.passphrase": "Phrase secr\u00e8te",
+        "record.field.hosts": "H\u00f4tes",
+        "record.field.comment": "Commentaire",
+        "record.type.ssh-key": "Cl\u00e9 SSH",
+        "ssh.derived.t": "D\u00e9riv\u00e9 de la cl\u00e9",
+        "ssh.derived.d": "Calcul\u00e9 \u00e0 partir de la cl\u00e9 stock\u00e9e plut\u00f4t que saisi \u00e0 c\u00f4t\u00e9, il ne peut donc pas la contredire.",
+        "ssh.type": "Type",
+        "ssh.bits": "Taille",
+        "ssh.fingerprint": "Empreinte",
+        "ssh.public": "Cl\u00e9 publique",
+        "ssh.sealed": "La partie priv\u00e9e est prot\u00e9g\u00e9e par une phrase secr\u00e8te",
+        "ssh.unreadable": "SPM ne peut rien d\u00e9river de cette cl\u00e9",
     },
     "hi": {
         "nav.security": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e",
@@ -14827,6 +15437,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "\u0905\u092d\u0940 \u0915\u094b\u0908 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0928\u0939\u0940\u0902",
         "empty.records.d": "API \u091f\u094b\u0915\u0928, \u0921\u0947\u091f\u093e\u092c\u0947\u0938 \u0915\u094d\u0930\u0947\u0921\u0947\u0902\u0936\u093f\u092f\u0932, \u0915\u093e\u0930\u094d\u0921, \u092a\u0939\u091a\u093e\u0928, \u0932\u093e\u0907\u0938\u0947\u0902\u0938, Wi-Fi \u0914\u0930 \u0938\u0930\u094d\u0935\u0930 \u092f\u0939\u093e\u0901 \u0930\u0939\u0924\u0947 \u0939\u0948\u0902\u0964",
         "confirm.delete_record": "\u092f\u0939 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0939\u091f\u093e\u090f\u0901?",
+        "record.field.private_key": "\u0928\u093f\u091c\u0940 \u0915\u0941\u0902\u091c\u0940",
+        "record.field.passphrase": "\u092a\u093e\u0938\u092b\u093c\u094d\u0930\u0947\u091c\u093c",
+        "record.field.hosts": "\u0939\u094b\u0938\u094d\u091f",
+        "record.field.comment": "\u091f\u093f\u092a\u094d\u092a\u0923\u0940",
+        "record.type.ssh-key": "SSH \u0915\u0941\u0902\u091c\u0940",
+        "ssh.derived.t": "\u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u0935\u094d\u092f\u0941\u0924\u094d\u092a\u0928\u094d\u0928",
+        "ssh.derived.d": "\u0938\u0902\u0917\u094d\u0930\u0939\u0940\u0924 \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u0917\u0923\u0928\u093e \u0915\u093f\u092f\u093e \u0917\u092f\u093e, \u0905\u0932\u0917 \u0938\u0947 \u091f\u093e\u0907\u092a \u0928\u0939\u0940\u0902 \u0915\u093f\u092f\u093e \u0917\u092f\u093e, \u0907\u0938\u0932\u093f\u090f \u092f\u0939 \u0909\u0938 \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u092d\u093f\u0928\u094d\u0928 \u0928\u0939\u0940\u0902 \u0939\u094b \u0938\u0915\u0924\u093e\u0964",
+        "ssh.type": "\u092a\u094d\u0930\u0915\u093e\u0930",
+        "ssh.bits": "\u0906\u0915\u093e\u0930",
+        "ssh.fingerprint": "\u092b\u093c\u093f\u0902\u0917\u0930\u092a\u094d\u0930\u093f\u0902\u091f",
+        "ssh.public": "\u0938\u093e\u0930\u094d\u0935\u091c\u0928\u093f\u0915 \u0915\u0941\u0902\u091c\u0940",
+        "ssh.sealed": "\u0928\u093f\u091c\u0940 \u092d\u093e\u0917 \u092a\u093e\u0938\u092b\u093c\u094d\u0930\u0947\u091c\u093c \u0938\u0947 \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0939\u0948",
+        "ssh.unreadable": "SPM \u0907\u0938 \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u0915\u0941\u091b \u092d\u0940 \u0935\u094d\u092f\u0941\u0924\u094d\u092a\u0928\u094d\u0928 \u0928\u0939\u0940\u0902 \u0915\u0930 \u0938\u0915\u0924\u093e",
     },
     "id": {
         "nav.security": "Keamanan",
@@ -15270,6 +15893,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "Belum ada record",
         "empty.records.d": "Token API, kredensial basis data, kartu, identitas, lisensi, Wi-Fi, dan server disimpan di sini.",
         "confirm.delete_record": "Hapus record ini?",
+        "record.field.private_key": "Kunci privat",
+        "record.field.passphrase": "Frasa sandi",
+        "record.field.hosts": "Host",
+        "record.field.comment": "Komentar",
+        "record.type.ssh-key": "Kunci SSH",
+        "ssh.derived.t": "Diturunkan dari kunci",
+        "ssh.derived.d": "Dihitung dari kunci yang tersimpan, bukan diketik, jadi tidak mungkin berbeda dengan kunci yang dijelaskannya.",
+        "ssh.type": "Jenis",
+        "ssh.bits": "Ukuran",
+        "ssh.fingerprint": "Fingerprint",
+        "ssh.public": "Kunci publik",
+        "ssh.sealed": "Bagian privat dilindungi frasa sandi",
+        "ssh.unreadable": "SPM tidak dapat menurunkan apa pun dari kunci ini",
     },
     "ja": {
         "nav.security": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3",
@@ -15713,6 +16349,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "\u30ec\u30b3\u30fc\u30c9\u306f\u307e\u3060\u3042\u308a\u307e\u305b\u3093",
         "empty.records.d": "API \u30c8\u30fc\u30af\u30f3\u3001\u30c7\u30fc\u30bf\u30d9\u30fc\u30b9\u8a8d\u8a3c\u60c5\u5831\u3001\u30ab\u30fc\u30c9\u3001\u8eab\u5206\u8a3c\u660e\u66f8\u3001\u30e9\u30a4\u30bb\u30f3\u30b9\u3001Wi-Fi\u3001\u30b5\u30fc\u30d0\u30fc\u304c\u3053\u3053\u306b\u5165\u308a\u307e\u3059\u3002",
         "confirm.delete_record": "\u3053\u306e\u30ec\u30b3\u30fc\u30c9\u3092\u524a\u9664\u3057\u307e\u3059\u304b\uff1f",
+        "record.field.private_key": "\u79d8\u5bc6\u9375",
+        "record.field.passphrase": "\u30d1\u30b9\u30d5\u30ec\u30fc\u30ba",
+        "record.field.hosts": "\u30db\u30b9\u30c8",
+        "record.field.comment": "\u30b3\u30e1\u30f3\u30c8",
+        "record.type.ssh-key": "SSH \u9375",
+        "ssh.derived.t": "\u9375\u304b\u3089\u5c0e\u51fa",
+        "ssh.derived.d": "\u4fdd\u5b58\u3055\u308c\u305f\u9375\u304b\u3089\u8a08\u7b97\u3055\u308c\u308b\u305f\u3081\u3001\u305d\u306e\u9375\u3068\u98df\u3044\u9055\u3046\u3053\u3068\u306f\u3042\u308a\u307e\u305b\u3093\u3002",
+        "ssh.type": "\u7a2e\u985e",
+        "ssh.bits": "\u9375\u9577",
+        "ssh.fingerprint": "\u30d5\u30a3\u30f3\u30ac\u30fc\u30d7\u30ea\u30f3\u30c8",
+        "ssh.public": "\u516c\u958b\u9375",
+        "ssh.sealed": "\u79d8\u5bc6\u9375\u306f\u30d1\u30b9\u30d5\u30ec\u30fc\u30ba\u3067\u4fdd\u8b77\u3055\u308c\u3066\u3044\u307e\u3059",
+        "ssh.unreadable": "SPM \u306f\u3053\u306e\u9375\u304b\u3089\u4f55\u3082\u5c0e\u51fa\u3067\u304d\u307e\u305b\u3093",
     },
     "ko": {
         "nav.security": "\ubcf4\uc548",
@@ -16156,6 +16805,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "\uc544\uc9c1 \ub808\ucf54\ub4dc\uac00 \uc5c6\uc2b5\ub2c8\ub2e4",
         "empty.records.d": "API \ud1a0\ud070, \ub370\uc774\ud130\ubca0\uc774\uc2a4 \uc790\uaca9 \uc99d\uba85, \uce74\ub4dc, \uc2e0\ubd84\uc99d, \ub77c\uc774\uc120\uc2a4, Wi-Fi, \uc11c\ubc84\uac00 \uc5ec\uae30\uc5d0 \uc800\uc7a5\ub429\ub2c8\ub2e4.",
         "confirm.delete_record": "\uc774 \ub808\ucf54\ub4dc\ub97c \uc0ad\uc81c\ud560\uae4c\uc694?",
+        "record.field.private_key": "\uac1c\uc778 \ud0a4",
+        "record.field.passphrase": "\uc554\ud638 \ubb38\uad6c",
+        "record.field.hosts": "\ud638\uc2a4\ud2b8",
+        "record.field.comment": "\uc8fc\uc11d",
+        "record.type.ssh-key": "SSH \ud0a4",
+        "ssh.derived.t": "\ud0a4\uc5d0\uc11c \ub3c4\ucd9c\ub428",
+        "ssh.derived.d": "\uc800\uc7a5\ub41c \ud0a4\uc5d0\uc11c \uacc4\uc0b0\ub418\ubbc0\ub85c \uc124\uba85\ud558\ub294 \ud0a4\uc640 \uc5b4\uae0b\ub0a0 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "ssh.type": "\uc885\ub958",
+        "ssh.bits": "\ud06c\uae30",
+        "ssh.fingerprint": "\uc9c0\ubb38",
+        "ssh.public": "\uacf5\uac1c \ud0a4",
+        "ssh.sealed": "\uac1c\uc778 \ud0a4\uac00 \uc554\ud638 \ubb38\uad6c\ub85c \ubcf4\ud638\ub418\uc5b4 \uc788\uc2b5\ub2c8\ub2e4",
+        "ssh.unreadable": "SPM\uc740 \uc774 \ud0a4\uc5d0\uc11c \uc544\ubb34\uac83\ub3c4 \ub3c4\ucd9c\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4",
     },
     "pt-br": {
         "nav.security": "Seguran\u00e7a",
@@ -16599,6 +17261,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "Nenhum registro ainda",
         "empty.records.d": "Tokens de API, credenciais de banco de dados, cart\u00f5es, identidades, licen\u00e7as, Wi-Fi e servidores ficam aqui.",
         "confirm.delete_record": "Excluir este registro?",
+        "record.field.private_key": "Chave privada",
+        "record.field.passphrase": "Frase secreta",
+        "record.field.hosts": "Hosts",
+        "record.field.comment": "Coment\u00e1rio",
+        "record.type.ssh-key": "Chave SSH",
+        "ssh.derived.t": "Derivado da chave",
+        "ssh.derived.d": "Calculado a partir da chave armazenada em vez de digitado ao lado, portanto n\u00e3o pode divergir dela.",
+        "ssh.type": "Tipo",
+        "ssh.bits": "Tamanho",
+        "ssh.fingerprint": "Impress\u00e3o digital",
+        "ssh.public": "Chave p\u00fablica",
+        "ssh.sealed": "A metade privada est\u00e1 protegida por frase secreta",
+        "ssh.unreadable": "O SPM n\u00e3o consegue derivar nada desta chave",
     },
     "ru": {
         "nav.security": "\u0411\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c",
@@ -17042,6 +17717,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "\u0417\u0430\u043f\u0438\u0441\u0435\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442",
         "empty.records.d": "\u0417\u0434\u0435\u0441\u044c \u0445\u0440\u0430\u043d\u044f\u0442\u0441\u044f \u0442\u043e\u043a\u0435\u043d\u044b API, \u0434\u043e\u0441\u0442\u0443\u043f\u044b \u043a \u0431\u0430\u0437\u0430\u043c \u0434\u0430\u043d\u043d\u044b\u0445, \u043a\u0430\u0440\u0442\u044b, \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b, \u043b\u0438\u0446\u0435\u043d\u0437\u0438\u0438, Wi-Fi \u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u044b.",
         "confirm.delete_record": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u044d\u0442\u0443 \u0437\u0430\u043f\u0438\u0441\u044c?",
+        "record.field.private_key": "\u0417\u0430\u043a\u0440\u044b\u0442\u044b\u0439 \u043a\u043b\u044e\u0447",
+        "record.field.passphrase": "\u041f\u0430\u0440\u043e\u043b\u044c\u043d\u0430\u044f \u0444\u0440\u0430\u0437\u0430",
+        "record.field.hosts": "\u0425\u043e\u0441\u0442\u044b",
+        "record.field.comment": "\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439",
+        "record.type.ssh-key": "SSH-\u043a\u043b\u044e\u0447",
+        "ssh.derived.t": "\u0412\u044b\u0447\u0438\u0441\u043b\u0435\u043d\u043e \u0438\u0437 \u043a\u043b\u044e\u0447\u0430",
+        "ssh.derived.d": "\u0412\u044b\u0447\u0438\u0441\u043b\u044f\u0435\u0442\u0441\u044f \u0438\u0437 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d\u043d\u043e\u0433\u043e \u043a\u043b\u044e\u0447\u0430, \u0430 \u043d\u0435 \u0432\u0432\u043e\u0434\u0438\u0442\u0441\u044f \u0440\u044f\u0434\u043e\u043c, \u0438 \u043f\u043e\u0442\u043e\u043c\u0443 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0441 \u043d\u0438\u043c \u0440\u0430\u0441\u0445\u043e\u0434\u0438\u0442\u044c\u0441\u044f.",
+        "ssh.type": "\u0422\u0438\u043f",
+        "ssh.bits": "\u0420\u0430\u0437\u043c\u0435\u0440",
+        "ssh.fingerprint": "\u041e\u0442\u043f\u0435\u0447\u0430\u0442\u043e\u043a",
+        "ssh.public": "\u041e\u0442\u043a\u0440\u044b\u0442\u044b\u0439 \u043a\u043b\u044e\u0447",
+        "ssh.sealed": "\u0417\u0430\u043a\u0440\u044b\u0442\u0430\u044f \u0447\u0430\u0441\u0442\u044c \u0437\u0430\u0449\u0438\u0449\u0435\u043d\u0430 \u043f\u0430\u0440\u043e\u043b\u044c\u043d\u043e\u0439 \u0444\u0440\u0430\u0437\u043e\u0439",
+        "ssh.unreadable": "SPM \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u043d\u0438\u0447\u0435\u0433\u043e \u0432\u044b\u0447\u0438\u0441\u043b\u0438\u0442\u044c \u0438\u0437 \u044d\u0442\u043e\u0433\u043e \u043a\u043b\u044e\u0447\u0430",
     },
     "zh-hans": {
         "nav.security": "\u5b89\u5168",
@@ -17485,6 +18173,19 @@ WEB_CATALOGUES = {
         "empty.records.t": "\u8fd8\u6ca1\u6709\u8bb0\u5f55",
         "empty.records.d": "API \u4ee4\u724c\u3001\u6570\u636e\u5e93\u51ed\u636e\u3001\u94f6\u884c\u5361\u3001\u8eab\u4efd\u8bc1\u4ef6\u3001\u8bb8\u53ef\u8bc1\u3001Wi-Fi \u548c\u670d\u52a1\u5668\u90fd\u5b58\u653e\u5728\u8fd9\u91cc\u3002",
         "confirm.delete_record": "\u5220\u9664\u8fd9\u6761\u8bb0\u5f55\uff1f",
+        "record.field.private_key": "\u79c1\u94a5",
+        "record.field.passphrase": "\u5bc6\u7801\u77ed\u8bed",
+        "record.field.hosts": "\u4e3b\u673a",
+        "record.field.comment": "\u6ce8\u91ca",
+        "record.type.ssh-key": "SSH \u5bc6\u94a5",
+        "ssh.derived.t": "\u7531\u5bc6\u94a5\u63a8\u5bfc",
+        "ssh.derived.d": "\u7531\u5b58\u50a8\u7684\u5bc6\u94a5\u8ba1\u7b97\u5f97\u51fa\uff0c\u800c\u975e\u624b\u5de5\u586b\u5199\uff0c\u56e0\u6b64\u4e0d\u4f1a\u4e0e\u5b83\u6240\u63cf\u8ff0\u7684\u5bc6\u94a5\u4e0d\u7b26\u3002",
+        "ssh.type": "\u7c7b\u578b",
+        "ssh.bits": "\u957f\u5ea6",
+        "ssh.fingerprint": "\u6307\u7eb9",
+        "ssh.public": "\u516c\u94a5",
+        "ssh.sealed": "\u79c1\u94a5\u90e8\u5206\u53d7\u5bc6\u7801\u77ed\u8bed\u4fdd\u62a4",
+        "ssh.unreadable": "SPM \u65e0\u6cd5\u4ece\u8be5\u5bc6\u94a5\u63a8\u5bfc\u51fa\u4efb\u4f55\u4fe1\u606f",
     },
 }
 # --- END GENERATED LOCALES ---
@@ -18248,6 +18949,14 @@ textarea.input { min-height: 120px; resize: vertical; font-family: var(--mono); 
 /* A stored value shown rather than edited. Sized like an input so a view page
    and its edit form do not jump when you move between them. */
 .ro { padding: 9px 0; color: var(--text); word-break: break-word; }
+.derived { margin-top: 18px; padding: 14px 16px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--surface-2); }
+.derived-head { margin-bottom: 6px; }
+.derived-head span { font-weight: 600; font-size: var(--fs-sm); }
+.derived-head p { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--text-dim);
+  max-width: 62ch; }
+.derived .field { margin-top: 10px; }
+.ro.mono { font-family: var(--mono); font-size: var(--fs-xs); }
 
 /* Flash / alerts */
 .flash {
@@ -19198,6 +19907,7 @@ ICON_SPRITE = """
   <symbol id="i-licence" viewBox="0 0 24 24"><path d="M4.5 3.5h15v11h-15zM8 7.5h8M8 11h5"/><circle cx="16.5" cy="17.5" r="3"/><path d="M14.5 20l-.5 2.5 2.5-1.2 2.5 1.2-.5-2.5"/></symbol>
   <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 8.5c5.5-4.7 13.5-4.7 19 0M6 12.5c3.6-3 8.4-3 12 0M9.5 16.5c1.6-1.3 3.4-1.3 5 0"/><circle cx="12" cy="20" r="1"/></symbol>
   <symbol id="i-server" viewBox="0 0 24 24"><path d="M3.5 3.5h17v7h-17zM3.5 13.5h17v7h-17zM7 7h.01M7 17h.01M11 7h6M11 17h6"/></symbol>
+  <symbol id="i-ssh" viewBox="0 0 24 24"><path d="M3.5 4.5h17v15h-17zM7 9.5l3 2.5-3 2.5M12.5 15h5"/></symbol>
   <symbol id="i-brand" viewBox="0 0 24 24"><path d="M4 6l5 6-5 6M12 18h8M12 6h8"/></symbol>
   <symbol id="i-overview" viewBox="0 0 24 24"><path d="M3.5 3.5h7v7h-7zM13.5 3.5h7v7h-7zM3.5 13.5h7v7h-7zM13.5 13.5h7v7h-7z"/></symbol>
   <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="4.5"/><path d="M12.5 12H21M17 12v3M20 12v2"/></symbol>
@@ -22493,6 +23203,35 @@ def build_record_view(parsed, counts=None):
                       '<div class="ro">%s</div></div>' % html.escape(folder))
     blocks.append('<div class="field"><label data-i18n="view.label.created">Created at</label>'
                   '<div class="ro">%s</div></div>' % html.escape(created))
+
+    # What the record can work out about itself. The type is never named here:
+    # the schema says whether it derives anything and the core says what, so
+    # the next type that computes something reaches this page without it
+    # changing. Nothing in here is a secret -- a fingerprint and a public key
+    # exist to be handed out, which is what makes deriving them worth doing --
+    # so it is rendered in the open rather than behind a reveal control.
+    derived = core.record_derived(record_type, values)
+    if derived:
+        rows = "".join(
+            ('<div class="field"><label data-i18n="%s">%s</label>'
+             '<div class="ro mono">%s</div></div>'
+             % (key, html.escape(english), html.escape(value)))
+            if value else
+            ('<div class="field"><div class="ro" data-i18n="%s">%s</div></div>'
+             % (key, html.escape(english)))
+            for key, english, value in derived)
+        # The panel is titled for what it was derived from, so the key comes
+        # from the schema's deriver name rather than being spelled "ssh" here.
+        # Nothing in this function knows what an SSH key is, and the next type
+        # that derives something gets its own heading without touching it.
+        derive = core.record_derive_name(record_type)
+        blocks.append(
+            '<div class="derived"><div class="derived-head">'
+            '<span data-i18n="%s.derived.t">Derived from the key</span>'
+            '<p data-i18n="%s.derived.d">Computed from the stored key rather '
+            'than typed beside it, so it cannot disagree with the key it '
+            'describes.</p></div>%s</div>' % (derive, derive, rows))
+
     back = "/records?type=" + urllib.parse.quote(record_type)
     edit = "/records-edit?type=%s&amp;id=%s" % (urllib.parse.quote(record_type),
                                             urllib.parse.quote(record_id))
@@ -27744,6 +28483,7 @@ main() {
 		emergency-open)  cmd_emergency_open "$@" ;;
 		generate|password-generate) cmd_generate_password "$@" ;;
 		record)           cmd_record "$@" ;;
+		ssh)              cmd_ssh "$@" ;;
 		notes-add)        cmd_notes_add "$@" ;;
 		notes-list)       cmd_notes_list "$@" ;;
 		notes-view)       cmd_notes_view "$@" ;;

@@ -6100,8 +6100,13 @@ rec_core() { VAULT_FILE="$rec_vault" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY="" "$
 
 # every registered type must be listed, and the listing is what a user types
 rec_types="$(core record types | cut -f1)"
-[ "$(printf '%s\n' "$rec_types" | wc -l)" -ge 7 ] ||
-	rec_fail 'record types listed fewer than the seven shipped schemas'
+rec_type_count="$(printf '%s\n' "$rec_types" | wc -l)"
+# A floor, not an equality: a new schema should not have to edit this line.
+# It is here so that a listing which silently loses a type -- a dictionary
+# rebuilt from a filtered iteration, say -- fails instead of testing fewer
+# types than it used to and still reporting a pass.
+[ "$rec_type_count" -ge 8 ] ||
+	rec_fail "record types listed $rec_type_count, fewer than the shipped schemas"
 
 # Add one record of every type, driving the interactive prompts from the
 # schema exactly as a person would: label first, then each field in order.
@@ -6284,7 +6289,8 @@ sys.stdout.write("  dashboard: %d typed record(s) survive a save and a delete, "
                  "and none is counted as a password\n" % len(typed))
 PYREC
 
-printf '  typed records: seven schemas add, list, view redacted, delete, and survive twenty formats field by field\n'
+printf '  typed records: %s schemas add, list, view redacted, delete, and survive twenty formats field by field\n' \
+	"$rec_type_count"
 
 # ----- typed records in the Dashboard ----------------------------------------
 # The CLI half of this shipped first and the Dashboard could only preserve the
@@ -6299,6 +6305,7 @@ printf '  typed records: seven schemas add, list, view redacted, delete, and sur
 
 python3 - "$web_script" "$ROOT_DIR" "$WEB_PORT" "$AUDIT_PASSWORD" \
 	"$PASSWORD_VAULT" "$TEST_ROOT/webrec-plain" <<'PYWEBREC'
+import base64
 import http.cookiejar
 import os
 import re
@@ -6562,10 +6569,209 @@ for record_type, record_id in made:
     assert core.find_record(plaintext, record_type, record_id) is None, \
         "the CLI still sees the %s the Dashboard deleted" % record_type
 
+# An ssh-key record shows what the core derives from the key, and still hides
+# the key. The container is built here rather than shelling out to ssh-keygen,
+# so this runs the same everywhere; that the derivation agrees with ssh-keygen
+# is pinned separately, in the core suite and in the shell block below.
+def openssh_container(public_blob):
+    def field(raw):
+        return len(raw).to_bytes(4, "big") + raw
+    raw = (b"openssh-key-v1\x00" + field(b"none") + field(b"none") + field(b"")
+           + (1).to_bytes(4, "big") + field(public_blob) + field(b"\x00" * 16))
+    body = base64.b64encode(raw).decode("ascii")
+    return ("-----BEGIN OPENSSH PRIVATE KEY-----\n"
+            + "\n".join(body[i:i + 70] for i in range(0, len(body), 70))
+            + "\n-----END OPENSSH PRIVATE KEY-----\n")
+
+pub_blob = core.ssh_public_blob_from_line(
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPlrtDmgZLIIUtf3kVUZW+av5Uc8iYx8DN"
+    "+p2wE1l+D2 plain@example")
+key_text = openssh_container(pub_blob)
+expect_fp = core.ssh_fingerprint(pub_blob)
+
+form = get("/records-add?type=ssh-key")
+url, view = post("/records-add", [
+    ("type", "ssh-key"), ("label", "web ssh derived"),
+    ("private_key", key_text), ("comment", "plain@example")], form)
+assert expect_fp in view, "the record page does not show the derived fingerprint"
+assert "ssh-ed25519" in view, "the record page does not show the derived key type"
+assert 'data-i18n="ssh.derived.t"' in view, "the derived panel is missing"
+# The public half is derived and shown; the private half is a secret and is
+# not. It reaches the page once, inside the reveal control's data-val, the
+# same way every other secret does -- so the assertion strips those attributes
+# and requires that nothing of the key survives anywhere else. Checking only
+# that the page "contains the key" would fail on a correct page, and checking
+# nothing would pass on one that printed it in the open.
+assert 'data-val="-----BEGIN OPENSSH PRIVATE KEY' in view, \
+    "the private key never reached the reveal control, so it cannot be copied"
+without_reveal = re.sub(r'data-val="[^"]*"', "", view)
+assert "PRIVATE KEY" not in without_reveal, \
+    "the record page printed the private key block outside the reveal control"
+for line in key_text.splitlines()[1:-1]:
+    assert line not in without_reveal, \
+        "the record page printed the private key body outside the reveal control"
+ssh_id = url.rsplit("id=", 1)[1]
+post("/records-delete", [("type", "ssh-key"), ("id", ssh_id)], get("/records"))
+
 sys.stdout.write("  dashboard records: %d schemas add, list, filter, view "
                  "redacted, edit, refuse and delete over HTTP, and the CLI "
                  "reads back every one\n" % len(core.RECORD_TYPES))
 PYWEBREC
+
+# ----- SSH keys, derived rather than typed ------------------------------------
+# The claim this feature rests on is that SPM derives a key's fingerprint
+# itself, matching what ssh-keygen prints, without ssh-keygen and without the
+# passphrase. Nothing in the running system would notice if that drifted -- a
+# wrong fingerprint looks exactly like a right one -- so it is checked here
+# against ssh-keygen's own answer, on keys generated for this run.
+#
+# `ssh-keygen` is used only as the oracle and to make the fixtures. SPM never
+# calls it.
+if command -v ssh-keygen >/dev/null 2>&1; then
+	SSH_LAB="$TEST_ROOT/sshkeys"
+	mkdir -p "$SSH_LAB"
+	ssh-keygen -t ed25519 -N "" -C "plain@spm.test" -f "$SSH_LAB/plain" -q
+	ssh-keygen -t ed25519 -N "regression-passphrase" -C "sealed@spm.test" \
+		-f "$SSH_LAB/sealed" -q
+	ssh-keygen -t rsa -b 2048 -N "" -C "rsa@spm.test" -f "$SSH_LAB/rsa" -q
+
+	ssh_truth_fp() { ssh-keygen -l -f "$1.pub" | awk '{print $2}'; }
+	ssh_truth_bits() { ssh-keygen -l -f "$1.pub" | awk '{print $1}'; }
+
+	for keyname in plain sealed rsa; do
+		key="$SSH_LAB/$keyname"
+		derived="$(base64 <"$key" | tr -d '\n' \
+			| python3 "$ROOT_DIR/src/spm_core.py" ssh info)"
+		got_fp="$(printf '%s\n' "$derived" \
+			| awk -F '\t' '$1=="fingerprint"{print $2}' | base64 -d)"
+		got_bits="$(printf '%s\n' "$derived" \
+			| awk -F '\t' '$1=="bits"{print $2}' | base64 -d)"
+		[ "$got_fp" = "$(ssh_truth_fp "$key")" ] || {
+			printf 'ssh: SPM derived %s for %s, ssh-keygen says %s\n' \
+				"$got_fp" "$keyname" "$(ssh_truth_fp "$key")" >&2
+			exit 1
+		}
+		[ "$got_bits" = "$(ssh_truth_bits "$key")" ] || {
+			printf 'ssh: SPM says %s bits for %s, ssh-keygen says %s\n' \
+				"$got_bits" "$keyname" "$(ssh_truth_bits "$key")" >&2
+			exit 1
+		}
+	done
+	# The sealed key is the one that matters: its fingerprint was derived
+	# without the passphrase, which is never given to anything here.
+	sealed_enc="$(base64 <"$SSH_LAB/sealed" | tr -d '\n' \
+		| python3 "$ROOT_DIR/src/spm_core.py" ssh info \
+		| awk -F '\t' '$1=="encrypted"{print $2}' | base64 -d)"
+	[ "$sealed_enc" = "1" ] || {
+		printf 'ssh: a passphrase-protected key was reported unprotected\n' >&2
+		exit 1
+	}
+
+	# Now the CLI, against a vault of its own.
+	SSH_VAULT="$TEST_ROOT/ssh-vault.gpg"
+	cp "$PASSWORD_VAULT" "$SSH_VAULT"
+	(
+		export VAULT_FILE="$SSH_VAULT" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY=""
+		export RECOVERY_FILE="$SSH_VAULT.recovery"
+		cmd_ssh import "$SSH_LAB/plain" "deploy" >/dev/null
+		cmd_ssh import "$SSH_LAB/sealed" "sealed" >/dev/null
+
+		# `ssh public` must reproduce the .pub file byte for byte: that line
+		# is pasted into authorized_keys, where a single wrong character is a
+		# lockout rather than a typo.
+		mine="$(cmd_ssh public 1)"
+		theirs="$(cat "$SSH_LAB/plain.pub")"
+		[ "$mine" = "$theirs" ] || {
+			printf 'ssh: rebuilt public line differs from ssh-keygen\n  %s\n  %s\n' \
+				"$mine" "$theirs" >&2
+			exit 1
+		}
+
+		# Every check below reads a command's output from a variable rather
+		# than piping it into grep. `grep -q` exits on its first match and
+		# closes the pipe; the command still writing gets SIGPIPE, and under
+		# `pipefail` the pipeline reports 141 -- so a pipe into `grep -q`
+		# reports failure precisely when the thing being looked for was
+		# found. The `|| exit` checks would fail on a correct build, and the
+		# `&& exit` checks below would pass on a broken one.
+		ssh_listing="$(cmd_ssh list)"
+		ssh_shown="$(cmd_ssh show 2)"
+
+		# The list shows the fingerprint ssh-keygen would print.
+		case "$ssh_listing" in
+			*"$(ssh_truth_fp "$SSH_LAB/plain")"*) ;;
+			*) printf 'ssh: list does not show the real fingerprint\n' >&2; exit 1 ;;
+		esac
+		case "$ssh_shown" in
+			*"$(ssh_truth_fp "$SSH_LAB/sealed")"*) ;;
+			*) printf 'ssh: show does not fingerprint the sealed key\n' >&2; exit 1 ;;
+		esac
+		case "$ssh_shown" in
+			*protected*) ;;
+			*) printf 'ssh: show does not say the key is passphrase-protected\n' >&2
+			   exit 1 ;;
+		esac
+
+		# The private key must never be printed by a command that does not
+		# claim to reveal it. This is the assertion that matters most here.
+		secret_line="$(sed -n '2p' "$SSH_LAB/plain")"
+		for output in "$ssh_listing" "$(cmd_ssh show 1)" "$(cmd_ssh public 1)"; do
+			case "$output" in
+				*"$secret_line"*)
+					printf 'ssh: a private key was printed in the open\n' >&2
+					exit 1
+					;;
+				*"PRIVATE KEY"*)
+					printf 'ssh: a private key block was printed in the open\n' >&2
+					exit 1
+					;;
+			esac
+		done
+
+		# And a record view masks it like any other secret, because the
+		# schema says private_key is one -- not because ssh code says so.
+		ssh_masked="$(cmd_record_view ssh-key 1)"
+		ssh_revealed="$(cmd_record_view ssh-key 1 --reveal)"
+		case "$ssh_masked" in
+			*"$secret_line"*)
+				printf 'ssh: record view revealed the private key\n' >&2
+				exit 1 ;;
+		esac
+		case "$ssh_revealed" in
+			*"$secret_line"*) ;;
+			*) printf 'ssh: --reveal did not show the private key\n' >&2; exit 1 ;;
+		esac
+	)
+
+	# A file that is not a key at all is refused rather than stored.
+	(
+		export VAULT_FILE="$SSH_VAULT" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY=""
+		export RECOVERY_FILE="$SSH_VAULT.recovery"
+		# Each refusal runs in a subshell of its own. `die` is `exit 1`,
+		# and an `exit` in an `if` condition ends the shell running it
+		# rather than yielding a status the `if` can test -- so without
+		# the extra parentheses a correct refusal would tear down this
+		# block, and errexit would call that a suite failure.
+		printf 'this is not a key\n' > "$SSH_LAB/junk"
+		if ( cmd_ssh import "$SSH_LAB/junk" "junk" ) >/dev/null 2>&1; then
+			printf 'ssh: a file that is not a key was imported\n' >&2
+			exit 1
+		fi
+		# And the .pub, which is the easy mistake: it sits beside the key,
+		# it is the file people are used to copying, and it fingerprints
+		# perfectly -- so a guard that only asks "did this fingerprint?"
+		# files it as the private half of a key and never notices.
+		if ( cmd_ssh import "$SSH_LAB/plain.pub" "oops" ) >/dev/null 2>&1; then
+			printf 'ssh: a public key was stored as a private one\n' >&2
+			exit 1
+		fi
+	)
+	printf '  ssh keys: 3 key types fingerprinted exactly as ssh-keygen prints '
+	printf 'them, sealed key included, and no private key reaches a screen\n'
+else
+	printf '  ssh keys: skipped, no ssh-keygen to check SPM against\n'
+fi
+
 # ----- line terminators in an exported custom field --------------------------
 # A custom field holding U+0085, U+2028 or U+2029 exported as valid JSON and
 # would not import back: those three are legal inside a JSON string and are
