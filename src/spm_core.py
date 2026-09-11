@@ -41,7 +41,7 @@ import urllib.request
 # without it -- quietly un-hiding an entry someone deliberately hid. Reading a
 # format-5 vault still works on 4.1.0; stamp_version is what stops it writing
 # one back.
-VAULT_FORMAT_VERSION = 5
+VAULT_FORMAT_VERSION = 6
 
 CONTAINER_MAGIC = b"SPM-VAULT-3"
 
@@ -826,6 +826,380 @@ def decode_attrs(column):
     return folder[:ATTRS_FOLDER_MAX], fields, payload.get("hidden") is True
 
 
+# ----- record sanitising -----------------------------------------------------
+# Every character str.splitlines() honours, which is eleven and not the three
+# people remember. A value carrying one of these is written as one record and
+# read back as two, so the tail becomes an orphan fragment no surface displays.
+#
+# This constant is here because there were two implementations of it and no
+# definition: `sanitize_field` in the shell collapses them with tr and sed,
+# `_vf` in the dashboard collapses them with a Python loop, and the pair of
+# them agreed only because someone kept them in step by hand. RECORD_BREAKS
+# below is a third list, for detection rather than prevention, and it omits
+# the structural three on purpose. A fourth writer -- typed records -- is what
+# made the absence of one definition worth fixing rather than noting.
+#
+# The shell keeps its own tr/sed rather than calling into here, because this
+# runs per field and a Python process per field is not free. The regression
+# suite feeds all eleven through both and fails if they disagree, which is the
+# guarantee that matters; sharing the code was never the point.
+VAULT_BREAK_CHARS = ("\t\r\n\v\f\x1c\x1d\x1e\x85"
+                     "\u2028\u2029")
+
+
+def sanitize_field(value):
+    """A value safe to write into one tab-separated, line-based record."""
+    text = "" if value is None else str(value)
+    for ch in VAULT_BREAK_CHARS:
+        text = text.replace(ch, " ")
+    return text
+
+
+# ----- typed records ---------------------------------------------------------
+# Seven record types were asked for at once -- API tokens, database
+# credentials, cards, identities, licences, Wi-Fi and servers -- and the way
+# this repository had added a record type before was a family of shell
+# commands, a set of web routes, a nav entry and a dashboard tile, per type.
+# `cmd_notes_add` through `cmd_notes_delete` is about 200 lines of shell for
+# one type; seven of those is 1,400 lines whose only difference is which
+# fields they prompt for, and seven more chances for the CLI and the Dashboard
+# to disagree about a record. 4.1.0 is what that disagreement costs: five
+# copies of the column order, all twenty export formats silently dropping
+# folders and custom fields, and no test failing because SPM was reading back
+# exactly what SPM wrote.
+#
+# So a type is data here, not code. A schema names its fields and says which
+# of them hold secrets; every surface -- add, list, view, edit, export,
+# redaction, the Security page -- reads the schema instead of knowing the
+# type. Adding an eighth type is a dict entry and its translations.
+#
+# The row is deliberately shaped like NOTE:
+#
+#     REC:<type>  <id>  <label>  <payload-b64>  <created>  <attrs>
+#
+# Six tab-separated columns, with the secret-bearing payload in field 3 --
+# where NOTE keeps its body and a password row keeps its password. That is not
+# cosmetic. `_describe_record` documents that it never reads field 3 because
+# every shape SPM writes keeps the secret there, and `scan_broken_records`
+# leans on the same column count. A seventh column, or a payload in field 2,
+# would have made both of those quietly wrong for the new types only.
+#
+# The type travels in the tag rather than inside the payload so that counting
+# records, listing one type, and describing a damaged row never require
+# decoding base64 -- and so a vault stays greppable by someone holding nothing
+# but the plaintext and `grep`.
+
+RECORD_TAG_PREFIX = "REC:"
+RECORD_TYPE_MAX = 32
+RECORD_PAYLOAD_MAX = 65536
+RECORD_VALUE_MAX = 8192
+
+# What a field is, rather than how it is drawn. "secret" is the only kind that
+# carries meaning below the interface: it decides redaction, what an export
+# masks, and what never reaches an event. Everything else is presentation.
+FIELD_PLAIN = "plain"
+FIELD_SECRET = "secret"
+
+# (name, kind, widget, required)
+RECORD_SCHEMAS = {
+    "api-token": {
+        "label": "API Token",
+        "icon": "token",
+        "fields": (
+            ("service", FIELD_PLAIN, "line", True),
+            ("token", FIELD_SECRET, "line", True),
+            ("username", FIELD_PLAIN, "line", False),
+            ("environment", FIELD_PLAIN, "line", False),
+            ("expires", FIELD_PLAIN, "date", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "db-credential": {
+        "label": "Database Credential",
+        "icon": "database",
+        "fields": (
+            ("engine", FIELD_PLAIN, "line", False),
+            ("host", FIELD_PLAIN, "line", True),
+            ("port", FIELD_PLAIN, "number", False),
+            ("database", FIELD_PLAIN, "line", False),
+            ("username", FIELD_PLAIN, "line", True),
+            ("password", FIELD_SECRET, "line", True),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "credit-card": {
+        "label": "Credit Card",
+        "icon": "card",
+        "fields": (
+            ("cardholder", FIELD_PLAIN, "line", True),
+            ("number", FIELD_SECRET, "line", True),
+            ("brand", FIELD_PLAIN, "line", False),
+            ("expiry", FIELD_PLAIN, "month", True),
+            ("cvv", FIELD_SECRET, "line", False),
+            ("pin", FIELD_SECRET, "line", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "identity": {
+        "label": "Identity Document",
+        "icon": "identity",
+        "fields": (
+            ("full_name", FIELD_PLAIN, "line", True),
+            ("document_type", FIELD_PLAIN, "line", False),
+            ("document_number", FIELD_SECRET, "line", True),
+            ("nationality", FIELD_PLAIN, "line", False),
+            ("issued", FIELD_PLAIN, "date", False),
+            ("expires", FIELD_PLAIN, "date", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "software-license": {
+        "label": "Software Licence",
+        "icon": "licence",
+        "fields": (
+            ("product", FIELD_PLAIN, "line", True),
+            ("license_key", FIELD_SECRET, "line", True),
+            ("version", FIELD_PLAIN, "line", False),
+            ("licensed_to", FIELD_PLAIN, "line", False),
+            ("seats", FIELD_PLAIN, "number", False),
+            ("purchased", FIELD_PLAIN, "date", False),
+            ("expires", FIELD_PLAIN, "date", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "wifi": {
+        "label": "Wi-Fi Network",
+        "icon": "wifi",
+        "fields": (
+            ("ssid", FIELD_PLAIN, "line", True),
+            ("password", FIELD_SECRET, "line", True),
+            ("security", FIELD_PLAIN, "line", False),
+            ("hidden_network", FIELD_PLAIN, "line", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "gpg-key": {
+        "label": "GPG Key",
+        "icon": "gpg",
+        "derive": "gpg",
+        "fields": (
+            ("private_key", FIELD_SECRET, "multiline", True),
+            ("passphrase", FIELD_SECRET, "line", False),
+            ("uids", FIELD_PLAIN, "line", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "ssh-key": {
+        "label": "SSH Key",
+        "icon": "ssh",
+        # Facts this type computes from its own values -- see record_derived.
+        # A name rather than a function, because the schemas are read before
+        # the derivations are defined and because a type staying data is the
+        # whole point of this engine.
+        "derive": "ssh",
+        "fields": (
+            # The private key is the record. Its type, size, fingerprint and
+            # public half are derived from these bytes rather than stored
+            # beside them -- see ssh_key_info -- so the record cannot come to
+            # disagree with the key it describes.
+            ("private_key", FIELD_SECRET, "multiline", True),
+            # Held so the agent can load a sealed key without prompting. A
+            # key whose passphrase lives in the same vault is no better
+            # protected than the vault, which is the trade the user makes by
+            # filling this in; leaving it empty means ssh-add asks.
+            ("passphrase", FIELD_SECRET, "line", False),
+            ("hosts", FIELD_PLAIN, "line", False),
+            ("comment", FIELD_PLAIN, "line", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "server": {
+        "label": "Server",
+        "icon": "server",
+        "fields": (
+            ("hostname", FIELD_PLAIN, "line", True),
+            ("address", FIELD_PLAIN, "line", False),
+            ("port", FIELD_PLAIN, "number", False),
+            ("username", FIELD_PLAIN, "line", True),
+            ("password", FIELD_SECRET, "line", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+}
+
+# Ordered, because a dict's order is an implementation detail and this decides
+# the order of a nav menu, a `--type` help listing and an export's rows. Sorted
+# rather than hand-listed so a new schema cannot be added to the registry and
+# forgotten here.
+RECORD_TYPES = tuple(sorted(RECORD_SCHEMAS))
+
+
+def record_tag(record_type):
+    """The row tag for a type. Raises on a type this build does not define."""
+    record_schema(record_type)
+    return RECORD_TAG_PREFIX + record_type
+
+
+def type_from_tag(tag):
+    """The type a row tag names, or "" when the tag is not a typed record.
+
+    Does not check the type against the registry: a vault written by a newer
+    SPM may hold a type this build has no schema for, and the honest answer is
+    its name rather than a refusal. Callers that need a schema ask for one.
+    """
+    if not tag.startswith(RECORD_TAG_PREFIX):
+        return ""
+    return tag[len(RECORD_TAG_PREFIX):]
+
+
+def record_schema(record_type):
+    """The schema for a type, or VaultError naming what is available."""
+    schema = RECORD_SCHEMAS.get(record_type)
+    if schema is None:
+        raise VaultError("unknown record type %r; known types are %s"
+                         % (record_type, ", ".join(RECORD_TYPES)))
+    return schema
+
+
+def record_fields(record_type):
+    """The ordered (name, kind, widget, required) tuples for a type."""
+    return record_schema(record_type)["fields"]
+
+
+def record_secret_fields(record_type):
+    """The field names that hold secrets, as a frozenset.
+
+    One definition, asked by redaction, by exports and by the event log. A
+    surface that decides for itself which of its fields are sensitive is the
+    shape of defect 4.1.0 found, and a secret is a worse thing to get wrong
+    than a folder.
+    """
+    return frozenset(name for name, kind, _w, _r in record_fields(record_type)
+                     if kind == FIELD_SECRET)
+
+
+def encode_record_payload(record_type, values):
+    """The payload column for a typed record.
+
+    Validates against the schema rather than trusting the caller: an unknown
+    field name is a typo that would otherwise be written, stored and never
+    displayed, because every surface renders the schema's fields and not the
+    payload's keys.
+    """
+    schema_fields = record_fields(record_type)
+    known = {name for name, _k, _w, _r in schema_fields}
+    values = {str(k): ("" if v is None else str(v)) for k, v in (values or {}).items()}
+    unknown = sorted(set(values) - known)
+    if unknown:
+        raise VaultError("record type %r has no field %s"
+                         % (record_type, ", ".join(repr(u) for u in unknown)))
+    for name, _kind, _widget, required in schema_fields:
+        value = values.get(name, "")
+        if required and not value.strip():
+            raise VaultError("record type %r requires a value for %r"
+                             % (record_type, name))
+        if len(value) > RECORD_VALUE_MAX:
+            raise VaultError("field %r is longer than %d characters"
+                             % (name, RECORD_VALUE_MAX))
+    # Written in schema order and skipping empties, so two records holding the
+    # same values encode to the same bytes whatever order the caller built its
+    # dict in. An export that round-trips must not change the vault.
+    payload = {name: values[name]
+               for name, _k, _w, _r in schema_fields
+               if values.get(name, "")}
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    encoded = base64.b64encode(raw.encode("utf-8")).decode("ascii")
+    if len(encoded) > RECORD_PAYLOAD_MAX:
+        raise VaultError("this record is larger than %d bytes encoded"
+                         % RECORD_PAYLOAD_MAX)
+    return encoded
+
+
+def decode_record_payload(record_type, column):
+    """{field: value} for a payload column. Never raises.
+
+    Same rule as decode_attrs: a row this build cannot fully read is still a
+    row the user should see. Refusing here would let one damaged record hide
+    every record of its type.
+
+    Unknown keys are dropped rather than kept. They can only come from a newer
+    SPM, and keeping one would let this build re-encode a record with a field
+    it cannot render -- which is the silent downgrade stamp_version exists to
+    prevent, arriving by another door.
+    """
+    try:
+        known = {name for name, _k, _w, _r in record_fields(record_type)}
+    except VaultError:
+        return {}
+    column = (column or "").strip()
+    if not column or column == "-":
+        return {}
+    try:
+        payload = json.loads(base64.b64decode(column, validate=True)
+                             .decode("utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {k: v for k, v in payload.items()
+            if k in known and isinstance(v, str)}
+
+
+SECRET_MASK = "********"
+
+
+def redact_record(record_type, values):
+    """A copy of `values` with every secret field replaced by a fixed mask.
+
+    A fixed mask rather than one sized to the value: a mask whose length
+    tracks the secret leaks the secret's length, which for a CVV or a PIN is
+    most of what there is to know.
+    """
+    secrets = record_secret_fields(record_type)
+    return {k: (SECRET_MASK if k in secrets and v else v)
+            for k, v in (values or {}).items()}
+
+
+
+def build_record_row(record_type, record_id, label, values, created,
+                     folder="", fields=None, hidden=False):
+    """One tab-separated typed-record row, sanitised and schema-checked."""
+    payload = encode_record_payload(record_type, values)
+    # A custom field may not take a schema field's name. Both cross an export
+    # in the same `fields` column and are told apart on the way back by
+    # whether the name is in the schema -- so a wifi record carrying a custom
+    # field called "password" would come back with one of the two silently
+    # gone. Refusing here is the only place that can still say which was meant.
+    shadowed = sorted({str(n).strip() for n, _v in (fields or [])}
+                      & {f for f, _k, _w, _r in record_fields(record_type)})
+    if shadowed:
+        raise VaultError(
+            "a custom field may not reuse the field name %s on a %s record"
+            % (", ".join(repr(name) for name in shadowed), record_type))
+    attrs = encode_attrs(folder=folder, fields=fields, hidden=hidden)
+    return "\t".join((record_tag(record_type), str(record_id),
+                      sanitize_field(label), payload, str(created),
+                      attrs or "-"))
+
+
+def parse_record_row(line):
+    """(type, id, label, values, created, folder, fields, hidden) or None.
+
+    None for any line that is not a typed record, so a caller can walk a whole
+    vault and let this decide.
+    """
+    parts = line.split("\t")
+    if len(parts) < 5:
+        return None
+    record_type = type_from_tag(parts[0])
+    if not record_type or record_type not in RECORD_SCHEMAS:
+        return None
+    values = decode_record_payload(record_type, parts[3])
+    folder, custom, hidden = decode_attrs(parts[5] if len(parts) > 5 else "")
+    return (record_type, parts[1], parts[2], values, parts[4],
+            folder, custom, hidden)
+
+
 # The column order every export writes and every headerless or positional
 # reader maps against. One ordered definition, because the places that had
 # their own each stopped at a different column: the SQL writer named eight
@@ -841,6 +1215,591 @@ def export_row_from_values(values):
     return {name: (values[index] if index < len(values) else "")
             for index, name in enumerate(EXPORT_FIELDNAMES)}
 
+
+# ----- SSH keys --------------------------------------------------------------
+# What SPM can say about a stored SSH key without being handed its passphrase.
+#
+# The roadmap asks for the public key, the fingerprint and the key type to be
+# stored beside the private key. They are derived here instead. A fingerprint
+# is the one field a user cannot check by eye -- it exists to be compared
+# against what a server presents -- and a typed one that is wrong is worse
+# than none at all, because it confirms the wrong key. Deriving it means the
+# record cannot disagree with the key it describes.
+#
+# openssh-key-v1 makes that cheap. The container keeps the public key in the
+# clear even when the private half is sealed, so the fingerprint of a
+# passphrase-protected key is readable without the passphrase -- the case that
+# matters most, since that is the key whose bytes an owner is least able to
+# inspect by hand. No ssh-keygen, no temporary file, no prompt: the derivation
+# is arithmetic over bytes the vault already holds.
+
+SSH_MAGIC = b"openssh-key-v1\x00"
+SSH_OPENSSH_HEAD = "-----BEGIN OPENSSH PRIVATE KEY-----"
+SSH_PEM_HEADS = (
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "-----BEGIN DSA PRIVATE KEY-----",
+    "-----BEGIN EC PRIVATE KEY-----",
+    "-----BEGIN PRIVATE KEY-----",
+    "-----BEGIN ENCRYPTED PRIVATE KEY-----",
+)
+# The prefixes an authorized_keys line starts with. sk- covers the FIDO2
+# resident keys OpenSSH 8.2 added, which are public keys like any other here.
+SSH_PUBLIC_PREFIXES = ("ssh-", "ecdsa-", "sk-")
+
+SSH_FORMAT_OPENSSH = "openssh"
+SSH_FORMAT_PEM = "pem"
+SSH_FORMAT_PUBLIC = "public"
+SSH_FORMAT_UNKNOWN = "unknown"
+
+
+def _ssh_field(blob, offset):
+    """One length-prefixed field of an SSH structure, and the offset past it.
+
+    Every length is checked against what is actually there. These bytes come
+    out of a vault, but a vault holds what a user pasted into it, and a length
+    header trusted blindly is how a truncated key becomes a slice of unrelated
+    memory rather than an error message.
+    """
+    if offset + 4 > len(blob):
+        raise ValueError("truncated SSH key structure")
+    length = int.from_bytes(blob[offset:offset + 4], "big")
+    offset += 4
+    if length > len(blob) - offset:
+        raise ValueError("truncated SSH key structure")
+    return blob[offset:offset + length], offset + length
+
+
+def ssh_public_blob(private_key):
+    """(public blob, cipher name) from an OpenSSH private key, undecrypted.
+
+    The cipher is "none" for a key stored in the clear; anything else names
+    what the private half is sealed under, which is how the agent path decides
+    whether it needs a passphrase before it asks for one.
+    """
+    body = "".join(line.strip() for line in (private_key or "").splitlines()
+                   if "-----" not in line)
+    raw = base64.b64decode(body)
+    if not raw.startswith(SSH_MAGIC):
+        raise ValueError("not an openssh-key-v1 private key")
+    offset = len(SSH_MAGIC)
+    cipher, offset = _ssh_field(raw, offset)
+    _kdf, offset = _ssh_field(raw, offset)
+    _kdf_options, offset = _ssh_field(raw, offset)
+    if offset + 4 > len(raw):
+        raise ValueError("truncated SSH key structure")
+    count = int.from_bytes(raw[offset:offset + 4], "big")
+    offset += 4
+    if count < 1:
+        raise ValueError("the key file declares no keys")
+    public, _offset = _ssh_field(raw, offset)
+    return public, cipher.decode("ascii", "replace")
+
+
+def ssh_public_blob_from_line(line):
+    """The blob inside an authorized_keys line, checked against its own name.
+
+    A line names its algorithm twice -- once as text and once inside the blob
+    -- and they have to agree. A line whose halves disagree would fingerprint
+    as one key while reading as another.
+    """
+    parts = (line or "").split()
+    if len(parts) < 2:
+        raise ValueError("not an SSH public key line")
+    blob = base64.b64decode(parts[1])
+    named, _offset = _ssh_field(blob, 0)
+    if named.decode("ascii", "replace") != parts[0]:
+        raise ValueError("the key line and the key data name different types")
+    return blob
+
+
+def ssh_fingerprint(public_blob):
+    """The SHA256 fingerprint, in the form `ssh-keygen -l` prints it."""
+    digest = hashlib.sha256(public_blob).digest()
+    return "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
+
+
+def ssh_key_type(public_blob):
+    """The algorithm named inside a public blob."""
+    algorithm, _offset = _ssh_field(public_blob, 0)
+    return algorithm.decode("ascii", "replace")
+
+
+def ssh_key_bits(public_blob):
+    """The size `ssh-keygen -l` reports, or 0 for a type not known here.
+
+    Zero is a real answer rather than a failure: a key type this build has
+    never heard of still has a fingerprint, and reporting no size is honest
+    where guessing one is not.
+    """
+    algorithm, offset = _ssh_field(public_blob, 0)
+    name = algorithm.decode("ascii", "replace")
+    if name in ("ssh-ed25519", "sk-ssh-ed25519@openssh.com"):
+        return 256
+    if name == "ssh-dss":
+        return 1024
+    if name.startswith("ecdsa-sha2-nistp"):
+        digits = name[len("ecdsa-sha2-nistp"):].split("@")[0]
+        return int(digits) if digits.isdigit() else 0
+    if name == "ssh-rsa":
+        _exponent, offset = _ssh_field(public_blob, offset)
+        modulus, _offset = _ssh_field(public_blob, offset)
+        # The bit length of the modulus, not its byte count: an RSA modulus
+        # carries a leading zero byte whenever its top bit is set, and
+        # counting bytes would report 2056 bits for a 2048-bit key.
+        return int.from_bytes(modulus, "big").bit_length()
+    return 0
+
+
+def ssh_public_line(public_blob, comment=""):
+    """The one-line authorized_keys form of a public key."""
+    line = "%s %s" % (ssh_key_type(public_blob),
+                      base64.b64encode(public_blob).decode("ascii"))
+    comment = " ".join((comment or "").split())
+    return line + (" " + comment if comment else "")
+
+
+def ssh_key_info(text, comment=""):
+    """Everything SPM can derive from a stored SSH key, without a passphrase.
+
+    Every key of the result is always present, even when it could not be
+    filled in, so a surface renders one shape instead of testing for absent
+    keys. An unreadable key is not an error either: SPM stores what it is
+    given, and a key in a format this build cannot parse is still a key its
+    owner wants kept. `problem` says why a field is empty, so the answer on
+    screen is a reason rather than a blank.
+    """
+    info = {"format": SSH_FORMAT_UNKNOWN, "type": "", "bits": 0,
+            "fingerprint": "", "public": "", "encrypted": False,
+            "problem": ""}
+    text = (text or "").strip()
+    if not text:
+        info["problem"] = "no key stored"
+        return info
+    try:
+        if text.startswith(SSH_PUBLIC_PREFIXES):
+            blob = ssh_public_blob_from_line(text)
+            info["format"] = SSH_FORMAT_PUBLIC
+        elif SSH_OPENSSH_HEAD in text:
+            blob, cipher = ssh_public_blob(text)
+            info["format"] = SSH_FORMAT_OPENSSH
+            info["encrypted"] = cipher != "none"
+        elif text.startswith(SSH_PEM_HEADS):
+            info["format"] = SSH_FORMAT_PEM
+            # A PEM key hides its public half behind the same encryption as
+            # its private one, so there is nothing to derive without the
+            # passphrase. Said plainly rather than reported as corruption:
+            # the key is fine, this format just does not answer the question.
+            info["encrypted"] = ("ENCRYPTED" in text.split("\n", 1)[0]
+                                 or "Proc-Type: 4,ENCRYPTED" in text)
+            info["problem"] = ("a PEM key does not carry its public half in "
+                               "the clear; convert it with "
+                               "`ssh-keygen -p -m RFC4716` to derive one")
+            return info
+        else:
+            info["problem"] = "unrecognised SSH key format"
+            return info
+    except Exception as failure:                      # noqa: BLE001
+        # Anything a malformed key can raise -- bad base64, a truncated
+        # structure, a length that overruns -- is the same answer to the
+        # caller: this text is not a key SPM can read.
+        info["problem"] = str(failure) or "the key could not be read"
+        return info
+    info["type"] = ssh_key_type(blob)
+    info["bits"] = ssh_key_bits(blob)
+    info["fingerprint"] = ssh_fingerprint(blob)
+    info["public"] = ssh_public_line(blob, comment)
+    return info
+
+
+# ----- OpenPGP keys -----------------------------------------------------------
+# The same shape as the SSH section above, and true for the same reason: an
+# OpenPGP secret key carries its public half in the clear. A Secret-Key packet
+# is a Public-Key packet with the secret material appended, and the fingerprint
+# is a hash of only the public part -- so SPM can name a stored key without the
+# passphrase, without gpg, and without writing anything to disk.
+#
+# Checked against gpg's own answer for RSA 2048 and 4096, ed25519 sealed and
+# unsealed, ECDSA nistp256 and an ECDH cv25519 subkey.
+
+PGP_ARMOR_HEAD = "-----BEGIN PGP "
+PGP_TAG_SECRET_KEY = 5
+PGP_TAG_PUBLIC_KEY = 6
+PGP_TAG_SECRET_SUBKEY = 7
+PGP_TAG_USER_ID = 13
+PGP_TAG_PUBLIC_SUBKEY = 14
+PGP_PRIMARY_TAGS = (PGP_TAG_SECRET_KEY, PGP_TAG_PUBLIC_KEY)
+PGP_SUBKEY_TAGS = (PGP_TAG_SECRET_SUBKEY, PGP_TAG_PUBLIC_SUBKEY)
+
+PGP_ALGORITHMS = {1: "RSA", 2: "RSA", 3: "RSA", 16: "Elgamal", 17: "DSA",
+                  18: "ECDH", 19: "ECDSA", 22: "EdDSA", 25: "X25519",
+                  27: "Ed25519", 28: "X448", 29: "Ed448"}
+
+# Curve OIDs as they appear in a key packet, by their hex bytes.
+PGP_CURVES = {
+    "2b06010401da470f01": "ed25519",
+    "2b060104019755010501": "cv25519",
+    "2a8648ce3d030107": "nistp256",
+    "2b81040022": "nistp384",
+    "2b81040023": "nistp521",
+    "2b8104000a": "secp256k1",
+    "2b2403030208010107": "brainpoolP256r1",
+    "2b240303020801010b": "brainpoolP384r1",
+    "2b240303020801010d": "brainpoolP512r1",
+}
+# The size a curve *means*, as against the length of a point encoded on it.
+PGP_CURVE_BITS = {"ed25519": 255, "cv25519": 255, "nistp256": 256,
+                  "nistp384": 384, "nistp521": 521, "secp256k1": 256,
+                  "brainpoolP256r1": 256, "brainpoolP384r1": 384,
+                  "brainpoolP512r1": 512}
+
+
+def pgp_dearmor(text):
+    """The bytes inside an ASCII-armored block.
+
+    Armor headers ("Version: ...") and the trailing =CRC24 line are not part
+    of the data and are dropped; everything between the BEGIN and END lines
+    that is neither is base64.
+    """
+    body = []
+    inside = False
+    seen_blank = False
+    for line in (text or "").replace("\r\n", "\n").split("\n"):
+        if line.startswith(PGP_ARMOR_HEAD):
+            inside = True
+            continue
+        if line.startswith("-----END PGP "):
+            break
+        if not inside:
+            continue
+        if not line.strip():
+            seen_blank = True
+            continue
+        if line.startswith("="):            # CRC24 checksum, not data
+            continue
+        if not seen_blank and ": " in line:  # an armor header
+            continue
+        body.append(line.strip())
+    if not body:
+        raise VaultError("no armored data between the BEGIN and END lines")
+    return base64.b64decode("".join(body))
+
+
+def pgp_packets(data):
+    """(tag, body) for each packet, in order, in both header formats."""
+    offset = 0
+    while offset < len(data):
+        first = data[offset]
+        if not first & 0x80:
+            raise VaultError("this is not an OpenPGP packet stream")
+        if first & 0x40:                                  # RFC 4880 new format
+            tag = first & 0x3F
+            offset += 1
+            if offset >= len(data):
+                raise VaultError("the key ends where a length should be")
+            marker = data[offset]
+            if marker < 192:
+                length = marker
+                offset += 1
+            elif marker < 224:
+                if offset + 1 >= len(data):
+                    raise VaultError("the key ends inside a length")
+                length = ((marker - 192) << 8) + data[offset + 1] + 192
+                offset += 2
+            elif marker == 255:
+                if offset + 5 > len(data):
+                    raise VaultError("the key ends inside a length")
+                length = int.from_bytes(data[offset + 1:offset + 5], "big")
+                offset += 5
+            else:
+                # A partial body length streams a packet in chunks. Nothing
+                # that exports a key writes one, and guessing at the rest
+                # would be inventing data.
+                raise VaultError("partial packet lengths are not supported")
+        else:                                             # old format
+            tag = (first & 0x3C) >> 2
+            kind = first & 0x03
+            offset += 1
+            if kind == 0:
+                if offset >= len(data):
+                    raise VaultError("the key ends where a length should be")
+                length = data[offset]
+                offset += 1
+            elif kind == 1:
+                if offset + 2 > len(data):
+                    raise VaultError("the key ends inside a length")
+                length = int.from_bytes(data[offset:offset + 2], "big")
+                offset += 2
+            elif kind == 2:
+                if offset + 4 > len(data):
+                    raise VaultError("the key ends inside a length")
+                length = int.from_bytes(data[offset:offset + 4], "big")
+                offset += 4
+            else:
+                raise VaultError("indeterminate packet lengths are not supported")
+        yield tag, data[offset:offset + length]
+        offset += length
+
+
+def _pgp_mpi(body, offset):
+    """Step over one multiprecision integer; return the new offset and bits.
+
+    Bounds-checked on both sides. Slicing past the end of a bytes object does
+    not raise in Python -- it returns something shorter -- so an unchecked
+    walk over a truncated key runs off the end, hashes a short slice, and
+    produces a fingerprint that is wrong and looks exactly like a right one.
+    A fingerprint is the thing you check to know which key you are holding,
+    so being confidently wrong is worse than admitting the key is unreadable.
+    """
+    if offset + 2 > len(body):
+        raise VaultError("the key ends inside a length")
+    bits = int.from_bytes(body[offset:offset + 2], "big")
+    size = (bits + 7) // 8
+    if offset + 2 + size > len(body):
+        raise VaultError("the key ends inside a value")
+    return offset + 2 + size, bits
+
+
+def pgp_public_material(body):
+    """(length of the public material, algorithm id, bits, curve name).
+
+    The length is what the fingerprint is taken over, and it is also where a
+    Secret-Key packet's protection byte begins.
+    """
+    if len(body) < 6:
+        raise VaultError("the key packet is too short to be one")
+    version = body[0]
+    if version not in (4, 6):
+        raise VaultError("unsupported key version %d" % version)
+    algorithm = body[5]
+    # A v6 packet counts its own public material in four bytes before it.
+    offset = 6 if version == 4 else 10
+    bits = 0
+    if algorithm in (1, 2, 3):                    # RSA: modulus, exponent
+        offset, bits = _pgp_mpi(body, offset)
+        offset, _ = _pgp_mpi(body, offset)
+    elif algorithm == 17:                         # DSA: p, q, g, y
+        offset, bits = _pgp_mpi(body, offset)
+        for _ in range(3):
+            offset, _ = _pgp_mpi(body, offset)
+    elif algorithm == 16:                         # Elgamal: p, g, y
+        offset, bits = _pgp_mpi(body, offset)
+        for _ in range(2):
+            offset, _ = _pgp_mpi(body, offset)
+    elif algorithm in (18, 19, 22):               # ECDH / ECDSA / EdDSA
+        if offset >= len(body):
+            raise VaultError("the key ends where the curve should be")
+        oid_length = body[offset]
+        if offset + 1 + oid_length > len(body):
+            raise VaultError("the key ends inside the curve name")
+        curve = PGP_CURVES.get(body[offset + 1:offset + 1 + oid_length].hex(), "")
+        offset += 1 + oid_length
+        offset, point_bits = _pgp_mpi(body, offset)
+        if algorithm == 18:                       # ECDH carries KDF parameters
+            if offset >= len(body) or offset + 1 + body[offset] > len(body):
+                raise VaultError("the key ends inside the KDF parameters")
+            offset += 1 + body[offset]
+        # The MPI holds an encoded point, not a number, so its bit length is
+        # the point's and not the curve's: an Ed25519 point measures 263, a
+        # number that looks like a key size and is not one. The curve is the
+        # honest answer to "how big is this key", and it is what gpg reports.
+        return offset, algorithm, PGP_CURVE_BITS.get(curve, 0) or point_bits, curve
+    elif algorithm in (25, 27, 28, 29):           # v6 native, fixed width
+        width = 56 if algorithm in (28, 29) else 32
+        if offset + width > len(body):
+            raise VaultError("the key ends inside the public key")
+        return offset + width, algorithm, width * 8, PGP_ALGORITHMS[algorithm].lower()
+    else:
+        raise VaultError("unsupported public key algorithm %d" % algorithm)
+    return offset, algorithm, bits, ""
+
+
+def pgp_fingerprint(body):
+    """The fingerprint of one key packet, as gpg prints it."""
+    # pgp_public_material walks the packet with a bounds check on every read,
+    # so length is already known not to exceed the body -- there is no second
+    # check here on purpose. A redundant guard would be a line no test could
+    # make fail, which is the same as a line that is not pulling its weight.
+    length, _algorithm, _bits, _curve = pgp_public_material(body)
+    material = body[:length]
+    if body[0] == 4:
+        digest = hashlib.sha1(
+            b"\x99" + len(material).to_bytes(2, "big") + material)
+    else:
+        digest = hashlib.sha256(
+            b"\x9b" + len(material).to_bytes(4, "big") + material)
+    return digest.hexdigest().upper()
+
+
+def pgp_key_id(fingerprint):
+    """The long key id: the last 16 hex digits of the fingerprint."""
+    return fingerprint[-16:]
+
+
+def pgp_is_sealed(body):
+    """Whether a Secret-Key packet's secret half is passphrase-protected.
+
+    The octet after the public material says so, and reading it costs nothing:
+    0 means the secret is stored in the clear, anything else means protected.
+    No passphrase is attempted to find this out, the same way the SSH side
+    reads a cipher name rather than trying it.
+    """
+    length, _algorithm, _bits, _curve = pgp_public_material(body)
+    if length >= len(body):
+        raise VaultError("the key ends where its protection should be")
+    return body[length] != 0
+
+
+def pgp_key_info(text):
+    """Everything SPM can derive from a stored OpenPGP key, without gpg.
+
+    Every key of the result is always present, so a surface renders one shape
+    rather than testing for absent keys, and `problem` says why a field is
+    empty. A key SPM cannot read is not an error: it is still a key its owner
+    wants kept, and the answer on screen is a reason rather than a blank.
+    """
+    info = {"fingerprint": "", "keyid": "", "algorithm": "", "bits": 0,
+            "curve": "", "created": "", "uids": "", "subkeys": 0,
+            "secret": False, "encrypted": False, "problem": ""}
+    text = (text or "").strip()
+    if not text:
+        info["problem"] = "no key stored"
+        return info
+    if PGP_ARMOR_HEAD not in text:
+        info["problem"] = "this is not an ASCII-armored OpenPGP key"
+        return info
+    try:
+        data = pgp_dearmor(text)
+        primary = None
+        uids = []
+        for tag, body in pgp_packets(data):
+            if tag in PGP_PRIMARY_TAGS and primary is None:
+                primary = (tag, body)
+            elif tag in PGP_SUBKEY_TAGS:
+                info["subkeys"] += 1
+            elif tag == PGP_TAG_USER_ID:
+                uids.append(body.decode("utf-8", "replace"))
+        if primary is None:
+            info["problem"] = "the armor holds no key packet"
+            return info
+        tag, body = primary
+        info["secret"] = tag == PGP_TAG_SECRET_KEY
+        length, algorithm, bits, curve = pgp_public_material(body)
+        info["fingerprint"] = pgp_fingerprint(body)
+        info["keyid"] = pgp_key_id(info["fingerprint"])
+        info["algorithm"] = PGP_ALGORITHMS.get(algorithm, str(algorithm))
+        info["bits"] = bits
+        info["curve"] = curve
+        info["created"] = _iso_from_epoch(int.from_bytes(body[1:5], "big"))
+        info["uids"] = ", ".join(uids)
+        if info["secret"]:
+            info["encrypted"] = pgp_is_sealed(body)
+        del length
+    except VaultError as failure:
+        info["problem"] = str(failure)
+        return info
+    except Exception as failure:                      # noqa: BLE001
+        # Bad base64, a length that overruns, a packet stream that is not one:
+        # to the caller these are all the same answer, and the answer is not a
+        # traceback.
+        info["problem"] = str(failure) or "the key could not be read"
+        return info
+    return info
+
+
+def _iso_from_epoch(seconds):
+    try:
+        return time.strftime("%Y-%m-%d", time.gmtime(seconds))
+    except Exception:                                 # noqa: BLE001
+        return ""
+
+
+# ----- derived record facts ---------------------------------------------------
+# Some record types can say more about themselves than they were told. An SSH
+# key knows its own type, size and fingerprint; a surface should be able to
+# show that without knowing what an SSH key is.
+#
+# A type opts in with a "derive" name in its schema and the function lands in
+# the registry below, so this stays a dictionary lookup rather than a branch
+# per type -- the same rule the rest of the engine follows, and the reason
+# adding a type is still a dictionary entry.
+
+
+def _derived_ssh(values):
+    info = ssh_key_info(values.get("private_key", ""),
+                        comment=values.get("comment", ""))
+    rows = []
+    if info["type"]:
+        rows.append(("ssh.type", "Type", info["type"]))
+    if info["bits"]:
+        rows.append(("ssh.bits", "Size", "%d" % info["bits"]))
+    if info["fingerprint"]:
+        rows.append(("ssh.fingerprint", "Fingerprint", info["fingerprint"]))
+    if info["public"]:
+        rows.append(("ssh.public", "Public key", info["public"]))
+    if info["encrypted"]:
+        rows.append(("ssh.sealed",
+                     "The private half is passphrase-protected", ""))
+    if info["problem"]:
+        rows.append(("ssh.unreadable",
+                     "SPM cannot derive anything from this key",
+                     info["problem"]))
+    return rows
+
+
+def _derived_gpg(values):
+    info = pgp_key_info(values.get("private_key", ""))
+    rows = []
+    if info["fingerprint"]:
+        rows.append(("gpg.fingerprint", "Fingerprint", info["fingerprint"]))
+        rows.append(("gpg.keyid", "Key ID", info["keyid"]))
+    if info["algorithm"]:
+        size = info["curve"] or ("%d" % info["bits"] if info["bits"] else "")
+        rows.append(("gpg.algorithm", "Algorithm",
+                     ("%s %s" % (info["algorithm"], size)).strip()))
+    if info["created"]:
+        rows.append(("gpg.created", "Created", info["created"]))
+    if info["uids"]:
+        rows.append(("gpg.uids", "Identities", info["uids"]))
+    if info["subkeys"]:
+        rows.append(("gpg.subkeys", "Subkeys", "%d" % info["subkeys"]))
+    if not info["secret"] and info["fingerprint"]:
+        rows.append(("gpg.publiconly",
+                     "This is a public key: it cannot sign or decrypt", ""))
+    if info["encrypted"]:
+        rows.append(("gpg.sealed",
+                     "The secret half is passphrase-protected", ""))
+    if info["problem"]:
+        rows.append(("gpg.unreadable",
+                     "SPM cannot derive anything from this key",
+                     info["problem"]))
+    return rows
+
+
+RECORD_DERIVERS = {"ssh": _derived_ssh, "gpg": _derived_gpg}
+
+
+def record_derived(record_type, values):
+    """(i18n key, English label, value) rows computed from a record's values.
+
+    Never a secret. Everything here is derived from a secret but is itself
+    publishable -- a fingerprint and a public key are meant to be handed out,
+    which is what makes deriving them worth doing. A deriver that wanted to
+    return a secret would be returning the stored value with extra steps.
+    """
+    deriver = RECORD_DERIVERS.get(record_derive_name(record_type))
+    return deriver(values or {}) if deriver else []
+
+
+def record_derive_name(record_type):
+    """The deriver a type opts into, or "" for a type that derives nothing.
+
+    Surfaces need this as well as the rows: the panel they draw is titled for
+    the thing it was derived from, and "Derived from the key" is the SSH
+    wording, not a universal one. Reading the name here keeps the title a
+    lookup like everything else, so the next deriver is still one dictionary
+    entry and its translations.
+    """
+    return RECORD_SCHEMAS.get(record_type, {}).get("derive", "")
 
 # ----- attributes across an export -------------------------------------------
 # A folder and its custom fields cross an export as their own readable columns
@@ -933,6 +1892,75 @@ def attrs_from_export_row(row):
         return encode_attrs(folder, fields, hidden)
     except Exception:
         return ""
+
+
+def iter_records(plaintext, record_type=""):
+    """(line_index, parsed) for every typed record row, in vault order.
+
+    The index is the caller's half of a rewrite: the dashboard edits and
+    deletes by replacing one line of the plaintext it already holds, and a
+    surface that searched for its own row again by id would be a second
+    definition of which row an id names.
+
+    `record_type` narrows to one type. Ids are per type, so a caller holding
+    only an id is holding half an address; every route that takes one takes
+    the type with it.
+    """
+    for index, line in enumerate((plaintext or "").splitlines()):
+        if not line.startswith(RECORD_TAG_PREFIX):
+            continue
+        parsed = parse_record_row(line)
+        if parsed is None:
+            continue
+        if record_type and parsed[0] != record_type:
+            continue
+        yield index, parsed
+
+
+def find_record(plaintext, record_type, record_id):
+    """(line_index, parsed) for one record, or None.
+
+    Both halves of the address are required. A lookup by id alone would find
+    the wifi record when the caller meant the server one, because each type
+    counts from one.
+    """
+    for index, parsed in iter_records(plaintext, record_type):
+        if parsed[1] == str(record_id):
+            return index, parsed
+    return None
+
+
+def record_next_id(plaintext, record_type):
+    """The next free id for a type, as a string.
+
+    Ids are allocated per type, so wifi 1 and server 1 both exist and each
+    type counts from one. A single sequence across types would make an id
+    meaningless without its type anyway, and would renumber nothing while
+    looking like it might.
+
+    A row whose id is not a number is ignored rather than refused: it cannot
+    have been written by this code, and refusing here would mean one damaged
+    row stopped every new record of its type from being added.
+    """
+    highest = 0
+    for _index, parsed in iter_records(plaintext, record_type):
+        if parsed[1].isdigit():
+            highest = max(highest, int(parsed[1]))
+    return str(highest + 1)
+
+
+def record_counts(plaintext):
+    """{type: n} for the types present, plus "" -> the total.
+
+    The total is carried here rather than summed by each caller because the
+    nav badge and the overview tile disagreeing about how many records a
+    vault holds is the class of defect a shared core exists to prevent.
+    """
+    counts = {"": 0}
+    for _index, parsed in iter_records(plaintext):
+        counts[parsed[0]] = counts.get(parsed[0], 0) + 1
+        counts[""] += 1
+    return counts
 
 
 def record_folders(plaintext):
@@ -1159,6 +2187,17 @@ def archive_generation(vault_path):
         os.chmod(target, 0o700)
         with open(vault_path, "rb") as handle:
             digest = hashlib.sha256(handle.read()).hexdigest()[:12]
+        # A snapshot is named for the ciphertext it captures, so an unchanged
+        # vault is one undo point however often it is archived. The name alone
+        # cannot enforce that: it also carries the second and the pid, so two
+        # archives of identical bytes that straddle a second tick used to land
+        # as two files. Retention counts files, so the duplicate evicts the
+        # oldest genuinely different generation -- history quietly gets
+        # shorter than it says it is. Match on the digest instead: it is the
+        # part of the name that means "this ciphertext".
+        if any(name.endswith(".%s.gpg" % digest) for name in os.listdir(target)):
+            _prune(target, ".gpg", _retention())
+            return
         stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
         snapshot = os.path.join(
             target, "%s.%d.%s.gpg" % (stamp, os.getpid(), digest))
@@ -3093,6 +4132,73 @@ def security_report(plaintext, rotation_days=365, check_breaches=False,
     return report
 
 
+# ----- typed records across an export ----------------------------------------
+# A record that cannot leave is a record you do not own, and this project has
+# already paid for finding that out late: until 4.1.0 every one of the twenty
+# export formats dropped folders and custom fields silently, because the CLI
+# and the dashboard each had their own idea of the column order. So the
+# crossing is defined once, here, and both surfaces call it.
+#
+# No new column. A typed record's fields ride the `fields` column that custom
+# fields already use -- it is JSON name/value pairs, meant to be read in a
+# spreadsheet -- and the `type` column, which every export has always carried,
+# is what says whether to read them back as schema fields or as custom ones.
+# Adding a thirteenth column would have broken every headerless and positional
+# reader, which is exactly the class of defect EXPORT_FIELDNAMES exists to
+# prevent.
+
+def record_export_row(record_type, record_id, label, values, created,
+                      folder="", custom=None, hidden=False):
+    """One export row for a typed record.
+
+    Schema fields and custom fields are merged into `fields` in that order.
+    They can be told apart again on the way back because a schema field's name
+    is in the schema and a custom one's is not, which is why build_record_row
+    refuses a custom field that shadows a schema field name.
+    """
+    merged = [{"name": name, "value": values[name]}
+              for name, _k, _w, _r in record_fields(record_type)
+              if values.get(name)]
+    merged += [{"name": n, "value": v} for n, v in (custom or [])]
+    return {
+        "type": record_type,
+        "id": str(record_id),
+        "label": label,
+        "username": "",
+        "secret": "",
+        "notes": "",
+        "created": created,
+        "extra": "",
+        "url": "",
+        "folder": folder,
+        "fields": json_line_safe(merged) if merged else "",
+        "hidden": "1" if hidden else "",
+    }
+
+
+def record_from_export_row(row):
+    """(type, values, custom) for an export row, or None if it is not typed.
+
+    Tolerant in the same way attrs_from_export_row is, and for the same
+    reason: an import is where rows arrive from software that never heard of
+    this format. A value that does not belong to the schema becomes a custom
+    field rather than being dropped, because a name this build does not know
+    may be a field a newer SPM does.
+    """
+    record_type = str(row.get("type", "") or "").strip()
+    if record_type not in RECORD_SCHEMAS:
+        return None
+    _folder, pairs, _hidden = decode_attrs(attrs_from_export_row(row))
+    known = {name for name, _k, _w, _r in record_fields(record_type)}
+    values, custom = {}, []
+    for name, value in pairs:
+        if name in known:
+            values[name] = value
+        else:
+            custom.append((name, value))
+    return record_type, values, custom
+
+
 # ----- diagnostics -----------------------------------------------------------
 
 # Characters that splitlines() honours but a TAB-delimited, line-based record
@@ -3125,6 +4231,15 @@ def _describe_record(line):
                 parts[2] if len(parts) > 2 else "")
     if tag.isdigit():
         return "PASSWORD", tag, (parts[1] if len(parts) > 1 else "")
+    typed = type_from_tag(tag)
+    if typed:
+        # The type comes from the tag, so a damaged typed record is still
+        # described by what it is. Reading it out of the payload would mean
+        # decoding field 3, which is the one field this function must not
+        # touch.
+        return (typed.upper(),
+                parts[1] if len(parts) > 1 else "?",
+                parts[2] if len(parts) > 2 else "")
     return tag or "(unknown)", "?", ""
 
 
@@ -3180,7 +4295,8 @@ def looks_like_vault(plaintext):
     """
     for line in plaintext.split("\n"):
         tag = line.split("\t", 1)[0]
-        if tag.startswith("META_") or tag in _RECORD_TAGS or tag.isdigit():
+        if (tag.startswith("META_") or tag in _RECORD_TAGS or tag.isdigit()
+                or tag.startswith(RECORD_TAG_PREFIX)):
             return True
     return False
 
@@ -3188,9 +4304,17 @@ def looks_like_vault(plaintext):
 def vault_counts(plaintext):
     """Record counts, duplicate password ids and empty password fields."""
     counts = {"passwords": 0, "notes": 0, "passphrases": 0,
-              "backup_codes": 0, "authenticators": 0}
+              "backup_codes": 0, "authenticators": 0, "records": 0}
     by_tag = {"NOTE": "notes", "PASSPHRASE": "passphrases",
               "BACKUP_CODE": "backup_codes", "AUTH": "authenticators"}
+    # Per-type counts share the dict rather than becoming a fourth return
+    # value, and every value in it stays an int. A caller that asked for
+    # counts["passwords"] before still gets a number, and one that wants a
+    # breakdown asks for counts["type:wifi"]. A nested dict here would have
+    # made `counts` a mixed bag whose every consumer needs to know which keys
+    # are numbers.
+    for known in RECORD_TYPES:
+        counts["type:" + known] = 0
     seen, duplicates, empty = {}, [], 0
     for line in plaintext.splitlines():
         if not line or line.startswith("#"):
@@ -3199,6 +4323,14 @@ def vault_counts(plaintext):
         tag = parts[0]
         if tag in by_tag:
             counts[by_tag[tag]] += 1
+        elif tag.startswith(RECORD_TAG_PREFIX):
+            counts["records"] += 1
+            # Counted even when this build has no schema for it, because a
+            # vault written by a newer SPM holding six records this one cannot
+            # render still holds six records, and reporting five would be a
+            # lie told by a diagnostic.
+            key = "type:" + type_from_tag(tag)
+            counts[key] = counts.get(key, 0) + 1
         elif tag.isdigit():
             counts["passwords"] += 1
             seen[tag] = seen.get(tag, 0) + 1
@@ -3399,6 +4531,43 @@ def _secrets(count):
     return fields[:count]
 
 
+def _b64(text):
+    """base64 of a value, for the line-based shell interface."""
+    return base64.b64encode(("" if text is None else str(text))
+                            .encode("utf-8")).decode("ascii")
+
+
+def _flag_value(args, flag, default=""):
+    """The argument after `flag`, or `default` when it is absent."""
+    if flag in args:
+        index = args.index(flag) + 1
+        if index < len(args):
+            return args[index]
+    return default
+
+
+def _record_values_in():
+    """{field: value} from "field<TAB>base64(value)" lines on stdin.
+
+    A malformed line is refused rather than skipped. Skipping would drop a
+    field the user typed and report success, which for a record they will
+    later rely on is the worst of the available outcomes.
+    """
+    values = {}
+    for line in sys.stdin.read().split("\n"):
+        if not line.strip():
+            continue
+        if "\t" not in line:
+            raise VaultError("malformed field line: expected NAME<TAB>base64")
+        name, encoded = line.split("\t", 1)
+        try:
+            values[name] = base64.b64decode(encoded.strip(),
+                                            validate=True).decode("utf-8")
+        except Exception:
+            raise VaultError("field %r did not carry valid base64" % (name,))
+    return values
+
+
 def main(argv):
     if len(argv) < 2:
         sys.stderr.write("usage: spm_core.py <command> [args]\n")
@@ -3439,6 +4608,126 @@ def main(argv):
             if not key:
                 raise VaultError("a vault key is required")
             rewrap_with_key(argv[2], key, new)
+        elif command == "record":
+            # record <op> [args] -- how the shell reads a schema. The
+            # dashboard imports this module and calls the functions directly,
+            # so nothing here exists for its benefit.
+            #
+            # Output is tab-separated rather than JSON because the only caller
+            # is a POSIX shell, and a shell that has to parse JSON grows
+            # either a python dependency per field or a regex that is wrong
+            # for some input. Field values travel base64-encoded for the same
+            # reason the vault row does: a note legitimately holds newlines,
+            # and this is a line-based interface.
+            #
+            # No field value is ever an argument. A payload holds the record's
+            # secrets and argv is world-readable on Linux for the life of the
+            # process -- the same reason `_key_fd` exists rather than handing
+            # openssl a key with -K. Ids, labels and timestamps are not
+            # secrets and travel normally.
+            op = argv[2]
+            if op == "types":
+                for name in RECORD_TYPES:
+                    sys.stdout.write("%s\t%s\t%s\n" % (
+                        name, RECORD_SCHEMAS[name]["label"],
+                        RECORD_SCHEMAS[name].get("icon", "")))
+            elif op == "schema":
+                for field, kind, widget, required in record_fields(argv[3]):
+                    sys.stdout.write("%s\t%s\t%s\t%s\n" % (
+                        field, kind, widget, "1" if required else "0"))
+            elif op == "next-id":
+                # next-id <plainfile> <type>
+                #
+                # The shell allocated this with its own awk over the same
+                # rows. Two implementations of "which id is free" is how the
+                # CLI and the dashboard come to hand the same id to two
+                # records, so the rule lives with the rows it reads.
+                with open(argv[3], "r", encoding="utf-8") as handle:
+                    sys.stdout.write(record_next_id(handle.read(), argv[4]) + "\n")
+            elif op == "row":
+                # row <type> <id> <label> <created> [--folder F] [--hidden]
+                # stdin: "field<TAB>base64(value)" lines
+                # stdout: one vault row
+                sys.stdout.write(build_record_row(
+                    argv[3], argv[4], argv[5], _record_values_in(), argv[6],
+                    folder=_flag_value(argv[7:], "--folder"),
+                    hidden="--hidden" in argv[7:]) + "\n")
+            elif op == "parse":
+                # stdin: one vault row
+                # stdout: "field<TAB>base64(value)" lines, preceded by the
+                # meta lines .type/.id/.label/.created/.folder/.hidden. The
+                # dot prefix cannot collide with a field name, because a
+                # schema field name is an identifier.
+                #
+                # Nothing at all, and exit 0, when the line is not a typed
+                # record this build can read: "not a typed record" is an
+                # answer to the question, not a failure to answer it.
+                parsed = parse_record_row(sys.stdin.read().rstrip("\n"))
+                if parsed is None:
+                    return 0
+                rtype, rid, label, values, created, folder, _f, hidden = parsed
+                for key, value in ((".type", rtype), (".id", rid),
+                                   (".label", label), (".created", created),
+                                   (".folder", folder),
+                                   (".hidden", "1" if hidden else "0")):
+                    sys.stdout.write("%s\t%s\n" % (key, _b64(value)))
+                for field, _k, _w, _r in record_fields(rtype):
+                    if values.get(field):
+                        sys.stdout.write("%s\t%s\n" % (field, _b64(values[field])))
+            elif op == "redact":
+                # stdin: "field<TAB>base64(value)" lines ; stdout: the same,
+                # masked. A surface that shows a record without revealing it
+                # asks for this rather than deciding which of its fields are
+                # sensitive -- that decision belongs to the schema, once.
+                masked = redact_record(argv[3], _record_values_in())
+                for field, _k, _w, _r in record_fields(argv[3]):
+                    if masked.get(field):
+                        sys.stdout.write("%s\t%s\n" % (field, _b64(masked[field])))
+            else:
+                raise VaultError("unknown record op %r" % (op,))
+        elif command == "ssh":
+            # ssh <op> [args] -- what the CLI asks about a stored SSH key.
+            #
+            # The key arrives on stdin, base64-encoded, for the same reason a
+            # record's field values do: it is the record's secret, and argv is
+            # world-readable on Linux for the life of the process. The comment
+            # is not a secret and travels normally.
+            op = argv[2]
+            if op == "info":
+                # info [comment]
+                # stdin:  base64 of the key text
+                # stdout: "name<TAB>base64(value)" lines
+                key_text = base64.b64decode(
+                    sys.stdin.read().strip() or "").decode("utf-8", "replace")
+                info = ssh_key_info(key_text, comment=argv[3] if len(argv) > 3 else "")
+                for name in ("format", "type", "bits", "fingerprint",
+                             "public", "encrypted", "problem"):
+                    value = info[name]
+                    if isinstance(value, bool):
+                        value = "1" if value else "0"
+                    sys.stdout.write("%s\t%s\n" % (name, _b64(str(value))))
+            else:
+                raise VaultError("unknown ssh op %r" % (op,))
+        elif command == "gpg":
+            # gpg <op> -- what the CLI asks about a stored OpenPGP key. The
+            # armored key arrives on stdin, base64-encoded, for the same
+            # reason the SSH key above does.
+            op = argv[2]
+            if op == "info":
+                # stdin:  base64 of the armored key text
+                # stdout: "name<TAB>base64(value)" lines
+                key_text = base64.b64decode(
+                    sys.stdin.read().strip() or "").decode("utf-8", "replace")
+                info = pgp_key_info(key_text)
+                for name in ("fingerprint", "keyid", "algorithm", "bits",
+                             "curve", "created", "uids", "subkeys",
+                             "secret", "encrypted", "problem"):
+                    value = info[name]
+                    if isinstance(value, bool):
+                        value = "1" if value else "0"
+                    sys.stdout.write("%s\t%s\n" % (name, _b64(str(value))))
+            else:
+                raise VaultError("unknown gpg op %r" % (op,))
         elif command == "secret-key":
             # secret-key <op> <vault> ; ops below say what they read on stdin.
             #

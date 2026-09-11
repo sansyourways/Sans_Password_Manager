@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **4.10.1**
+Current release: **5.0.0**
 
 ---
 
@@ -43,6 +43,9 @@ Current release: **4.10.1**
   - [Install the browser extension](#install-the-browser-extension)
   - [CLI Commands](#cli-commands)
   - [Secure Notes](#secure-notes)
+  - [Typed records](#typed-records)
+  - [SSH keys](#ssh-keys)
+  - [GPG keys](#gpg-keys)
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
   - [Doctor / Health Check](#doctor--health-check)
 - [Hidden entries](#hidden-entries)
@@ -260,6 +263,17 @@ filters and result count visible](docs/screenshots/web-v2.13.0/31-passwords-filt
   records, plus an opt-in k-anonymous Pwned Passwords review that sends only
   five-character SHA-1 prefixes and lists affected record IDs
 - Cross-type search and `#hashtag` tags across every record type
+- SSH private keys as a record type, with the fingerprint, key type, size
+  and public key derived from the stored key rather than typed in — read
+  straight out of the `openssh-key-v1` container, without the passphrase,
+  without a temporary file, and without shelling out to `ssh-keygen`
+- Stored SSH keys handed to `ssh-agent` over a pipe with a bounded lifetime,
+  never as a file or a command-line argument, with the passphrase delivered
+  over an inherited descriptor and unloading done by the public half alone
+- OpenPGP secret keys as a record type, with the fingerprint, key id,
+  algorithm, curve or size, creation date and identities derived from the
+  stored key in pure Python — matching `gpg`'s own fingerprint without gpg,
+  without a keyring or agent, and without the passphrase
 - A URL on every password record, scheme-restricted to `http(s)`, used to bind
   a credential to a site for the browser extension
 - Encrypted history, verified manual/automatic backups, and confirmed rollback,
@@ -345,7 +359,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 4.10.1
+bash install.sh --version 5.0.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -380,7 +394,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v4.10.1.zip \
+gh attestation verify Sans_Password_Manager_v5.0.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -396,9 +410,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v4.10.1
+git checkout v5.0.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v4.10.1.zip.sha256
+sha256sum -c Sans_Password_Manager_v5.0.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -411,7 +425,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=4.10.1
+version=5.0.0
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -428,7 +442,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v4.10.1/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v5.0.0/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -450,7 +464,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 4.10.1 at /home/you/.local/bin/spm
+Installed SPM 5.0.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
@@ -856,6 +870,21 @@ tab. The address shown here is your own host — the example below is redacted.
 ./spm.sh backup-codes-list
 ./spm.sh backup-codes-view <id>
 ./spm.sh backup-codes-delete <id>
+./spm.sh record types
+./spm.sh record add <type>
+./spm.sh record list [type]
+./spm.sh record view <type> <id> [--reveal]
+./spm.sh record delete <type> <id>
+./spm.sh ssh import <keyfile> [label]
+./spm.sh ssh list
+./spm.sh ssh show <id>
+./spm.sh ssh public <id>
+./spm.sh ssh load <id> [minutes]
+./spm.sh ssh unload <id|--all>
+./spm.sh ssh agent
+./spm.sh gpg import <keyfile> [label]
+./spm.sh gpg list
+./spm.sh gpg show <id>
 ./spm.sh doctor
 ./spm.sh web
 ```
@@ -872,6 +901,369 @@ tab. The address shown here is your own host — the example below is redacted.
 ```
 
 Stored inside encrypted vault.
+
+---
+
+## Typed records
+
+A password is one shape: a service, a username and a secret. Most of what
+people keep in a password manager is not that shape. An API token has an
+environment and an expiry. A database credential has a host, a port and an
+engine. A Wi-Fi network has an SSID and a security mode. Putting any of them
+in a password entry means the extra parts go in the notes field, where nothing
+can search them, redact them or check them.
+
+SPM stores nine of those shapes properly:
+
+| Type | What it is for |
+|---|---|
+| `api-token` | Service tokens, with the environment and expiry that decide when to rotate |
+| `db-credential` | Engine, host, port, database, user and password for one connection |
+| `credit-card` | Cardholder, number, expiry, CVV and PIN |
+| `identity` | A passport, licence or national ID, with its issue and expiry dates |
+| `software-license` | A licence key, who it is licensed to, and how many seats |
+| `wifi` | Network name, password and security mode |
+| `server` | Hostname, address, port and the account you log in with |
+| `ssh-key` | A private key, its passphrase, and the hosts it opens |
+| `gpg-key` | An OpenPGP secret key, its passphrase, and its identities |
+
+### From the command line
+
+```bash
+./spm.sh record types
+./spm.sh record add wifi
+./spm.sh record list
+./spm.sh record list wifi
+./spm.sh record view wifi 1
+./spm.sh record view wifi 1 --reveal
+./spm.sh record delete wifi 1
+```
+
+`record add` reads the schema and prompts for its fields in order. Secret
+fields turn the echo off the way the master password prompt does; a notes
+field reads until Ctrl+D.
+
+`record view` masks every secret field by default and prints them only with
+`--reveal`, so reading a record over a shared screen does not put its secrets
+in the scrollback.
+
+Ids are allocated per type, so `wifi 1` and `server 1` both exist and each type
+counts from one. Every command that takes an id takes the type with it — an id
+on its own is half an address.
+
+### In the Dashboard
+
+**Records** in the sidebar lists every typed record in the vault, with chips to
+narrow the list to one type. **+ Add Record** asks which kind of thing this is
+and then draws the form for that type. A record's page shows its fields with
+every secret masked behind the same reveal-and-copy control the password pages
+use, and it can be edited or deleted from there.
+
+The list, the forms, the masking and the type filter are all drawn from the
+same schema the CLI prompts from. Neither surface has its own list of fields,
+which is what keeps them from disagreeing about a record.
+
+Records are counted on the overview beside the other kinds of entry, and the
+search box finds them by label, id, folder, any non-secret field, or the name
+of a custom field. Secret fields are deliberately not searched: if a query
+could match a password, the number of results would answer "is this string in
+the vault?" for anyone who reached an unlocked session. Password entries
+follow the same rule. A hidden record shows as dots in search results, the way
+it does everywhere else.
+
+### What a typed record is, in the vault
+
+One row, shaped like a secure note:
+
+```
+REC:<type>	<id>	<label>	<payload-b64>	<created>	<attrs>
+```
+
+Six tab-separated columns, with the secret-bearing payload in field 3 — where a
+note keeps its body and a password entry keeps its password. The payload is the
+record's fields as JSON, base64-encoded, so a value holding a newline stays one
+value and one row.
+
+The type travels in the row tag rather than inside the payload, so counting
+records, listing one type, or describing a damaged row never requires decoding
+anything — and a vault stays greppable by someone holding nothing but the
+plaintext and `grep`.
+
+Typed records carry folders, custom fields and the hidden flag exactly as
+password entries do, and they cross all twenty export formats in the same
+`fields` column. A custom field may not reuse a schema field's name: both
+travel in that one column and are told apart on the way back by whether the
+name is in the schema, so SPM refuses the collision rather than letting one of
+the two disappear.
+
+### Adding a type
+
+A type is data, not code. `RECORD_SCHEMAS` in the trusted core names a type's
+fields, says which of them hold secrets and which are required, and gives it an
+icon. Everything else — the CLI prompts, the Dashboard form, the list, the
+redaction, the exports — reads that. Adding a tenth type is a dictionary
+entry, an icon in the sprite and its translations.
+
+A schema may also name a *deriver*: a function that reads the record's own
+fields and returns facts about them. `ssh-key` uses one; see below.
+
+---
+
+## SSH keys
+
+An SSH private key is a password by another name: it opens accounts on
+machines, it is long-lived, and losing control of it is losing the machines.
+It is usually kept as a file in `~/.ssh`, at whatever permissions the last
+tool to touch it left behind, backed up by whatever backs up the home
+directory, and copied between laptops by hand.
+
+SPM stores it as a record like any other — encrypted with the rest of the
+vault, masked on screen, carried across exports, hideable, and searchable by
+everything about it except the key itself.
+
+```bash
+./spm.sh ssh import ~/.ssh/id_ed25519 "work laptop"
+./spm.sh ssh list
+./spm.sh ssh show 1
+./spm.sh ssh public 1          # the authorized_keys line, to paste on a server
+./spm.sh ssh load 1            # hand it to the running ssh-agent for 15 minutes
+./spm.sh ssh load 1 60         # or for an hour
+./spm.sh ssh agent             # what the agent holds, and what came from here
+./spm.sh ssh unload 1
+```
+
+`ssh import` reads the key file, and reads the comment from the matching
+`.pub` file beside it when there is one. It refuses a file that is not a
+private key, so pointing it at a `.pub` by mistake is an error rather than a
+record whose secret field holds something public.
+
+`ssh list` prints one line per stored key with its type, size and fingerprint.
+`ssh show` prints those plus the full public key. Neither prints the private
+key, and neither has a `--reveal`: to see the private half you read it as the
+record it is, with `./spm.sh record view ssh-key 1 --reveal`.
+
+### The public half is derived, never typed
+
+SPM does not ask you for the fingerprint or the public key, and does not store
+either one. It computes them from the stored private key every time it shows
+them.
+
+This is possible without the passphrase because of how OpenSSH writes keys. An
+`openssh-key-v1` file is a container: a magic string, the cipher and KDF used
+to protect the private half, and then **the public key in the clear**,
+followed by the encrypted private section. Encrypting a key protects the part
+that signs; the part that identifies was never secret — it is the same string
+you put in `authorized_keys`. So SPM parses the container, takes the public
+blob, and hashes it:
+
+```
+SHA256:<base64(sha256(public blob)) without padding>
+```
+
+which is exactly what `ssh-keygen -l` prints. The regression suite compares
+the two on every run when `ssh-keygen` is installed, for ed25519, RSA and
+passphrase-protected keys.
+
+The point of deriving rather than storing is that a stored fingerprint is a
+claim, and claims drift. If someone edits the private key field, a stored
+fingerprint keeps describing the key that used to be there — and a fingerprint
+is precisely the thing you check when you want to know *which key this is*. A
+derived one cannot be wrong about its own key: if it renders at all, it is the
+fingerprint of the bytes in the record.
+
+RSA sizes are counted in bits from the modulus, not in bytes of the field. A
+2048-bit modulus is often stored with a leading zero byte, and counting bytes
+would report it as 2056-bit — a number that would look plausible and be wrong.
+
+### What SPM will not do with a key it cannot read
+
+If the key is not a format SPM understands, or the container is truncated, or
+the algorithm named on a public line disagrees with the blob underneath it,
+SPM derives nothing and says so. It does **not** guess, and it does **not**
+refuse to store the record — the key is still your key, and a manager that
+drops a secret because it cannot describe it is worse than one that keeps it
+quietly. The record's page says SPM cannot derive anything from this key, and
+gives the reason.
+
+Old PEM keys (`-----BEGIN RSA PRIVATE KEY-----` and friends) are stored and
+recognised as keys, but their public half is inside the encoding rather than
+beside it, so nothing is derived from them.
+
+### Handing a key to ssh-agent
+
+A key in the vault is still a key you have to get to `ssh`, and the usual way
+to do that is `ssh-add ~/.ssh/id_ed25519` — which is a key that lives on disk.
+`ssh load` hands the stored key straight to the agent instead:
+
+```bash
+./spm.sh ssh load 1        # 15 minutes
+./spm.sh ssh load 1 60     # an hour
+./spm.sh ssh load 1 0      # until the agent dies
+./spm.sh ssh unload 1
+./spm.sh ssh unload --all
+./spm.sh ssh agent
+```
+
+The key travels over a pipe. It is never written to a file, and it is never an
+argument to anything — `ssh-add` reads it on stdin, which is what the trailing
+`-` in `ssh-add -t 900 -` means. There is no moment during a load when the
+private key exists anywhere a second process could read it.
+
+**The default lifetime is 15 minutes**, and it is not an arbitrary number: it
+is the longest idle lock the Dashboard offers. A key you loaded and forgot is
+the same problem as a vault you unlocked and walked away from, so it expires
+on the same terms. `0` means no expiry, and has to be typed.
+
+**A passphrase is asked for only when the key has one.** The container says
+whether it is sealed, so SPM knows before it asks — it does not prompt for a
+passphrase a key does not have, and does not discover the need for one by
+watching `ssh-add` fail. When it does ask, the passphrase reaches `ssh-add`
+through `SSH_ASKPASS`, over an inherited file descriptor, from a shell
+builtin: not a file, not an argument, not an environment variable.
+
+**Unloading never touches the private key.** `ssh-add -d` names a key by its
+*public* half, and SPM derives that already — so taking a key out of the agent
+costs nothing more than the string you would have put in `authorized_keys`.
+
+**SPM will not start an agent.** If none is running, `ssh load` says so and
+stops. Launching a background process the user did not ask for and cannot see,
+which then holds a private key for as long as the session lives, is not a
+password manager's decision to make.
+
+`ssh agent` lists what the agent holds and marks which of it came from this
+vault. The match is on fingerprints, derived at both ends from the same bytes,
+so a key relabelled in either place still lines up.
+
+#### Why the Dashboard has no Load button
+
+Every other thing an SSH key record can do is on both surfaces. The agent is
+the exception, deliberately.
+
+An `ssh-agent` belongs to a session on a machine, not to a vault. The Dashboard
+is a server, and it can be [published on a domain](#publish-the-spm-dashboard-on-a-domain-with-https)
+and reached from a different machine entirely — where "load this key into the
+agent" would load it into the agent of the *host*, not of the person clicking.
+That is not what the button appears to say, and a control that quietly acts on
+the wrong machine is worse than one that is not there.
+
+So the agent is driven from the terminal, where "the agent" means the one in
+front of you. The Dashboard still shows everything about the key that does not
+depend on where you are standing.
+
+### In the Dashboard
+
+An SSH key record looks like every other typed record: **+ Add Record** →
+**SSH Key**, with the private key and passphrase as masked secret fields
+behind the same reveal-and-copy control the password pages use.
+
+Below the fields, the record page shows a **Derived from the key** panel —
+type, size, fingerprint and public key, in monospace, as read-only text.
+Nothing in that panel is editable, because nothing in it is stored: it is
+recomputed from the private key field each time the page is drawn. A sealed
+key adds a line saying the private half is passphrase-protected, which SPM
+knows from the container's cipher name without ever attempting the passphrase.
+
+The panel is not special-cased for SSH. A schema names a deriver, the record
+page asks the core for that record's derived rows, and renders whatever comes
+back. A future type that has facts worth computing gets the same panel by
+adding one dictionary entry.
+
+### Where the key goes
+
+Nowhere it was not already. The private key is a secret field of a record:
+it is in the vault ciphertext, and it reaches the Dashboard page only inside
+the reveal control, exactly like a password. It is never written to a
+temporary file, never passed as a command-line argument — argv is readable by
+every process on the machine — and never handed to `ssh-keygen` or any other
+external program to be parsed. Everything SPM says about a key, it works out
+itself, from bytes it already has decrypted in memory.
+
+---
+
+## GPG keys
+
+An OpenPGP secret key is the other long-lived key people keep in a file: it
+signs commits and releases, it decrypts mail, and its fingerprint is an
+identity other people have verified and signed. It usually lives in `~/.gnupg`,
+where it is entangled with a keyring, an agent, and trust state — which makes
+it awkward to keep a second copy of, or to move to a new machine, without
+copying the whole apparatus.
+
+SPM stores the key itself as a record, the same way it stores an SSH key:
+encrypted with the rest of the vault, masked on screen, carried across exports,
+hideable, and searchable by everything about it except the key.
+
+```bash
+./spm.sh gpg import ~/backup/signing.asc "signing key"
+./spm.sh gpg list
+./spm.sh gpg show 1
+```
+
+`gpg import` reads an ASCII-armored secret key. Export one from GnuPG with
+`gpg --armor --export-secret-keys <id>`. It refuses a public key (the
+`--export` form without `-secret-keys`), because a `gpg-key` record whose
+secret field held only a public key could neither sign nor decrypt — the one
+thing it is kept for.
+
+### The public facts are derived, never typed
+
+As with SSH, SPM does not ask for the fingerprint, the key id, or the
+algorithm, and does not store them. It computes them from the stored key each
+time, and it does so **without gpg** — no keyring, no agent, no passphrase.
+
+An OpenPGP secret key is a public key with the secret material appended, and
+the fingerprint is a hash of only the public part. So SPM parses the packet
+stream itself and hashes the public half:
+
+- **v4 keys**: SHA-1 of `0x99 ‖ length ‖ public-key material` — the definition
+  gpg uses, which is why the fingerprints match to the hex digit.
+- **v6 keys**: SHA-256, per the newer format.
+
+The regression suite generates throwaway keys with gpg and checks SPM's
+fingerprint against `gpg`'s own for an ed25519 key, a passphrase-protected
+ed25519 key, and an RSA key — with the passphrase never handed to anything.
+
+Whether the secret half is passphrase-protected is read from the packet's
+protection byte, not discovered by trying the passphrase — the same way the
+SSH side reads a cipher name. And the key's identities (the `Name <email>`
+user IDs) and its subkey count come out of the same parse.
+
+### Two ways to be wrong that SPM is not
+
+**An elliptic-curve key's size is its curve, not the length of a point.** An
+Ed25519 point encodes as 263 bits; reporting "263" would look like a key size
+and be wrong. SPM reads the curve from the key's OID and reports `ed25519`,
+`nistp256`, and so on — matching what `gpg` prints. It is the same mistake as
+measuring an RSA key by the *bytes* of its modulus, which the SSH side already
+avoids.
+
+**A truncated key does not get a plausible fingerprint.** Walking the key's
+internal length fields without checking them lets a cut-off key hash a shorter
+slice than intended and produce a fingerprint that is wrong and looks right —
+and a fingerprint is exactly the thing you check to confirm *which* key you
+are holding. Every length is bounds-checked, so a truncated or corrupt key
+derives nothing and says why, rather than answering confidently and wrongly.
+
+### A key SPM cannot read is still kept
+
+An unrecognised format, a truncated packet, or a key this build does not
+understand all derive nothing and say so on the record's page — and the record
+is still stored. Dropping a secret because it cannot be described is worse than
+keeping it quietly.
+
+### In the Dashboard
+
+A GPG key record looks like every other typed record: **+ Add Record** →
+**GPG Key**, with the secret key and its passphrase as masked secret fields.
+Below them is the same **Derived from the key** panel the SSH records use —
+fingerprint, key id, algorithm, creation date, identities and subkey count, as
+read-only text, recomputed on every draw. The panel is not special-cased for
+either type: a schema names a deriver, the record page asks the core for that
+record's rows and its heading, and renders what comes back. GPG landed as a
+dictionary entry.
+
+Unlike SSH, there is nothing GPG-specific left out of the Dashboard — there is
+no agent equivalent here that depends on which machine you are sitting at.
 
 ---
 
@@ -1949,7 +2341,7 @@ issue. Roadmap entries are directions, not promised delivery dates.
 
 ## Development & Versioning
 
-Version: **4.10.1**
+Version: **5.0.0**
 Web session cookies use `HttpOnly` and `SameSite=Strict`; `Secure` is added when the request arrives over HTTPS (`X-Forwarded-Proto`). Plain-HTTP non-loopback binds require an explicit `yes` confirmation: prefer localhost behind a TLS reverse proxy. `SPM_WEB_ALLOW_INSECURE_REMOTE=1` remains a non-interactive escape hatch for isolated trusted networks only.
 The web login locks a client out for 60 seconds after 5 failed master-password attempts.
 The 30-second idle auto-lock performs a single logout transition and tears down

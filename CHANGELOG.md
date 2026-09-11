@@ -7,6 +7,95 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-09-11
+
+Typed records: one schema engine, and the first key types built on it. A
+password manager keeps more shapes than a password, and until now the extra
+parts went in the notes field where nothing could search, redact or check
+them. This release gives those shapes a home, in the CLI and the Dashboard
+from the same schema, and lands SSH keys, an SSH-agent bridge, and GPG keys
+as the first records that read their own facts out of the key.
+
+The major version is for the new record kinds and the engine under them, not
+for a format break: a 4.x vault opens unchanged, and a vault carrying typed
+records stays a tab-separated file that `grep` still reads.
+
+### Added
+- **Typed records, from one schema.** `api-token`, `db-credential`,
+  `credit-card`, `identity`, `software-license`, `wifi` and `server` each
+  store the parts that shape actually has -- an environment and an expiry, a
+  host and a port, an SSID and a security mode -- instead of a password entry
+  with the rest in a note. `RECORD_SCHEMAS` in the trusted core names each
+  type's fields, which of them are secret and which are required, and its
+  icon; the CLI prompts, the Dashboard form, the list, the redaction and all
+  twenty export formats read that one definition, so the two surfaces cannot
+  disagree about a record. Adding a type is a dictionary entry, not code.
+- `spm record [types|add|list|view|delete]`. Ids are allocated per type, so
+  `wifi 1` and `server 1` both exist; every command that takes an id takes the
+  type with it. `record view` masks every secret field and prints it only with
+  `--reveal`.
+- **Typed records in the Dashboard.** A Records section lists every typed
+  record with per-type filter chips; **+ Add Record** draws the form for a
+  type from the schema; a record's page masks each secret behind the same
+  reveal-and-copy control the password pages use. Records are counted on the
+  overview and found by the search box -- by label, id, folder, any non-secret
+  field, or a custom field's name. Secret fields are deliberately never
+  matched, so a result count cannot answer "is this string in the vault?"
+- **SSH keys as a record type (`ssh-key`).** Stores the private key, its
+  passphrase and the hosts it opens; derives the fingerprint, key type, size
+  and public key from the stored key every time, parsed out of the
+  `openssh-key-v1` container in pure Python -- without the passphrase, without
+  a temporary file, and without shelling out to `ssh-keygen`. `spm ssh
+  [import|list|show|public]`.
+- **SSH agent integration.** `spm ssh [load|unload|agent]` hands a stored key
+  to `ssh-agent` over a pipe -- `ssh-add -t <seconds> -` reads it on stdin, so
+  it is never a file and never an argument. The default lifetime is 15
+  minutes, the Dashboard's longest idle lock; a sealed key's passphrase
+  reaches `ssh-add` over an inherited descriptor; unloading names the key by
+  its public half alone. SPM will not start an agent it was not given.
+- **GPG / OpenPGP keys as a record type (`gpg-key`).** Stores the armored
+  secret key and its passphrase; derives the fingerprint, key id, algorithm,
+  curve or size, creation date, identities and subkey count -- matching
+  `gpg`'s own fingerprint without gpg, without a keyring or agent, and without
+  the passphrase, because a secret key carries its public half in the clear.
+  `spm gpg [import|list|show]`.
+- **A derived-facts panel, schema-driven.** A type names a deriver; the CLI
+  and the Dashboard ask the core for a record's derived rows and heading and
+  render what comes back, naming no key type. GPG needed no new Dashboard code
+  beyond an icon and translations.
+
+### Fixed
+- **History could quietly get shorter than it claimed.** Two archives of
+  identical ciphertext that straddled a one-second tick landed as two files,
+  and retention counts files, so the duplicate evicted the oldest genuinely
+  different generation. Snapshots now match on the content digest rather than
+  the whole filename.
+
+### Security
+- **Nothing public about a key is ever typed or stored -- it is derived.** A
+  stored fingerprint is a claim, and claims drift: edit the key and a stored
+  fingerprint keeps describing the key that used to be there, which is exactly
+  backwards, since the fingerprint is what you check to know which key this is.
+  A derived one cannot be wrong about its own key.
+- **A key SPM cannot read is still kept, and said so.** An unrecognised format,
+  a truncated container, or an old PEM/public key derives nothing and gives the
+  reason on the record's page rather than being dropped or guessed at.
+- **A truncated key never gets a plausible fingerprint.** Length fields in both
+  the SSH and OpenPGP parsers are bounds-checked on both sides, because slicing
+  past the end of a byte string does not raise in Python -- it returns
+  something shorter, which would hash to a fingerprint that is wrong and looks
+  right.
+- **A key's size is measured honestly.** RSA in bits of the modulus, not bytes
+  (a 2048-bit key is not 2056); an elliptic-curve key by its curve, not the bit
+  length of an encoded point (an Ed25519 point is not a 263-bit key).
+- **Secret key material never travels on argv.** `core record row`, `core ssh
+  info` and `core gpg info` take their values as base64 on stdin, because argv
+  is world-readable on Linux.
+- **`ssh import` and `gpg import` refuse a public key.** A public key
+  fingerprints exactly like a secret one, so a guard that only asked "did this
+  fingerprint?" would file it as the secret half of a key that could then
+  neither sign, decrypt, nor open a host.
+
 ## [4.10.1] - 2026-09-06
 
 A custom field could hold a character that made your own export refuse to

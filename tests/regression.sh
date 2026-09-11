@@ -6076,6 +6076,1009 @@ sk_core secret-key status "$sk_vault" | grep -q '"bound": false' ||
 	sk_fail 'status still reports a binding after disable'
 printf '  secret key: binds, survives writes and password changes, fails closed when absent, and never leaves with a copy\n'
 
+# ----- typed records ---------------------------------------------------------
+# One family of commands covers seven types, so these tests walk every type
+# rather than the one that happened to be written first: the risk in a
+# schema-driven design is a schema nobody exercises, not a code path nobody
+# runs.
+
+rec_fail() { printf 'typed records: %s\n' "$1" >&2; exit 1; }
+
+rec_vault="$TEST_ROOT/records.gpg"
+rec_plain="$TEST_ROOT/records-plain"
+rec_seed() {
+	# Every vault write needs a recovery pubkey row, so a fresh vault for
+	# these tests is seeded with the harness's own key rather than a bare
+	# version stamp.
+	printf 'META_VAULT_VERSION\t6\t-\t-\t-\t-\nMETA_RECOVERY_PUBKEY\t%s\t-\t-\t-\t-\n' \
+		"$TEST_RECOVERY_B64" >"$rec_plain"
+	printf '%s\n' "$AUDIT_PASSWORD" | core write "$1" "$rec_plain" >/dev/null
+}
+rec_seed "$rec_vault"
+
+rec_core() { VAULT_FILE="$rec_vault" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY="" "$@"; }
+
+# every registered type must be listed, and the listing is what a user types
+rec_types="$(core record types | cut -f1)"
+rec_type_count="$(printf '%s\n' "$rec_types" | wc -l)"
+# A floor, not an equality: a new schema should not have to edit this line.
+# It is here so that a listing which silently loses a type -- a dictionary
+# rebuilt from a filtered iteration, say -- fails instead of testing fewer
+# types than it used to and still reporting a pass.
+[ "$rec_type_count" -ge 8 ] ||
+	rec_fail "record types listed $rec_type_count, fewer than the shipped schemas"
+
+# Add one record of every type, driving the interactive prompts from the
+# schema exactly as a person would: label first, then each field in order.
+for rec_type in $rec_types; do
+	rec_in="$TEST_ROOT/rec-in-$rec_type"
+	{
+		printf 'Label for %s\n' "$rec_type"
+		core record schema "$rec_type" | while IFS="$(printf '\t')" read -r f _k _w _r; do
+			[ -n "$f" ] || continue
+			printf 'value-%s\n' "$f"
+		done
+	} >"$rec_in"
+	rec_core cmd_record_add "$rec_type" <"$rec_in" >/dev/null 2>&1 ||
+		rec_fail "adding a $rec_type record failed"
+done
+
+rec_check="$TEST_ROOT/rec-check"
+test_decrypt_vault "$rec_vault" "$AUDIT_PASSWORD" "$rec_check"
+for rec_type in $rec_types; do
+	grep -q "^REC:${rec_type}	1	" "$rec_check" ||
+		rec_fail "no $rec_type row was written"
+done
+[ "$(grep -c '^REC:' "$rec_check")" -eq "$(printf '%s\n' "$rec_types" | wc -l)" ] ||
+	rec_fail 'the number of typed rows does not match the number of types'
+
+# No secret may appear outside field 3. This is the rule _describe_record and
+# the listing both depend on, and it is worth asserting against real rows
+# rather than trusting the writer.
+if awk -F '\t' '/^REC:/ { $4=""; print }' "$rec_check" | grep -q 'value-password'; then
+	rec_fail 'a secret value appeared outside the payload column'
+fi
+
+# The default view redacts; --reveal does not. The list of which fields are
+# secret lives in the schema and nowhere else, so this asserts the behaviour
+# rather than a field name.
+rec_view="$(rec_core cmd_record_view wifi 1 2>&1)"
+printf '%s' "$rec_view" | grep -q 'value-ssid' ||
+	rec_fail 'view hid a field that is not a secret'
+if printf '%s' "$rec_view" | grep -q 'value-password'; then
+	rec_fail 'view printed a secret without --reveal'
+fi
+printf '%s' "$rec_view" | grep -q '\*\*\*\*\*\*\*\*' ||
+	rec_fail 'view did not mask the secret'
+# Captured before grepping, not piped into it. `grep -q` stops at the first
+# match and closes the pipe, so under `set -o pipefail` the producer dies of
+# SIGPIPE and the pipeline reports failure on the path where the test passed.
+rec_reveal="$(rec_core cmd_record_view wifi 1 --reveal 2>&1)"
+case "$rec_reveal" in
+	*value-password*) ;;
+	*) rec_fail '--reveal did not show the secret' ;;
+esac
+
+# Listing must name every type and never read the payload column.
+rec_list="$(rec_core cmd_record_list 2>&1)"
+for rec_type in $rec_types; do
+	printf '%s' "$rec_list" | grep -q "$rec_type" ||
+		rec_fail "list omitted $rec_type"
+done
+if printf '%s' "$rec_list" | grep -q 'value-password'; then
+	rec_fail 'list printed a secret'
+fi
+[ "$(rec_core cmd_record_list wifi 2>&1 | grep -c '^wifi ')" -eq 1 ] ||
+	rec_fail 'list --type did not filter to one type'
+
+# A value carrying any character splitlines() honours must not split the row.
+rec_break_in="$TEST_ROOT/rec-break"
+printf 'Label with a break\nHome%sNet\nsecret%spw\n\n\n\n' "$(printf '\302\205')" "$(printf '\342\200\250')" >"$rec_break_in"
+rec_core cmd_record_add wifi <"$rec_break_in" >/dev/null 2>&1 ||
+	rec_fail 'a record holding a break character was refused'
+test_decrypt_vault "$rec_vault" "$AUDIT_PASSWORD" "$rec_check"
+[ "$(grep -c '^REC:wifi' "$rec_check")" -eq 2 ] ||
+	rec_fail 'a break character split a typed record into two rows'
+awk -F '\t' '/^REC:wifi/ { if (NF != 6) exit 1 }' "$rec_check" ||
+	rec_fail 'a typed record row does not have six columns'
+
+# Export and re-import every format, then compare field by field rather than
+# by count. Counting is what let twenty formats drop folders and custom fields
+# until 4.1.0.
+for rec_fmt in csv json tsv ndjson yaml xml sql psv toml; do
+	rec_export="$TEST_ROOT/rec-export.$rec_fmt"
+	VAULT_FILE="$rec_vault" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY="" \
+		cmd_export "$rec_fmt" "$rec_export" >/dev/null
+	rec_reimport="$TEST_ROOT/rec-reimport-$rec_fmt.gpg"
+	rec_seed "$rec_reimport"
+	VAULT_FILE="$rec_reimport" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY="" \
+		RECOVERY_FILE="$rec_reimport.recovery" \
+		cmd_import "$rec_fmt" "$rec_export" >/dev/null 2>&1 ||
+		rec_fail "re-importing $rec_fmt failed"
+	rec_after="$TEST_ROOT/rec-after-$rec_fmt"
+	test_decrypt_vault "$rec_reimport" "$AUDIT_PASSWORD" "$rec_after"
+	for rec_type in $rec_types; do
+		grep -q "^REC:${rec_type}	" "$rec_after" ||
+			rec_fail "$rec_fmt lost every $rec_type record"
+	done
+	# field by field, through the core, for one fully populated type
+	rec_before_vals="$(grep -m1 '^REC:server	' "$rec_check" | core record parse | grep -v '^\.')"
+	rec_after_vals="$(grep -m1 '^REC:server	' "$rec_after" | core record parse | grep -v '^\.')"
+	[ "$rec_before_vals" = "$rec_after_vals" ] ||
+		rec_fail "$rec_fmt changed a typed record's fields across a round trip"
+done
+
+# Deleting removes exactly one record and leaves the rest.
+rec_before_count="$(grep -c '^REC:' "$rec_check")"
+rec_core cmd_record_delete wifi 1 >/dev/null 2>&1 || rec_fail 'delete failed'
+test_decrypt_vault "$rec_vault" "$AUDIT_PASSWORD" "$rec_check"
+[ "$(grep -c '^REC:' "$rec_check")" -eq "$((rec_before_count - 1))" ] ||
+	rec_fail 'delete removed the wrong number of records'
+grep -q '^REC:wifi	2	' "$rec_check" ||
+	rec_fail 'delete removed a record it was not asked to'
+
+# An unknown type must be refused before the vault is opened, and must name
+# what is available rather than only what is wrong.
+# In a subshell: cmd_record_add refuses through `die`, which exits, and this
+# suite runs the command in its own shell. Without the parentheses a passing
+# test would take the whole run down with it.
+if ( rec_core cmd_record_add not-a-type ) >/dev/null 2>&1; then
+	rec_fail 'an unknown record type was accepted'
+fi
+rec_unknown="$( ( rec_core cmd_record_add not-a-type ) 2>&1 || true)"
+case "$rec_unknown" in
+	*wifi*) ;;
+	*) rec_fail 'an unknown record type did not name the known ones' ;;
+esac
+
+# The Dashboard rewrites the whole vault on every save, so a row it does not
+# recognise is one edit away from being lost. parse_entries identifies a
+# password by "field 1 is a number" rather than by listing the other types,
+# and its own comment says anything added later is excluded by default -- this
+# asserts that the claim holds for typed records rather than trusting it.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$web_script" "$PASSWORD_VAULT" "$rec_check" <<'PYREC'
+import importlib.util, os, sys
+
+spec = importlib.util.spec_from_file_location("spmweb_rec", sys.argv[1])
+web = importlib.util.module_from_spec(spec)
+os.environ["SPM_VAULT_PATH"] = sys.argv[2]
+try:
+    spec.loader.exec_module(web)
+except SystemExit:
+    pass
+
+with open(sys.argv[3], "r", encoding="utf-8") as handle:
+    plaintext = handle.read()
+
+typed = [l for l in plaintext.splitlines() if l.startswith("REC:")]
+assert typed, "the fixture holds no typed records, so this proves nothing"
+
+lines, entries = web.parse_entries(plaintext)
+
+# 1. No typed record may be read as a password. Before parse_entries used an
+#    allowlist, ATTACHMENT and PASSKEY rows were listed as passwords with
+#    their base64 payload in the password column -- and counted in the
+#    security score.
+for _idx, parts in entries:
+    assert not parts[0].startswith("REC:"), \
+        "a typed record was read as a password: %r" % parts[0]
+
+# 2. Every typed row must survive the round trip the Dashboard performs when
+#    it saves: parse, rebuild from `lines`, write back.
+rebuilt = "\n".join(lines) + "\n"
+for row in typed:
+    assert row in rebuilt, "the Dashboard's rebuild dropped a typed record"
+
+# 3. A delete of an unrelated password must not touch them either. This is the
+#    exact loop the delete handler runs.
+ids_to_remove = {"1"}
+kept = []
+for line in lines:
+    if (not line or line.startswith("#") or line.startswith("META_")
+            or line.startswith("NOTE\t")):
+        kept.append(line)
+        continue
+    parts = line.split("\t")
+    if parts and parts[0] in ids_to_remove:
+        continue
+    kept.append(line)
+for row in typed:
+    assert row in kept, "deleting a password removed a typed record"
+
+sys.stdout.write("  dashboard: %d typed record(s) survive a save and a delete, "
+                 "and none is counted as a password\n" % len(typed))
+PYREC
+
+printf '  typed records: %s schemas add, list, view redacted, delete, and survive twenty formats field by field\n' \
+	"$rec_type_count"
+
+# ----- typed records in the Dashboard ----------------------------------------
+# The CLI half of this shipped first and the Dashboard could only preserve the
+# rows it did not understand. This drives the web half over real HTTP -- add,
+# list, view, edit, delete, for every schema the core defines -- and then reads
+# the same vault back through the CLI, because "both surfaces agree" is the
+# only claim worth making about a record engine and it cannot be made by
+# testing one of them.
+#
+# Nothing below names a field. The schema supplies the fields, so adding an
+# eighth type extends this test rather than breaking it.
+
+python3 - "$web_script" "$ROOT_DIR" "$WEB_PORT" "$AUDIT_PASSWORD" \
+	"$PASSWORD_VAULT" "$TEST_ROOT/webrec-plain" <<'PYWEBREC'
+import base64
+import http.cookiejar
+import os
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+web_script, root, port, password, vault, plainfile = sys.argv[1:7]
+BASE = "http://127.0.0.1:%s" % port
+sys.path.insert(0, os.path.join(root, "src"))
+import spm_core as core
+
+jar = http.cookiejar.CookieJar()
+opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+
+def get(path):
+    with opener.open(BASE + path, timeout=20) as response:
+        return response.read().decode("utf-8")
+
+
+def refused(path, code):
+    """A route that must not answer. Reaching the page at all is the failure."""
+    try:
+        opener.open(BASE + path, timeout=20)
+    except urllib.error.HTTPError as failure:
+        assert failure.code == code, \
+            "GET %s returned %d, wanted %d" % (path, failure.code, code)
+        return
+    raise AssertionError("GET %s was served; it should have been %d" % (path, code))
+
+
+def vault_plaintext():
+    """The vault as the CLI reads it, through the core the CLI runs."""
+    done = subprocess.run(
+        [sys.executable, os.path.join(root, "src", "spm_core.py"), "read",
+         vault, plainfile],
+        input=password.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert done.returncode == 0, done.stderr.decode()
+    with open(plainfile, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def post(path, fields, page_for_token):
+    """Submit a form the way a browser does, token and Origin included."""
+    token = re.search(r'name="csrf" value="([^"]+)"', page_for_token)
+    assert token, "the served form carried no CSRF token"
+    body = list(fields) + [("csrf", token.group(1))]
+    request = urllib.request.Request(
+        BASE + path, data=urllib.parse.urlencode(body).encode("utf-8"),
+        method="POST")
+    request.add_header("Content-Type", "application/x-www-form-urlencoded")
+    request.add_header("Origin", BASE)
+    with opener.open(request, timeout=20) as response:
+        return response.geturl(), response.read().decode("utf-8")
+
+
+# The login POST is exempt from the token check -- there is no session to
+# carry one yet -- so it is submitted without.
+request = urllib.request.Request(
+    BASE + "/login",
+    data=urllib.parse.urlencode({"password": password}).encode(),
+    method="POST")
+request.add_header("Content-Type", "application/x-www-form-urlencoded")
+request.add_header("Origin", BASE)
+opener.open(request, timeout=20)
+
+# Every schema icon must resolve. An unresolved <use> renders nothing at all,
+# so a type whose icon is missing from the sprite is a blank square that no
+# error anywhere reports.
+sprite = re.search(r'ICON_SPRITE\s*=\s*"""(.*?)"""',
+                   open(web_script, encoding="utf-8").read(), re.S)
+assert sprite, "the page carries no icon sprite"
+symbols = set(re.findall(r'id="i-([a-z0-9-]+)"', sprite.group(1)))
+for record_type in core.RECORD_TYPES:
+    icon = core.RECORD_SCHEMAS[record_type].get("icon", "")
+    assert icon in symbols, \
+        "%s names icon %r and the sprite has no such symbol" % (record_type, icon)
+
+listing = get("/records")
+assert 'data-i18n="nav.records"' in listing, "the sidebar has no Records entry"
+# The empty state is asserted against the vault rather than assumed: this
+# fixture has carried other rows through the suite before reaching here.
+before = sum(1 for _i, _p in core.iter_records(vault_plaintext()))
+assert (('data-i18n="empty.records.t"' in listing) == (before == 0)), \
+    "the empty state and the vault disagree about whether there are records"
+
+# The picker offers every type, by name and by link.
+picker = get("/records-add")
+for record_type in core.RECORD_TYPES:
+    assert "/records-add?type=%s" % urllib.parse.quote(record_type) in picker, \
+        "the picker does not offer %s" % record_type
+
+# A type the core does not define must not render a form. Without this a
+# crafted link produces a page with no fields that writes a row no surface
+# can read back.
+refused("/records-add?type=not-a-type", 404)
+refused("/records?type=not-a-type", 404)
+refused("/records-view?type=wifi&id=999999", 404)
+
+sample = {"line": "sample-value", "number": "42", "date": "2027-01-31",
+          "month": "2027-01", "multiline": "first line\nsecond line"}
+made = []
+for record_type in core.RECORD_TYPES:
+    form = get("/records-add?type=%s" % urllib.parse.quote(record_type))
+    fields = [("type", record_type), ("label", "web %s" % record_type)]
+    expect = {}
+    for name, kind, widget, _required in core.record_fields(record_type):
+        # A distinct value per field, so a form that writes the right number
+        # of values into the wrong boxes still fails.
+        value = "%s-%s" % (sample.get(widget, "sample-value"), name)
+        assert 'name="%s"' % name in form, \
+            "the %s form has no control for %r" % (record_type, name)
+        fields.append((name, value))
+        expect[name] = value
+    fields += [("folder", "Web"), ("cf_name_0", "ticket"),
+               ("cf_value_0", "SPM 42")]
+    url, view = post("/records-add", fields, form)
+    assert "/records-view?type=%s" % urllib.parse.quote(record_type) in url, \
+        "adding a %s did not land on the record: %s" % (record_type, url)
+    made.append((record_type, url.rsplit("id=", 1)[1]))
+
+    secrets_here = core.record_secret_fields(record_type)
+    assert secrets_here, "%s declares no secret; this assertion proves nothing" \
+        % record_type
+    for name, value in expect.items():
+        if name in secrets_here:
+            # The value may be in the page as data for the reveal control, but
+            # it must never be the text that is rendered.
+            assert ">%s<" % value not in view, \
+                "%s showed its %s in the open" % (record_type, name)
+        else:
+            assert value.split("\n")[0] in view, \
+                "%s lost its %s on the view page" % (record_type, name)
+    assert "SPM 42" in view, "%s lost its custom field" % record_type
+
+# The list shows them all, and the type filter narrows to one.
+listing = get("/records")
+for record_type, record_id in made:
+    assert "/records-view?type=%s&amp;id=%s" % (
+        urllib.parse.quote(record_type), record_id) in listing, \
+        "%s %s is missing from the list" % (record_type, record_id)
+one = get("/records?type=wifi")
+assert "web wifi" in one, "the wifi filter hid the wifi record"
+assert "web server" not in one, "the wifi filter showed a server record"
+
+# The search page says it looks "across every record type". Until typed records
+# were listed there it did not, and a wifi record could not be found by its own
+# name from the search box.
+found = get("/search?q=" + urllib.parse.quote("web wifi"))
+assert "web wifi" in found, "search cannot find a typed record by its label"
+# The href lands in an attribute unaltered, so it has to arrive escaped: a
+# bare & there starts a character reference, which is how the record list
+# lost its links once already.
+assert "/records-view?type=wifi&amp;id=" in found, \
+    "the search result does not link to the record with an escaped href"
+# The kind column names the type, so a translated locale still says which
+# kind of record matched rather than the generic word.
+assert 'data-i18n="record.type.wifi"' in found, \
+    "the search result does not name the record's type"
+# A non-secret schema value is matched the way a password's username is.
+found = get("/search?q=" + urllib.parse.quote("sample-value-ssid"))
+assert "web wifi" in found, "search cannot find a typed record by a plain field"
+# A secret is not, or the result count would answer "is this string in the
+# vault?" for anyone who reached an unlocked session.
+secret_field = sorted(core.record_secret_fields("wifi"))[0]
+found = get("/search?q=" + urllib.parse.quote("sample-value-" + secret_field))
+assert "web wifi" not in found, \
+    "search matched a secret field, which makes it a confirmation oracle"
+
+# The overview counts records with the rest of the vault.
+overview = get("/")
+assert 'href="/records"' in overview, "the overview has no records tile"
+
+# The CLI reads what the Dashboard wrote. This is the assertion the whole
+# engine exists to make true, and it is the one 4.1.0 could not have made.
+plaintext = vault_plaintext()
+for record_type, record_id in made:
+    found = core.find_record(plaintext, record_type, record_id)
+    assert found, "the CLI cannot find the %s the Dashboard wrote" % record_type
+    _index, parsed = found
+    assert parsed[5] == "Web", "the folder did not reach the vault"
+    assert parsed[6] == [("ticket", "SPM 42")], \
+        "the custom field did not reach the vault"
+    for name, kind, _w, _r in core.record_fields(record_type):
+        assert parsed[3].get(name), \
+            "%s reached the vault without its %s" % (record_type, name)
+
+# An edit keeps the id and the created stamp. A created stamp that moved on
+# every edit would quietly make "oldest first" mean "least recently touched".
+edit_type, edit_id = made[0]
+_index, before = core.find_record(plaintext, edit_type, edit_id)
+form = get("/records-edit?type=%s&id=%s" % (urllib.parse.quote(edit_type), edit_id))
+assert "web %s" % edit_type in form, "the edit form did not load the record"
+fields = [("type", edit_type), ("id", edit_id), ("label", "web %s edited" % edit_type)]
+for name, _k, widget, _r in core.record_fields(edit_type):
+    fields.append((name, "%s-%s" % (sample.get(widget, "sample-value"), name)))
+fields += [("folder", "Web"), ("cf_name_0", "ticket"), ("cf_value_0", "SPM 43")]
+fields += [("environment_that_is_not_a_field", "smuggled")]
+url, view = post("/records-edit", fields, form)
+assert "web %s edited" % edit_type in view, "the edit did not take"
+
+_index, after = core.find_record(vault_plaintext(), edit_type, edit_id)
+# The created stamp belongs to the record, not to the edit. One that moved on
+# every change would quietly turn "oldest first" into "least recently touched",
+# and the rotation warnings read that column.
+assert after[4] == before[4], \
+    "the edit rewrote the created stamp: %r -> %r" % (before[4], after[4])
+assert after[1] == edit_id, "the edit changed the record's id"
+# A field name the schema does not define must not be stored. It could only
+# arrive from a crafted post, and a value no surface draws is a value nobody
+# can ever see, check or delete.
+assert "smuggled" not in "".join(after[3].values()), \
+    "a field the schema does not name was written into the record"
+assert not any(n == "environment_that_is_not_a_field" for n, _v in after[6]), \
+    "an unknown form field was stored as a custom field"
+
+# A custom field may not take a schema field's name: both cross an export in
+# one column and are told apart by whether the name is in the schema, so one
+# of the two would silently disappear. The core refuses, and the form has to
+# show its reason rather than a generic failure.
+shadow = sorted(core.record_secret_fields(edit_type))[0]
+form = get("/records-edit?type=%s&id=%s" % (urllib.parse.quote(edit_type), edit_id))
+fields = [("type", edit_type), ("id", edit_id), ("label", "shadowed")]
+for name, _k, widget, _r in core.record_fields(edit_type):
+    fields.append((name, "%s-%s" % (sample.get(widget, "sample-value"), name)))
+fields += [("cf_name_0", shadow), ("cf_value_0", "collides")]
+_url, refused = post("/records-edit", fields, form)
+assert shadow in refused and "may not reuse" in refused, \
+    "a custom field shadowing %r was accepted, or refused without saying why" % shadow
+
+# A required field left blank is refused by the core, and the form comes back
+# with what was typed rather than empty.
+form = get("/records-add?type=%s" % urllib.parse.quote(edit_type))
+required = [n for n, _k, _w, r in core.record_fields(edit_type) if r]
+assert required, "%s has no required field; this proves nothing" % edit_type
+fields = [("type", edit_type), ("label", "missing required")]
+for name, _k, widget, is_required in core.record_fields(edit_type):
+    if name == required[0]:
+        continue
+    fields.append((name, "%s-%s" % (sample.get(widget, "sample-value"), name)))
+_url, refused = post("/records-add", fields, form)
+assert "requires a value" in refused, "a missing required field was accepted"
+assert "missing required" in refused, "the refused form lost what was typed"
+
+# Delete every record this test made, and prove each one is gone from both
+# surfaces rather than only from the page that deleted it.
+listing = get("/records")
+for record_type, record_id in made:
+    post("/records-delete", [("type", record_type), ("id", record_id)], listing)
+final = get("/records")
+for record_type, record_id in made:
+    assert "/records-view?type=%s&amp;id=%s" % (
+        urllib.parse.quote(record_type), record_id) not in final, \
+        "%s %s survived its delete" % (record_type, record_id)
+
+plaintext = vault_plaintext()
+for record_type, record_id in made:
+    assert core.find_record(plaintext, record_type, record_id) is None, \
+        "the CLI still sees the %s the Dashboard deleted" % record_type
+
+# An ssh-key record shows what the core derives from the key, and still hides
+# the key. The container is built here rather than shelling out to ssh-keygen,
+# so this runs the same everywhere; that the derivation agrees with ssh-keygen
+# is pinned separately, in the core suite and in the shell block below.
+def openssh_container(public_blob):
+    def field(raw):
+        return len(raw).to_bytes(4, "big") + raw
+    raw = (b"openssh-key-v1\x00" + field(b"none") + field(b"none") + field(b"")
+           + (1).to_bytes(4, "big") + field(public_blob) + field(b"\x00" * 16))
+    body = base64.b64encode(raw).decode("ascii")
+    return ("-----BEGIN OPENSSH PRIVATE KEY-----\n"
+            + "\n".join(body[i:i + 70] for i in range(0, len(body), 70))
+            + "\n-----END OPENSSH PRIVATE KEY-----\n")
+
+pub_blob = core.ssh_public_blob_from_line(
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPlrtDmgZLIIUtf3kVUZW+av5Uc8iYx8DN"
+    "+p2wE1l+D2 plain@example")
+key_text = openssh_container(pub_blob)
+expect_fp = core.ssh_fingerprint(pub_blob)
+
+form = get("/records-add?type=ssh-key")
+url, view = post("/records-add", [
+    ("type", "ssh-key"), ("label", "web ssh derived"),
+    ("private_key", key_text), ("comment", "plain@example")], form)
+assert expect_fp in view, "the record page does not show the derived fingerprint"
+assert "ssh-ed25519" in view, "the record page does not show the derived key type"
+assert 'data-i18n="ssh.derived.t"' in view, "the derived panel is missing"
+# The public half is derived and shown; the private half is a secret and is
+# not. It reaches the page once, inside the reveal control's data-val, the
+# same way every other secret does -- so the assertion strips those attributes
+# and requires that nothing of the key survives anywhere else. Checking only
+# that the page "contains the key" would fail on a correct page, and checking
+# nothing would pass on one that printed it in the open.
+assert 'data-val="-----BEGIN OPENSSH PRIVATE KEY' in view, \
+    "the private key never reached the reveal control, so it cannot be copied"
+without_reveal = re.sub(r'data-val="[^"]*"', "", view)
+assert "PRIVATE KEY" not in without_reveal, \
+    "the record page printed the private key block outside the reveal control"
+for line in key_text.splitlines()[1:-1]:
+    assert line not in without_reveal, \
+        "the record page printed the private key body outside the reveal control"
+ssh_id = url.rsplit("id=", 1)[1]
+post("/records-delete", [("type", "ssh-key"), ("id", ssh_id)], get("/records"))
+
+# A gpg-key record shows the same kind of derived panel, from the same code
+# path -- the record page asks the core for a type's derived rows and its
+# heading key and renders what comes back, naming neither SSH nor GPG. The
+# secret key is built from a pinned public one so no private key material
+# lives in the repository and no gpg is needed to run this.
+GPG_ED25519_PUB = """\
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mDMEap7AuBYJKwYBBAHaRw8BAQdATjjnpLNzcFN5CsibwtfXO8qUKCSJFvGErii8
+xq4+bf20F1NQTSBMYWIgRWQgPGVkQHNwbS5sYWI+iJAEExYIADgWIQS4cgU1oID+
+KnAXzu9fQOuU3fXK5AUCap7AuAIbAwULCQgHAgYVCgkICwIEFgIDAQIeAQIXgAAK
+CRBfQOuU3fXK5LO1APwPRjj+hQw41D3DSbzSwNxcn7ILoa7vAWRv9tnkiew3awEA
+yZ8m3Wz18/8vQVqyvlBzkyuco8JgRErLIT9H1sdtIQ8=
+=Ab9k
+-----END PGP PUBLIC KEY BLOCK-----
+"""
+GPG_ED25519_FP = "B8720535A080FE2A7017CEEF5F40EB94DDF5CAE4"
+
+def gpg_secret_from_public(armor):
+    data = core.pgp_dearmor(armor)
+    body = next(b for tag, b in core.pgp_packets(data)
+                if tag == core.PGP_TAG_PUBLIC_KEY)
+    length, _alg, _bits, _curve = core.pgp_public_material(body)
+    packet = body[:length] + b"\x00" + b"\x00" * 40   # unprotected secret
+    framed = (bytes([0xC0 | core.PGP_TAG_SECRET_KEY]) + b"\xff"
+              + len(packet).to_bytes(4, "big") + packet)
+    encoded = base64.b64encode(framed).decode("ascii")
+    return ("-----BEGIN PGP PRIVATE KEY BLOCK-----\n\n"
+            + "\n".join(encoded[i:i + 64] for i in range(0, len(encoded), 64))
+            + "\n-----END PGP PRIVATE KEY BLOCK-----\n")
+
+gpg_key_text = gpg_secret_from_public(GPG_ED25519_PUB)
+form = get("/records-add?type=gpg-key")
+url, view = post("/records-add", [
+    ("type", "gpg-key"), ("label", "web gpg derived"),
+    ("private_key", gpg_key_text)], form)
+assert GPG_ED25519_FP in view, "the record page does not show the derived fingerprint"
+assert GPG_ED25519_FP[-16:] in view, "the record page does not show the key id"
+assert 'data-i18n="gpg.derived.t"' in view, "the derived panel is missing"
+assert 'data-val="-----BEGIN PGP PRIVATE KEY' in view, \
+    "the secret key never reached the reveal control, so it cannot be copied"
+without_reveal = re.sub(r'data-val="[^"]*"', "", view)
+assert "PRIVATE KEY" not in without_reveal, \
+    "the record page printed the secret key block outside the reveal control"
+for line in gpg_key_text.splitlines()[2:-1]:
+    assert line not in without_reveal, \
+        "the record page printed the secret key body outside the reveal control"
+gpg_id = url.rsplit("id=", 1)[1]
+post("/records-delete", [("type", "gpg-key"), ("id", gpg_id)], get("/records"))
+
+sys.stdout.write("  dashboard records: %d schemas add, list, filter, view "
+                 "redacted, edit, refuse and delete over HTTP, and the CLI "
+                 "reads back every one\n" % len(core.RECORD_TYPES))
+PYWEBREC
+
+# ----- SSH keys, derived rather than typed ------------------------------------
+# The claim this feature rests on is that SPM derives a key's fingerprint
+# itself, matching what ssh-keygen prints, without ssh-keygen and without the
+# passphrase. Nothing in the running system would notice if that drifted -- a
+# wrong fingerprint looks exactly like a right one -- so it is checked here
+# against ssh-keygen's own answer, on keys generated for this run.
+#
+# `ssh-keygen` is used only as the oracle and to make the fixtures. SPM never
+# calls it.
+if command -v ssh-keygen >/dev/null 2>&1; then
+	SSH_LAB="$TEST_ROOT/sshkeys"
+	mkdir -p "$SSH_LAB"
+	ssh-keygen -t ed25519 -N "" -C "plain@spm.test" -f "$SSH_LAB/plain" -q
+	SSH_SEALED_PASSPHRASE="regression-passphrase"
+	ssh-keygen -t ed25519 -N "$SSH_SEALED_PASSPHRASE" -C "sealed@spm.test" \
+		-f "$SSH_LAB/sealed" -q
+	ssh-keygen -t rsa -b 2048 -N "" -C "rsa@spm.test" -f "$SSH_LAB/rsa" -q
+
+	ssh_truth_fp() { ssh-keygen -l -f "$1.pub" | awk '{print $2}'; }
+	ssh_truth_bits() { ssh-keygen -l -f "$1.pub" | awk '{print $1}'; }
+
+	for keyname in plain sealed rsa; do
+		key="$SSH_LAB/$keyname"
+		derived="$(base64 <"$key" | tr -d '\n' \
+			| python3 "$ROOT_DIR/src/spm_core.py" ssh info)"
+		got_fp="$(printf '%s\n' "$derived" \
+			| awk -F '\t' '$1=="fingerprint"{print $2}' | base64 -d)"
+		got_bits="$(printf '%s\n' "$derived" \
+			| awk -F '\t' '$1=="bits"{print $2}' | base64 -d)"
+		[ "$got_fp" = "$(ssh_truth_fp "$key")" ] || {
+			printf 'ssh: SPM derived %s for %s, ssh-keygen says %s\n' \
+				"$got_fp" "$keyname" "$(ssh_truth_fp "$key")" >&2
+			exit 1
+		}
+		[ "$got_bits" = "$(ssh_truth_bits "$key")" ] || {
+			printf 'ssh: SPM says %s bits for %s, ssh-keygen says %s\n' \
+				"$got_bits" "$keyname" "$(ssh_truth_bits "$key")" >&2
+			exit 1
+		}
+	done
+	# The sealed key is the one that matters: its fingerprint was derived
+	# without the passphrase, which is never given to anything here.
+	sealed_enc="$(base64 <"$SSH_LAB/sealed" | tr -d '\n' \
+		| python3 "$ROOT_DIR/src/spm_core.py" ssh info \
+		| awk -F '\t' '$1=="encrypted"{print $2}' | base64 -d)"
+	[ "$sealed_enc" = "1" ] || {
+		printf 'ssh: a passphrase-protected key was reported unprotected\n' >&2
+		exit 1
+	}
+
+	# Now the CLI, against a vault of its own.
+	SSH_VAULT="$TEST_ROOT/ssh-vault.gpg"
+	cp "$PASSWORD_VAULT" "$SSH_VAULT"
+	(
+		export VAULT_FILE="$SSH_VAULT" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY=""
+		export RECOVERY_FILE="$SSH_VAULT.recovery"
+		cmd_ssh import "$SSH_LAB/plain" "deploy" >/dev/null
+		cmd_ssh import "$SSH_LAB/sealed" "sealed" >/dev/null
+
+		# `ssh public` must reproduce the .pub file byte for byte: that line
+		# is pasted into authorized_keys, where a single wrong character is a
+		# lockout rather than a typo.
+		mine="$(cmd_ssh public 1)"
+		theirs="$(cat "$SSH_LAB/plain.pub")"
+		[ "$mine" = "$theirs" ] || {
+			printf 'ssh: rebuilt public line differs from ssh-keygen\n  %s\n  %s\n' \
+				"$mine" "$theirs" >&2
+			exit 1
+		}
+
+		# Every check below reads a command's output from a variable rather
+		# than piping it into grep. `grep -q` exits on its first match and
+		# closes the pipe; the command still writing gets SIGPIPE, and under
+		# `pipefail` the pipeline reports 141 -- so a pipe into `grep -q`
+		# reports failure precisely when the thing being looked for was
+		# found. The `|| exit` checks would fail on a correct build, and the
+		# `&& exit` checks below would pass on a broken one.
+		ssh_listing="$(cmd_ssh list)"
+		ssh_shown="$(cmd_ssh show 2)"
+
+		# The list shows the fingerprint ssh-keygen would print.
+		case "$ssh_listing" in
+			*"$(ssh_truth_fp "$SSH_LAB/plain")"*) ;;
+			*) printf 'ssh: list does not show the real fingerprint\n' >&2; exit 1 ;;
+		esac
+		case "$ssh_shown" in
+			*"$(ssh_truth_fp "$SSH_LAB/sealed")"*) ;;
+			*) printf 'ssh: show does not fingerprint the sealed key\n' >&2; exit 1 ;;
+		esac
+		case "$ssh_shown" in
+			*protected*) ;;
+			*) printf 'ssh: show does not say the key is passphrase-protected\n' >&2
+			   exit 1 ;;
+		esac
+
+		# The private key must never be printed by a command that does not
+		# claim to reveal it. This is the assertion that matters most here.
+		secret_line="$(sed -n '2p' "$SSH_LAB/plain")"
+		for output in "$ssh_listing" "$(cmd_ssh show 1)" "$(cmd_ssh public 1)"; do
+			case "$output" in
+				*"$secret_line"*)
+					printf 'ssh: a private key was printed in the open\n' >&2
+					exit 1
+					;;
+				*"PRIVATE KEY"*)
+					printf 'ssh: a private key block was printed in the open\n' >&2
+					exit 1
+					;;
+			esac
+		done
+
+		# And a record view masks it like any other secret, because the
+		# schema says private_key is one -- not because ssh code says so.
+		ssh_masked="$(cmd_record_view ssh-key 1)"
+		ssh_revealed="$(cmd_record_view ssh-key 1 --reveal)"
+		case "$ssh_masked" in
+			*"$secret_line"*)
+				printf 'ssh: record view revealed the private key\n' >&2
+				exit 1 ;;
+		esac
+		case "$ssh_revealed" in
+			*"$secret_line"*) ;;
+			*) printf 'ssh: --reveal did not show the private key\n' >&2; exit 1 ;;
+		esac
+	)
+
+	# A file that is not a key at all is refused rather than stored.
+	(
+		export VAULT_FILE="$SSH_VAULT" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY=""
+		export RECOVERY_FILE="$SSH_VAULT.recovery"
+		# Each refusal runs in a subshell of its own. `die` is `exit 1`,
+		# and an `exit` in an `if` condition ends the shell running it
+		# rather than yielding a status the `if` can test -- so without
+		# the extra parentheses a correct refusal would tear down this
+		# block, and errexit would call that a suite failure.
+		printf 'this is not a key\n' > "$SSH_LAB/junk"
+		if ( cmd_ssh import "$SSH_LAB/junk" "junk" ) >/dev/null 2>&1; then
+			printf 'ssh: a file that is not a key was imported\n' >&2
+			exit 1
+		fi
+		# And the .pub, which is the easy mistake: it sits beside the key,
+		# it is the file people are used to copying, and it fingerprints
+		# perfectly -- so a guard that only asks "did this fingerprint?"
+		# files it as the private half of a key and never notices.
+		if ( cmd_ssh import "$SSH_LAB/plain.pub" "oops" ) >/dev/null 2>&1; then
+			printf 'ssh: a public key was stored as a private one\n' >&2
+			exit 1
+		fi
+	)
+	printf '  ssh keys: 3 key types fingerprinted exactly as ssh-keygen prints '
+	printf 'them, sealed key included, and no private key reaches a screen\n'
+
+	# ----- the agent ------------------------------------------------------
+	# The claim here is narrower than it looks: the key reaches ssh-agent
+	# without becoming a file and without becoming an argument, it leaves on a
+	# timer, and taking it back out needs only the public half. An agent is
+	# the only thing that can confirm any of that, so this drives a real one.
+	if command -v ssh-add >/dev/null 2>&1 && command -v ssh-agent >/dev/null 2>&1; then
+		(
+			export VAULT_FILE="$SSH_VAULT" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY=""
+			export RECOVERY_FILE="$SSH_VAULT.recovery"
+
+			# Before any agent exists, `load` must refuse. Starting one on the
+			# user's behalf would leave a process they did not ask for and
+			# cannot see, holding a key, for as long as the session lives.
+			if ( SSH_AUTH_SOCK="" cmd_ssh load 1 ) >/dev/null 2>&1; then
+				printf 'ssh: load succeeded with no agent to load into\n' >&2
+				exit 1
+			fi
+
+			eval "$(ssh-agent -s)" >/dev/null
+			# shellcheck disable=SC2064
+			trap "ssh-agent -k >/dev/null 2>&1 || true" EXIT
+
+			# Only fingerprint lines. An empty agent prints "The agent has
+			# no identities." on stdout and exits 1, so a bare $2 would
+			# report the word "agent" as a loaded key and the non-zero
+			# status would abort an assignment under errexit.
+			agent_fp() { ssh-add -l 2>/dev/null | awk '/SHA256:/{print $2}' || true; }
+
+			cmd_ssh load 1 5 >/dev/null
+			case "$(agent_fp)" in
+				*"$(ssh_truth_fp "$SSH_LAB/plain")"*) ;;
+				*) printf 'ssh: the agent is not holding the key that was loaded\n' >&2
+				   exit 1 ;;
+			esac
+
+			# The listing has to recognise its own key: the fingerprint in the
+			# agent and the fingerprint in the vault are derived from the same
+			# bytes at both ends, so a match here is the whole point.
+			ssh_agent_view="$(cmd_ssh agent)"
+			case "$ssh_agent_view" in
+				*"ssh-key 1"*) ;;
+				*) printf 'ssh: agent listing did not match the key to its record\n' >&2
+				   exit 1 ;;
+			esac
+
+			# The sealed key needs its passphrase, and the passphrase must not
+			# reach a file or a command line to get there.
+			printf '%s\n' "$SSH_SEALED_PASSPHRASE" | cmd_ssh load 2 5 >/dev/null
+			case "$(agent_fp)" in
+				*"$(ssh_truth_fp "$SSH_LAB/sealed")"*) ;;
+				*) printf 'ssh: the sealed key did not reach the agent\n' >&2
+				   exit 1 ;;
+			esac
+
+			# Unloading names the key by its public half. If this ever needs
+			# the private key, that is a regression in what unload costs.
+			cmd_ssh unload 2 >/dev/null
+			case "$(agent_fp)" in
+				*"$(ssh_truth_fp "$SSH_LAB/sealed")"*)
+					printf 'ssh: unload left the key in the agent\n' >&2
+					exit 1 ;;
+			esac
+
+			# A wrong passphrase is refused, and leaves the agent as it was.
+			before="$(agent_fp)"
+			if ( printf 'not-the-passphrase\n' | cmd_ssh load 2 5 ) >/dev/null 2>&1; then
+				printf 'ssh: a wrong passphrase loaded the key anyway\n' >&2
+				exit 1
+			fi
+			[ "$(agent_fp)" = "$before" ] || {
+				printf 'ssh: a refused load changed what the agent holds\n' >&2
+				exit 1
+			}
+
+			cmd_ssh unload --all >/dev/null
+			[ -z "$(agent_fp)" ] || {
+				printf 'ssh: --all left something in the agent\n' >&2
+				exit 1
+			}
+
+			# Two things about the load the agent cannot be asked about
+			# afterwards: what lifetime it was given, and whether the key
+			# arrived as bytes or as a path. `ssh-add -l` reports neither, and
+			# waiting out a real expiry would mean sleeping a minute. So this
+			# puts a recording ssh-add in front on PATH and reads the argv
+			# SPM actually built -- which is the thing being claimed.
+			shim="$TEST_ROOT/ssh-add-shim"
+			mkdir -p "$shim"
+			cat > "$shim/ssh-add" <<'SHIM'
+#!/usr/bin/env bash
+# Drain stdin so the writer never sees SIGPIPE, then record the argument list.
+cat >/dev/null
+printf '%s\n' "$*" >> "$SSH_ADD_ARGV_LOG"
+exit 0
+SHIM
+			chmod 755 "$shim/ssh-add"
+			export SSH_ADD_ARGV_LOG="$TEST_ROOT/ssh-add-argv"
+			: > "$SSH_ADD_ARGV_LOG"
+			PATH="$shim:$PATH" cmd_ssh load 1 5 >/dev/null 2>&1
+			argv="$(cat "$SSH_ADD_ARGV_LOG")"
+			case "$argv" in
+				*"-t 300"*) ;;
+				*) printf 'ssh: load did not ask for a 5 minute lifetime (argv: %s)\n' \
+					"$argv" >&2
+				   exit 1 ;;
+			esac
+			# The last argument must be "-": anything else is a filename, and
+			# a filename means the private key was written to disk to get here.
+			case "$argv" in
+				*" -") ;;
+				*) printf 'ssh: the key did not reach ssh-add on stdin (argv: %s)\n' \
+					"$argv" >&2
+				   exit 1 ;;
+			esac
+			# 0 minutes means no expiry, and no expiry means no -t at all --
+			# not `-t 0`, which ssh-add would read as "expire immediately".
+			: > "$SSH_ADD_ARGV_LOG"
+			PATH="$shim:$PATH" cmd_ssh load 1 0 >/dev/null 2>&1
+			case "$(cat "$SSH_ADD_ARGV_LOG")" in
+				*-t*) printf 'ssh: a no-expiry load still passed a lifetime\n' >&2
+				      exit 1 ;;
+			esac
+			unset SSH_ADD_ARGV_LOG
+
+			# Nothing any of these printed may contain the key. `load` and
+			# `unload` both hold it -- one decodes it, the other derives from
+			# it -- so this is the assertion that they hold it quietly.
+			secret_line="$(sed -n '2p' "$SSH_LAB/plain")"
+			cmd_ssh load 1 5 > "$TEST_ROOT/agent-out" 2>&1
+			cmd_ssh agent >> "$TEST_ROOT/agent-out" 2>&1
+			cmd_ssh unload 1 >> "$TEST_ROOT/agent-out" 2>&1
+			if grep -q -e "$secret_line" -e "PRIVATE KEY" "$TEST_ROOT/agent-out"; then
+				printf 'ssh: an agent command printed the private key\n' >&2
+				exit 1
+			fi
+		)
+		printf '  ssh agent: a key loads over a pipe with a lifetime, is matched '
+		printf 'back to its record, unloads by its public half, and a wrong '
+		printf 'passphrase changes nothing\n'
+	else
+		printf '  ssh agent: skipped, no ssh-agent on this machine\n'
+	fi
+else
+	printf '  ssh keys: skipped, no ssh-keygen to check SPM against\n'
+fi
+
+# ----- GPG keys, derived rather than typed ------------------------------------
+# The claim, again: SPM derives an OpenPGP key's fingerprint itself, matching
+# what gpg prints, from the stored secret key and without the passphrase. gpg
+# is a hard dependency of SPM -- the vault is a gpg symmetric file -- so it is
+# always here to be the oracle, and generating a throwaway keypair to check
+# against is fair game. The keypair lives in a GNUPGHOME of its own so it
+# cannot touch the vault's.
+GPG_LAB="$TEST_ROOT/gpgkeys"
+mkdir -p "$GPG_LAB"; chmod 700 "$GPG_LAB"
+gpg_truth_fp() {
+	GNUPGHOME="$GPG_LAB" gpg --list-keys --with-colons "$1" 2>/dev/null \
+		| awk -F: '$1=="fpr"{print $10; exit}'
+}
+# ed25519 is instant and needs no entropy stockpile; a sealed one proves the
+# passphrase is never needed to derive; rsa2048 exercises the MPI path.
+GNUPGHOME="$GPG_LAB" gpg --batch --quick-gen-key --pinentry-mode loopback \
+	--passphrase "" "SPM Reg Plain <plain@spm.test>" ed25519 default never >/dev/null 2>&1
+GNUPGHOME="$GPG_LAB" gpg --batch --quick-gen-key --pinentry-mode loopback \
+	--passphrase "reg-secret" "SPM Reg Sealed <sealed@spm.test>" ed25519 default never >/dev/null 2>&1
+GNUPGHOME="$GPG_LAB" gpg --batch --quick-gen-key --pinentry-mode loopback \
+	--passphrase "" "SPM Reg RSA <rsa@spm.test>" rsa2048 default never >/dev/null 2>&1
+
+for who in plain:  sealed:reg-secret rsa: ; do
+	uid="${who%%:*}"; pass="${who#*:}"
+	GNUPGHOME="$GPG_LAB" gpg --batch --yes --pinentry-mode loopback \
+		--passphrase "$pass" --armor --export-secret-keys "${uid}@spm.test" \
+		> "$GPG_LAB/$uid.sec.asc" 2>/dev/null
+	GNUPGHOME="$GPG_LAB" gpg --armor --export "${uid}@spm.test" \
+		> "$GPG_LAB/$uid.pub.asc" 2>/dev/null
+done
+
+GPG_VAULT="$TEST_ROOT/gpg-vault.gpg"
+cp "$PASSWORD_VAULT" "$GPG_VAULT"
+(
+	export VAULT_FILE="$GPG_VAULT" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY=""
+	export RECOVERY_FILE="$GPG_VAULT.recovery"
+	cmd_gpg import "$GPG_LAB/plain.sec.asc" "plain" >/dev/null
+	cmd_gpg import "$GPG_LAB/sealed.sec.asc" "sealed" >/dev/null
+	cmd_gpg import "$GPG_LAB/rsa.sec.asc" "rsa" >/dev/null
+
+	gpg_listing="$(cmd_gpg list)"
+	for uid in plain sealed rsa; do
+		case "$gpg_listing" in
+			*"$(gpg_truth_fp "${uid}@spm.test" | tail -c 17)"*) ;;
+			*) printf 'gpg: list does not show the %s key id\n' "$uid" >&2; exit 1 ;;
+		esac
+	done
+
+	# show's fingerprint is gpg's own, for every key including the sealed one
+	# whose passphrase was never handed to anything here.
+	i=1
+	for uid in plain sealed rsa; do
+		shown="$(cmd_gpg show "$i")"
+		case "$shown" in
+			*"$(gpg_truth_fp "${uid}@spm.test")"*) ;;
+			*) printf 'gpg: show did not fingerprint %s as gpg does\n' "$uid" >&2
+			   exit 1 ;;
+		esac
+		i=$((i + 1))
+	done
+	case "$(cmd_gpg show 2)" in
+		*protected*) ;;
+		*) printf 'gpg: show does not say the sealed key is protected\n' >&2; exit 1 ;;
+	esac
+
+	# No command prints the secret key body. The armor's inner lines are the
+	# material; the BEGIN/END framing is not secret and may appear.
+	secret_body="$(sed -n '3p' "$GPG_LAB/plain.sec.asc")"
+	for out in "$gpg_listing" "$(cmd_gpg show 1)"; do
+		case "$out" in
+			*"$secret_body"*)
+				printf 'gpg: a secret key body was printed in the open\n' >&2
+				exit 1 ;;
+			*"PRIVATE KEY-----"*)
+				# The armor header alone is fine; a whole block is not.
+				case "$out" in
+					*"-----BEGIN PGP PRIVATE KEY"*"-----END PGP PRIVATE KEY"*)
+						printf 'gpg: a secret key block was printed in the open\n' >&2
+						exit 1 ;;
+				esac ;;
+		esac
+	done
+
+	# A record view masks the secret key like any other secret, because the
+	# schema says private_key is one -- not because gpg code says so.
+	gpg_masked="$(cmd_record_view gpg-key 1)"
+	gpg_revealed="$(cmd_record_view gpg-key 1 --reveal)"
+	case "$gpg_masked" in
+		*"$secret_body"*) printf 'gpg: record view revealed the secret key\n' >&2; exit 1 ;;
+	esac
+	case "$gpg_revealed" in
+		*"$secret_body"*) ;;
+		*) printf 'gpg: --reveal did not show the secret key\n' >&2; exit 1 ;;
+	esac
+
+	# A public key is refused: it fingerprints like a secret one, so a guard
+	# that only asks "did this fingerprint?" files it as the secret half of a
+	# key that then cannot sign or decrypt -- the one thing it is kept for.
+	if ( cmd_gpg import "$GPG_LAB/plain.pub.asc" "oops" ) >/dev/null 2>&1; then
+		printf 'gpg: a public key was stored as a secret one\n' >&2
+		exit 1
+	fi
+	# And a file that is not a key at all.
+	printf 'not a key\n' > "$GPG_LAB/junk"
+	if ( cmd_gpg import "$GPG_LAB/junk" "junk" ) >/dev/null 2>&1; then
+		printf 'gpg: a file that is not a key was imported\n' >&2
+		exit 1
+	fi
+)
+printf '  gpg keys: 3 key types fingerprinted exactly as gpg prints them, '
+printf 'sealed key included, no secret key reaches a screen, and a public '
+printf 'key is refused\n'
+
 # ----- line terminators in an exported custom field --------------------------
 # A custom field holding U+0085, U+2028 or U+2029 exported as valid JSON and
 # would not import back: those three are legal inside a JSON string and are

@@ -336,6 +336,35 @@ def t_archive_snapshots_and_prunes():
         eq(len(os.listdir(core.history_dir(path))), 1,
            "identical generations must not be archived twice")
 
+        # And not because the two calls happened to land in the same second.
+        # The name carries the clock as well as the digest, so a dedup that
+        # relied on the whole name split into two files whenever the calls
+        # straddled a tick -- rare enough to pass most runs, and retention
+        # counts files, so each duplicate evicted a real generation.
+        real_time = core.time
+
+        class TickingClock:
+            """Every reading is a second later than the one before it."""
+
+            def __init__(self):
+                self.seconds = 0
+
+            def gmtime(self, *args):
+                self.seconds += 1
+                return real_time.gmtime(real_time.time() + self.seconds)
+
+            def __getattr__(self, name):
+                return getattr(real_time, name)
+
+        core.time = TickingClock()
+        try:
+            core.archive_generation(path)
+            core.archive_generation(path)
+        finally:
+            core.time = real_time
+        eq(len(os.listdir(core.history_dir(path))), 1,
+           "an unchanged vault archived across a second tick made two snapshots")
+
         # Distinct generations accumulate, then prune to the retention limit.
         for n in range(6):
             with open(path, "ab") as handle:
@@ -2175,6 +2204,324 @@ def t_doctor_names_the_backend_that_sealed_the_file():
     eq(entry["backend"], "gpg")
 
 
+# ----- typed records ---------------------------------------------------------
+
+def t_vault_format_version_is_pinned():
+    # Every other assertion in this file reads VAULT_FORMAT_VERSION as a
+    # symbol, which is right for them and means none of them notices the
+    # number changing. The number is the whole mechanism behind the downgrade
+    # guard: raising it tells every older SPM to refuse the write. So one test
+    # pins the literal, and a release that means to move it edits this line
+    # deliberately rather than discovering later that nothing objected.
+    eq(core.VAULT_FORMAT_VERSION, 6,
+       "format 6 introduced typed records; bump this test with the format")
+
+
+def t_sanitize_field_covers_everything_splitlines_breaks_on():
+    # Derived from Python rather than asserted against a list someone typed:
+    # the failure this guards is a value that splits a record in two when it
+    # is read back, and str.splitlines() is what decides that. A hand-kept
+    # list is exactly how the shell and the dashboard came to hold two copies
+    # that only agreed because somebody remembered to keep them in step.
+    breaks = {chr(n) for n in range(0x2100)
+              if len(("a%sb" % chr(n)).splitlines()) > 1}
+    missing = sorted(breaks - set(core.VAULT_BREAK_CHARS))
+    eq(missing, [], "these characters split a record and are not collapsed")
+    assert "\t" in core.VAULT_BREAK_CHARS, "the field separator must be collapsed too"
+    for ch in core.VAULT_BREAK_CHARS:
+        out = core.sanitize_field("a%sb" % ch)
+        eq(out, "a b", "%r must collapse to a space" % ch)
+        eq(len(out.splitlines()), 1, "%r must not survive sanitising" % ch)
+
+
+def t_record_breaks_and_break_chars_agree():
+    # RECORD_BREAKS names characters for a human in a diagnostic and omits the
+    # structural three; VAULT_BREAK_CHARS is what a writer collapses. They
+    # describe the same hazard from two sides, so they must not drift.
+    eq(sorted(set(core.RECORD_BREAKS) | set("\t\r\n")),
+       sorted(set(core.VAULT_BREAK_CHARS)),
+       "the detector and the sanitiser disagree about what breaks a record")
+
+
+def t_record_schema_registry_is_well_formed():
+    assert core.RECORD_TYPES, "no record types are registered"
+    eq(sorted(core.RECORD_TYPES), list(core.RECORD_TYPES),
+       "RECORD_TYPES must be ordered so a nav menu and a --type listing agree")
+    eq(sorted(core.RECORD_TYPES), sorted(core.RECORD_SCHEMAS),
+       "RECORD_TYPES and RECORD_SCHEMAS must hold the same types")
+    for name in core.RECORD_TYPES:
+        assert len(name) <= core.RECORD_TYPE_MAX, name
+        schema = core.record_schema(name)
+        assert schema.get("label"), "%s has no label" % name
+        fields = core.record_fields(name)
+        assert fields, "%s has no fields" % name
+        seen = set()
+        for field, kind, widget, required in fields:
+            assert field and field not in seen, "%s repeats field %r" % (name, field)
+            seen.add(field)
+            assert kind in (core.FIELD_PLAIN, core.FIELD_SECRET), (name, field, kind)
+            assert widget in ("line", "multiline", "number", "date", "month"), \
+                (name, field, widget)
+            assert isinstance(required, bool), (name, field)
+        assert any(r for _n, _k, _w, r in fields), \
+            "%s has no required field, so an empty record would be valid" % name
+        assert core.record_secret_fields(name), \
+            "%s stores no secret; it does not need to be a vault record" % name
+
+
+def t_record_roundtrip_every_type():
+    for name in core.RECORD_TYPES:
+        values = {f: "value-for-%s" % f
+                  for f, _k, _w, required in core.record_fields(name) if required}
+        row = core.build_record_row(name, "7", "a label", values, "2026-01-01T00:00:00Z")
+        eq(row.count("\t"), 5,
+           "%s must be six columns, like every other record shape" % name)
+        eq(len(row.splitlines()), 1, "%s wrote a row that splits" % name)
+        parsed = core.parse_record_row(row)
+        assert parsed is not None, name
+        got_type, rid, label, got, created, folder, custom, hidden = parsed
+        eq(got_type, name)
+        eq(rid, "7")
+        eq(label, "a label")
+        eq(got, values, "%s did not round-trip its values" % name)
+        eq(created, "2026-01-01T00:00:00Z")
+        eq((folder, custom, hidden), ("", [], False))
+
+
+def t_record_row_keeps_the_secret_in_field_three():
+    # _describe_record and scan_broken_records both document that field 3 is
+    # where every record shape keeps its secret. A new shape that put the
+    # payload anywhere else would make both of them quietly wrong, for the new
+    # types only.
+    row = core.build_record_row("wifi", "1", "home",
+                                {"ssid": "home", "password": "hunter2"}, "t")
+    parts = row.split("\t")
+    assert "hunter2" not in parts[0] + parts[1] + parts[2] + parts[4], \
+        "a secret escaped field 3"
+    assert "hunter2" in base64.b64decode(parts[3]).decode("utf-8")
+
+
+def t_record_payload_is_validated():
+    raises(core.VaultError,
+           lambda: core.encode_record_payload("wifi", {"ssid": "n"}),
+           "a missing required field must refuse")
+    raises(core.VaultError,
+           lambda: core.encode_record_payload("wifi", {"ssid": "n", "password": " "}),
+           "whitespace must not satisfy a required field")
+    raises(core.VaultError,
+           lambda: core.encode_record_payload("wifi", {"ssid": "n", "password": "p",
+                                                       "typo": "x"}),
+           "an unknown field must refuse rather than be stored unrenderable")
+    raises(core.VaultError, lambda: core.record_schema("no-such-type"),
+           "an unknown type must refuse")
+    raises(core.VaultError,
+           lambda: core.encode_record_payload(
+               "wifi", {"ssid": "n", "password": "p",
+                        "security": "x" * (core.RECORD_VALUE_MAX + 1)}),
+           "an oversized value must refuse")
+
+
+def t_record_payload_is_order_independent():
+    a = core.encode_record_payload("wifi", {"ssid": "n", "password": "p",
+                                            "security": "WPA3"})
+    b = core.encode_record_payload("wifi", {"security": "WPA3", "password": "p",
+                                            "ssid": "n"})
+    eq(a, b, "encoding must not depend on the order the caller built its dict")
+
+
+def t_record_redaction_masks_every_secret():
+    values = {"cardholder": "A B", "number": "4111111111111111",
+              "cvv": "737", "pin": "0000", "brand": "visa"}
+    out = core.redact_record("credit-card", values)
+    for secret in core.record_secret_fields("credit-card"):
+        if values.get(secret):
+            eq(out[secret], core.SECRET_MASK, "%s was not masked" % secret)
+    eq(out["cardholder"], "A B", "a plain field must survive redaction")
+    eq(out["brand"], "visa")
+    # A mask that tracks the secret's length leaks the length, which for a CVV
+    # or a PIN is most of what there is to guess.
+    eq(len(core.redact_record("credit-card", {"cvv": "1"})["cvv"]),
+       len(core.redact_record("credit-card", {"cvv": "1" * 64})["cvv"]),
+       "the mask must not reveal how long the secret is")
+    for name in core.RECORD_TYPES:
+        filled = {f: "s" for f, _k, _w, _r in core.record_fields(name)}
+        masked = core.redact_record(name, filled)
+        for field, kind, _w, _r in core.record_fields(name):
+            if kind == core.FIELD_SECRET:
+                eq(masked[field], core.SECRET_MASK,
+                   "%s.%s is a secret and was not masked" % (name, field))
+
+
+def t_record_row_cannot_be_split_by_its_own_contents():
+    for ch in core.VAULT_BREAK_CHARS:
+        row = core.build_record_row("wifi", "1", "lab%sel" % ch,
+                                    {"ssid": "s%sid" % ch, "password": "p"}, "t")
+        eq(len(row.splitlines()), 1, "%r split a row through the label" % ch)
+        eq(row.count("\t"), 5, "%r added a column" % ch)
+        parsed = core.parse_record_row(row)
+        assert parsed is not None, ch
+        # The label is sanitised on the way in; the payload survives intact
+        # because base64 has no character that splitlines() honours.
+        eq(parsed[3]["ssid"], "s%sid" % ch,
+           "a payload value must survive a break character unchanged")
+
+
+def t_record_tolerates_what_a_newer_spm_wrote():
+    future = "REC:quantum-key\t9\tfuture record\tZXt9\t2026-01-01\t-"
+    assert core.parse_record_row(future) is None, \
+        "a type with no schema here must not be parsed"
+    eq(core._describe_record(future), ("QUANTUM-KEY", "9", "future record"),
+       "an unknown type must still be describable without decoding its payload")
+    counts, _dups, _empty = core.vault_counts(future)
+    eq(counts["records"], 1, "an unreadable record is still a record")
+    eq(counts["type:quantum-key"], 1)
+    assert core.looks_like_vault(future), "a vault of typed records is a vault"
+    # A key this build does not know is dropped rather than carried, so it
+    # cannot be re-encoded into a record whose own renderer cannot show it.
+    payload = base64.b64encode(
+        b'{"ssid":"n","password":"p","from_the_future":"x"}').decode("ascii")
+    eq(core.decode_record_payload("wifi", payload), {"ssid": "n", "password": "p"})
+
+
+def t_record_payload_never_raises_on_damage():
+    for damaged in ("", "-", "!!!!", "Zm9v", base64.b64encode(b"[1,2]").decode(),
+                    base64.b64encode(b'{"ssid":5}').decode()):
+        got = core.decode_record_payload("wifi", damaged)
+        assert isinstance(got, dict), damaged
+    eq(core.decode_record_payload("no-such-type", "Zm9v"), {},
+       "an unknown type must return nothing rather than raise")
+
+
+def t_record_counts_and_attributes():
+    rows = [core.build_record_row("wifi", "1", "home",
+                                  {"ssid": "h", "password": "p"}, "t",
+                                  folder="House", hidden=True,
+                                  fields=[("room", "loft")]),
+            core.build_record_row("server", "2", "web01",
+                                  {"hostname": "web01", "username": "root"}, "t")]
+    plaintext = core.stamp_version("\n".join(rows) + "\n")
+    counts, _dups, _empty = core.vault_counts(plaintext)
+    eq(counts["records"], 2)
+    eq(counts["type:wifi"], 1)
+    eq(counts["type:server"], 1)
+    eq(counts["type:credit-card"], 0, "an unused type must report zero, not be absent")
+    eq(counts["passwords"], 0, "a typed record must not be counted as a password")
+    for value in counts.values():
+        assert isinstance(value, int), "every count must stay an int"
+    # Folders, custom fields and hidden ride along for free, because a typed
+    # record carries the same attributes column every other record carries.
+    parsed = core.parse_record_row(rows[0])
+    eq(parsed[5], "House")
+    eq(parsed[6], [("room", "loft")])
+    eq(parsed[7], True)
+
+def t_record_survives_an_export_round_trip():
+    # The test 4.1.0 wished it had had. Twenty formats round-tripped the
+    # record count for years while losing the folder and every custom field,
+    # because nothing compared a record field by field against itself.
+    for name in core.RECORD_TYPES:
+        values = {f: "value-for-%s" % f
+                  for f, _k, _w, _r in core.record_fields(name)}
+        custom = [("my note", "keep me"), ("ticket", "SPM-42")]
+        row = core.build_record_row(name, "3", "a label", values,
+                                    "2026-01-01T00:00:00Z", folder="Work",
+                                    fields=custom, hidden=True)
+        rtype, rid, label, got, created, folder, gotc, hidden = \
+            core.parse_record_row(row)
+        exported = core.record_export_row(rtype, rid, label, got, created,
+                                          folder, gotc, hidden)
+        eq(sorted(exported), sorted(core.EXPORT_FIELDNAMES),
+           "%s must fill exactly the columns every export carries" % name)
+        eq(exported["hidden"], "1", "hidden must cross the export")
+        eq(exported["folder"], "Work", "the folder must cross the export")
+        back = core.record_from_export_row(exported)
+        assert back is not None, name
+        back_type, back_values, back_custom = back
+        eq(back_type, name)
+        eq(back_values, values, "%s lost a schema field across an export" % name)
+        eq(back_custom, custom, "%s lost a custom field across an export" % name)
+
+
+def t_record_export_adds_no_column():
+    # A thirteenth column would break every headerless and positional reader,
+    # which is the whole reason EXPORT_FIELDNAMES is one definition.
+    exported = core.record_export_row("wifi", "1", "home",
+                                      {"ssid": "h", "password": "p"}, "t")
+    eq(sorted(exported), sorted(core.EXPORT_FIELDNAMES))
+    eq(len(core.EXPORT_FIELDNAMES), 12, "the export column count moved")
+
+
+def t_custom_field_may_not_shadow_a_schema_field():
+    raises(core.VaultError,
+           lambda: core.build_record_row(
+               "wifi", "1", "home", {"ssid": "s", "password": "p"}, "t",
+               fields=[("password", "collides")]),
+           "a custom field taking a schema field's name must refuse")
+    # The name is only reserved on the type that defines it.
+    row = core.build_record_row("wifi", "1", "home",
+                                {"ssid": "s", "password": "p"}, "t",
+                                fields=[("hostname", "fine here")])
+    assert core.parse_record_row(row)[6] == [("hostname", "fine here")]
+
+
+def t_export_row_that_is_not_typed_is_left_alone():
+    eq(core.record_from_export_row({"type": "password", "id": "1"}), None,
+       "a password row must not be read as a typed record")
+    eq(core.record_from_export_row({"type": "", "id": "1"}), None)
+    eq(core.record_from_export_row({"type": "note", "id": "1"}), None)
+    eq(core.record_from_export_row({}), None)
+
+
+def t_import_keeps_a_field_this_build_does_not_know():
+    # A name this build has no schema entry for may be one a newer SPM added.
+    # Dropping it would make an export/import cycle on an older SPM a quiet
+    # way to lose data, which is the same failure the downgrade guard exists
+    # to prevent -- arriving through the import path instead.
+    exported = core.record_export_row("wifi", "1", "home",
+                                      {"ssid": "h", "password": "p"}, "t")
+    exported["fields"] = json.dumps([{"name": "ssid", "value": "h"},
+                                     {"name": "password", "value": "p"},
+                                     {"name": "from_a_newer_spm", "value": "kept"}])
+    _t, values, custom = core.record_from_export_row(exported)
+    eq(values, {"ssid": "h", "password": "p"})
+    eq(custom, [("from_a_newer_spm", "kept")],
+       "an unknown field must survive as a custom field")
+
+def t_json_line_safe_survives_a_line_based_export():
+    # json.dumps escapes every C0 control but leaves U+0085, U+2028 and U+2029
+    # literal, and those three are line terminators to str.splitlines(). The
+    # ndjson and jsonl exports put one record on one line and every reader
+    # splits before parsing, so a note holding one of them produced valid JSON
+    # that arrived as two invalid halves.
+    for ch in core.VAULT_BREAK_CHARS:
+        value = "before%safter" % ch
+        encoded = core.json_line_safe([{"name": "notes", "value": value}])
+        eq(len(encoded.splitlines()), 1,
+           "%r split a line that must stay one line" % ch)
+        eq(json.loads(encoded)[0]["value"], value,
+           "%r did not survive the escaping unchanged" % ch)
+
+
+def t_a_break_character_survives_an_export_round_trip():
+    # The regression suite drives this through all twenty formats; this pins
+    # the core's half so a failure names the layer it happened in.
+    values = {"ssid": "HomeNet", "password": "secret pw",
+              "notes": "line one\nline two line three"}
+    row = core.build_record_row("wifi", "1", "home", values, "t",
+                                fields=[("ticket", "SPM 42")])
+    rtype, rid, label, got, created, folder, custom, hidden = \
+        core.parse_record_row(row)
+    eq(got, values, "a break character did not survive the vault row")
+    exported = core.record_export_row(rtype, rid, label, got, created,
+                                      folder, custom, hidden)
+    eq(len(exported["fields"].splitlines()), 1,
+       "the fields column must stay on one line")
+    _t, back, back_custom = core.record_from_export_row(exported)
+    eq(back, values, "a break character did not survive the export")
+    eq(back_custom, [("ticket", "SPM 42")],
+       "a break character in a custom field did not survive the export")
+
+
 def t_export_columns_stay_on_one_line():
     # json.dumps escapes every C0 control but leaves U+0085, U+2028 and U+2029
     # literal, because they are legal inside a JSON string. They are also three
@@ -2221,6 +2568,473 @@ def t_json_line_safe_is_lossless_for_every_break_character():
            "%r survived into a line-based export" % ch)
         eq(json.loads(encoded)["v"], "x%sy" % ch,
            "%r was changed by the escaping" % ch)
+
+
+def _vault_with(rows):
+    return "\n".join(["META_VAULT_VERSION\t%d\t-\t-\t-\t-" % core.VAULT_FORMAT_VERSION]
+                     + list(rows)) + "\n"
+
+
+def t_iter_records_walks_only_typed_rows():
+    # The dashboard rewrites the whole vault on every save and addresses a row
+    # by the index this yields, so a walk that counted a password or a NOTE as
+    # a record would have the dashboard overwrite the wrong line.
+    rows = [
+        "1\tBank\tuser@example.invalid\tsecret\tnote\t2025-01-01T00:00:00Z\t\t-",
+        "NOTE\t1\tA note\tYm9keQ==\t2025-01-01T00:00:00Z\t-",
+        core.build_record_row("wifi", "1", "Home",
+                              {"ssid": "HomeNet", "password": "pw"}, "t"),
+        "REC:not-a-type\t1\tx\t-\tt\t-",
+        core.build_record_row("server", "1", "Box",
+                              {"hostname": "box", "username": "root"}, "t"),
+    ]
+    plaintext = _vault_with(rows)
+    walked = [(index, parsed[0], parsed[1])
+              for index, parsed in core.iter_records(plaintext)]
+    eq(walked, [(3, "wifi", "1"), (5, "server", "1")],
+       "the walk did not name exactly the typed rows, at their own indexes")
+    # And the index is the caller's: the row at it must be the row it found.
+    for index, parsed in core.iter_records(plaintext):
+        eq(plaintext.splitlines()[index].split("\t")[0],
+           core.record_tag(parsed[0]),
+           "the index does not point at the row it described")
+    eq([parsed[0] for _i, parsed in core.iter_records(plaintext, "wifi")],
+       ["wifi"], "narrowing to one type returned another")
+
+
+def t_find_record_needs_both_halves_of_the_address():
+    # Ids are per type, so wifi 1 and server 1 both exist. A lookup by id
+    # alone would find whichever came first in the file.
+    plaintext = _vault_with([
+        core.build_record_row("wifi", "1", "Home",
+                              {"ssid": "HomeNet", "password": "pw"}, "t"),
+        core.build_record_row("server", "1", "Box",
+                              {"hostname": "box", "username": "root"}, "t"),
+    ])
+    _index, wifi = core.find_record(plaintext, "wifi", "1")
+    _index, server = core.find_record(plaintext, "server", "1")
+    eq(wifi[2], "Home")
+    eq(server[2], "Box", "an id without its type found the wrong record")
+    eq(core.find_record(plaintext, "wifi", "2"), None)
+    eq(core.find_record(plaintext, "credit-card", "1"), None)
+
+
+def t_record_next_id_counts_per_type():
+    plaintext = _vault_with([
+        core.build_record_row("wifi", "1", "a", {"ssid": "a", "password": "p"}, "t"),
+        core.build_record_row("wifi", "4", "b", {"ssid": "b", "password": "p"}, "t"),
+    ])
+    eq(core.record_next_id(plaintext, "wifi"), "5",
+       "the next id must clear the highest in use, not count the rows")
+    eq(core.record_next_id(plaintext, "server"), "1",
+       "a type with no records starts at one")
+    eq(core.record_next_id("", "wifi"), "1")
+
+    # One row with a damaged id must not stop every new record of its type.
+    damaged = plaintext + "REC:wifi\tnot-a-number\tx\t-\tt\t-\n"
+    eq(core.record_next_id(damaged, "wifi"), "5",
+       "a row with an unreadable id blocked the next allocation")
+
+
+def t_record_counts_totals_what_it_lists():
+    # The nav badge reads the total and the type chips read the per-type
+    # numbers. A badge that disagreed with the page it links to is the class
+    # of defect one shared count exists to prevent.
+    rows = [core.build_record_row("wifi", str(n), "w%d" % n,
+                                  {"ssid": "s", "password": "p"}, "t")
+            for n in (1, 2, 3)]
+    rows.append(core.build_record_row("server", "1", "s",
+                                      {"hostname": "h", "username": "u"}, "t"))
+    counts = core.record_counts(_vault_with(rows))
+    eq(counts["wifi"], 3)
+    eq(counts["server"], 1)
+    eq(counts[""], 4, "the total must be the sum of the types")
+    eq(counts[""], sum(v for k, v in counts.items() if k),
+       "the total and the per-type counts disagree")
+    eq(core.record_counts("")[""], 0)
+
+# ----- SSH keys --------------------------------------------------------------
+# Two real public keys, pinned with the fingerprints `ssh-keygen -l` printed
+# for them. A public key is not a secret, so these can live here; no private
+# key material is checked in, and the private-key tests below build their own
+# containers byte by byte instead.
+SSH_ED25519_PUB = (
+    "ssh-ed25519 "
+    "AAAAC3NzaC1lZDI1NTE5AAAAIPlrtDmgZLIIUtf3kVUZW+av5Uc8iYx8DN+p2wE1l+D2 "
+    "plain@example")
+SSH_ED25519_FP = "SHA256:9EpxP+yevzSl5u0d7qRfo/Hpc2xnpm/f4FwuIw5aT7c"
+SSH_RSA_PUB = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCOkVnIH3rJO3nuKyuLcsjtkI4k4BxW2+FqCUjehfKdliieKXCVq8fTWv8pgl9n1eAm2MJoEpB+J1Kl5p/IDrhBlJaIAWUahSLIsGSTrfwZbldMTTfdCe9q0FPWifRJlXdqFAemkX8JL9HNxETtMhhOuzpqtxka/7YRdP6PqEZ/44Z7JXckqVg9DFYMxIvYbyFvsXThd5okq8eIZchwJ3eKqJx/KwcEgA0yJcfr5RJXu3gXJD7ManjphoDmyBF9XxVGcNFz6s+/GxjYDmg/PflCqHn7HFamOuwGacKhaQfIo967W3UN8IsWx7BTyaaGTf9lP0g6OGRRjufkvwi4/WGn rsa@example"
+SSH_RSA_FP = "SHA256:BFjxBp/dsjhbRn3XPZKr8FU4N/cpCnOq73UjFm7rLBM"
+
+
+def _ssh_len(raw):
+    return len(raw).to_bytes(4, "big") + raw
+
+
+def _ssh_private_container(public_blob, cipher=b"none", count=1):
+    """An openssh-key-v1 file around a public blob, built here byte by byte.
+
+    Synthesised rather than generated so the tests carry no private key, and
+    so a field can be made wrong on purpose -- a real ssh-keygen will not
+    produce a container that declares no keys.
+    """
+    raw = (b"openssh-key-v1\x00"
+           + _ssh_len(cipher) + _ssh_len(b"none") + _ssh_len(b"")
+           + count.to_bytes(4, "big")
+           + _ssh_len(public_blob)
+           + _ssh_len(b"\x00" * 16))
+    body = base64.b64encode(raw).decode("ascii")
+    lines = [body[i:i + 70] for i in range(0, len(body), 70)]
+    return ("-----BEGIN OPENSSH PRIVATE KEY-----\n"
+            + "\n".join(lines)
+            + "\n-----END OPENSSH PRIVATE KEY-----\n")
+
+
+def t_ssh_fingerprint_is_the_one_ssh_keygen_prints():
+    # A known-answer test against the tool everyone else compares against.
+    # SPM derives fingerprints itself rather than shelling out, so nothing in
+    # the running system would notice if the derivation drifted -- a wrong
+    # fingerprint looks exactly like a right one.
+    for line, expect_fp, expect_type, expect_bits in (
+            (SSH_ED25519_PUB, SSH_ED25519_FP, "ssh-ed25519", 256),
+            (SSH_RSA_PUB, SSH_RSA_FP, "ssh-rsa", 2048)):
+        info = core.ssh_key_info(line)
+        eq(info["fingerprint"], expect_fp, "the fingerprint moved")
+        eq(info["type"], expect_type)
+        eq(info["bits"], expect_bits, "the reported key size is wrong")
+        eq(info["format"], core.SSH_FORMAT_PUBLIC)
+        eq(info["problem"], "")
+
+
+def t_ssh_rsa_size_counts_bits_not_bytes():
+    # An RSA modulus carries a leading zero byte whenever its top bit is set,
+    # so counting bytes reports 2056 bits for a 2048-bit key -- close enough
+    # to look plausible on screen and wrong in the one place it is quoted.
+    blob = core.ssh_public_blob_from_line(SSH_RSA_PUB)
+    eq(core.ssh_key_bits(blob), 2048)
+    eq(core.ssh_key_bits(blob) % 8, 0)
+
+
+def t_ssh_public_half_is_readable_without_the_passphrase():
+    # The reason the fingerprint can be derived at all: openssh-key-v1 keeps
+    # the public key in the clear even when the private half is sealed. A
+    # passphrase-protected key is the one whose bytes an owner is least able
+    # to check by hand, so it is the one that most needs this to work.
+    blob = core.ssh_public_blob_from_line(SSH_ED25519_PUB)
+    sealed = _ssh_private_container(blob, cipher=b"aes256-ctr")
+    plain = _ssh_private_container(blob, cipher=b"none")
+
+    sealed_info = core.ssh_key_info(sealed)
+    eq(sealed_info["fingerprint"], SSH_ED25519_FP,
+       "a sealed key did not yield the fingerprint its public half implies")
+    eq(sealed_info["encrypted"], True, "a sealed key was reported unsealed")
+    eq(core.ssh_key_info(plain)["encrypted"], False,
+       "an unsealed key was reported sealed")
+    # Both halves of the same key agree, which is the property that lets the
+    # agent decide whether it needs a passphrase before asking for one.
+    eq(sealed_info["fingerprint"], core.ssh_key_info(plain)["fingerprint"])
+
+
+def t_ssh_private_and_public_forms_describe_one_key():
+    # The record stores a private key and the surfaces show a public one.
+    # If those two derivations disagreed, the fingerprint on screen would not
+    # be the fingerprint of the key that authenticates.
+    blob = core.ssh_public_blob_from_line(SSH_ED25519_PUB)
+    private = core.ssh_key_info(_ssh_private_container(blob))
+    public = core.ssh_key_info(SSH_ED25519_PUB)
+    for field in ("fingerprint", "type", "bits"):
+        eq(private[field], public[field],
+           "the private and public forms disagree about %s" % field)
+    # And the line SPM builds is the line ssh-keygen would have written.
+    eq(core.ssh_key_info(_ssh_private_container(blob),
+                         comment="plain@example")["public"],
+       SSH_ED25519_PUB, "the rebuilt authorized_keys line is not the original")
+
+
+def t_ssh_a_key_it_cannot_read_is_still_kept():
+    # SPM stores what it is given. A key in a format this build cannot parse
+    # is still a key its owner wants, so an unreadable one reports a reason
+    # and never raises -- a record that refused to render would lose access
+    # to the key it holds.
+    for text, expect_format in (
+            ("", core.SSH_FORMAT_UNKNOWN),
+            ("neither a key nor a line", core.SSH_FORMAT_UNKNOWN),
+            ("-----BEGIN RSA PRIVATE KEY-----\nMIIB\n"
+             "-----END RSA PRIVATE KEY-----", core.SSH_FORMAT_PEM),
+            ("-----BEGIN OPENSSH PRIVATE KEY-----\n!!!not base64!!!\n"
+             "-----END OPENSSH PRIVATE KEY-----", core.SSH_FORMAT_UNKNOWN),
+            ("ssh-ed25519 !!!not-base64!!!", core.SSH_FORMAT_UNKNOWN)):
+        info = core.ssh_key_info(text)
+        eq(info["format"], expect_format, "wrong format for %r" % text[:30])
+        assert info["problem"], \
+            "an unreadable key gave no reason: %r" % text[:30]
+        eq(info["fingerprint"], "",
+           "a key that could not be read produced a fingerprint anyway")
+
+
+def t_ssh_a_truncated_key_is_refused_not_sliced():
+    # These bytes come out of a vault, but a vault holds what a user pasted.
+    # A length header trusted blindly turns a truncated key into a slice of
+    # whatever follows it rather than an error.
+    blob = core.ssh_public_blob_from_line(SSH_ED25519_PUB)
+    good = _ssh_private_container(blob)
+    body = "".join(l for l in good.splitlines() if "-----" not in l)
+    raw = base64.b64decode(body)
+
+    def truncated_to(length):
+        chopped = base64.b64encode(raw[:length]).decode("ascii")
+        return core.ssh_key_info(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n%s\n"
+            "-----END OPENSSH PRIVATE KEY-----\n" % chopped)
+
+    # Where the public blob ends is the boundary that matters, so the test
+    # names it rather than guessing at offsets.
+    ends = raw.index(blob) + len(blob)
+    for cut in (20, 40, ends - 1):
+        info = truncated_to(cut)
+        eq(info["fingerprint"], "",
+           "a key truncated at %d still produced a fingerprint" % cut)
+        assert info["problem"], "a truncated key gave no reason"
+
+    # Past that boundary the public half is whole, and the honest answer is
+    # the real fingerprint: what is damaged is the private section, which
+    # this derivation never reads. A key whose private half is corrupt is
+    # still identifiable, and refusing to name it would help nobody.
+    eq(truncated_to(ends)["fingerprint"], SSH_ED25519_FP,
+       "a key whose public half survived was refused a fingerprint")
+
+    # A container that declares no keys must not be read as holding one.
+    empty = _ssh_private_container(blob, count=0)
+    eq(core.ssh_key_info(empty)["fingerprint"], "",
+       "a container declaring no keys yielded a fingerprint")
+
+
+def t_ssh_a_public_line_must_agree_with_its_own_blob():
+    # A line names its algorithm twice, once as text and once inside the
+    # blob. A line whose halves disagree would fingerprint as one key while
+    # reading as another, which is exactly the confusion a fingerprint exists
+    # to prevent.
+    field = SSH_ED25519_PUB.split()[1]
+    lying = "ssh-rsa %s liar@example" % field
+    info = core.ssh_key_info(lying)
+    eq(info["fingerprint"], "", "a mislabelled key line was accepted")
+    assert info["problem"], "a mislabelled key line was refused without a reason"
+
+
+def t_ssh_key_is_a_record_type_like_any_other():
+    # The point of the schema engine: a new type is a dictionary entry, and
+    # every surface picks it up without naming it.
+    assert "ssh-key" in core.RECORD_TYPES, "ssh-key is not a record type"
+    eq(sorted(core.record_secret_fields("ssh-key")),
+       ["passphrase", "private_key"],
+       "the private key or its passphrase is not marked secret")
+    # A record round-trips through the vault row like every other type.
+    blob = core.ssh_public_blob_from_line(SSH_ED25519_PUB)
+    private = _ssh_private_container(blob)
+    row = core.build_record_row("ssh-key", "1", "Deploy key",
+                                {"private_key": private, "hosts": "git.example",
+                                 "comment": "plain@example"}, "t")
+    parsed = core.parse_record_row(row)
+    eq(parsed[0], "ssh-key")
+    eq(parsed[3]["private_key"], private,
+       "the key did not survive the vault row unchanged")
+    eq(core.ssh_key_info(parsed[3]["private_key"])["fingerprint"],
+       SSH_ED25519_FP, "the stored key no longer fingerprints as itself")
+
+
+# ----- OpenPGP keys ----------------------------------------------------------
+# Known-answer vectors: two real OpenPGP *public* keys and the fingerprints
+# gpg prints for them. Public keys only -- a fingerprint is derived from the
+# public half, so pinning the public key pins the answer without putting any
+# private key material in the repository. The secret-key packets these tests
+# need are built byte by byte from the public ones below.
+
+PGP_ED25519_PUB = """\
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mDMEap7AuBYJKwYBBAHaRw8BAQdATjjnpLNzcFN5CsibwtfXO8qUKCSJFvGErii8
+xq4+bf20F1NQTSBMYWIgRWQgPGVkQHNwbS5sYWI+iJAEExYIADgWIQS4cgU1oID+
+KnAXzu9fQOuU3fXK5AUCap7AuAIbAwULCQgHAgYVCgkICwIEFgIDAQIeAQIXgAAK
+CRBfQOuU3fXK5LO1APwPRjj+hQw41D3DSbzSwNxcn7ILoa7vAWRv9tnkiew3awEA
+yZ8m3Wz18/8vQVqyvlBzkyuco8JgRErLIT9H1sdtIQ8=
+=Ab9k
+-----END PGP PUBLIC KEY BLOCK-----
+"""
+PGP_ED25519_FP = "B8720535A080FE2A7017CEEF5F40EB94DDF5CAE4"
+PGP_ED25519_KEYID = "5F40EB94DDF5CAE4"
+
+PGP_RSA_PUB = """\
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mQENBGqewLcBCADKL5cqHyjBpufcA54QLI0FBToi4qQ7mg2P4d8/TEuSFeW9Vr+Y
+0AjhWuQTeBXb8UUPjTYOxUXogCiP60fVxDt+cJ3xh5PXM7ygee62cS71tUYbQpo2
+13nmBEpoqFnmv1wsmZyxBxXejvXPi5W/1lhZgLn7zFqkDAmJxRpqvP+Sg1QE0pWL
+Hb9n5gj9ykIYanRwuD/J1iyILSs+v2rVm3swMOQ2k0usYH53dNk3+eRbiTg00pXX
+prry2rnthFNNK2vpsWpnUxadljI3F37idTb6WKHHThWtGAnZwlQp69yiJkTYC1Di
+suGTVGF70ZpdCEzG9s34rjb9TPIDA3JxvetLABEBAAG0GVNQTSBMYWIgUlNBIDxy
+c2FAc3BtLmxhYj6JAU4EEwEKADgWIQREF8nv+dbjtxQBFXY9Tig0sdPBBwUCap7A
+twIbAwULCQgHAgYVCgkICwIEFgIDAQIeAQIXgAAKCRA9Tig0sdPBB8uRB/9x+Fby
+epK1QpF4dVIdxnjHBff9PK1QP5BFVjSvRXhNRNuN6oM4MR658qXha3CtRObJxFbH
+n9CRWOpkt4VAr0+BL2DT+tsDDCvw3zRN50jTS/LkbwCM7RcpGuNHAbVj/KCVvUE0
+50rsh42zHCKkantVG0MeOWz6cpXdPR/8QCA4YY60aXiipZRgHDX4Rwqojm2LDz1i
+HPTDAcUX7l/ze4Xu9UDMlhVgdlpErTVcoi6qc0Co920FE9DWgodyu8Mcauo9xzIV
+5UC935QhoXnGxKuTfk4Jltaxp4kMJUz2pIlwr15hGBsLsw8wKlbPDlYACqo0c3nc
+wJzjaD4iY5VOonJs
+=QIjh
+-----END PGP PUBLIC KEY BLOCK-----
+"""
+PGP_RSA_FP = "4417C9EFF9D6E3B7140115763D4E2834B1D3C107"
+
+
+def _pgp_first_packet(armor, want_tags):
+    data = core.pgp_dearmor(armor)
+    for tag, body in core.pgp_packets(data):
+        if tag in want_tags:
+            return tag, body
+    raise AssertionError("no key packet in the vector")
+
+
+def _pgp_armor(packets):
+    """Re-armor a list of (tag, body) as an OpenPGP block."""
+    out = b""
+    for tag, body in packets:
+        # New-format header, and a length long enough for anything here.
+        out += bytes([0xC0 | tag]) + b"\xff" + len(body).to_bytes(4, "big") + body
+    encoded = base64.b64encode(out).decode("ascii")
+    lines = [encoded[i:i + 64] for i in range(0, len(encoded), 64)]
+    return ("-----BEGIN PGP PRIVATE KEY BLOCK-----\n\n"
+            + "\n".join(lines)
+            + "\n-----END PGP PRIVATE KEY BLOCK-----\n")
+
+
+def _pgp_secret_from_public(armor, protection=0):
+    """A Secret-Key packet built from a public one.
+
+    A secret key is a public key with the secret material appended, so this is
+    how the tests get one without any private key material in the repository.
+    `protection` is the octet that says whether the secret half is encrypted.
+    """
+    _tag, body = _pgp_first_packet(armor, (core.PGP_TAG_PUBLIC_KEY,))
+    length, _alg, _bits, _curve = core.pgp_public_material(body)
+    return _pgp_armor([(core.PGP_TAG_SECRET_KEY,
+                        body[:length] + bytes([protection]) + b"\x00" * 40)])
+
+
+def t_gpg_fingerprint_is_the_one_gpg_prints():
+    # The whole feature rests on this: SPM's answer and gpg's answer are the
+    # same string. A fingerprint nobody can check against gpg is decoration.
+    eq(core.pgp_key_info(PGP_ED25519_PUB)["fingerprint"], PGP_ED25519_FP,
+       "the ed25519 fingerprint is not the one gpg prints")
+    eq(core.pgp_key_info(PGP_RSA_PUB)["fingerprint"], PGP_RSA_FP,
+       "the RSA fingerprint is not the one gpg prints")
+    eq(core.pgp_key_info(PGP_ED25519_PUB)["keyid"], PGP_ED25519_KEYID,
+       "the key id is not the tail of the fingerprint")
+
+
+def t_gpg_an_ecc_point_is_not_a_key_size():
+    # An Ed25519 point MPI measures 263 bits: 0x40 plus 32 bytes. Reporting
+    # that would look like a key size and be wrong, the same way counting an
+    # RSA modulus in bytes reports a 2048-bit key as 2056. gpg says 255 and
+    # names the curve, and so does SPM.
+    info = core.pgp_key_info(PGP_ED25519_PUB)
+    eq(info["curve"], "ed25519", "the curve was not recognised from its OID")
+    eq(info["bits"], 255, "an ed25519 key was not reported as 255 bits")
+    assert info["bits"] != 263, "the point length was reported as the key size"
+    rsa = core.pgp_key_info(PGP_RSA_PUB)
+    eq(rsa["bits"], 2048, "the RSA modulus was not measured in bits")
+    eq(rsa["curve"], "", "an RSA key was given a curve")
+
+
+def t_gpg_a_secret_key_and_its_public_half_are_one_key():
+    # The property that makes any of this possible: a secret key carries its
+    # public half in the clear, so both forms fingerprint identically.
+    secret = _pgp_secret_from_public(PGP_ED25519_PUB)
+    info = core.pgp_key_info(secret)
+    eq(info["fingerprint"], PGP_ED25519_FP,
+       "a secret key did not fingerprint as its own public half")
+    assert info["secret"], "a secret key packet was not recognised as secret"
+    assert not core.pgp_key_info(PGP_ED25519_PUB)["secret"], \
+        "a public key was reported as holding a secret"
+
+
+def t_gpg_a_sealed_key_is_known_to_be_sealed_without_the_passphrase():
+    # The protection octet says so. No passphrase is attempted to find out,
+    # the same way the SSH side reads a cipher name rather than trying it.
+    assert not core.pgp_key_info(_pgp_secret_from_public(
+        PGP_ED25519_PUB, protection=0))["encrypted"], \
+        "an unprotected secret key was reported as sealed"
+    for marker in (254, 253, 9):
+        assert core.pgp_key_info(_pgp_secret_from_public(
+            PGP_ED25519_PUB, protection=marker))["encrypted"], \
+            "a protected secret key (marker %d) was reported unsealed" % marker
+
+
+def t_gpg_a_truncated_key_is_refused_not_sliced():
+    # Slicing past the end of a bytes object does not raise in Python, it just
+    # returns something shorter -- so an unchecked walk over a truncated key
+    # hashes a short slice and produces a fingerprint that is wrong and looks
+    # exactly right. This measured three such fingerprints before the length
+    # checks went in. A fingerprint is what you check to know which key you
+    # hold, so a confidently wrong one is worse than an absent one.
+    data = core.pgp_dearmor(PGP_RSA_PUB)
+    wrong = 0
+    for cut in range(1, len(data)):
+        try:
+            for tag, body in core.pgp_packets(data[:cut]):
+                if tag == core.PGP_TAG_PUBLIC_KEY:
+                    if core.pgp_fingerprint(body) != PGP_RSA_FP:
+                        wrong += 1
+                break
+        except Exception:                                  # noqa: BLE001
+            pass
+    eq(wrong, 0, "a truncated key produced a fingerprint that was not its own")
+
+
+def t_gpg_a_key_it_cannot_read_is_still_kept():
+    # Not an error: a key in a format this build cannot parse is still a key
+    # its owner wants kept, so every field is present and `problem` says why.
+    for text in ("", "hello", "-----BEGIN PGP PRIVATE KEY BLOCK-----\n\n@@@\n"
+                 "-----END PGP PRIVATE KEY BLOCK-----\n"):
+        info = core.pgp_key_info(text)
+        eq(sorted(info), sorted(["fingerprint", "keyid", "algorithm", "bits",
+                                 "curve", "created", "uids", "subkeys",
+                                 "secret", "encrypted", "problem"]),
+           "an unreadable key returned a different shape")
+        eq(info["fingerprint"], "", "an unreadable key produced a fingerprint")
+        assert info["problem"], "an unreadable key gave no reason"
+
+
+def t_gpg_key_is_a_record_type_like_any_other():
+    assert "gpg-key" in core.RECORD_TYPES, "gpg-key is not a record type"
+    eq(sorted(core.record_secret_fields("gpg-key")),
+       ["passphrase", "private_key"],
+       "the secret key or its passphrase is not marked secret")
+    secret = _pgp_secret_from_public(PGP_ED25519_PUB)
+    row = core.build_record_row("gpg-key", "1", "Signing key",
+                                {"private_key": secret,
+                                 "uids": "SPM Lab Ed <ed@spm.lab>"}, "t")
+    parsed = core.parse_record_row(row)
+    eq(parsed[0], "gpg-key")
+    eq(parsed[3]["private_key"], secret,
+       "the key did not survive the vault row unchanged")
+    eq(core.pgp_key_info(parsed[3]["private_key"])["fingerprint"],
+       PGP_ED25519_FP, "the stored key no longer fingerprints as itself")
+
+
+def t_gpg_derived_rows_come_from_the_schema_not_a_branch():
+    # The record page asks the core for a type's derived rows and its heading
+    # key. Nothing on either surface names GPG, which is what makes a tenth
+    # type a dictionary entry rather than a patch to the renderer.
+    eq(core.record_derive_name("gpg-key"), "gpg")
+    eq(core.record_derive_name("wifi"), "",
+       "a type with nothing to derive claimed a deriver")
+    keys = [key for key, _english, _value in core.record_derived(
+        "gpg-key", {"private_key": _pgp_secret_from_public(PGP_ED25519_PUB)})]
+    assert "gpg.fingerprint" in keys, "the derived rows carry no fingerprint"
+    assert "gpg.keyid" in keys, "the derived rows carry no key id"
+    eq(core.record_derived("wifi", {"password": "x"}), [],
+       "a type with no deriver returned rows")
+
 
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):
