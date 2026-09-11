@@ -10,6 +10,57 @@ and cryptography in the smallest auditable component, and make the CLI, the SPM
 Dashboard, sync and the browser extension clients of that core rather than
 co-owners of it. That review is a design concept, not a formal security audit.
 
+## Shipped in 5.0.0 — typed records, and keys that describe themselves
+
+- **Typed records, from one schema — shipped in 5.0.0.** A password manager
+  keeps more shapes than a password, and until now the extra parts went in the
+  notes field where nothing could search, redact or check them. `api-token`,
+  `db-credential`, `credit-card`, `identity`, `software-license`, `wifi` and
+  `server` each store the parts their shape actually has. `RECORD_SCHEMAS` in
+  the trusted core names each type's fields, which are secret and which are
+  required, and its icon; the CLI prompts, the Dashboard form, the list, the
+  redaction and all twenty export formats read that one definition. Neither
+  surface keeps its own field list, so the two cannot disagree about a record,
+  and adding a type is a dictionary entry rather than code.
+
+  The vault did not move for it. A 4.x vault opens unchanged, and a typed
+  record is one tab-separated row — the type in the row tag, the secret-bearing
+  payload base64 in one field — so counting records or describing a damaged row
+  still decodes nothing, and the file stays greppable.
+
+- **SSH keys as a record type — shipped in 5.0.0 (roadmap item 9).** The
+  private key, its passphrase and the hosts it opens are stored; the
+  fingerprint, key type, size and public key are derived from the stored key
+  every time, parsed out of the `openssh-key-v1` container in pure Python —
+  without the passphrase, without a temporary file, and without shelling out to
+  `ssh-keygen`, because the container carries the public half in the clear.
+
+- **SSH agent integration — shipped in 5.0.0 (item 10).** `spm ssh load`
+  hands a stored key to `ssh-agent` over a pipe: `ssh-add -t <seconds> -` reads
+  it on stdin, so it is never a file and never an argument. The default
+  lifetime is fifteen minutes — the Dashboard's longest idle lock, not an
+  invented number — a sealed key's passphrase reaches `ssh-add` over an
+  inherited descriptor, and unload names the key by its public half alone. SPM
+  will not start an agent it was not given. It is CLI-only on purpose: an agent
+  belongs to a session on a machine, not to a vault, and the Dashboard can be
+  reached from a different machine entirely.
+
+- **GPG / OpenPGP keys as a record type — shipped in 5.0.0 (item 11).** The
+  armored secret key is stored; the fingerprint, key id, algorithm, curve or
+  size, creation date and identities are derived — matching `gpg`'s own
+  fingerprint without gpg, a keyring or the passphrase, because an OpenPGP
+  secret key carries its public half in the clear just as an SSH key does.
+
+  The reason nothing public is typed: a stored fingerprint is a claim, and
+  claims drift. Edit the key and a stored fingerprint keeps describing the key
+  that used to be there — which is backwards, because the fingerprint is what
+  you check to know which key this is. A derived one cannot be wrong about its
+  own key. Two ways to be wrong that these are not: a key's size is its curve,
+  not the bit length of an encoded point (an Ed25519 point measures 263 and is
+  not a 263-bit key), and every length field is bounds-checked so a truncated
+  key derives nothing rather than a plausible-looking wrong fingerprint. A key
+  SPM cannot read is still kept, with the reason shown.
+
 ## Shipped in 4.10.0 — offline theft resistance
 
 - **A Secret Key — shipped in 4.10.0.** 128 bits generated once per vault,
