@@ -2753,6 +2753,165 @@ cmd_ssh_public() {
 	printf '%s\n' "$line"
 }
 
+# ----- OpenPGP keys ------------------------------------------------------------
+# The same family as the ssh commands above, for the same reason. An armored
+# OpenPGP secret key carries its public half in the clear, so the fingerprint,
+# key id, algorithm, creation date and identities are all derived from the
+# stored key rather than typed beside it -- and derived without gpg, which
+# means without a keyring, without an agent, and without the passphrase.
+
+gpg_derived() {
+	# "name<TAB>value" of everything the core can derive, decoded for display.
+	local keyb64="$1" k v
+	printf '%s\n' "$keyb64" | core gpg info \
+		| while IFS="$(printf '\t')" read -r k v; do
+			printf '%s\t%s\n' "$k" "$(printf '%s' "$v" | base64 -d 2>/dev/null)"
+		done
+}
+
+gpg_derived_field() {
+	printf '%s\n' "$1" | awk -F '\t' -v want="$2" '$1==want{print $2; exit}'
+}
+
+gpg_require_key_record() {
+	local file="$1" rid="$2"
+	[ -n "$(record_find_row "$file" "gpg-key" "$rid")" ] \
+		|| { secure_wipe "$file"; die "No gpg-key record with ID $rid."; }
+}
+
+cmd_gpg_import() {
+	local keyfile="${1:-}" label="${2:-}"
+	[ -n "$keyfile" ] || die "Usage: $0 gpg import <keyfile> [label]"
+	[ -f "$keyfile" ] || die "No such key file: $keyfile"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	[ -n "$label" ] || label="$(basename "$keyfile")"
+
+	local keyb64 derived fingerprint problem
+	keyb64="$(base64 <"$keyfile" | tr -d '\n')"
+	derived="$(gpg_derived "$keyb64")"
+	fingerprint="$(gpg_derived_field "$derived" fingerprint)"
+	problem="$(gpg_derived_field "$derived" problem)"
+	[ -n "$fingerprint" ] \
+		|| die "That file does not look like an OpenPGP key: $problem"
+	# A public key fingerprints exactly like a secret one -- that is what a
+	# fingerprint is for -- so the test above waves one through and files it
+	# as the secret half of a key. A gpg-key record holding only a public key
+	# cannot sign or decrypt, which is the whole reason to keep one.
+	[ "$(gpg_derived_field "$derived" secret)" = "1" ] \
+		|| die "That is a public key. Export the secret half with: gpg --armor --export-secret-keys <id>"
+
+	local tmp fields_tmp rid created row uids
+	tmp="$(make_tmp)"
+	fields_tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	printf 'private_key\t%s\n' "$keyb64" >"$fields_tmp"
+	uids="$(gpg_derived_field "$derived" uids)"
+	[ -n "$uids" ] && printf 'uids\t%s\n' \
+		"$(printf '%s' "$uids" | base64 | tr -d '\n')" >>"$fields_tmp"
+
+	rid="$(next_record_id_from_vault "$tmp" "gpg-key")"
+	created="$(now_iso)"
+	row="$(core record row "gpg-key" "$rid" "$(sanitize_field "$label")" \
+		"$created" <"$fields_tmp")" || {
+		secure_wipe "$tmp"; secure_wipe "$fields_tmp"
+		die "The key was refused."
+	}
+	printf '%s\n' "$row" >>"$tmp"
+	encrypt_file_to_vault "$tmp"
+	secure_wipe "$tmp"
+	secure_wipe "$fields_tmp"
+
+	printf '\ngpg-key added with ID %s.\n' "$rid"
+	printf '  %s\n' "$fingerprint"
+	[ "$(gpg_derived_field "$derived" encrypted)" = "1" ] \
+		&& printf '  the secret half is passphrase-protected\n'
+	printf '\n'
+}
+
+cmd_gpg_list() {
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+
+	local rows
+	rows="$(awk -F '\t' '$1=="REC:gpg-key"{print $2}' "$tmp")"
+	if [ -z "$rows" ]; then
+		secure_wipe "$tmp"
+		printf '\nNo GPG keys stored. Add one with: %s gpg import <keyfile>\n\n' "$0"
+		return 0
+	fi
+
+	printf '\n%-5s %-24s %-16s %s\n' "ID" "LABEL" "KEY ID" "IDENTITIES"
+	local rid row label derived
+	printf '%s\n' "$rows" | while read -r rid; do
+		[ -n "$rid" ] || continue
+		row="$(record_find_row "$tmp" "gpg-key" "$rid" | core record parse)"
+		label="$(printf '%s\n' "$row" | awk -F '\t' '$1==".label"{print $2}' | base64 -d 2>/dev/null)"
+		derived="$(gpg_derived "$(printf '%s\n' "$row" | awk -F '\t' '$1=="private_key"{print $2}')")"
+		printf '%-5s %-24s %-16s %s\n' "$rid" "$label" \
+			"$(gpg_derived_field "$derived" keyid)" \
+			"$(gpg_derived_field "$derived" uids)"
+	done
+	printf '\n'
+	secure_wipe "$tmp"
+}
+
+cmd_gpg_show() {
+	local rid="${1:-}"
+	[ -n "$rid" ] || die "Usage: $0 gpg show <id>"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+
+	local tmp parsed label derived
+	tmp="$(make_tmp)"
+	decrypt_vault_to_file "$tmp"
+	gpg_require_key_record "$tmp" "$rid"
+	parsed="$(record_find_row "$tmp" "gpg-key" "$rid" | core record parse)"
+	label="$(printf '%s\n' "$parsed" | awk -F '\t' '$1==".label"{print $2}' | base64 -d 2>/dev/null)"
+	derived="$(gpg_derived "$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="private_key"{print $2}')")"
+	secure_wipe "$tmp"
+
+	local size curve bits subkeys problem
+	curve="$(gpg_derived_field "$derived" curve)"
+	bits="$(gpg_derived_field "$derived" bits)"
+	size="$curve"
+	[ -n "$size" ] || size="$bits"
+
+	printf '\ngpg-key %s\n' "$rid"
+	printf '  label        %s\n' "$label"
+	printf '\n'
+	# Everything below is derived from the stored key, not stored beside it.
+	printf '  fingerprint  %s\n' "$(gpg_derived_field "$derived" fingerprint)"
+	printf '  key id       %s\n' "$(gpg_derived_field "$derived" keyid)"
+	printf '  algorithm    %s %s\n' "$(gpg_derived_field "$derived" algorithm)" "$size"
+	printf '  created      %s\n' "$(gpg_derived_field "$derived" created)"
+	printf '  identities   %s\n' "$(gpg_derived_field "$derived" uids)"
+	subkeys="$(gpg_derived_field "$derived" subkeys)"
+	[ "$subkeys" = "0" ] || printf '  subkeys      %s\n' "$subkeys"
+	[ "$(gpg_derived_field "$derived" secret)" = "1" ] \
+		|| printf '  note         this is a public key: it cannot sign or decrypt\n'
+	[ "$(gpg_derived_field "$derived" encrypted)" = "1" ] \
+		&& printf '  passphrase   the secret half is protected\n'
+	problem="$(gpg_derived_field "$derived" problem)"
+	[ -n "$problem" ] && printf '  note         %s\n' "$problem"
+	printf '\n'
+}
+
+cmd_gpg() {
+	local op="${1:-}"
+	[ $# -gt 0 ] && shift
+	case "$op" in
+		import) cmd_gpg_import "$@" ;;
+		list)   cmd_gpg_list "$@" ;;
+		show)   cmd_gpg_show "$@" ;;
+		*)
+			printf 'Usage: %s gpg <import|list|show> [args]\n' "$0" >&2
+			exit 1
+			;;
+	esac
+}
+
 # ----- the SSH agent -----------------------------------------------------------
 # A key in the vault is a key you still have to get to ssh, and the usual way
 # is `ssh-add ~/.ssh/id_ed25519` -- which is a key that lives on disk. These
@@ -6652,6 +6811,12 @@ Kunci SSH:
                                      (bawaan 15 menit; 0 berarti tanpa batas)
   ./spm.sh ssh unload <id|--all>   → Keluarkan kembali dari agent
   ./spm.sh ssh agent               → Isi agent, dan mana yang dari vault ini
+
+Kunci GPG:
+  ./spm.sh gpg import <keyfile> [label]
+                                   → Simpan secret key ber-armor dari berkas
+  ./spm.sh gpg list                → Semua kunci tersimpan beserta key id
+  ./spm.sh gpg show <id>           → Fingerprint, algoritma, tanggal, identitas
   (jenis, ukuran, fingerprint, dan public key diturunkan dari kunci yang
    tersimpan, jadi tidak mungkin berbeda dengan kunci yang dijelaskannya)
 
@@ -6793,6 +6958,14 @@ SSH keys:
   ./spm.sh ssh agent               → What the agent holds, and which of it
                                      came from this vault
   (the key reaches the agent over a pipe: never a file, never a command line)
+
+GPG keys:
+  ./spm.sh gpg import <keyfile> [label]
+                                   → Store an armored secret key from a file
+  ./spm.sh gpg list                → Every stored key, with its key id
+  ./spm.sh gpg show <id>           → Fingerprint, algorithm, dates, identities
+  (all of it derived from the stored key, without gpg and without the
+   passphrase, because a secret key carries its public half in the clear)
 
 Secure Notes:
   ./spm.sh notes-add       → Add secure note
@@ -8911,6 +9084,7 @@ main() {
 		generate|password-generate) cmd_generate_password "$@" ;;
 		record)           cmd_record "$@" ;;
 		ssh)              cmd_ssh "$@" ;;
+		gpg)              cmd_gpg "$@" ;;
 		notes-add)        cmd_notes_add "$@" ;;
 		notes-list)       cmd_notes_list "$@" ;;
 		notes-view)       cmd_notes_view "$@" ;;

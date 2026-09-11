@@ -45,6 +45,7 @@ Current release: **4.10.1**
   - [Secure Notes](#secure-notes)
   - [Typed records](#typed-records)
   - [SSH keys](#ssh-keys)
+  - [GPG keys](#gpg-keys)
   - [Recovery: Forgot Master Password](#recovery-forgot-master-password)
   - [Doctor / Health Check](#doctor--health-check)
 - [Hidden entries](#hidden-entries)
@@ -269,6 +270,10 @@ filters and result count visible](docs/screenshots/web-v2.13.0/31-passwords-filt
 - Stored SSH keys handed to `ssh-agent` over a pipe with a bounded lifetime,
   never as a file or a command-line argument, with the passphrase delivered
   over an inherited descriptor and unloading done by the public half alone
+- OpenPGP secret keys as a record type, with the fingerprint, key id,
+  algorithm, curve or size, creation date and identities derived from the
+  stored key in pure Python — matching `gpg`'s own fingerprint without gpg,
+  without a keyring or agent, and without the passphrase
 - A URL on every password record, scheme-restricted to `http(s)`, used to bind
   a credential to a site for the browser extension
 - Encrypted history, verified manual/automatic backups, and confirmed rollback,
@@ -877,6 +882,9 @@ tab. The address shown here is your own host — the example below is redacted.
 ./spm.sh ssh load <id> [minutes]
 ./spm.sh ssh unload <id|--all>
 ./spm.sh ssh agent
+./spm.sh gpg import <keyfile> [label]
+./spm.sh gpg list
+./spm.sh gpg show <id>
 ./spm.sh doctor
 ./spm.sh web
 ```
@@ -905,7 +913,7 @@ engine. A Wi-Fi network has an SSID and a security mode. Putting any of them
 in a password entry means the extra parts go in the notes field, where nothing
 can search them, redact them or check them.
 
-SPM stores eight of those shapes properly:
+SPM stores nine of those shapes properly:
 
 | Type | What it is for |
 |---|---|
@@ -917,6 +925,7 @@ SPM stores eight of those shapes properly:
 | `wifi` | Network name, password and security mode |
 | `server` | Hostname, address, port and the account you log in with |
 | `ssh-key` | A private key, its passphrase, and the hosts it opens |
+| `gpg-key` | An OpenPGP secret key, its passphrase, and its identities |
 
 ### From the command line
 
@@ -992,7 +1001,7 @@ the two disappear.
 A type is data, not code. `RECORD_SCHEMAS` in the trusted core names a type's
 fields, says which of them hold secrets and which are required, and gives it an
 icon. Everything else — the CLI prompts, the Dashboard form, the list, the
-redaction, the exports — reads that. Adding a ninth type is a dictionary
+redaction, the exports — reads that. Adding a tenth type is a dictionary
 entry, an icon in the sprite and its translations.
 
 A schema may also name a *deriver*: a function that reads the record's own
@@ -1168,6 +1177,93 @@ temporary file, never passed as a command-line argument — argv is readable by
 every process on the machine — and never handed to `ssh-keygen` or any other
 external program to be parsed. Everything SPM says about a key, it works out
 itself, from bytes it already has decrypted in memory.
+
+---
+
+## GPG keys
+
+An OpenPGP secret key is the other long-lived key people keep in a file: it
+signs commits and releases, it decrypts mail, and its fingerprint is an
+identity other people have verified and signed. It usually lives in `~/.gnupg`,
+where it is entangled with a keyring, an agent, and trust state — which makes
+it awkward to keep a second copy of, or to move to a new machine, without
+copying the whole apparatus.
+
+SPM stores the key itself as a record, the same way it stores an SSH key:
+encrypted with the rest of the vault, masked on screen, carried across exports,
+hideable, and searchable by everything about it except the key.
+
+```bash
+./spm.sh gpg import ~/backup/signing.asc "signing key"
+./spm.sh gpg list
+./spm.sh gpg show 1
+```
+
+`gpg import` reads an ASCII-armored secret key. Export one from GnuPG with
+`gpg --armor --export-secret-keys <id>`. It refuses a public key (the
+`--export` form without `-secret-keys`), because a `gpg-key` record whose
+secret field held only a public key could neither sign nor decrypt — the one
+thing it is kept for.
+
+### The public facts are derived, never typed
+
+As with SSH, SPM does not ask for the fingerprint, the key id, or the
+algorithm, and does not store them. It computes them from the stored key each
+time, and it does so **without gpg** — no keyring, no agent, no passphrase.
+
+An OpenPGP secret key is a public key with the secret material appended, and
+the fingerprint is a hash of only the public part. So SPM parses the packet
+stream itself and hashes the public half:
+
+- **v4 keys**: SHA-1 of `0x99 ‖ length ‖ public-key material` — the definition
+  gpg uses, which is why the fingerprints match to the hex digit.
+- **v6 keys**: SHA-256, per the newer format.
+
+The regression suite generates throwaway keys with gpg and checks SPM's
+fingerprint against `gpg`'s own for an ed25519 key, a passphrase-protected
+ed25519 key, and an RSA key — with the passphrase never handed to anything.
+
+Whether the secret half is passphrase-protected is read from the packet's
+protection byte, not discovered by trying the passphrase — the same way the
+SSH side reads a cipher name. And the key's identities (the `Name <email>`
+user IDs) and its subkey count come out of the same parse.
+
+### Two ways to be wrong that SPM is not
+
+**An elliptic-curve key's size is its curve, not the length of a point.** An
+Ed25519 point encodes as 263 bits; reporting "263" would look like a key size
+and be wrong. SPM reads the curve from the key's OID and reports `ed25519`,
+`nistp256`, and so on — matching what `gpg` prints. It is the same mistake as
+measuring an RSA key by the *bytes* of its modulus, which the SSH side already
+avoids.
+
+**A truncated key does not get a plausible fingerprint.** Walking the key's
+internal length fields without checking them lets a cut-off key hash a shorter
+slice than intended and produce a fingerprint that is wrong and looks right —
+and a fingerprint is exactly the thing you check to confirm *which* key you
+are holding. Every length is bounds-checked, so a truncated or corrupt key
+derives nothing and says why, rather than answering confidently and wrongly.
+
+### A key SPM cannot read is still kept
+
+An unrecognised format, a truncated packet, or a key this build does not
+understand all derive nothing and say so on the record's page — and the record
+is still stored. Dropping a secret because it cannot be described is worse than
+keeping it quietly.
+
+### In the Dashboard
+
+A GPG key record looks like every other typed record: **+ Add Record** →
+**GPG Key**, with the secret key and its passphrase as masked secret fields.
+Below them is the same **Derived from the key** panel the SSH records use —
+fingerprint, key id, algorithm, creation date, identities and subkey count, as
+read-only text, recomputed on every draw. The panel is not special-cased for
+either type: a schema names a deriver, the record page asks the core for that
+record's rows and its heading, and renders what comes back. GPG landed as a
+dictionary entry.
+
+Unlike SSH, there is nothing GPG-specific left out of the Dashboard — there is
+no agent equivalent here that depends on which machine you are sitting at.
 
 ---
 
