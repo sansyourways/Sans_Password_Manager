@@ -207,6 +207,21 @@ filters and result count visible](docs/screenshots/web-v2.13.0/31-passwords-filt
 | --- | --- |
 | ![SPM password generator](docs/screenshots/web-v2.13.0/26-generator.png) | ![SPM import and export workspace](docs/screenshots/web-v2.13.0/27-transfer.png) |
 
+### Typed records, SSH keys and GPG keys
+
+New in 5.0.0. A **Records** section holds the shapes a password entry cannot:
+API tokens, database and server credentials, Wi-Fi networks, identities and
+licences, and SSH and GPG keys. Each type draws its own form from one schema.
+A key record adds a **Derived from the key** panel -- the fingerprint, type and
+size for an SSH key, or the fingerprint, key id and algorithm for a GPG key,
+read out of the stored key itself rather than typed beside it, so they cannot
+disagree with the key they describe. The key stays a masked secret; only the
+public facts are shown.
+
+| Records list | SSH key, fingerprint derived | GPG key, fingerprint derived |
+| --- | --- | --- |
+| ![SPM typed-records list showing SSH and GPG keys, an API token, a server and a Wi-Fi network, all synthetic](docs/screenshots/web-v2.13.0/37-records.png) | ![SPM SSH-key record with the private key masked and its type, size and fingerprint derived from the stored key](docs/screenshots/web-v2.13.0/38-record-ssh-key.png) | ![SPM GPG-key record with the secret key masked and its fingerprint, key id and algorithm derived from the stored key](docs/screenshots/web-v2.13.0/39-record-gpg-key.png) |
+
 <details>
 <summary><strong>Complete web interface gallery</strong></summary>
 
@@ -239,6 +254,12 @@ filters and result count visible](docs/screenshots/web-v2.13.0/31-passwords-filt
 | List | Add | View | Edit |
 | --- | --- | --- | --- |
 | ![Backup-code list](docs/screenshots/web-v2.13.0/22-backup-codes.png) | ![Add backup codes](docs/screenshots/web-v2.13.0/23-backup-codes-add.png) | ![View backup codes](docs/screenshots/web-v2.13.0/24-backup-codes-view.png) | ![Edit backup codes](docs/screenshots/web-v2.13.0/25-backup-codes-edit.png) |
+
+#### Records
+
+| Add (schema-drawn form) | Server record | Wi-Fi and the rest |
+| --- | --- | --- |
+| ![Add an SSH-key record, form drawn from the schema](docs/screenshots/web-v2.13.0/41-record-add.png) | ![Server record with hostname, address, port and account](docs/screenshots/web-v2.13.0/40-record-server.png) | ![Typed-records list](docs/screenshots/web-v2.13.0/37-records.png) |
 
 #### Settings
 
