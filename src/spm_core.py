@@ -978,6 +978,17 @@ RECORD_SCHEMAS = {
             ("notes", FIELD_PLAIN, "multiline", False),
         ),
     },
+    "gpg-key": {
+        "label": "GPG Key",
+        "icon": "gpg",
+        "derive": "gpg",
+        "fields": (
+            ("private_key", FIELD_SECRET, "multiline", True),
+            ("passphrase", FIELD_SECRET, "line", False),
+            ("uids", FIELD_PLAIN, "line", False),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
     "ssh-key": {
         "label": "SSH Key",
         "icon": "ssh",
@@ -1400,6 +1411,308 @@ def ssh_key_info(text, comment=""):
     return info
 
 
+# ----- OpenPGP keys -----------------------------------------------------------
+# The same shape as the SSH section above, and true for the same reason: an
+# OpenPGP secret key carries its public half in the clear. A Secret-Key packet
+# is a Public-Key packet with the secret material appended, and the fingerprint
+# is a hash of only the public part -- so SPM can name a stored key without the
+# passphrase, without gpg, and without writing anything to disk.
+#
+# Checked against gpg's own answer for RSA 2048 and 4096, ed25519 sealed and
+# unsealed, ECDSA nistp256 and an ECDH cv25519 subkey.
+
+PGP_ARMOR_HEAD = "-----BEGIN PGP "
+PGP_TAG_SECRET_KEY = 5
+PGP_TAG_PUBLIC_KEY = 6
+PGP_TAG_SECRET_SUBKEY = 7
+PGP_TAG_USER_ID = 13
+PGP_TAG_PUBLIC_SUBKEY = 14
+PGP_PRIMARY_TAGS = (PGP_TAG_SECRET_KEY, PGP_TAG_PUBLIC_KEY)
+PGP_SUBKEY_TAGS = (PGP_TAG_SECRET_SUBKEY, PGP_TAG_PUBLIC_SUBKEY)
+
+PGP_ALGORITHMS = {1: "RSA", 2: "RSA", 3: "RSA", 16: "Elgamal", 17: "DSA",
+                  18: "ECDH", 19: "ECDSA", 22: "EdDSA", 25: "X25519",
+                  27: "Ed25519", 28: "X448", 29: "Ed448"}
+
+# Curve OIDs as they appear in a key packet, by their hex bytes.
+PGP_CURVES = {
+    "2b06010401da470f01": "ed25519",
+    "2b060104019755010501": "cv25519",
+    "2a8648ce3d030107": "nistp256",
+    "2b81040022": "nistp384",
+    "2b81040023": "nistp521",
+    "2b8104000a": "secp256k1",
+    "2b2403030208010107": "brainpoolP256r1",
+    "2b240303020801010b": "brainpoolP384r1",
+    "2b240303020801010d": "brainpoolP512r1",
+}
+# The size a curve *means*, as against the length of a point encoded on it.
+PGP_CURVE_BITS = {"ed25519": 255, "cv25519": 255, "nistp256": 256,
+                  "nistp384": 384, "nistp521": 521, "secp256k1": 256,
+                  "brainpoolP256r1": 256, "brainpoolP384r1": 384,
+                  "brainpoolP512r1": 512}
+
+
+def pgp_dearmor(text):
+    """The bytes inside an ASCII-armored block.
+
+    Armor headers ("Version: ...") and the trailing =CRC24 line are not part
+    of the data and are dropped; everything between the BEGIN and END lines
+    that is neither is base64.
+    """
+    body = []
+    inside = False
+    seen_blank = False
+    for line in (text or "").replace("\r\n", "\n").split("\n"):
+        if line.startswith(PGP_ARMOR_HEAD):
+            inside = True
+            continue
+        if line.startswith("-----END PGP "):
+            break
+        if not inside:
+            continue
+        if not line.strip():
+            seen_blank = True
+            continue
+        if line.startswith("="):            # CRC24 checksum, not data
+            continue
+        if not seen_blank and ": " in line:  # an armor header
+            continue
+        body.append(line.strip())
+    if not body:
+        raise VaultError("no armored data between the BEGIN and END lines")
+    return base64.b64decode("".join(body))
+
+
+def pgp_packets(data):
+    """(tag, body) for each packet, in order, in both header formats."""
+    offset = 0
+    while offset < len(data):
+        first = data[offset]
+        if not first & 0x80:
+            raise VaultError("this is not an OpenPGP packet stream")
+        if first & 0x40:                                  # RFC 4880 new format
+            tag = first & 0x3F
+            offset += 1
+            if offset >= len(data):
+                raise VaultError("the key ends where a length should be")
+            marker = data[offset]
+            if marker < 192:
+                length = marker
+                offset += 1
+            elif marker < 224:
+                if offset + 1 >= len(data):
+                    raise VaultError("the key ends inside a length")
+                length = ((marker - 192) << 8) + data[offset + 1] + 192
+                offset += 2
+            elif marker == 255:
+                if offset + 5 > len(data):
+                    raise VaultError("the key ends inside a length")
+                length = int.from_bytes(data[offset + 1:offset + 5], "big")
+                offset += 5
+            else:
+                # A partial body length streams a packet in chunks. Nothing
+                # that exports a key writes one, and guessing at the rest
+                # would be inventing data.
+                raise VaultError("partial packet lengths are not supported")
+        else:                                             # old format
+            tag = (first & 0x3C) >> 2
+            kind = first & 0x03
+            offset += 1
+            if kind == 0:
+                if offset >= len(data):
+                    raise VaultError("the key ends where a length should be")
+                length = data[offset]
+                offset += 1
+            elif kind == 1:
+                if offset + 2 > len(data):
+                    raise VaultError("the key ends inside a length")
+                length = int.from_bytes(data[offset:offset + 2], "big")
+                offset += 2
+            elif kind == 2:
+                if offset + 4 > len(data):
+                    raise VaultError("the key ends inside a length")
+                length = int.from_bytes(data[offset:offset + 4], "big")
+                offset += 4
+            else:
+                raise VaultError("indeterminate packet lengths are not supported")
+        yield tag, data[offset:offset + length]
+        offset += length
+
+
+def _pgp_mpi(body, offset):
+    """Step over one multiprecision integer; return the new offset and bits.
+
+    Bounds-checked on both sides. Slicing past the end of a bytes object does
+    not raise in Python -- it returns something shorter -- so an unchecked
+    walk over a truncated key runs off the end, hashes a short slice, and
+    produces a fingerprint that is wrong and looks exactly like a right one.
+    A fingerprint is the thing you check to know which key you are holding,
+    so being confidently wrong is worse than admitting the key is unreadable.
+    """
+    if offset + 2 > len(body):
+        raise VaultError("the key ends inside a length")
+    bits = int.from_bytes(body[offset:offset + 2], "big")
+    size = (bits + 7) // 8
+    if offset + 2 + size > len(body):
+        raise VaultError("the key ends inside a value")
+    return offset + 2 + size, bits
+
+
+def pgp_public_material(body):
+    """(length of the public material, algorithm id, bits, curve name).
+
+    The length is what the fingerprint is taken over, and it is also where a
+    Secret-Key packet's protection byte begins.
+    """
+    if len(body) < 6:
+        raise VaultError("the key packet is too short to be one")
+    version = body[0]
+    if version not in (4, 6):
+        raise VaultError("unsupported key version %d" % version)
+    algorithm = body[5]
+    # A v6 packet counts its own public material in four bytes before it.
+    offset = 6 if version == 4 else 10
+    bits = 0
+    if algorithm in (1, 2, 3):                    # RSA: modulus, exponent
+        offset, bits = _pgp_mpi(body, offset)
+        offset, _ = _pgp_mpi(body, offset)
+    elif algorithm == 17:                         # DSA: p, q, g, y
+        offset, bits = _pgp_mpi(body, offset)
+        for _ in range(3):
+            offset, _ = _pgp_mpi(body, offset)
+    elif algorithm == 16:                         # Elgamal: p, g, y
+        offset, bits = _pgp_mpi(body, offset)
+        for _ in range(2):
+            offset, _ = _pgp_mpi(body, offset)
+    elif algorithm in (18, 19, 22):               # ECDH / ECDSA / EdDSA
+        if offset >= len(body):
+            raise VaultError("the key ends where the curve should be")
+        oid_length = body[offset]
+        if offset + 1 + oid_length > len(body):
+            raise VaultError("the key ends inside the curve name")
+        curve = PGP_CURVES.get(body[offset + 1:offset + 1 + oid_length].hex(), "")
+        offset += 1 + oid_length
+        offset, point_bits = _pgp_mpi(body, offset)
+        if algorithm == 18:                       # ECDH carries KDF parameters
+            if offset >= len(body) or offset + 1 + body[offset] > len(body):
+                raise VaultError("the key ends inside the KDF parameters")
+            offset += 1 + body[offset]
+        # The MPI holds an encoded point, not a number, so its bit length is
+        # the point's and not the curve's: an Ed25519 point measures 263, a
+        # number that looks like a key size and is not one. The curve is the
+        # honest answer to "how big is this key", and it is what gpg reports.
+        return offset, algorithm, PGP_CURVE_BITS.get(curve, 0) or point_bits, curve
+    elif algorithm in (25, 27, 28, 29):           # v6 native, fixed width
+        width = 56 if algorithm in (28, 29) else 32
+        if offset + width > len(body):
+            raise VaultError("the key ends inside the public key")
+        return offset + width, algorithm, width * 8, PGP_ALGORITHMS[algorithm].lower()
+    else:
+        raise VaultError("unsupported public key algorithm %d" % algorithm)
+    return offset, algorithm, bits, ""
+
+
+def pgp_fingerprint(body):
+    """The fingerprint of one key packet, as gpg prints it."""
+    # pgp_public_material walks the packet with a bounds check on every read,
+    # so length is already known not to exceed the body -- there is no second
+    # check here on purpose. A redundant guard would be a line no test could
+    # make fail, which is the same as a line that is not pulling its weight.
+    length, _algorithm, _bits, _curve = pgp_public_material(body)
+    material = body[:length]
+    if body[0] == 4:
+        digest = hashlib.sha1(
+            b"\x99" + len(material).to_bytes(2, "big") + material)
+    else:
+        digest = hashlib.sha256(
+            b"\x9b" + len(material).to_bytes(4, "big") + material)
+    return digest.hexdigest().upper()
+
+
+def pgp_key_id(fingerprint):
+    """The long key id: the last 16 hex digits of the fingerprint."""
+    return fingerprint[-16:]
+
+
+def pgp_is_sealed(body):
+    """Whether a Secret-Key packet's secret half is passphrase-protected.
+
+    The octet after the public material says so, and reading it costs nothing:
+    0 means the secret is stored in the clear, anything else means protected.
+    No passphrase is attempted to find this out, the same way the SSH side
+    reads a cipher name rather than trying it.
+    """
+    length, _algorithm, _bits, _curve = pgp_public_material(body)
+    if length >= len(body):
+        raise VaultError("the key ends where its protection should be")
+    return body[length] != 0
+
+
+def pgp_key_info(text):
+    """Everything SPM can derive from a stored OpenPGP key, without gpg.
+
+    Every key of the result is always present, so a surface renders one shape
+    rather than testing for absent keys, and `problem` says why a field is
+    empty. A key SPM cannot read is not an error: it is still a key its owner
+    wants kept, and the answer on screen is a reason rather than a blank.
+    """
+    info = {"fingerprint": "", "keyid": "", "algorithm": "", "bits": 0,
+            "curve": "", "created": "", "uids": "", "subkeys": 0,
+            "secret": False, "encrypted": False, "problem": ""}
+    text = (text or "").strip()
+    if not text:
+        info["problem"] = "no key stored"
+        return info
+    if PGP_ARMOR_HEAD not in text:
+        info["problem"] = "this is not an ASCII-armored OpenPGP key"
+        return info
+    try:
+        data = pgp_dearmor(text)
+        primary = None
+        uids = []
+        for tag, body in pgp_packets(data):
+            if tag in PGP_PRIMARY_TAGS and primary is None:
+                primary = (tag, body)
+            elif tag in PGP_SUBKEY_TAGS:
+                info["subkeys"] += 1
+            elif tag == PGP_TAG_USER_ID:
+                uids.append(body.decode("utf-8", "replace"))
+        if primary is None:
+            info["problem"] = "the armor holds no key packet"
+            return info
+        tag, body = primary
+        info["secret"] = tag == PGP_TAG_SECRET_KEY
+        length, algorithm, bits, curve = pgp_public_material(body)
+        info["fingerprint"] = pgp_fingerprint(body)
+        info["keyid"] = pgp_key_id(info["fingerprint"])
+        info["algorithm"] = PGP_ALGORITHMS.get(algorithm, str(algorithm))
+        info["bits"] = bits
+        info["curve"] = curve
+        info["created"] = _iso_from_epoch(int.from_bytes(body[1:5], "big"))
+        info["uids"] = ", ".join(uids)
+        if info["secret"]:
+            info["encrypted"] = pgp_is_sealed(body)
+        del length
+    except VaultError as failure:
+        info["problem"] = str(failure)
+        return info
+    except Exception as failure:                      # noqa: BLE001
+        # Bad base64, a length that overruns, a packet stream that is not one:
+        # to the caller these are all the same answer, and the answer is not a
+        # traceback.
+        info["problem"] = str(failure) or "the key could not be read"
+        return info
+    return info
+
+
+def _iso_from_epoch(seconds):
+    try:
+        return time.strftime("%Y-%m-%d", time.gmtime(seconds))
+    except Exception:                                 # noqa: BLE001
+        return ""
+
+
 # ----- derived record facts ---------------------------------------------------
 # Some record types can say more about themselves than they were told. An SSH
 # key knows its own type, size and fingerprint; a surface should be able to
@@ -1433,7 +1746,36 @@ def _derived_ssh(values):
     return rows
 
 
-RECORD_DERIVERS = {"ssh": _derived_ssh}
+def _derived_gpg(values):
+    info = pgp_key_info(values.get("private_key", ""))
+    rows = []
+    if info["fingerprint"]:
+        rows.append(("gpg.fingerprint", "Fingerprint", info["fingerprint"]))
+        rows.append(("gpg.keyid", "Key ID", info["keyid"]))
+    if info["algorithm"]:
+        size = info["curve"] or ("%d" % info["bits"] if info["bits"] else "")
+        rows.append(("gpg.algorithm", "Algorithm",
+                     ("%s %s" % (info["algorithm"], size)).strip()))
+    if info["created"]:
+        rows.append(("gpg.created", "Created", info["created"]))
+    if info["uids"]:
+        rows.append(("gpg.uids", "Identities", info["uids"]))
+    if info["subkeys"]:
+        rows.append(("gpg.subkeys", "Subkeys", "%d" % info["subkeys"]))
+    if not info["secret"] and info["fingerprint"]:
+        rows.append(("gpg.publiconly",
+                     "This is a public key: it cannot sign or decrypt", ""))
+    if info["encrypted"]:
+        rows.append(("gpg.sealed",
+                     "The secret half is passphrase-protected", ""))
+    if info["problem"]:
+        rows.append(("gpg.unreadable",
+                     "SPM cannot derive anything from this key",
+                     info["problem"]))
+    return rows
+
+
+RECORD_DERIVERS = {"ssh": _derived_ssh, "gpg": _derived_gpg}
 
 
 def record_derived(record_type, values):
@@ -4366,6 +4708,26 @@ def main(argv):
                     sys.stdout.write("%s\t%s\n" % (name, _b64(str(value))))
             else:
                 raise VaultError("unknown ssh op %r" % (op,))
+        elif command == "gpg":
+            # gpg <op> -- what the CLI asks about a stored OpenPGP key. The
+            # armored key arrives on stdin, base64-encoded, for the same
+            # reason the SSH key above does.
+            op = argv[2]
+            if op == "info":
+                # stdin:  base64 of the armored key text
+                # stdout: "name<TAB>base64(value)" lines
+                key_text = base64.b64decode(
+                    sys.stdin.read().strip() or "").decode("utf-8", "replace")
+                info = pgp_key_info(key_text)
+                for name in ("fingerprint", "keyid", "algorithm", "bits",
+                             "curve", "created", "uids", "subkeys",
+                             "secret", "encrypted", "problem"):
+                    value = info[name]
+                    if isinstance(value, bool):
+                        value = "1" if value else "0"
+                    sys.stdout.write("%s\t%s\n" % (name, _b64(str(value))))
+            else:
+                raise VaultError("unknown gpg op %r" % (op,))
         elif command == "secret-key":
             # secret-key <op> <vault> ; ops below say what they read on stdin.
             #

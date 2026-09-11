@@ -6613,6 +6613,56 @@ for line in key_text.splitlines()[1:-1]:
 ssh_id = url.rsplit("id=", 1)[1]
 post("/records-delete", [("type", "ssh-key"), ("id", ssh_id)], get("/records"))
 
+# A gpg-key record shows the same kind of derived panel, from the same code
+# path -- the record page asks the core for a type's derived rows and its
+# heading key and renders what comes back, naming neither SSH nor GPG. The
+# secret key is built from a pinned public one so no private key material
+# lives in the repository and no gpg is needed to run this.
+GPG_ED25519_PUB = """\
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mDMEap7AuBYJKwYBBAHaRw8BAQdATjjnpLNzcFN5CsibwtfXO8qUKCSJFvGErii8
+xq4+bf20F1NQTSBMYWIgRWQgPGVkQHNwbS5sYWI+iJAEExYIADgWIQS4cgU1oID+
+KnAXzu9fQOuU3fXK5AUCap7AuAIbAwULCQgHAgYVCgkICwIEFgIDAQIeAQIXgAAK
+CRBfQOuU3fXK5LO1APwPRjj+hQw41D3DSbzSwNxcn7ILoa7vAWRv9tnkiew3awEA
+yZ8m3Wz18/8vQVqyvlBzkyuco8JgRErLIT9H1sdtIQ8=
+=Ab9k
+-----END PGP PUBLIC KEY BLOCK-----
+"""
+GPG_ED25519_FP = "B8720535A080FE2A7017CEEF5F40EB94DDF5CAE4"
+
+def gpg_secret_from_public(armor):
+    data = core.pgp_dearmor(armor)
+    body = next(b for tag, b in core.pgp_packets(data)
+                if tag == core.PGP_TAG_PUBLIC_KEY)
+    length, _alg, _bits, _curve = core.pgp_public_material(body)
+    packet = body[:length] + b"\x00" + b"\x00" * 40   # unprotected secret
+    framed = (bytes([0xC0 | core.PGP_TAG_SECRET_KEY]) + b"\xff"
+              + len(packet).to_bytes(4, "big") + packet)
+    encoded = base64.b64encode(framed).decode("ascii")
+    return ("-----BEGIN PGP PRIVATE KEY BLOCK-----\n\n"
+            + "\n".join(encoded[i:i + 64] for i in range(0, len(encoded), 64))
+            + "\n-----END PGP PRIVATE KEY BLOCK-----\n")
+
+gpg_key_text = gpg_secret_from_public(GPG_ED25519_PUB)
+form = get("/records-add?type=gpg-key")
+url, view = post("/records-add", [
+    ("type", "gpg-key"), ("label", "web gpg derived"),
+    ("private_key", gpg_key_text)], form)
+assert GPG_ED25519_FP in view, "the record page does not show the derived fingerprint"
+assert GPG_ED25519_FP[-16:] in view, "the record page does not show the key id"
+assert 'data-i18n="gpg.derived.t"' in view, "the derived panel is missing"
+assert 'data-val="-----BEGIN PGP PRIVATE KEY' in view, \
+    "the secret key never reached the reveal control, so it cannot be copied"
+without_reveal = re.sub(r'data-val="[^"]*"', "", view)
+assert "PRIVATE KEY" not in without_reveal, \
+    "the record page printed the secret key block outside the reveal control"
+for line in gpg_key_text.splitlines()[2:-1]:
+    assert line not in without_reveal, \
+        "the record page printed the secret key body outside the reveal control"
+gpg_id = url.rsplit("id=", 1)[1]
+post("/records-delete", [("type", "gpg-key"), ("id", gpg_id)], get("/records"))
+
 sys.stdout.write("  dashboard records: %d schemas add, list, filter, view "
                  "redacted, edit, refuse and delete over HTTP, and the CLI "
                  "reads back every one\n" % len(core.RECORD_TYPES))
@@ -6915,6 +6965,119 @@ SHIM
 else
 	printf '  ssh keys: skipped, no ssh-keygen to check SPM against\n'
 fi
+
+# ----- GPG keys, derived rather than typed ------------------------------------
+# The claim, again: SPM derives an OpenPGP key's fingerprint itself, matching
+# what gpg prints, from the stored secret key and without the passphrase. gpg
+# is a hard dependency of SPM -- the vault is a gpg symmetric file -- so it is
+# always here to be the oracle, and generating a throwaway keypair to check
+# against is fair game. The keypair lives in a GNUPGHOME of its own so it
+# cannot touch the vault's.
+GPG_LAB="$TEST_ROOT/gpgkeys"
+mkdir -p "$GPG_LAB"; chmod 700 "$GPG_LAB"
+gpg_truth_fp() {
+	GNUPGHOME="$GPG_LAB" gpg --list-keys --with-colons "$1" 2>/dev/null \
+		| awk -F: '$1=="fpr"{print $10; exit}'
+}
+# ed25519 is instant and needs no entropy stockpile; a sealed one proves the
+# passphrase is never needed to derive; rsa2048 exercises the MPI path.
+GNUPGHOME="$GPG_LAB" gpg --batch --quick-gen-key --pinentry-mode loopback \
+	--passphrase "" "SPM Reg Plain <plain@spm.test>" ed25519 default never >/dev/null 2>&1
+GNUPGHOME="$GPG_LAB" gpg --batch --quick-gen-key --pinentry-mode loopback \
+	--passphrase "reg-secret" "SPM Reg Sealed <sealed@spm.test>" ed25519 default never >/dev/null 2>&1
+GNUPGHOME="$GPG_LAB" gpg --batch --quick-gen-key --pinentry-mode loopback \
+	--passphrase "" "SPM Reg RSA <rsa@spm.test>" rsa2048 default never >/dev/null 2>&1
+
+for who in plain:  sealed:reg-secret rsa: ; do
+	uid="${who%%:*}"; pass="${who#*:}"
+	GNUPGHOME="$GPG_LAB" gpg --batch --yes --pinentry-mode loopback \
+		--passphrase "$pass" --armor --export-secret-keys "${uid}@spm.test" \
+		> "$GPG_LAB/$uid.sec.asc" 2>/dev/null
+	GNUPGHOME="$GPG_LAB" gpg --armor --export "${uid}@spm.test" \
+		> "$GPG_LAB/$uid.pub.asc" 2>/dev/null
+done
+
+GPG_VAULT="$TEST_ROOT/gpg-vault.gpg"
+cp "$PASSWORD_VAULT" "$GPG_VAULT"
+(
+	export VAULT_FILE="$GPG_VAULT" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY=""
+	export RECOVERY_FILE="$GPG_VAULT.recovery"
+	cmd_gpg import "$GPG_LAB/plain.sec.asc" "plain" >/dev/null
+	cmd_gpg import "$GPG_LAB/sealed.sec.asc" "sealed" >/dev/null
+	cmd_gpg import "$GPG_LAB/rsa.sec.asc" "rsa" >/dev/null
+
+	gpg_listing="$(cmd_gpg list)"
+	for uid in plain sealed rsa; do
+		case "$gpg_listing" in
+			*"$(gpg_truth_fp "${uid}@spm.test" | tail -c 17)"*) ;;
+			*) printf 'gpg: list does not show the %s key id\n' "$uid" >&2; exit 1 ;;
+		esac
+	done
+
+	# show's fingerprint is gpg's own, for every key including the sealed one
+	# whose passphrase was never handed to anything here.
+	i=1
+	for uid in plain sealed rsa; do
+		shown="$(cmd_gpg show "$i")"
+		case "$shown" in
+			*"$(gpg_truth_fp "${uid}@spm.test")"*) ;;
+			*) printf 'gpg: show did not fingerprint %s as gpg does\n' "$uid" >&2
+			   exit 1 ;;
+		esac
+		i=$((i + 1))
+	done
+	case "$(cmd_gpg show 2)" in
+		*protected*) ;;
+		*) printf 'gpg: show does not say the sealed key is protected\n' >&2; exit 1 ;;
+	esac
+
+	# No command prints the secret key body. The armor's inner lines are the
+	# material; the BEGIN/END framing is not secret and may appear.
+	secret_body="$(sed -n '3p' "$GPG_LAB/plain.sec.asc")"
+	for out in "$gpg_listing" "$(cmd_gpg show 1)"; do
+		case "$out" in
+			*"$secret_body"*)
+				printf 'gpg: a secret key body was printed in the open\n' >&2
+				exit 1 ;;
+			*"PRIVATE KEY-----"*)
+				# The armor header alone is fine; a whole block is not.
+				case "$out" in
+					*"-----BEGIN PGP PRIVATE KEY"*"-----END PGP PRIVATE KEY"*)
+						printf 'gpg: a secret key block was printed in the open\n' >&2
+						exit 1 ;;
+				esac ;;
+		esac
+	done
+
+	# A record view masks the secret key like any other secret, because the
+	# schema says private_key is one -- not because gpg code says so.
+	gpg_masked="$(cmd_record_view gpg-key 1)"
+	gpg_revealed="$(cmd_record_view gpg-key 1 --reveal)"
+	case "$gpg_masked" in
+		*"$secret_body"*) printf 'gpg: record view revealed the secret key\n' >&2; exit 1 ;;
+	esac
+	case "$gpg_revealed" in
+		*"$secret_body"*) ;;
+		*) printf 'gpg: --reveal did not show the secret key\n' >&2; exit 1 ;;
+	esac
+
+	# A public key is refused: it fingerprints like a secret one, so a guard
+	# that only asks "did this fingerprint?" files it as the secret half of a
+	# key that then cannot sign or decrypt -- the one thing it is kept for.
+	if ( cmd_gpg import "$GPG_LAB/plain.pub.asc" "oops" ) >/dev/null 2>&1; then
+		printf 'gpg: a public key was stored as a secret one\n' >&2
+		exit 1
+	fi
+	# And a file that is not a key at all.
+	printf 'not a key\n' > "$GPG_LAB/junk"
+	if ( cmd_gpg import "$GPG_LAB/junk" "junk" ) >/dev/null 2>&1; then
+		printf 'gpg: a file that is not a key was imported\n' >&2
+		exit 1
+	fi
+)
+printf '  gpg keys: 3 key types fingerprinted exactly as gpg prints them, '
+printf 'sealed key included, no secret key reaches a screen, and a public '
+printf 'key is refused\n'
 
 # ----- line terminators in an exported custom field --------------------------
 # A custom field holding U+0085, U+2028 or U+2029 exported as valid JSON and

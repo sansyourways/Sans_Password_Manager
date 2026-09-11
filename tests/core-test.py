@@ -2842,6 +2842,200 @@ def t_ssh_key_is_a_record_type_like_any_other():
        SSH_ED25519_FP, "the stored key no longer fingerprints as itself")
 
 
+# ----- OpenPGP keys ----------------------------------------------------------
+# Known-answer vectors: two real OpenPGP *public* keys and the fingerprints
+# gpg prints for them. Public keys only -- a fingerprint is derived from the
+# public half, so pinning the public key pins the answer without putting any
+# private key material in the repository. The secret-key packets these tests
+# need are built byte by byte from the public ones below.
+
+PGP_ED25519_PUB = """\
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mDMEap7AuBYJKwYBBAHaRw8BAQdATjjnpLNzcFN5CsibwtfXO8qUKCSJFvGErii8
+xq4+bf20F1NQTSBMYWIgRWQgPGVkQHNwbS5sYWI+iJAEExYIADgWIQS4cgU1oID+
+KnAXzu9fQOuU3fXK5AUCap7AuAIbAwULCQgHAgYVCgkICwIEFgIDAQIeAQIXgAAK
+CRBfQOuU3fXK5LO1APwPRjj+hQw41D3DSbzSwNxcn7ILoa7vAWRv9tnkiew3awEA
+yZ8m3Wz18/8vQVqyvlBzkyuco8JgRErLIT9H1sdtIQ8=
+=Ab9k
+-----END PGP PUBLIC KEY BLOCK-----
+"""
+PGP_ED25519_FP = "B8720535A080FE2A7017CEEF5F40EB94DDF5CAE4"
+PGP_ED25519_KEYID = "5F40EB94DDF5CAE4"
+
+PGP_RSA_PUB = """\
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mQENBGqewLcBCADKL5cqHyjBpufcA54QLI0FBToi4qQ7mg2P4d8/TEuSFeW9Vr+Y
+0AjhWuQTeBXb8UUPjTYOxUXogCiP60fVxDt+cJ3xh5PXM7ygee62cS71tUYbQpo2
+13nmBEpoqFnmv1wsmZyxBxXejvXPi5W/1lhZgLn7zFqkDAmJxRpqvP+Sg1QE0pWL
+Hb9n5gj9ykIYanRwuD/J1iyILSs+v2rVm3swMOQ2k0usYH53dNk3+eRbiTg00pXX
+prry2rnthFNNK2vpsWpnUxadljI3F37idTb6WKHHThWtGAnZwlQp69yiJkTYC1Di
+suGTVGF70ZpdCEzG9s34rjb9TPIDA3JxvetLABEBAAG0GVNQTSBMYWIgUlNBIDxy
+c2FAc3BtLmxhYj6JAU4EEwEKADgWIQREF8nv+dbjtxQBFXY9Tig0sdPBBwUCap7A
+twIbAwULCQgHAgYVCgkICwIEFgIDAQIeAQIXgAAKCRA9Tig0sdPBB8uRB/9x+Fby
+epK1QpF4dVIdxnjHBff9PK1QP5BFVjSvRXhNRNuN6oM4MR658qXha3CtRObJxFbH
+n9CRWOpkt4VAr0+BL2DT+tsDDCvw3zRN50jTS/LkbwCM7RcpGuNHAbVj/KCVvUE0
+50rsh42zHCKkantVG0MeOWz6cpXdPR/8QCA4YY60aXiipZRgHDX4Rwqojm2LDz1i
+HPTDAcUX7l/ze4Xu9UDMlhVgdlpErTVcoi6qc0Co920FE9DWgodyu8Mcauo9xzIV
+5UC935QhoXnGxKuTfk4Jltaxp4kMJUz2pIlwr15hGBsLsw8wKlbPDlYACqo0c3nc
+wJzjaD4iY5VOonJs
+=QIjh
+-----END PGP PUBLIC KEY BLOCK-----
+"""
+PGP_RSA_FP = "4417C9EFF9D6E3B7140115763D4E2834B1D3C107"
+
+
+def _pgp_first_packet(armor, want_tags):
+    data = core.pgp_dearmor(armor)
+    for tag, body in core.pgp_packets(data):
+        if tag in want_tags:
+            return tag, body
+    raise AssertionError("no key packet in the vector")
+
+
+def _pgp_armor(packets):
+    """Re-armor a list of (tag, body) as an OpenPGP block."""
+    out = b""
+    for tag, body in packets:
+        # New-format header, and a length long enough for anything here.
+        out += bytes([0xC0 | tag]) + b"\xff" + len(body).to_bytes(4, "big") + body
+    encoded = base64.b64encode(out).decode("ascii")
+    lines = [encoded[i:i + 64] for i in range(0, len(encoded), 64)]
+    return ("-----BEGIN PGP PRIVATE KEY BLOCK-----\n\n"
+            + "\n".join(lines)
+            + "\n-----END PGP PRIVATE KEY BLOCK-----\n")
+
+
+def _pgp_secret_from_public(armor, protection=0):
+    """A Secret-Key packet built from a public one.
+
+    A secret key is a public key with the secret material appended, so this is
+    how the tests get one without any private key material in the repository.
+    `protection` is the octet that says whether the secret half is encrypted.
+    """
+    _tag, body = _pgp_first_packet(armor, (core.PGP_TAG_PUBLIC_KEY,))
+    length, _alg, _bits, _curve = core.pgp_public_material(body)
+    return _pgp_armor([(core.PGP_TAG_SECRET_KEY,
+                        body[:length] + bytes([protection]) + b"\x00" * 40)])
+
+
+def t_gpg_fingerprint_is_the_one_gpg_prints():
+    # The whole feature rests on this: SPM's answer and gpg's answer are the
+    # same string. A fingerprint nobody can check against gpg is decoration.
+    eq(core.pgp_key_info(PGP_ED25519_PUB)["fingerprint"], PGP_ED25519_FP,
+       "the ed25519 fingerprint is not the one gpg prints")
+    eq(core.pgp_key_info(PGP_RSA_PUB)["fingerprint"], PGP_RSA_FP,
+       "the RSA fingerprint is not the one gpg prints")
+    eq(core.pgp_key_info(PGP_ED25519_PUB)["keyid"], PGP_ED25519_KEYID,
+       "the key id is not the tail of the fingerprint")
+
+
+def t_gpg_an_ecc_point_is_not_a_key_size():
+    # An Ed25519 point MPI measures 263 bits: 0x40 plus 32 bytes. Reporting
+    # that would look like a key size and be wrong, the same way counting an
+    # RSA modulus in bytes reports a 2048-bit key as 2056. gpg says 255 and
+    # names the curve, and so does SPM.
+    info = core.pgp_key_info(PGP_ED25519_PUB)
+    eq(info["curve"], "ed25519", "the curve was not recognised from its OID")
+    eq(info["bits"], 255, "an ed25519 key was not reported as 255 bits")
+    assert info["bits"] != 263, "the point length was reported as the key size"
+    rsa = core.pgp_key_info(PGP_RSA_PUB)
+    eq(rsa["bits"], 2048, "the RSA modulus was not measured in bits")
+    eq(rsa["curve"], "", "an RSA key was given a curve")
+
+
+def t_gpg_a_secret_key_and_its_public_half_are_one_key():
+    # The property that makes any of this possible: a secret key carries its
+    # public half in the clear, so both forms fingerprint identically.
+    secret = _pgp_secret_from_public(PGP_ED25519_PUB)
+    info = core.pgp_key_info(secret)
+    eq(info["fingerprint"], PGP_ED25519_FP,
+       "a secret key did not fingerprint as its own public half")
+    assert info["secret"], "a secret key packet was not recognised as secret"
+    assert not core.pgp_key_info(PGP_ED25519_PUB)["secret"], \
+        "a public key was reported as holding a secret"
+
+
+def t_gpg_a_sealed_key_is_known_to_be_sealed_without_the_passphrase():
+    # The protection octet says so. No passphrase is attempted to find out,
+    # the same way the SSH side reads a cipher name rather than trying it.
+    assert not core.pgp_key_info(_pgp_secret_from_public(
+        PGP_ED25519_PUB, protection=0))["encrypted"], \
+        "an unprotected secret key was reported as sealed"
+    for marker in (254, 253, 9):
+        assert core.pgp_key_info(_pgp_secret_from_public(
+            PGP_ED25519_PUB, protection=marker))["encrypted"], \
+            "a protected secret key (marker %d) was reported unsealed" % marker
+
+
+def t_gpg_a_truncated_key_is_refused_not_sliced():
+    # Slicing past the end of a bytes object does not raise in Python, it just
+    # returns something shorter -- so an unchecked walk over a truncated key
+    # hashes a short slice and produces a fingerprint that is wrong and looks
+    # exactly right. This measured three such fingerprints before the length
+    # checks went in. A fingerprint is what you check to know which key you
+    # hold, so a confidently wrong one is worse than an absent one.
+    data = core.pgp_dearmor(PGP_RSA_PUB)
+    wrong = 0
+    for cut in range(1, len(data)):
+        try:
+            for tag, body in core.pgp_packets(data[:cut]):
+                if tag == core.PGP_TAG_PUBLIC_KEY:
+                    if core.pgp_fingerprint(body) != PGP_RSA_FP:
+                        wrong += 1
+                break
+        except Exception:                                  # noqa: BLE001
+            pass
+    eq(wrong, 0, "a truncated key produced a fingerprint that was not its own")
+
+
+def t_gpg_a_key_it_cannot_read_is_still_kept():
+    # Not an error: a key in a format this build cannot parse is still a key
+    # its owner wants kept, so every field is present and `problem` says why.
+    for text in ("", "hello", "-----BEGIN PGP PRIVATE KEY BLOCK-----\n\n@@@\n"
+                 "-----END PGP PRIVATE KEY BLOCK-----\n"):
+        info = core.pgp_key_info(text)
+        eq(sorted(info), sorted(["fingerprint", "keyid", "algorithm", "bits",
+                                 "curve", "created", "uids", "subkeys",
+                                 "secret", "encrypted", "problem"]),
+           "an unreadable key returned a different shape")
+        eq(info["fingerprint"], "", "an unreadable key produced a fingerprint")
+        assert info["problem"], "an unreadable key gave no reason"
+
+
+def t_gpg_key_is_a_record_type_like_any_other():
+    assert "gpg-key" in core.RECORD_TYPES, "gpg-key is not a record type"
+    eq(sorted(core.record_secret_fields("gpg-key")),
+       ["passphrase", "private_key"],
+       "the secret key or its passphrase is not marked secret")
+    secret = _pgp_secret_from_public(PGP_ED25519_PUB)
+    row = core.build_record_row("gpg-key", "1", "Signing key",
+                                {"private_key": secret,
+                                 "uids": "SPM Lab Ed <ed@spm.lab>"}, "t")
+    parsed = core.parse_record_row(row)
+    eq(parsed[0], "gpg-key")
+    eq(parsed[3]["private_key"], secret,
+       "the key did not survive the vault row unchanged")
+    eq(core.pgp_key_info(parsed[3]["private_key"])["fingerprint"],
+       PGP_ED25519_FP, "the stored key no longer fingerprints as itself")
+
+
+def t_gpg_derived_rows_come_from_the_schema_not_a_branch():
+    # The record page asks the core for a type's derived rows and its heading
+    # key. Nothing on either surface names GPG, which is what makes a tenth
+    # type a dictionary entry rather than a patch to the renderer.
+    eq(core.record_derive_name("gpg-key"), "gpg")
+    eq(core.record_derive_name("wifi"), "",
+       "a type with nothing to derive claimed a deriver")
+    keys = [key for key, _english, _value in core.record_derived(
+        "gpg-key", {"private_key": _pgp_secret_from_public(PGP_ED25519_PUB)})]
+    assert "gpg.fingerprint" in keys, "the derived rows carry no fingerprint"
+    assert "gpg.keyid" in keys, "the derived rows carry no key id"
+    eq(core.record_derived("wifi", {"password": "x"}), [],
+       "a type with no deriver returned rows")
+
+
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):
         check(name[2:], fn)
