@@ -624,17 +624,32 @@ printf 'Web regression: the language a page is actually served in\n'
 grep -q 'lang="en" dir="ltr"' "$TEST_ROOT/login.html" || {
 	printf 'the English login page does not declare lang and dir\n' >&2; exit 1
 }
-# The picker, as actually served. The flag leads and the language's own name
-# follows it -- a reader who needs Arabic cannot be expected to find it listed
-# as "Arabic", and a flag alone identifies nothing, since a flag is a country
-# and a language is not.
-grep -q '<option value="en" dir="ltr" selected>🇬🇧' \
+# The picker draws real SVG flags now, not regional-indicator emoji -- desktop
+# Windows renders those emoji as the two country letters ("GB") instead of a
+# flag. The native <select> stays as the no-JS fallback but carries only the
+# language name; the flag is an inline SVG, in the sprite and the enhanced
+# listbox that a browser with JS gets.
+grep -q '<option value="en" dir="ltr" selected>English</option>' \
 	"$TEST_ROOT/login.html" || {
-	printf 'the language picker serves no flag for English\n' >&2; exit 1
+	printf 'the language picker option is not the plain language name\n' >&2; exit 1
 }
-grep -q 'English</option>' "$TEST_ROOT/login.html" || {
-	printf 'the language picker dropped the language name\n' >&2; exit 1
+grep -q 'id="flag-en"' "$TEST_ROOT/login.html" || {
+	printf 'the flag sprite was not served\n' >&2; exit 1
 }
+grep -q 'href="#flag-en"' "$TEST_ROOT/login.html" || {
+	printf 'the picker draws no SVG flag for English\n' >&2; exit 1
+}
+grep -q 'data-lang-combo' "$TEST_ROOT/login.html" || {
+	printf 'the enhanced language combobox is absent\n' >&2; exit 1
+}
+# No regional-indicator emoji reaches the page any more -- that was the bug.
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$TEST_ROOT/login.html" <<'FLAGPY'
+import sys
+page = open(sys.argv[1], encoding="utf-8").read()
+stray = "".join(ch for ch in page if 0x1F1E6 <= ord(ch) <= 0x1F1FF)
+if stray:
+    sys.exit("regional-indicator emoji still reach the page: %r" % (stray[:20],))
+FLAGPY
 # Read the DICT the browser is handed rather than grepping the page: the
 # direction and review maps legitimately name every language, so a substring
 # search would pass whatever the payload actually contained.
