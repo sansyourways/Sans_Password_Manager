@@ -7,6 +7,23 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.0.2] - 2026-09-12
+
+A Dashboard navigation change. The sidebar's **Records** entry now expands into
+one nested row per record type -- SSH keys, GPG keys, API tokens, cards,
+database and server credentials, Wi-Fi networks, identities and licences -- so
+each category is reachable on its own instead of only through the type filter
+on the records page.
+
+### Changed
+- **The sidebar shows record categories as nested rows under Records.** Each
+  type gets its own row with its icon, its own name, a count of how many
+  entries it holds, and a link to that filtered list; the active category is
+  highlighted. The rows are generated from `RECORD_SCHEMAS`, so a new record
+  type appears in the sidebar without anyone editing a menu -- the same reason
+  the top-level entry had stayed a single Records row until now. Records itself
+  still links to the full, unfiltered list.
+
 ## [5.0.1] - 2026-09-12
 
 A Dashboard fix. The language picker on the sign-in page drew each language's

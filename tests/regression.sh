@@ -2323,6 +2323,20 @@ for name, markup in pages.items():
 if "<nav" not in web.render_shell("<p>x</p>", "overview", "0", "/v"):
     sys.exit("the sidebar is not exposed as a navigation landmark")
 
+# Records expands into one nested sidebar row per record type, generated from
+# the schema so a new type appears without editing the menu. The rows carry the
+# type's own i18n label and link to the filtered list, and the active category
+# is highlighted -- the whole point of the nested menu.
+nav = web._nav_html("records", {"ssh-key": 1, "": 1}, "ssh-key")
+subs = re.findall(r'class="nav-item nav-subitem[^"]*" href="/records\?type=([^"&]+)"', nav)
+missing = [rt for rt in web.core.RECORD_TYPES if rt not in subs]
+if missing:
+    sys.exit("the Records submenu is missing a row for: %s" % ", ".join(missing))
+if 'data-i18n="record.type.ssh-key"' not in nav:
+    sys.exit("a Records submenu row does not carry its own type label")
+if 'class="nav-item nav-subitem active"' not in nav:
+    sys.exit("the Records submenu does not highlight the active category")
+
 # Bitwarden entries belong on the import form. They shipped on the export form
 # in 3.4.3, which made the feature unreachable from the picker: the tests
 # exercised _apply_import directly and never rendered the page.

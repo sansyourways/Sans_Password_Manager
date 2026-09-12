@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.0.1"
+VERSION="5.0.2"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -19746,6 +19746,17 @@ p  { margin: 0; }
 }
 .nav-item.active .nav-count { background: var(--accent); color: var(--accent-fg); }
 
+/* Records expands into one nested row per type. Generated from the schema
+   in _records_submenu_html, indented so the row's icon sits under the
+   parent's label; the collapsed rail centres them like any nav item. */
+.nav-sub { display: flex; flex-direction: column; margin: 2px 0 6px; }
+.nav-subitem { padding-block: 7px; padding-inline-start: calc(var(--sp-3) + 30px);
+  font-size: var(--fs-sm); color: var(--text-faint); }
+.nav-subitem:hover { color: var(--text); }
+.nav-subitem.active { color: var(--accent-hi); font-weight: 600; }
+.nav-subitem.active::before { inset-inline-start: -12px; height: 14px; }
+.nav-subitem .nav-ico { width: 15px; font-size: 13px; opacity: .9; }
+
 .sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: var(--sp-2); }
 .vault-chip {
   display: flex; align-items: center; gap: var(--sp-2);
@@ -21069,10 +21080,12 @@ NAV_SECTIONS = [
         ("passphrases",    "/passphrases",    "phrase", "nav.passphrases",    "Passphrases",    "passphrases"),
         ("authenticators", "/authenticators", "authenticator", "nav.authenticators", "Authenticators", "authenticators"),
         ("backup-codes",   "/backup-codes",   "backup", "nav.backup_codes",   "Backup Codes",   "backups"),
-        # One entry for every typed record, not one per schema. Seven more
-        # rows here would make the sidebar longer than the vault is deep, and
-        # adding an eighth type would mean editing a menu -- which is the
-        # per-type work the schema engine exists to remove.
+        # Records expands into one nested row per type -- SSH keys, GPG keys,
+        # cards, licences and the rest -- so each category is reachable on its
+        # own. The nested rows are generated from RECORD_SCHEMAS in
+        # _records_submenu_html, so a new type still appears here without
+        # anyone editing this menu, which is the per-type work the schema
+        # engine exists to remove.
         ("records",        "/records",        "record", "nav.records",        "Records",        "records"),
     ]),
     ("nav.group.tools", [
@@ -21088,7 +21101,29 @@ NAV_SECTIONS = [
 ]
 
 
-def _nav_html(active, counts):
+def _records_submenu_html(active_sub, counts):
+    """One nested nav row per record type, drawn from the schema so a new type
+    appears without editing the menu. Every type is listed, used or not, so the
+    sidebar is a stable map of what a record can be; the count rides along for
+    the ones that have entries."""
+    rows = []
+    for record_type in core.RECORD_TYPES:
+        n = counts.get(record_type, 0)
+        icon = core.RECORD_SCHEMAS[record_type].get("icon", "record")
+        label = record_type_label(record_type)
+        cls = "nav-item nav-subitem" + (" active" if record_type == active_sub else "")
+        badge = '<span class="nav-count">%d</span>' % n if n else ""
+        rows.append(
+            '<a class="%s" href="/records?type=%s" title="%s" '
+            'data-i18n-title="record.type.%s">'
+            '<span class="nav-ico" aria-hidden="true">%s</span>'
+            '<span class="nav-text" data-i18n="record.type.%s">%s</span>%s</a>'
+            % (cls, urllib.parse.quote(record_type), html.escape(label),
+               record_type, _icon(icon), record_type, html.escape(label), badge))
+    return '<div class="nav-sub">%s</div>' % "".join(rows)
+
+
+def _nav_html(active, counts, active_sub=""):
     out = []
     for group_key, items in NAV_SECTIONS:
         label = {"nav.group.vault": "Vault", "nav.group.tools": "Tools",
@@ -21110,6 +21145,8 @@ def _nav_html(active, counts):
                 f'<span class="nav-ico" aria-hidden="true">{_icon(ico)}</span>'
                 f'<span class="nav-text" data-i18n="{i18n}">{fallback}</span>{badge}</a>'
             )
+            if key == "records":
+                out.append(_records_submenu_html(active_sub, counts))
         out.append("</nav>")
     return "".join(out)
 
@@ -21166,7 +21203,7 @@ window.SPM_LANG = (function () {
 
 
 def render_shell(content, active, version, vault_path, title="Sans Password Manager",
-                 counts=None, flash="", searchable=False):
+                 counts=None, flash="", searchable=False, active_sub=""):
     """Wrap page content in the shared app shell (sidebar + topbar)."""
     counts = counts or {}
     search_html = ""
@@ -21210,7 +21247,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
         <div class="brand-meta">v{html.escape(version)}</div>
       </div>
     </div>
-    {_nav_html(active, counts)}
+    {_nav_html(active, counts, active_sub)}
     <div class="sidebar-foot">
       <div class="vault-chip" title="{html.escape(vault_path)}">
         <span class="dot" aria-hidden="true"></span>
@@ -24219,7 +24256,7 @@ def build_records_page(plaintext, active_type="", counts=None):
                         + '<div class="card" data-searchable>', 1)
     return render_shell(body + RECORD_CONFIRM_SCRIPT, "records", VERSION,
                         VAULT_PATH, title="Records", counts=counts,
-                        searchable=True)
+                        searchable=True, active_sub=active_type)
 
 
 RECORD_CONFIRM_SCRIPT = """
@@ -24311,7 +24348,7 @@ def build_record_view(parsed, counts=None):
 <div class="card" style="max-width:640px"><div class="card-body">{"".join(blocks)}</div></div>
 {REVEAL_SCRIPT}"""
     return render_shell(content, "records", VERSION, VAULT_PATH,
-                        title=label, counts=counts or {})
+                        title=label, counts=counts or {}, active_sub=record_type)
 
 
 def posted_record_values(record_type, data):
