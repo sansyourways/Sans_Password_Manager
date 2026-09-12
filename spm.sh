@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.0.0"
+VERSION="5.0.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -19121,34 +19121,64 @@ def lang_direction(code):
     return WEB_LOCALES.get(code, WEB_LOCALES["en"])["dir"]
 
 
-def lang_options_markup(active):
-    """The picker, built from the catalogues rather than repeated per page.
+FLAG_SPRITE = (
+    '''<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="flag-en" viewBox="0 0 36 36"><path fill="#00247D" d="M0 9.059V13h5.628zM4.664 31H13v-5.837zM23 25.164V31h8.335zM0 23v3.941L5.63 23zM31.337 5H23v5.837zM36 26.942V23h-5.631zM36 13V9.059L30.371 13zM13 5H4.664L13 10.837z"/><path fill="#CF1B2B" d="M25.14 23l9.712 6.801c.471-.479.808-1.082.99-1.749L28.627 23H25.14zM13 23h-2.141l-9.711 6.8c.521.53 1.189.909 1.938 1.085L13 23.943V23zm10-10h2.141l9.711-6.8c-.521-.53-1.188-.909-1.937-1.085L23 12.057V13zm-12.141 0L1.148 6.2C.677 6.68.34 7.282.157 7.949L7.372 13h3.487z"/><path fill="#EEE" d="M36 21H21v10h2v-5.836L31.335 31H32c1.117 0 2.126-.461 2.852-1.199L25.14 23h3.487l7.215 5.052c.093-.337.158-.686.158-1.052v-.058L30.369 23H36v-2zM0 21v2h5.63L0 26.941V27c0 1.091.439 2.078 1.148 2.8l9.711-6.8H13v.943l-9.914 6.941c.294.07.598.116.914.116h.664L13 25.163V31h2V21H0zM36 9c0-1.091-.439-2.078-1.148-2.8L25.141 13H23v-.943l9.915-6.942C32.62 5.046 32.316 5 32 5h-.663L23 10.837V5h-2v10h15v-2h-5.629L36 9.059V9zM13 5v5.837L4.664 5H4c-1.118 0-2.126.461-2.852 1.2l9.711 6.8H7.372L.157 7.949C.065 8.286 0 8.634 0 9v.059L5.628 13H0v2h15V5h-2z"/><path fill="#CF1B2B" d="M21 15V5h-6v10H0v6h15v10h6V21h15v-6z"/></symbol><symbol id="flag-ar" viewBox="0 0 36 36"><path fill="#006C35" d="M32 5H4C1.791 5 0 6.791 0 9v18c0 2.209 1.791 4 4 4h28c2.209 0 4-1.791 4-4V9c0-2.209-1.791-4-4-4z"/><g fill="#FFF"><path d="M8.919 14.05c.632.06.283-1.069.512-1.274.043-.101.123-.102.129.026v.958c-.006.312.199.403.358.468.166-.013.276-.007.341.154l.078 1.658s.384.11.402-.933c.019-.612-.122-1.124-.039-1.243.003-.117.152-.124.256-.067.165.116.239.26.495.203.391-.107.625-.297.631-.597-.023-.285-.055-.57-.178-.855.017-.052-.075-.186-.058-.238.07.11.177.101.201 0-.066-.219-.169-.429-.337-.52-.138-.122-.34-.097-.414.157-.034.292.106.64.318.923.045.111.109.295.081.461-.113.064-.227.038-.321-.062 0 0-.311-.233-.311-.285.083-.528.019-.588-.027-.734-.032-.202-.128-.267-.206-.405-.078-.082-.183-.082-.233 0-.138.238-.074.75.026.979.071.21.181.343.129.343-.043.119-.131.091-.195-.046-.092-.284-.11-.707-.11-.898-.028-.236-.058-.741-.213-.869-.095-.129-.236-.067-.285.052-.01.234-.012.469.015.686.106.379.14.713.192 1.102.014.521-.301.226-.287-.032.073-.335.054-.863-.011-.997-.051-.133-.112-.167-.236-.145-.098-.008-.352.27-.424.73 0 0-.061.237-.087.448-.035.238-.191.406-.301-.033-.095-.319-.153-1.106-.312-.922-.046.615-.101 1.697.421 1.807z"/><path d="M9.87 14.499c-.52.01-1.281.683-1.302 1.056.548-.264 1.087-.518 1.645-.79-.09-.135-.005-.256-.343-.266z"/><path d="M12.737 16.516c.241-.803-.039-1.395.092-1.392.277.299.665.04.75-.064.037-.052.128-.086.192-.018.217.156.599.082.678-.192.046-.268.083-.546.092-.833-.177.055-.309.092-.321.165l-.037.238c-.015.077-.168.08-.174-.018-.067-.305-.345-.345-.513.128-.113.092-.317.11-.339-.027.027-.317-.101-.36-.357-.211-.082-.629-.165-1.23-.247-1.859.107-.003.205.076.302-.046-.107-.333-.333-1.013-.458-1.062-.061-.074-.113-.028-.192-.009-.134.043-.259.159-.22.384.159.965.263 1.7.421 2.665.024.113-.07.262-.192.247-.207-.14-.259-.424-.613-.412-.257.003-.55.281-.586.55-.043.213-.058.445 0 .632.18.216.397.195.586.146.155-.064.284-.22.338-.183.037.045.009.558-.732.952-.449.201-.806.247-.998-.119-.119-.229.009-1.099-.284-.897-.867 2.235 2.03 2.545 2.354.092.031-.101.153-.202.174-.037-.067 2.222-2.241 2.375-2.61 1.676-.092-.165-.119-.531-.128-.751-.055-.437-.284-.269-.32.164-.037.241-.027.309-.027.54.115 1.755 2.915 1.001 3.369-.449zm-1.08-1.518c-.018.034-.097.02-.155.02-.066-.003-.097-.014-.137-.067-.018-.06.038-.117.063-.162.031-.053.198-.108.257.04.026.067.003.136-.028.169z"/><path d="M13.602 13.009c.174-.064.999-1.007.999-1.007-.043-.037-.081-.064-.124-.101-.046-.04-.041-.08 0-.119.204-.119.139-.38.032-.499-.177-.08-.331-.054-.444.004-.143.137-.177.357-.064.495.11.052.22.163.147.224-.337.36-1.261.981-1.154 1.003.023.03.59.029.608 0zm.611-1.481c.053-.013.121.034.153.104.032.07.015.137-.037.15h-.002c-.052.013-.12-.034-.152-.104-.031-.071-.014-.137.038-.15zm-5.351 5.73c-.136.277-.193.087-.205-.068-.021-.294.007-.565.039-.779.034-.22 0-.153-.07-.064-.309.492-.336 1.228-.165 1.447.09.104.239.15.35.116.194-.084.279-.478.233-.621-.066-.101-.117-.117-.182-.031zm10.181-5.208c.356.478.694.965 1.025 1.461.065.43.112.85.14 1.267.055.804.071 1.674.021 2.521.15.006.393-.244.477-.609.055-.505-.02-1.404-.025-1.702-.005-.159-.015-.354-.027-.56.394.644.778 1.318 1.153 2.067.137-.064.107-.83.027-.938-.3-.643-.713-1.279-.845-1.523-.049-.09-.216-.346-.415-.639-.031-.336-.062-.608-.084-.698-.062-.428.177.047.144-.202-.077-.428-.315-.717-.593-1.109-.09-.127-.087-.153-.226.031-.058.131-.069.244-.066.351-.036-.053-.076-.108-.139-.185-.241-.207-.255-.219-.455-.388-.101-.072-.347-.202-.391.014-.022.191-.01.294.022.454.026.107.181.285.257.387zm.74-.024c.019.083.039.166.052.251l.015.081c-.059-.08-.108-.146-.131-.172-.164-.194-.028-.152.064-.16z"/><path d="M21.919 16.693c-.348.363-.85.81-1.396 1.017-.059.066.146.349.41.349.443-.052.833-.301 1.194-.956.097-.152.267-.479.271-.733.033-1.486-.074-2.643-.297-3.717-.015-.104-.006-.227.012-.259.028-.034.126 0 .178-.084.075-.078-.201-.718-.359-.964-.056-.11-.075-.184-.168.013-.098.16-.163.439-.155.699.211 1.463.276 2.744.414 4.207.011.141-.01.347-.104.428zm5.83-3.71c-.015-.104-.061-.346-.043-.377.028-.074.173.008.225-.077.076-.077-.374-.655-.531-.901-.057-.11-.076-.184-.169.013-.098.16-.132.447-.093.699.235 1.589.41 2.783.446 4.192-.021.134-.025.206-.088.374-.139.178-.292.4-.437.508-.144.107-.451.21-.552.289-.317.185-.318.396-.06.403.442-.052.966-.088 1.327-.634.097-.152.212-.565.217-.819.033-1.486-.019-2.596-.242-3.67zm-3.351 1.237c.004-.204.023-.474.034-.643.005-.063.02-.134.08-.15.061-.016.169.062.17-.004-.012-.129-.038-.321-.111-.412-.1-.148-.365-.112-.412.12.001.086.04.132.033.21-.012.044-.058.074-.167.022.018-.016-.071-.139-.071-.139-.085-.052-.199.003-.272.05-.041.074-.07.201-.024.33.12.227.539.612.74.616z"/><path d="M24.257 12.481c.293.359.592.723.893 1.093.065.826.082 1.502.146 2.328-.009.35-.117.655-.22.699 0 0-.155.09-.259-.009-.076-.031-.379-.505-.379-.505-.155-.142-.257-.102-.367 0-.304.293-.441.843-.647 1.221-.054.085-.204.157-.371-.006-.423-.579-.175-1.402-.227-1.19-.377.425-.211 1.128-.126 1.28.124.248.225.408.467.531.22.162.392.06.486-.053.222-.231.225-.816.329-.934.072-.213.257-.177.346-.082.087.124.189.204.315.273.207.183.454.216.697.049.166-.093.275-.214.372-.453.108-.288.049-1.612.027-2.406.155.2.306.409.459.618.067.663.105 1.323.083 1.997-.016.135.47-.4.466-.654-.002-.205 0-.391 0-.566.234.352.462.715.676 1.099.134-.07.09-.825.005-.929-.247-.414-.576-.845-.803-1.153-.015-.039-.023-.083-.041-.12-.091-.211-.034-.381-.077-.605-.042-.225-.031-.561-.096-.828-.018-.104-.072-.438-.056-.469.026-.075.126.002.175-.084.073-.08-.253-.925-.419-1.167-.06-.108-.168-.071-.302.105-.123.116-.077.38-.03.631.117.608.215 1.191.299 1.768-.161-.215-.356-.469-.545-.713l-.008-.044c0-.011-.027-.524-.051-.646-.004-.049-.016-.064.036-.058.055.046.062.049.097.065.056.01.105-.085.072-.172l-.517-.952c-.041-.041-.095-.085-.16.011-.063.055-.13.155-.128.283.016.225.055.455.07.681l.022.122c-.023-.027-.051-.061-.063-.073-.439-.462.202-.075-.084-.432-.242-.266-.312-.349-.52-.509-.104-.067-.167-.195-.201.023-.013.191-.027.414-.015.575 0 .092.093.26.174.36zm-8.901 1.079c.252.104.413-.376.517-.902.07-.148.124-.164.16-.088-.009.7.05.855.23 1.068.401.31.733.039.76.013l.312-.312c.069-.073.162-.078.26-.013.096.086.083.236.287.34.172.069.54.016.625-.132.115-.196.143-.264.195-.338.082-.109.222-.06.222-.026-.013.061-.095.122-.039.231.098.073.12.026.178.01.204-.098.356-.54.356-.54.009-.165-.083-.151-.143-.117-.078.047-.083.063-.161.111-.1.015-.293.081-.388-.067-.098-.178-.1-.426-.174-.605 0-.013-.13-.283-.009-.3.061.011.19.045.211-.063.063-.106-.137-.408-.273-.561-.119-.13-.284-.146-.443-.013-.112.103-.096.217-.118.326-.028.124-.022.278.105.443.111.219.314.502.247.898 0 0-.118.188-.325.164-.086-.019-.226-.056-.3-.606-.056-.417.014-1-.163-1.273-.064-.165-.11-.324-.266-.042-.042.111-.222.279-.091.626.107.219.15.576.102.974-.074.113-.09.151-.187.264-.136.146-.283.109-.396.054-.106-.071-.188-.108-.236-.334.009-.36.029-.95-.037-1.075-.097-.194-.257-.124-.326-.065-.329.301-.491.808-.59 1.211-.091.294-.188.21-.256.091-.166-.156-.177-1.373-.378-1.172-.323.914.182 1.918.532 1.82z"/><path d="M20.137 15.524l-.096-.055-1.881-.009c-.097-.037-.068-.069 0-.095.449-.061 1.248-.191 1.301-.958-.009-.399-.172-.661-.662-.733-.359.028-.616.377-.575.76-.017.104.034.306-.071.329-.691.063-1.444.495-1.469.805-.042.029-.136-.055-.124-.187-.026-.535-.202-1.14-.475-1.606-.218-.218-.15-.146-.296-.043-.094.108-.111.182-.106.397 0 .008.176.499.325.843.099.353.192.756.125 1.137-.232.504-.699.956-1.149 1.201-.232.075-.431.048-.48-.004-.143-.096-.136-.273-.125-.276.379-.265.813-.478 1.153-1.191.1-.272.13-.437.031-.858-.039-.158-.089-.286-.197-.398.061-.04.236.093.263.014-.04-.202-.177-.472-.331-.61-.135-.123-.282-.137-.406-.024-.14.078-.17.356-.103.6.074.184.275.215.419.584 0 .008.052.276-.022.381-.059.184-.824.785-.866.812-.021.026-.012-.013-.015-.113-.005-.122.049-.41.034-.412-.249.161-.332.654-.377.8-.63.435-1.343.759-1.755 1.201-.215.335 1.478-.385 1.675-.472.044.032.039.183.157.318.176.238.548.385.913.294.61-.221.963-.637 1.321-1.098.051-.075.131-.132.205-.075.246.551.957.941 1.874.982.213-.259.11-.384.024-.438 0-.008-.453-.18-.522-.352-.042-.156.06-.293.264-.397.589-.071 1.168-.15 1.729-.33.006-.188.115-.47.19-.592.072-.124.111-.087.1-.132zm-1.547-1.172c.028-.047.121-.045.208.006.087.05.136.13.107.177-.028.048-.122.045-.209-.006-.087-.05-.134-.129-.106-.177zm-.757 1.9c-.202.069-.396.123-.396.415.075.406-.103.267-.208.211-.124-.089-.473-.304-.523-.768-.008-.111.079-.204.218-.204.209.057.518.061.786.089.219.014.328.186.123.257zm-6.967-4.505c.216.104.624.06.606-.29 0-.031-.008-.135-.011-.163-.044-.103-.164-.078-.192.029-.009.035.015.091-.016.109-.018.018-.087.007-.084-.089 0-.031-.023-.064-.036-.083-.014-.009-.022-.012-.047-.012-.03.001-.03.009-.046.035-.007.025-.017.051-.017.08-.004.034-.017.046-.042.052-.028 0-.022.003-.044-.012-.014-.015-.031-.021-.031-.046 0-.026-.006-.068-.014-.086-.012-.016-.031-.023-.053-.029-.118 0-.126.135-.119.187-.011.009-.015.251.146.318z"/><path d="M17.512 14.027c0-.031-.023-.063-.036-.083-.014-.009-.022-.012-.047-.012-.03.001-.029.009-.046.035-.007.026-.017.051-.017.08-.003.035-.017.047-.042.052-.028 0-.022.003-.045-.011-.014-.015-.031-.021-.031-.046 0-.026-.006-.069-.014-.086-.012-.016-.031-.023-.053-.028-.118 0-.126.135-.12.186-.009.01-.014.251.147.319.217.103.732.043.606-.29 0-.031-.008-.135-.011-.164-.044-.103-.165-.077-.192.029-.008.035.016.091-.016.109-.016.018-.086.007-.083-.09zm3.397-.707c.216.104.623.06.605-.289 0-.031-.008-.135-.011-.164-.044-.103-.164-.077-.191.029-.009.035.015.091-.017.109-.018.018-.087.008-.084-.089 0-.031-.023-.064-.036-.083-.014-.009-.022-.012-.048-.012-.03.002-.029.009-.046.035-.007.026-.017.051-.017.08-.004.035-.017.047-.042.052-.028 0-.022.003-.045-.011-.014-.015-.03-.021-.03-.046 0-.026-.006-.069-.014-.087-.013-.016-.031-.023-.054-.028-.118 0-.126.135-.119.186-.007.01-.012.251.149.318zm.146-1.352c.077.216-.059.422.022.452.073.034.177-.223.215-.46.045-.192-.092-.585-.286-.666-.118-.028-.286.042-.232.2-.027.076.238.334.281.474zm1.995 5.064c.151.001.325-.345.399-.688.041-.472-.028-.759-.04-1.037-.013-.277-.313-2.392-.375-2.602-.073-.397.293-.053.253-.284-.127-.291-.442-.714-.542-.967-.06-.108-.034-.204-.168-.028-.123.405-.166.735-.119.987.318 1.66.644 3.04.592 4.619zm3.756-4.34c.035.108-.053.457.02.489.067.036.161-.241.196-.498.019-.141-.084-.633-.261-.721-.108-.03-.261.045-.211.217-.025.083.217.361.256.513zm-13.119 3.656c.065.027.154-.177.188-.366.019-.104-.081-.465-.25-.53-.104-.022-.246.006-.202.16-.005.083.23.183.244.376.034.08-.05.337.02.36zm-4.556-4.615c.033.083-.033.348.036.373.063.028.152-.184.185-.379.019-.108.004-.474-.246-.549-.103-.023-.246.034-.199.165-.024.062.187.274.224.39zm4.902 1.173c-.191.104-.266.412-.146.591.111.159.287.1.311.1.188.023.299-.352.299-.352s.006-.105-.217.094c-.094.018-.106-.017-.129-.071-.02-.097-.016-.195.029-.292.032-.093-.04-.134-.147-.07zm1.442-1.153c.071-.052.095-.086.118-.174.029-.146-.155.069-.178-.094-.041-.151.077-.213.189-.359.004-.101.002-.172-.135-.09-.096.065-.288.263-.294.491-.006.129-.03.128.055.21.061.089.122.08.245.016zm1.299.078c.124-.336.124-.478.133-.621-.038-.217-.185-.21-.282.031-.042.091-.091.57-.083.57-.033.143.149.204.232.02zm8.17 2.383s-1.003.713-1.027.738c-.1.088-.05.4 0 .364.071.028 1.08-.657 1.06-.737.047.002.07-.401-.033-.365zm-.123 1.934c.067.036.244-.183.237-.456.02-.141-.051-.658-.227-.746-.108-.03-.252.062-.202.233-.025.082.124.369.163.521.035.109-.044.416.029.448zm-5.68 1.496c0 .009.085.082.185.024.21-.081.342-.159.636-.224.077-.001.072-.208-.05-.215-.159.008-.307.016-.466.142-.098.022-.114-.037-.136-.091-.024-.133.055-.225.038-.324.006.006-.091-.083-.19-.033-.005 0-.221.146-.29.248-.043.033-.038.061-.025.116.033.076.092.053.158.017.088-.012.13.046.123.151-.042.133.017.182.017.189zm6.551.166c-.033.057-.055.143.047.17.188.053.621-.229.621-.234.07-.053.047-.152.041-.152-.041-.047-.133-.02-.195-.027-.029 0-.127-.015-.08-.101.038-.053.052-.086.078-.151.029-.065.004-.108-.102-.143-.107-.02-.15-.01-.269 0-.064.014-.086.042-.098.12.005.118.076.112.15.159.043.055.071.105-.003.194-.07.065-.119.101-.19.165zM25.5 23H24v-.5c0-.276-.224-.5-.5-.5s-.5.224-.5.5v.5H11s0 1 3 1h9v.5c0 .276.224.5.5.5s.5-.224.5-.5V24h1v.5c0 .276.224.5.5.5s.5-.224.5-.5v-1c0-.276-.224-.5-.5-.5z"/></g></symbol><symbol id="flag-de" viewBox="0 0 36 36"><path fill="#FFCD05" d="M0 27c0 2.209 1.791 4 4 4h28c2.209 0 4-1.791 4-4v-4H0v4z"/><path fill="#ED1F24" d="M0 14h36v9H0z"/><path fill="#141414" d="M32 5H4C1.791 5 0 6.791 0 9v5h36V9c0-2.209-1.791-4-4-4z"/></symbol><symbol id="flag-es" viewBox="0 0 36 36"><path fill="#C60A1D" d="M36 27c0 2.209-1.791 4-4 4H4c-2.209 0-4-1.791-4-4V9c0-2.209 1.791-4 4-4h28c2.209 0 4 1.791 4 4v18z"/><path fill="#FFC400" d="M0 12h36v12H0z"/><path fill="#EA596E" d="M9 17v3c0 1.657 1.343 3 3 3s3-1.343 3-3v-3H9z"/><path fill="#F4A2B2" d="M12 16h3v3h-3z"/><path fill="#DD2E44" d="M9 16h3v3H9z"/><ellipse fill="#EA596E" cx="12" cy="14.5" rx="3" ry="1.5"/><ellipse fill="#FFAC33" cx="12" cy="13.75" rx="3" ry=".75"/><path fill="#99AAB5" d="M7 16h1v7H7zm9 0h1v7h-1z"/><path fill="#66757F" d="M6 22h3v1H6zm9 0h3v1h-3zm-8-7h1v1H7zm9 0h1v1h-1z"/></symbol><symbol id="flag-fr" viewBox="0 0 36 36"><path fill="#ED2939" d="M36 27c0 2.209-1.791 4-4 4h-8V5h8c2.209 0 4 1.791 4 4v18z"/><path fill="#002495" d="M4 5C1.791 5 0 6.791 0 9v18c0 2.209 1.791 4 4 4h8V5H4z"/><path fill="#EEE" d="M12 5h12v26H12z"/></symbol><symbol id="flag-hi" viewBox="0 0 36 36"><path fill="#138808" d="M0 27a4 4 0 0 0 4 4h28a4 4 0 0 0 4-4v-5H0v5z"/><path fill="#F93" d="M36 14V9a4 4 0 0 0-4-4H4a4 4 0 0 0-4 4v5h36z"/><path fill="#F7F7F7" d="M0 13.667h36v8.667H0z"/><circle fill="navy" cx="18" cy="18" r="4"/><circle fill="#F7F7F7" cx="18" cy="18" r="3.375"/><path d="m18.1 16.75-.1.65-.1-.65.1-1.95zm-.928-1.841.408 1.909.265.602-.072-.653zm-.772.32.888 1.738.412.513-.238-.613zm-.663.508 1.308 1.45.531.389-.389-.531zm-.508.663 1.638 1.062.613.238-.513-.412zm-.32.772 1.858.601.653.072-.602-.265zM14.8 18l1.95.1.65-.1-.65-.1zm.109.828 1.909-.408.602-.265-.653.072zm.32.772 1.738-.888.513-.412-.613.238zm.508.663 1.45-1.308.389-.531-.531.389zm.663.508 1.062-1.638.238-.613-.412.513zm.772.32.601-1.858.072-.653-.265.602zM18 21.2l.1-1.95-.1-.65-.1.65zm.828-.109-.408-1.909-.265-.602.072.653zm.772-.32-.888-1.738-.412-.513.238.613zm.663-.508-1.308-1.45-.531-.389.389.531zm.508-.663-1.638-1.062-.613-.238.513.412zm.32-.772-1.858-.601-.653-.072.602.265zM21.2 18l-1.95-.1-.65.1.65.1zm-.109-.828-1.909.408-.602.265.653-.072zm-.32-.772-1.738.888-.513.412.613-.238zm-.508-.663-1.45 1.308-.389.531.531-.389zm-.663-.508-1.062 1.638-.238.613.412-.513zm-.772-.32-.601 1.858-.072.653.265-.602z" fill="#6666B3"/><g fill="navy"><circle cx="17.56" cy="14.659" r=".2"/><circle cx="16.71" cy="14.887" r=".2"/><circle cx="15.948" cy="15.326" r=".2"/><circle cx="15.326" cy="15.948" r=".2"/><circle cx="14.887" cy="16.71" r=".2"/><circle cx="14.659" cy="17.56" r=".2"/><circle cx="14.659" cy="18.44" r=".2"/><circle cx="14.887" cy="19.29" r=".2"/><circle cx="15.326" cy="20.052" r=".2"/><circle cx="15.948" cy="20.674" r=".2"/><circle cx="16.71" cy="21.113" r=".2"/><circle cx="17.56" cy="21.341" r=".2"/><circle cx="18.44" cy="21.341" r=".2"/><circle cx="19.29" cy="21.113" r=".2"/><circle cx="20.052" cy="20.674" r=".2"/><circle cx="20.674" cy="20.052" r=".2"/><circle cx="21.113" cy="19.29" r=".2"/><circle cx="21.341" cy="18.44" r=".2"/><circle cx="21.341" cy="17.56" r=".2"/><circle cx="21.113" cy="16.71" r=".2"/><circle cx="20.674" cy="15.948" r=".2"/><circle cx="20.052" cy="15.326" r=".2"/><circle cx="19.29" cy="14.887" r=".2"/><circle cx="18.44" cy="14.659" r=".2"/><circle cx="18" cy="18" r=".9"/></g></symbol><symbol id="flag-id" viewBox="0 0 36 36"><path fill="#DC1F26" d="M32 5H4C1.791 5 0 6.791 0 9v9h36V9c0-2.209-1.791-4-4-4z"/><path fill="#EEE" d="M36 27c0 2.209-1.791 4-4 4H4c-2.209 0-4-1.791-4-4v-9h36v9z"/></symbol><symbol id="flag-ja" viewBox="0 0 36 36"><path fill="#EEE" d="M36 27c0 2.209-1.791 4-4 4H4c-2.209 0-4-1.791-4-4V9c0-2.209 1.791-4 4-4h28c2.209 0 4 1.791 4 4v18z"/><circle fill="#ED1B2F" cx="18" cy="18" r="7"/></symbol><symbol id="flag-ko" viewBox="0 0 36 36"><path fill="#EEE" d="M36 27c0 2.209-1.791 4-4 4H4c-2.209 0-4-1.791-4-4V9c0-2.209 1.791-4 4-4h28c2.209 0 4 1.791 4 4v18z"/><path fill="#C60C30" d="M21.441 13.085c-2.714-1.9-6.455-1.24-8.356 1.474-.95 1.356-.621 3.227.737 4.179 1.357.949 3.228.618 4.178-.738s2.822-1.687 4.178-.736c1.358.95 1.688 2.821.737 4.178 1.901-2.714 1.241-6.455-1.474-8.357z"/><path fill="#003478" d="M22.178 17.264c-1.356-.951-3.228-.62-4.178.736s-2.821 1.687-4.178.737c-1.358-.951-1.687-2.822-.737-4.179-1.901 2.716-1.241 6.456 1.473 8.356 2.715 1.901 6.455 1.242 8.356-1.474.951-1.355.621-3.226-.736-4.176z"/><path d="M24.334 25.572l1.928-2.298.766.643-1.928 2.298zm2.57-3.063l1.928-2.297.766.643-1.928 2.297zm-1.038 4.351l1.928-2.297.766.643-1.928 2.297zm2.572-3.066l1.93-2.297.766.644-1.93 2.296zm-1.041 4.352l1.93-2.297.765.643-1.929 2.297zm2.571-3.065l1.927-2.3.767.643-1.927 2.3zm.004-14.162l.766-.643 1.93 2.299-.767.643zM27.4 7.853l.766-.643 1.928 2.299-.767.642zm-1.533 1.288l.766-.643 4.5 5.362-.766.643zm-1.532 1.284l.767-.643 1.927 2.298-.766.642zm2.57 3.065l.766-.643 1.93 2.297-.765.643zM6.4 20.854l.766-.643 4.499 5.363-.767.643zM4.87 22.14l.765-.642 1.929 2.298-.767.643zm2.567 3.066l.766-.643 1.93 2.297-.766.643zm-4.101-1.781l.766-.643 4.5 5.362-.767.643zm-.001-10.852l4.498-5.362.767.642-4.5 5.363zm1.532 1.287l4.5-5.363.766.643-4.5 5.362zM6.4 15.145l4.5-5.363.766.643-4.5 5.363z" fill="#292F33"/></symbol><symbol id="flag-pt-br" viewBox="0 0 36 36"><path fill="#009B3A" d="M36 27c0 2.209-1.791 4-4 4H4c-2.209 0-4-1.791-4-4V9c0-2.209 1.791-4 4-4h28c2.209 0 4 1.791 4 4v18z"/><path fill="#FEDF01" d="M32.728 18L18 29.124 3.272 18 18 6.875z"/><circle fill="#002776" cx="17.976" cy="17.924" r="6.458"/><path fill="#CBE9D4" d="M12.277 14.887c-.332.621-.558 1.303-.672 2.023 3.995-.29 9.417 1.891 11.744 4.595.402-.604.7-1.28.883-2.004-2.872-2.808-7.917-4.63-11.955-4.614z"/><path fill="#88C9F9" d="M12 18.233h1v1h-1zm1 2h1v1h-1z"/><path fill="#55ACEE" d="M15 18.233h1v1h-1zm2 1h1v1h-1zm4 2h1v1h-1zm-3 1h1v1h-1zm3-6h1v1h-1z"/><path fill="#3B88C3" d="M19 20.233h1v1h-1z"/></symbol><symbol id="flag-ru" viewBox="0 0 36 36"><path fill="#CE2028" d="M36 27c0 2.209-1.791 4-4 4H4c-2.209 0-4-1.791-4-4v-4h36v4z"/><path fill="#22408C" d="M0 13h36v10H0z"/><path fill="#EEE" d="M32 5H4C1.791 5 0 6.791 0 9v4h36V9c0-2.209-1.791-4-4-4z"/></symbol><symbol id="flag-zh-hans" viewBox="0 0 36 36"><path fill="#DE2910" d="M36 27c0 2.209-1.791 4-4 4H4c-2.209 0-4-1.791-4-4V9c0-2.209 1.791-4 4-4h28c2.209 0 4 1.791 4 4v18z"/><path fill="#FFDE02" d="M11.136 8.977l.736.356.589-.566-.111.81.72.386-.804.144-.144.804-.386-.72-.81.111.566-.589zm4.665 2.941l-.356.735.566.59-.809-.112-.386.721-.144-.805-.805-.144.721-.386-.112-.809.59.566zm-.957 3.779l.268.772.817.017-.651.493.237.783-.671-.467-.671.467.236-.783-.651-.493.817-.017zm-3.708 3.28l.736.356.589-.566-.111.81.72.386-.804.144-.144.804-.386-.72-.81.111.566-.589zM7 10.951l.929 2.671 2.826.058-2.253 1.708.819 2.706L7 16.479l-2.321 1.615.819-2.706-2.253-1.708 2.826-.058z"/></symbol></svg>'''
+)
 
-    A language names itself in its own script -- a reader who needs Arabic
-    cannot be expected to find it listed as "Arabic". Unreviewed translations
-    are marked here rather than only in the docs, because the picker is where
-    somebody chooses to rely on one.
 
-    The flag leads and the name carries the meaning, in that order and not the
-    other way round. A flag is a country and a language is not: English is not
-    one country and Arabic is not one either, so the flag is a landmark for the
-    eye scanning a list of twelve, never the thing that identifies the entry.
-    It is also the part that degrades -- a platform with no regional-indicator
-    glyphs renders it as two letters -- which is survivable precisely because
-    the name beside it is doing the work.
+def flag_use(code):
+    """An inline SVG that draws one locale's flag from the sprite above.
+
+    Flags used to be regional-indicator emoji in the option text, which a
+    platform without those glyphs -- desktop Windows, most of all -- renders
+    as the two country letters ("GB", "ID") rather than a flag. An SVG draws
+    the same everywhere and needs no OS font. The emoji is kept in each
+    locale's metadata (the i18n lint still checks it); the country it names is
+    what the sprite symbol is keyed by.
     """
-    parts = []
+    return ('<svg class="lang-flag" aria-hidden="true">'
+            '<use href="#flag-%s"></use></svg>' % html.escape(code))
+
+
+def lang_picker_markup(active):
+    """The language picker: a native <select> for the no-JS and assistive
+    path, enhanced by JS into a listbox that shows a real flag per language.
+
+    A native <select> cannot carry an SVG in its option text and Windows will
+    not render a flag font inside one, so the flags can only be a progressive
+    enhancement layered over it. Without JS the select still works, now with
+    clean language names and no broken two-letter fallback; with JS the custom
+    combobox takes over and every language shows its flag. The name still
+    carries the meaning and the flag is the landmark, in that order.
+    """
+    native, items = [], []
+    btn_flag, btn_name = flag_use(active), ""
     for code in sorted(WEB_LOCALES, key=lambda c: (c != "en", c)):
         meta = WEB_LOCALES[code]
-        label = "%s\u00a0\u00a0%s" % (meta["flag"], meta["name"])
-        if meta["review"] == "unreviewed":
-            label += " (\u03b2)"
-        parts.append(
-            '<option value="%s" dir="%s"%s>%s</option>' % (
-                html.escape(code), html.escape(meta["dir"]),
-                " selected" if code == active else "",
-                html.escape(label)))
-    return "".join(parts)
+        label = html.escape(meta["name"] + (" (\u03b2)" if meta["review"] == "unreviewed" else ""))
+        if code == active:
+            btn_name = label
+        native.append(
+            '<option value="%s" dir="%s"%s>%s</option>'
+            % (html.escape(code), html.escape(meta["dir"]),
+               " selected" if code == active else "", label))
+        items.append(
+            '<li class="lang-opt" role="option" id="lang-opt-%s" data-code="%s" '
+            'dir="%s" aria-selected="%s">%s<span class="lang-nm">%s</span></li>'
+            % (html.escape(code), html.escape(code), html.escape(meta["dir"]),
+               "true" if code == active else "false", flag_use(code), label))
+    return (
+        FLAG_SPRITE
+        + '<div class="lang-combo" data-lang-combo>'
+        + '<select class="select lang-native" id="lang-picker" aria-label="Language">%s</select>' % "".join(native)
+        + '<button type="button" class="lang-btn" id="lang-combo-btn" hidden '
+          'aria-haspopup="listbox" aria-expanded="false" aria-label="Language">'
+          '%s<span class="lang-nm lang-btn-nm">%s</span>'
+          '<svg class="lang-caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1l4 4 4-4"/></svg>'
+          '</button>' % (btn_flag, btn_name)
+        + '<ul class="lang-list" id="lang-combo-list" role="listbox" tabindex="-1" '
+          'aria-label="Language" hidden>%s</ul>' % "".join(items)
+        + '</div>')
 
 
 def catalogue_payload(active):
@@ -19352,6 +19382,88 @@ I18N_SCRIPT = """
     getLang: function() { return current; },
     apply: applyTranslations
   };
+})();
+
+// Language picker enhancer: turns the native select into an accessible
+// listbox that shows an SVG flag per language. Progressive -- with no JS the
+// control still switches languages; this only adds the flags and the keyboard
+// listbox on top, and drives the same #lang-picker so the i18n swap is
+// unchanged.
+(function () {
+  function enhance(combo) {
+    var select = combo.querySelector("#lang-picker") || combo.querySelector(".lang-native");
+    var btn = combo.querySelector(".lang-btn");
+    var list = combo.querySelector(".lang-list");
+    if (!select || !btn || !list) return;
+    var opts = Array.prototype.slice.call(list.querySelectorAll(".lang-opt"));
+    if (!opts.length) return;
+    var open = false, activeIdx = -1;
+    combo.setAttribute("data-ready", "1");
+    btn.hidden = false;
+
+    function idxOf(code) { for (var i = 0; i < opts.length; i++) { if (opts[i].dataset.code === code) return i; } return -1; }
+    function setActive(i) {
+      if (activeIdx >= 0 && opts[activeIdx]) opts[activeIdx].classList.remove("is-active");
+      activeIdx = i;
+      if (i >= 0 && opts[i]) {
+        opts[i].classList.add("is-active");
+        list.setAttribute("aria-activedescendant", opts[i].id);
+        opts[i].scrollIntoView({ block: "nearest" });
+      }
+    }
+    function openList() {
+      if (open) return; open = true; list.hidden = false;
+      btn.setAttribute("aria-expanded", "true");
+      var s = idxOf(select.value); setActive(s >= 0 ? s : 0); list.focus();
+    }
+    function closeList(focusBtn) {
+      if (!open) return; open = false; list.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+      if (focusBtn !== false) btn.focus();
+    }
+    function choose(i) {
+      var opt = opts[i], code = opt.dataset.code;
+      var name = opt.querySelector(".lang-nm").textContent;
+      opts.forEach(function (o) { o.setAttribute("aria-selected", o === opt ? "true" : "false"); });
+      var use = btn.querySelector(".lang-flag use");
+      if (use) use.setAttribute("href", "#flag-" + code);
+      var nm = btn.querySelector(".lang-btn-nm");
+      if (nm) nm.textContent = name;
+      if (select.value !== code) {
+        select.value = code;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      closeList();
+    }
+    btn.addEventListener("click", function () { open ? closeList() : openList(); });
+    btn.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") {
+        e.preventDefault(); openList();
+      }
+    });
+    list.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setActive(Math.min(opts.length - 1, activeIdx + 1)); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); setActive(Math.max(0, activeIdx - 1)); }
+      else if (e.key === "Home") { e.preventDefault(); setActive(0); }
+      else if (e.key === "End") { e.preventDefault(); setActive(opts.length - 1); }
+      else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (activeIdx >= 0) choose(activeIdx); }
+      else if (e.key === "Escape") { e.preventDefault(); closeList(); }
+      else if (e.key === "Tab") { closeList(false); }
+      else if (e.key.length === 1) {
+        var ch = e.key.toLowerCase();
+        for (var k = 1; k <= opts.length; k++) {
+          var j = (Math.max(0, activeIdx) + k) % opts.length;
+          if (opts[j].textContent.trim().toLowerCase().indexOf(ch) === 0) { setActive(j); break; }
+        }
+      }
+    });
+    opts.forEach(function (o, i) { o.addEventListener("click", function () { choose(i); }); });
+    document.addEventListener("click", function (e) { if (open && !combo.contains(e.target)) closeList(false); });
+  }
+  document.addEventListener("DOMContentLoaded", function () {
+    var combos = document.querySelectorAll("[data-lang-combo]");
+    for (var i = 0; i < combos.length; i++) enhance(combos[i]);
+  });
 })();
 
 // Inline handlers were removed so the CSP no longer needs 'unsafe-inline'.
@@ -19699,6 +19811,41 @@ p  { margin: 0; }
   background-repeat: no-repeat;
   transition: border-color .16s var(--ease);
 }
+
+/* Language picker: real SVG flags via progressive enhancement over the native
+   select. A native select control cannot show a flag on desktop Windows (it renders
+   the regional-indicator emoji as two letters), so the flags live in a
+   JS-enhanced listbox layered over the still-functional select. */
+.lang-combo { position: relative; display: inline-block; text-align: start; }
+.lang-combo[data-ready] .lang-native { display: none; }
+.lang-flag { width: 22px; height: 22px; flex: 0 0 auto; display: inline-block; vertical-align: middle; }
+.lang-nm { white-space: nowrap; }
+.lang-btn {
+  display: none; align-items: center; gap: var(--sp-2); height: 34px;
+  padding-inline: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface); color: var(--text); font-size: var(--fs-sm);
+  font-family: inherit; cursor: pointer; transition: border-color .16s var(--ease);
+}
+.lang-combo[data-ready] .lang-btn { display: inline-flex; }
+.lang-btn:hover { border-color: var(--border-hi); }
+.lang-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lang-caret {
+  width: 9px; height: 6px; fill: none; stroke: currentColor; stroke-width: 1.4;
+  opacity: .55; margin-inline-start: 2px; transition: transform .16s var(--ease);
+}
+.lang-btn[aria-expanded="true"] .lang-caret { transform: rotate(180deg); }
+.lang-list {
+  position: absolute; z-index: 60; inset-inline-start: 0; top: calc(100% + 4px);
+  min-width: 100%; max-height: 280px; overflow: auto; margin: 0; padding: var(--sp-1);
+  list-style: none; background: var(--surface); border: 1px solid var(--border-hi);
+  border-radius: var(--r-md); box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+}
+.lang-opt {
+  display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm, 6px); cursor: pointer; color: var(--text); font-size: var(--fs-sm);
+}
+.lang-opt:hover, .lang-opt.is-active { background: var(--accent-soft); }
+.lang-opt[aria-selected="true"] { font-weight: 600; }
 .select:hover { border-color: var(--border-hi); }
 .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 
@@ -21087,9 +21234,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
           <span class="lbl" aria-live="off">Locks in 30s</span>
           <span class="track"><span class="fill"></span></span>
         </div>
-        <select class="select" id="lang-picker" aria-label="Language">
-          __SPM_LANG_OPTIONS__
-        </select>
+        __SPM_LANG_PICKER__
         <span class="faint lang-notice" id="lang-notice" data-i18n="lang.unreviewed" hidden></span>
       </div>
     </header>
@@ -22413,9 +22558,7 @@ def login_page(version, message=""):
       <span data-i18n="login.note">All decryption happens on this host. Nothing leaves it.</span>
     </div></div>
     <div style="text-align:center;margin-top:var(--sp-4)">
-      <select class="select" id="lang-picker" aria-label="Language">
-        __SPM_LANG_OPTIONS__
-      </select>
+      __SPM_LANG_PICKER__
       <p class="faint lang-notice" id="lang-notice" data-i18n="lang.unreviewed" hidden></p>
       <div class="faint" style="margin-top:var(--sp-2)">v{html.escape(version)}</div>
     </div>
@@ -22918,9 +23061,7 @@ def unlock_page(version, csrf):
       <a href="/logout" data-i18n="unlock.fallback">Use master password instead</a>
     </div></div>
     <div style="text-align:center;margin-top:var(--sp-4)">
-      <select class="select" id="lang-picker" aria-label="Language">
-        __SPM_LANG_OPTIONS__
-      </select>
+      __SPM_LANG_PICKER__
       <p class="faint lang-notice" id="lang-notice" data-i18n="lang.unreviewed" hidden></p>
       <div class="faint" style="margin-top:var(--sp-2)">v{html.escape(version)}</div>
     </div>
@@ -25626,8 +25767,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # and quietly ship an English-only, left-to-right corner of the app.
         if "__SPM_DIR__" in body:
             body = body.replace("__SPM_DIR__", html.escape(lang_direction(active)))
-        if "__SPM_LANG_OPTIONS__" in body:
-            body = body.replace("__SPM_LANG_OPTIONS__", lang_options_markup(active))
+        if "__SPM_LANG_PICKER__" in body:
+            body = body.replace("__SPM_LANG_PICKER__", lang_picker_markup(active))
         if "__SPM_LANG_CODES__" in body:
             body = body.replace(
                 "__SPM_LANG_CODES__",

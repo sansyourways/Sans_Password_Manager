@@ -7,6 +7,25 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.0.1] - 2026-09-12
+
+A Dashboard fix. The language picker on the sign-in page drew each language's
+flag as a regional-indicator emoji, which desktop Windows has no glyph for and
+renders as the two country letters -- so English showed "GB", Indonesian "ID",
+and so on, rather than a flag. Phones and macOS were unaffected because their
+system fonts carry the glyphs.
+
+### Fixed
+- **The language picker shows real flags on every platform.** Flags are now
+  inline SVG drawn from a bundled sprite rather than emoji, so they render the
+  same on Windows, macOS, Linux, iOS and Android. The native `<select>` stays
+  as the no-JS and assistive fallback -- now carrying just the language name,
+  so it no longer shows a stray "GB" either -- and a browser with JavaScript
+  gets an accessible listbox (full keyboard support, ARIA, and RTL) that shows
+  a flag beside each language. The emoji flag stays in each locale's metadata,
+  where the i18n lint still checks it and the country it names keys the sprite;
+  nothing about the twelve languages or their catalogues changed.
+
 ## [5.0.0] - 2026-09-11
 
 Typed records: one schema engine, and the first key types built on it. A

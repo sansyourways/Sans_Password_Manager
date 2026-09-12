@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **5.0.0**
+Current release: **5.0.1**
 
 ---
 
@@ -380,7 +380,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 5.0.0
+bash install.sh --version 5.0.1
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -415,7 +415,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v5.0.0.zip \
+gh attestation verify Sans_Password_Manager_v5.0.1.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -431,9 +431,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v5.0.0
+git checkout v5.0.1
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v5.0.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v5.0.1.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -446,7 +446,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=5.0.0
+version=5.0.1
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -463,7 +463,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v5.0.0/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v5.0.1/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -485,7 +485,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 5.0.0 at /home/you/.local/bin/spm
+Installed SPM 5.0.1 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
