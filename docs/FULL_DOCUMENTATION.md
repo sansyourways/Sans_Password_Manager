@@ -92,7 +92,7 @@ attacker with root access.
 
 ## Product tour
 
-Every web capture below was taken from the 5.0.0 release candidate in Chromium
+Every web capture below was taken from the 5.0.1 release candidate in Chromium
 at 1440x900, against a disposable vault holding only synthetic documentation
 data. No personal vault, browser profile, real credential, or production
 hostname appears in these images. The locked-screen captures use Chromium
