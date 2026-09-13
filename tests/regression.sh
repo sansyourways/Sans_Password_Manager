@@ -2323,10 +2323,11 @@ for name, markup in pages.items():
 if "<nav" not in web.render_shell("<p>x</p>", "overview", "0", "/v"):
     sys.exit("the sidebar is not exposed as a navigation landmark")
 
-# Records expands into one nested sidebar row per record type, generated from
-# the schema so a new type appears without editing the menu. The rows carry the
-# type's own i18n label and link to the filtered list, and the active category
-# is highlighted -- the whole point of the nested menu.
+# Records renders both sidebar layouts the viewer chooses between in Settings
+# (5.0.3): the default always-visible rows and the opt-in collapsible disclosure.
+# Both carry one nested row per record type, generated from the schema so a new
+# type appears without editing the menu; the rows carry the type's own i18n label
+# and link to the filtered list, and the active category is highlighted.
 nav = web._nav_html("records", {"ssh-key": 1, "": 1}, "ssh-key")
 subs = re.findall(r'class="nav-item nav-subitem[^"]*" href="/records\?type=([^"&]+)"', nav)
 missing = [rt for rt in web.core.RECORD_TYPES if rt not in subs]
@@ -2336,6 +2337,23 @@ if 'data-i18n="record.type.ssh-key"' not in nav:
     sys.exit("a Records submenu row does not carry its own type label")
 if 'class="nav-item nav-subitem active"' not in nav:
     sys.exit("the Records submenu does not highlight the active category")
+# The default layout keeps Records as a plain link; the collapsible layout adds
+# a disclosure button (aria-expanded/aria-controls) and an All row. Both must be
+# present in the markup -- CSS picks one from <html data-recnav>.
+if 'class="nav-item nav-records-link' not in nav:
+    sys.exit("the default Records layout (always-visible link) is missing")
+if 'class="nav-item nav-parent nav-records-toggle' not in nav:
+    sys.exit("the collapsible Records disclosure button is missing")
+if 'aria-expanded="false" aria-controls="records-sub"' not in nav:
+    sys.exit("the Records disclosure is not an accessible expander")
+if 'id="records-sub"' not in nav or 'nav-sub-all' not in nav:
+    sys.exit("the collapsible Records submenu or its All row is missing")
+# The choice is a one-click toggle in Settings, remembered per-browser.
+settings = web.settings_page()
+if 'id="recnav-toggle"' not in settings:
+    sys.exit("Settings does not offer the Records-layout toggle")
+if 'data-i18n="settings.sidebar.nested"' not in settings:
+    sys.exit("the Records-layout toggle carries no translatable label")
 
 # Bitwarden entries belong on the import form. They shipped on the export form
 # in 3.4.3, which made the feature unreachable from the picker: the tests

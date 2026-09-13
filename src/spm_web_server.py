@@ -502,6 +502,9 @@ WEB_CATALOGUES = {
         "settings.master.title": "Master Password",
         "settings.mismatch": "The two new passwords do not match.",
         "settings.new": "New master password",
+        "settings.sidebar.desc": "Choose how record categories appear in the sidebar.",
+        "settings.sidebar.nested": "Collapse record categories into an expandable Records menu",
+        "settings.sidebar.title": "Sidebar",
         "settings.submit": "Change master password",
         "settings.theme.applied": "Theme applied.",
         "settings.theme.apply": "Apply theme",
@@ -971,6 +974,9 @@ WEB_CATALOGUES = {
         "settings.master.title": "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629",
         "settings.mismatch": "\u0643\u0644\u0645\u062a\u0627 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062c\u062f\u064a\u062f\u062a\u0627\u0646 \u063a\u064a\u0631 \u0645\u062a\u0637\u0627\u0628\u0642\u062a\u064a\u0646.",
         "settings.new": "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629 \u0627\u0644\u062c\u062f\u064a\u062f\u0629",
+        "settings.sidebar.desc": "\u0627\u062e\u062a\u0631 \u0643\u064a\u0641 \u062a\u0638\u0647\u0631 \u0641\u0626\u0627\u062a \u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0641\u064a \u0627\u0644\u0634\u0631\u064a\u0637 \u0627\u0644\u062c\u0627\u0646\u0628\u064a.",
+        "settings.sidebar.nested": "\u0637\u064a\u0651 \u0641\u0626\u0627\u062a \u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0641\u064a \u0642\u0627\u0626\u0645\u0629 \u0633\u062c\u0644\u0627\u062a \u0642\u0627\u0628\u0644\u0629 \u0644\u0644\u062a\u0648\u0633\u064a\u0639",
+        "settings.sidebar.title": "\u0627\u0644\u0634\u0631\u064a\u0637 \u0627\u0644\u062c\u0627\u0646\u0628\u064a",
         "settings.submit": "\u063a\u064a\u0651\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629",
         "settings.theme.applied": "\u0637\u064f\u0628\u0650\u0651\u0642\u062a \u0627\u0644\u0633\u0645\u0629.",
         "settings.theme.apply": "\u062a\u0637\u0628\u064a\u0642 \u0627\u0644\u0633\u0645\u0629",
@@ -1440,6 +1446,9 @@ WEB_CATALOGUES = {
         "settings.master.title": "Hauptpasswort",
         "settings.mismatch": "Die beiden neuen Passw\u00f6rter stimmen nicht \u00fcberein.",
         "settings.new": "Neues Hauptpasswort",
+        "settings.sidebar.desc": "W\u00e4hlen Sie, wie Datensatzkategorien in der Seitenleiste erscheinen.",
+        "settings.sidebar.nested": "Datensatzkategorien in ein aufklappbares Datens\u00e4tze-Men\u00fc einklappen",
+        "settings.sidebar.title": "Seitenleiste",
         "settings.submit": "Hauptpasswort \u00e4ndern",
         "settings.theme.applied": "Design angewendet.",
         "settings.theme.apply": "Design anwenden",
@@ -1909,6 +1918,9 @@ WEB_CATALOGUES = {
         "settings.master.title": "Contrase\u00f1a maestra",
         "settings.mismatch": "Las dos contrase\u00f1as nuevas no coinciden.",
         "settings.new": "Nueva contrase\u00f1a maestra",
+        "settings.sidebar.desc": "Elige c\u00f3mo aparecen las categor\u00edas de registros en la barra lateral.",
+        "settings.sidebar.nested": "Contraer las categor\u00edas de registros en un men\u00fa Registros desplegable",
+        "settings.sidebar.title": "Barra lateral",
         "settings.submit": "Cambiar la contrase\u00f1a maestra",
         "settings.theme.applied": "Tema aplicado.",
         "settings.theme.apply": "Aplicar el tema",
@@ -2378,6 +2390,9 @@ WEB_CATALOGUES = {
         "settings.master.title": "Mot de passe ma\u00eetre",
         "settings.mismatch": "Les deux nouveaux mots de passe ne correspondent pas.",
         "settings.new": "Nouveau mot de passe ma\u00eetre",
+        "settings.sidebar.desc": "Choisissez comment les cat\u00e9gories de fiches apparaissent dans la barre lat\u00e9rale.",
+        "settings.sidebar.nested": "Regrouper les cat\u00e9gories de fiches dans un menu Fiches d\u00e9pliable",
+        "settings.sidebar.title": "Barre lat\u00e9rale",
         "settings.submit": "Changer le mot de passe ma\u00eetre",
         "settings.theme.applied": "Th\u00e8me appliqu\u00e9.",
         "settings.theme.apply": "Appliquer le th\u00e8me",
@@ -2847,6 +2862,9 @@ WEB_CATALOGUES = {
         "settings.master.title": "\u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921",
         "settings.mismatch": "\u0926\u094b\u0928\u094b\u0902 \u0928\u090f \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u092e\u0947\u0932 \u0928\u0939\u0940\u0902 \u0916\u093e\u0924\u0947\u0964",
         "settings.new": "\u0928\u092f\u093e \u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921",
+        "settings.sidebar.desc": "\u091a\u0941\u0928\u0947\u0902 \u0915\u093f \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0936\u094d\u0930\u0947\u0923\u093f\u092f\u093e\u0901 \u0938\u093e\u0907\u0921\u092c\u093e\u0930 \u092e\u0947\u0902 \u0915\u0948\u0938\u0947 \u0926\u093f\u0916\u0947\u0902\u0964",
+        "settings.sidebar.nested": "\u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0936\u094d\u0930\u0947\u0923\u093f\u092f\u094b\u0902 \u0915\u094b \u090f\u0915 \u0935\u093f\u0938\u094d\u0924\u093e\u0930-\u092f\u094b\u0917\u094d\u092f \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u092e\u0947\u0928\u0942 \u092e\u0947\u0902 \u0938\u092e\u0947\u091f\u0947\u0902",
+        "settings.sidebar.title": "\u0938\u093e\u0907\u0921\u092c\u093e\u0930",
         "settings.submit": "\u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u092c\u0926\u0932\u0947\u0902",
         "settings.theme.applied": "\u0925\u0940\u092e \u0932\u093e\u0917\u0942 \u0939\u094b \u0917\u0908\u0964",
         "settings.theme.apply": "\u0925\u0940\u092e \u0932\u093e\u0917\u0942 \u0915\u0930\u0947\u0902",
@@ -3316,6 +3334,9 @@ WEB_CATALOGUES = {
         "settings.master.title": "Kata Sandi Utama",
         "settings.mismatch": "Kedua kata sandi baru tidak sama.",
         "settings.new": "Kata sandi utama baru",
+        "settings.sidebar.desc": "Pilih bagaimana kategori record tampil di bilah sisi.",
+        "settings.sidebar.nested": "Ciutkan kategori record ke dalam menu Records yang dapat dibuka",
+        "settings.sidebar.title": "Bilah sisi",
         "settings.submit": "Ubah kata sandi utama",
         "settings.theme.applied": "Tema diterapkan.",
         "settings.theme.apply": "Terapkan tema",
@@ -3785,6 +3806,9 @@ WEB_CATALOGUES = {
         "settings.master.title": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
         "settings.mismatch": "\u65b0\u3057\u3044\u30d1\u30b9\u30ef\u30fc\u30c9\u304c\u4e00\u81f4\u3057\u307e\u305b\u3093\u3002",
         "settings.new": "\u65b0\u3057\u3044\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
+        "settings.sidebar.desc": "\u30ec\u30b3\u30fc\u30c9\u306e\u30ab\u30c6\u30b4\u30ea\u3092\u30b5\u30a4\u30c9\u30d0\u30fc\u306b\u3069\u3046\u8868\u793a\u3059\u308b\u304b\u9078\u3073\u307e\u3059\u3002",
+        "settings.sidebar.nested": "\u30ec\u30b3\u30fc\u30c9\u306e\u30ab\u30c6\u30b4\u30ea\u3092\u958b\u9589\u3067\u304d\u308b\u300c\u30ec\u30b3\u30fc\u30c9\u300d\u30e1\u30cb\u30e5\u30fc\u306b\u307e\u3068\u3081\u308b",
+        "settings.sidebar.title": "\u30b5\u30a4\u30c9\u30d0\u30fc",
         "settings.submit": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5909\u66f4",
         "settings.theme.applied": "\u30c6\u30fc\u30de\u3092\u9069\u7528\u3057\u307e\u3057\u305f\u3002",
         "settings.theme.apply": "\u30c6\u30fc\u30de\u3092\u9069\u7528",
@@ -4254,6 +4278,9 @@ WEB_CATALOGUES = {
         "settings.master.title": "\ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638",
         "settings.mismatch": "\uc0c8\ub85c \uc785\ub825\ud55c \ub450 \ube44\ubc00\ubc88\ud638\uac00 \uc11c\ub85c \ub2e4\ub985\ub2c8\ub2e4.",
         "settings.new": "\uc0c8 \ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638",
+        "settings.sidebar.desc": "\ub808\ucf54\ub4dc \ubc94\uc8fc\ub97c \uc0ac\uc774\ub4dc\ubc14\uc5d0 \uc5b4\ub5bb\uac8c \ud45c\uc2dc\ud560\uc9c0 \uc120\ud0dd\ud569\ub2c8\ub2e4.",
+        "settings.sidebar.nested": "\ub808\ucf54\ub4dc \ubc94\uc8fc\ub97c \ud3bc\uce60 \uc218 \uc788\ub294 \ub808\ucf54\ub4dc \uba54\ub274\ub85c \uc811\uae30",
+        "settings.sidebar.title": "\uc0ac\uc774\ub4dc\ubc14",
         "settings.submit": "\ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638 \ubcc0\uacbd",
         "settings.theme.applied": "\ud14c\ub9c8\ub97c \uc801\uc6a9\ud588\uc2b5\ub2c8\ub2e4.",
         "settings.theme.apply": "\ud14c\ub9c8 \uc801\uc6a9",
@@ -4723,6 +4750,9 @@ WEB_CATALOGUES = {
         "settings.master.title": "Senha mestra",
         "settings.mismatch": "As duas senhas novas n\u00e3o coincidem.",
         "settings.new": "Nova senha mestra",
+        "settings.sidebar.desc": "Escolha como as categorias de registros aparecem na barra lateral.",
+        "settings.sidebar.nested": "Recolher as categorias de registros em um menu Registros expans\u00edvel",
+        "settings.sidebar.title": "Barra lateral",
         "settings.submit": "Mudar a senha mestra",
         "settings.theme.applied": "Tema aplicado.",
         "settings.theme.apply": "Aplicar o tema",
@@ -5192,6 +5222,9 @@ WEB_CATALOGUES = {
         "settings.master.title": "\u041c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044c",
         "settings.mismatch": "\u0414\u0432\u0430 \u043d\u043e\u0432\u044b\u0445 \u043f\u0430\u0440\u043e\u043b\u044f \u043d\u0435 \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u044e\u0442.",
         "settings.new": "\u041d\u043e\u0432\u044b\u0439 \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044c",
+        "settings.sidebar.desc": "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435, \u043a\u0430\u043a \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0438 \u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u043e\u0442\u043e\u0431\u0440\u0430\u0436\u0430\u044e\u0442\u0441\u044f \u043d\u0430 \u0431\u043e\u043a\u043e\u0432\u043e\u0439 \u043f\u0430\u043d\u0435\u043b\u0438.",
+        "settings.sidebar.nested": "\u0421\u0432\u0435\u0440\u043d\u0443\u0442\u044c \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0438 \u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u0432 \u0440\u0430\u0441\u043a\u0440\u044b\u0432\u0430\u044e\u0449\u0435\u0435\u0441\u044f \u043c\u0435\u043d\u044e \u00ab\u0417\u0430\u043f\u0438\u0441\u0438\u00bb",
+        "settings.sidebar.title": "\u0411\u043e\u043a\u043e\u0432\u0430\u044f \u043f\u0430\u043d\u0435\u043b\u044c",
         "settings.submit": "\u0421\u043c\u0435\u043d\u0438\u0442\u044c \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044c",
         "settings.theme.applied": "\u0422\u0435\u043c\u0430 \u043f\u0440\u0438\u043c\u0435\u043d\u0435\u043d\u0430.",
         "settings.theme.apply": "\u041f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c \u0442\u0435\u043c\u0443",
@@ -5661,6 +5694,9 @@ WEB_CATALOGUES = {
         "settings.master.title": "\u4e3b\u5bc6\u7801",
         "settings.mismatch": "\u4e24\u6b21\u8f93\u5165\u7684\u65b0\u5bc6\u7801\u4e0d\u4e00\u81f4\u3002",
         "settings.new": "\u65b0\u7684\u4e3b\u5bc6\u7801",
+        "settings.sidebar.desc": "\u9009\u62e9\u8bb0\u5f55\u5206\u7c7b\u5728\u4fa7\u8fb9\u680f\u4e2d\u7684\u663e\u793a\u65b9\u5f0f\u3002",
+        "settings.sidebar.nested": "\u5c06\u8bb0\u5f55\u5206\u7c7b\u6536\u62e2\u4e3a\u53ef\u5c55\u5f00\u7684\u201c\u8bb0\u5f55\u201d\u83dc\u5355",
+        "settings.sidebar.title": "\u4fa7\u8fb9\u680f",
         "settings.submit": "\u66f4\u6539\u4e3b\u5bc6\u7801",
         "settings.theme.applied": "\u4e3b\u9898\u5df2\u5e94\u7528\u3002",
         "settings.theme.apply": "\u5e94\u7528\u4e3b\u9898",
@@ -6104,6 +6140,27 @@ I18N_SCRIPT = """
   });
 })();
 
+// Records collapsible layout: when the viewer has chosen it in Settings, the
+// disclosure button expands/collapses the nested categories. CSS drives the
+// show/hide off <html data-recnav-open>; this only flips that attribute, keeps
+// the button's aria-expanded in step, and remembers the open state.
+(function () {
+  document.addEventListener("DOMContentLoaded", function () {
+    var root = document.documentElement;
+    var btn = document.querySelector(".nav-records-toggle");
+    if (!btn) return;
+    function isOpen() { return root.getAttribute("data-recnav-open") === "1"; }
+    btn.setAttribute("aria-expanded", isOpen() ? "true" : "false");
+    btn.addEventListener("click", function () {
+      var next = !isOpen();
+      if (next) root.setAttribute("data-recnav-open", "1");
+      else root.removeAttribute("data-recnav-open");
+      btn.setAttribute("aria-expanded", next ? "true" : "false");
+      try { localStorage.setItem("spm.recnav.open", next ? "1" : "0"); } catch (e) {}
+    });
+  });
+})();
+
 // Inline handlers were removed so the CSP no longer needs 'unsafe-inline'.
 // One delegated listener covers every control, including markup added later.
 (function () {
@@ -6394,6 +6451,24 @@ p  { margin: 0; }
 .nav-subitem.active { color: var(--accent-hi); font-weight: 600; }
 .nav-subitem.active::before { inset-inline-start: -12px; height: 14px; }
 .nav-subitem .nav-ico { width: 15px; font-size: 13px; opacity: .9; }
+
+/* Records layouts. Default (no data-recnav): the Records link plus categories
+   always visible. Opt-in collapsible: Records is a disclosure button (with an
+   All row) that expands on click. One is shown by CSS on <html data-recnav>. */
+.nav-parent { width: 100%; text-align: start; background: none; border: none; font: inherit; cursor: pointer; }
+.nav-caret { width: 9px; height: 6px; margin-inline-start: auto; flex: none; fill: none;
+  stroke: currentColor; stroke-width: 1.4; opacity: .5; transition: transform .16s var(--ease); }
+.nav-parent .nav-count { margin-inline-start: auto; }
+.nav-parent .nav-count ~ .nav-caret { margin-inline-start: var(--sp-2); }
+.nav-parent[aria-expanded="true"] .nav-caret { transform: rotate(180deg); }
+.nav-records-toggle { display: none; }
+.nav-sub-all { display: none; }
+:root[data-recnav="collapsible"] .nav-records-link { display: none; }
+:root[data-recnav="collapsible"] .nav-records-toggle { display: flex; }
+:root[data-recnav="collapsible"] .nav-sub-all { display: flex; }
+:root[data-recnav="collapsible"] #records-sub { display: none; }
+:root[data-recnav="collapsible"][data-recnav-open="1"] #records-sub { display: flex; }
+body.rail .nav-caret { display: none; }
 
 .sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: var(--sp-2); }
 .vault-chip {
@@ -7739,26 +7814,54 @@ NAV_SECTIONS = [
 ]
 
 
-def _records_submenu_html(active_sub, counts):
-    """One nested nav row per record type, drawn from the schema so a new type
-    appears without editing the menu. Every type is listed, used or not, so the
-    sidebar is a stable map of what a record can be; the count rides along for
-    the ones that have entries."""
-    rows = []
+def _records_nav(active, active_sub, counts, badge, ico, i18n, fallback):
+    """Records in the sidebar, in the two layouts the viewer chooses between in
+    Settings. The default keeps every record type visible as a nested row -- a
+    stable map of what a record can be. The opt-in collapsible layout turns
+    Records into a disclosure that expands on click, with an All row first.
+
+    Both are rendered here; CSS shows one, keyed on the <html data-recnav>
+    attribute the pre-paint bootstrap sets from the saved choice, so switching
+    is one click and no reload. Rows come from RECORD_SCHEMAS, so a new type
+    appears in either layout without editing this menu."""
+    caret = ('<svg class="nav-caret" viewBox="0 0 10 6" aria-hidden="true">'
+             '<path d="M1 1l4 4 4-4"/></svg>')
+    on = " active" if active == "records" else ""
+    link = (
+        '<a class="nav-item nav-records-link%s" href="/records" title="%s" '
+        'data-i18n-title="%s"><span class="nav-ico" aria-hidden="true">%s</span>'
+        '<span class="nav-text" data-i18n="%s">%s</span>%s</a>'
+        % (on, html.escape(fallback), i18n, _icon(ico), i18n, fallback, badge))
+    toggle = (
+        '<button type="button" class="nav-item nav-parent nav-records-toggle%s" '
+        'data-nav-parent aria-expanded="false" aria-controls="records-sub" '
+        'title="%s" data-i18n-title="%s">'
+        '<span class="nav-ico" aria-hidden="true">%s</span>'
+        '<span class="nav-text" data-i18n="%s">%s</span>%s%s</button>'
+        % (on, html.escape(fallback), i18n, _icon(ico), i18n, fallback, badge, caret))
+    all_cls = "nav-item nav-subitem nav-sub-all" + (
+        " active" if active == "records" and not active_sub else "")
+    rows = [
+        '<a class="%s" href="/records" title="All" data-i18n-title="tags.all">'
+        '<span class="nav-ico" aria-hidden="true">%s</span>'
+        '<span class="nav-text" data-i18n="tags.all">All</span></a>'
+        % (all_cls, _icon("record"))]
     for record_type in core.RECORD_TYPES:
         n = counts.get(record_type, 0)
         icon = core.RECORD_SCHEMAS[record_type].get("icon", "record")
         label = record_type_label(record_type)
-        cls = "nav-item nav-subitem" + (" active" if record_type == active_sub else "")
-        badge = '<span class="nav-count">%d</span>' % n if n else ""
+        cls = "nav-item nav-subitem" + (
+            " active" if record_type == active_sub else "")
+        cnt = '<span class="nav-count">%d</span>' % n if n else ""
         rows.append(
             '<a class="%s" href="/records?type=%s" title="%s" '
             'data-i18n-title="record.type.%s">'
             '<span class="nav-ico" aria-hidden="true">%s</span>'
             '<span class="nav-text" data-i18n="record.type.%s">%s</span>%s</a>'
             % (cls, urllib.parse.quote(record_type), html.escape(label),
-               record_type, _icon(icon), record_type, html.escape(label), badge))
-    return '<div class="nav-sub">%s</div>' % "".join(rows)
+               record_type, _icon(icon), record_type, html.escape(label), cnt))
+    return ('%s%s<div class="nav-sub" id="records-sub">%s</div>'
+            % (link, toggle, "".join(rows)))
 
 
 def _nav_html(active, counts, active_sub=""):
@@ -7771,20 +7874,22 @@ def _nav_html(active, counts, active_sub=""):
         # straight to the navigation instead of walking the page.
         out.append('<nav class="nav" aria-label="%s">' % label)
         for key, href, ico, i18n, fallback, counter in items:
-            cls = "nav-item active" if key == active else "nav-item"
             badge = ""
             if counter is not None:
                 n = counts.get(counter, 0)
                 if n:
                     badge = f'<span class="nav-count">{n}</span>'
+            if key == "records":
+                out.append(_records_nav(active, active_sub, counts, badge,
+                                        ico, i18n, fallback))
+                continue
+            cls = "nav-item active" if key == active else "nav-item"
             out.append(
                 f'<a class="{cls}" href="{href}" title="{html.escape(fallback)}" '
                 f'data-i18n-title="{i18n}">'
                 f'<span class="nav-ico" aria-hidden="true">{_icon(ico)}</span>'
                 f'<span class="nav-text" data-i18n="{i18n}">{fallback}</span>{badge}</a>'
             )
-            if key == "records":
-                out.append(_records_submenu_html(active_sub, counts))
         out.append("</nav>")
     return "".join(out)
 
@@ -7820,6 +7925,25 @@ THEME_BOOTSTRAP = """
     if (allowed.indexOf(saved) < 0) saved = "console";
     document.body.className = document.body.className.replace(/theme-[^\\s]+/g, "").trim();
     document.body.classList.add("theme-" + saved);
+  } catch (e) {}
+})();
+</script>
+"""
+
+
+RECNAV_BOOTSTRAP = """
+<script>
+/* The sidebar record-menu layout is a device-local preference with no vault
+   data. Resolve it on <html> before the sidebar paints so the chosen layout
+   is the first one drawn, never a flash of the other. */
+(function () {
+  try {
+    var r = document.documentElement;
+    if (localStorage.getItem("spm.recnav.mode") === "collapsible") {
+      r.setAttribute("data-recnav", "collapsible");
+      if (localStorage.getItem("spm.recnav.open") === "1")
+        r.setAttribute("data-recnav-open", "1");
+    }
   } catch (e) {}
 })();
 </script>
@@ -7872,6 +7996,7 @@ def render_shell(content, active, version, vault_path, title="Sans Password Mana
 </head>
 <body class="theme-console">
 {THEME_BOOTSTRAP}
+{RECNAV_BOOTSTRAP}
 {RAIL_BOOTSTRAP}
 {ICON_SPRITE}
 <a class="skip-link" href="#main-content">Skip to vault content</a>
@@ -9923,6 +10048,18 @@ def settings_page(flash="", hidden_hosts=()):
     </div>
   </div>
 </section>
+<section class="card settings-section" id="sidebar-layout">
+  <div class="card-head"><h2 data-i18n="settings.sidebar.title">Sidebar</h2></div>
+  <div class="card-body">
+    <p class="faint" data-i18n="settings.sidebar.desc">Choose how record categories
+      appear in the sidebar.</p>
+    <label class="switch-row" style="margin-top:var(--sp-4)">
+      <input type="checkbox" id="recnav-toggle">
+      <span data-i18n="settings.sidebar.nested">Collapse record categories into an
+        expandable Records menu</span>
+    </label>
+  </div>
+</section>
 <section class="card settings-section" id="idle-lock">
   <div class="card-head"><div>
     <h2 data-i18n="settings.lock.title">Idle Lock</h2>
@@ -10075,6 +10212,27 @@ SETTINGS_SCRIPT = """
   pw.addEventListener("input", check);
   cf.addEventListener("input", check);
 })();
+  (function () {
+    /* Sidebar record-menu layout: one click flips the device-local choice and
+       updates <html data-recnav> live, so the sidebar switches with no reload. */
+    var box = document.getElementById("recnav-toggle");
+    if (!box) return;
+    var root = document.documentElement;
+    try { box.checked = localStorage.getItem("spm.recnav.mode") === "collapsible"; } catch (e) {}
+    box.addEventListener("change", function () {
+      try {
+        if (box.checked) {
+          root.setAttribute("data-recnav", "collapsible");
+          localStorage.setItem("spm.recnav.mode", "collapsible");
+        } else {
+          root.removeAttribute("data-recnav");
+          root.removeAttribute("data-recnav-open");
+          localStorage.setItem("spm.recnav.mode", "expanded");
+          localStorage.removeItem("spm.recnav.open");
+        }
+      } catch (e) {}
+    });
+  })();
 </script>"""
 
 
