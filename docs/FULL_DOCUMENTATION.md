@@ -222,6 +222,18 @@ public facts are shown.
 | --- | --- | --- |
 | ![SPM typed-records list showing SSH and GPG keys, an API token, a server and a Wi-Fi network, all synthetic](docs/screenshots/web-v2.13.0/37-records.png) | ![SPM SSH-key record with the private key masked and its type, size and fingerprint derived from the stored key](docs/screenshots/web-v2.13.0/38-record-ssh-key.png) | ![SPM GPG-key record with the secret key masked and its fingerprint, key id and algorithm derived from the stored key](docs/screenshots/web-v2.13.0/39-record-gpg-key.png) |
 
+By default the sidebar lists every record type as its own row under **Records**.
+New in 5.0.3, a one-click toggle in Settings folds those rows into a
+**collapsible Records menu** instead: it stays a single row marked with a
+disclosure caret until you open it, then expands an **All** row followed by one
+row per type, and folds away again when you close it. The choice is remembered
+per browser. Both layouts are drawn from the same schema, so a new record type
+appears in whichever one you have chosen.
+
+| Records folded into a collapsible disclosure |
+| --- |
+| ![SPM sidebar with the record categories folded into a single collapsible Records row marked by a disclosure caret, the categories hidden until it is opened](docs/screenshots/web-v2.13.0/42-records-collapsed.png) |
+
 <details>
 <summary><strong>Complete web interface gallery</strong></summary>
 
