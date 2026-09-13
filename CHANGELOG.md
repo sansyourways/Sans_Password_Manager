@@ -7,6 +7,26 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.0.3] - 2026-09-13
+
+A Dashboard navigation option. 5.0.2 made the sidebar's record categories always
+visible as nested rows under **Records**; 5.0.3 keeps that as the default but
+lets you fold them into a collapsible Records menu that expands only when you
+click it. The choice is a one-click toggle in Settings and is remembered
+per-browser. No vault format change -- 5.0.3 reads and writes exactly the vaults
+5.0.2 does.
+
+### Added
+- **A Settings toggle chooses how the Records sidebar behaves.** The default is
+  unchanged: every record category shows as its own nested row under Records.
+  Turning on "collapse record categories" in Settings turns Records into an
+  expandable disclosure -- the categories stay hidden until you click Records,
+  which reveals an **All** row and one row per type, and clicking again folds
+  them away. The preference is stored in the browser and applied before first
+  paint, so there is no flash of the other layout. Both layouts are still
+  generated from `RECORD_SCHEMAS`, so a new record type appears in either one
+  without anyone editing a menu.
+
 ## [5.0.2] - 2026-09-12
 
 A Dashboard navigation change. The sidebar's **Records** entry now expands into
