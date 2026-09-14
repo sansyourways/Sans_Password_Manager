@@ -17,6 +17,7 @@ import base64
 import calendar
 import concurrent.futures
 import hashlib
+import datetime
 import hmac
 import json
 import os
@@ -748,16 +749,26 @@ ATTRS_FIELD_VALUE_MAX = 4096
 ATTRS_FIELD_MAX = 64
 
 
-def encode_attrs(folder="", fields=None, hidden=False):
+def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
+                 trashed_at=""):
     """The attributes column for a record, or "" when there is nothing to say.
 
     Empty is empty rather than an encoded empty object, so a record that uses
     none of this is byte-identical to how format 3 wrote it.
+
+    5.1.0 adds two keys inside the same JSON, both empty-when-unused so the
+    byte-identical property holds: `favorite` (a pinned record, roadmap 22) and
+    `trashed_at` (an ISO timestamp marking a soft-deleted record, roadmap 24).
+    These live in the attributes column for the same reason the folder does --
+    they belong to the record, and every path that already moves or exports a
+    record carries the column along.
     """
     folder = (folder or "").strip()
     fields = [(str(n).strip(), str(v)) for n, v in (fields or []) if str(n).strip()]
     hidden = bool(hidden)
-    if not folder and not fields and not hidden:
+    favorite = bool(favorite)
+    trashed_at = (trashed_at or "").strip()
+    if not folder and not fields and not hidden and not favorite and not trashed_at:
         return ""
     if len(folder) > ATTRS_FOLDER_MAX:
         raise VaultError("folder name is longer than %d characters"
@@ -765,6 +776,8 @@ def encode_attrs(folder="", fields=None, hidden=False):
     if len(fields) > ATTRS_FIELD_MAX:
         raise VaultError("a record may carry at most %d custom fields"
                          % ATTRS_FIELD_MAX)
+    if len(trashed_at) > 40:
+        raise VaultError("trashed_at timestamp is malformed")
     seen = set()
     for name, value in fields:
         if len(name) > ATTRS_FIELD_NAME_MAX:
@@ -784,33 +797,40 @@ def encode_attrs(folder="", fields=None, hidden=False):
         payload["fields"] = [{"name": n, "value": v} for n, v in fields]
     if hidden:
         payload["hidden"] = True
+    if favorite:
+        payload["favorite"] = True
+    if trashed_at:
+        payload["trashed_at"] = trashed_at
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     return base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
 
 def decode_attrs(column):
-    """(folder, [(name, value)], hidden) for an attributes column.
+    """(folder, [(name, value)], hidden, favorite, trashed_at) for an attrs column.
 
     Never raises. A column this build cannot read is a record it should still
     show, minus the part it did not understand -- refusing would make one bad
     row hide a whole vault.
 
-    Three values rather than two, deliberately. Every caller unpacked two, so
-    adding `hidden` breaks each of them at the point of use instead of letting
-    a writer re-encode a record without the flag it never read. That silent
-    drop is exactly how folders and custom fields went missing from twenty
-    export formats until 4.1.0.
+    Five values rather than three, deliberately, and for the same reason the
+    third was added. Every caller unpacked the tuple positionally, so widening
+    it breaks each of them at the point of use instead of letting a writer
+    re-encode a record without the flags it never read. That silent drop is
+    exactly how folders and custom fields went missing from twenty export
+    formats until 4.1.0, and how a favourite or a trashed marker would vanish on
+    the next edit if this returned only what the caller happened to want. Use
+    `attrs_edit` to change one flag while preserving the rest.
     """
     column = (column or "").strip()
     if not column:
-        return "", [], False
+        return "", [], False, False, ""
     try:
         payload = json.loads(base64.b64decode(column, validate=True)
                              .decode("utf-8"))
     except Exception:
-        return "", [], False
+        return "", [], False, False, ""
     if not isinstance(payload, dict):
-        return "", [], False
+        return "", [], False, False, ""
     folder = payload.get("folder") or ""
     if not isinstance(folder, str):
         folder = ""
@@ -823,7 +843,32 @@ def decode_attrs(column):
             name, value = item.get("name"), item.get("value")
             if isinstance(name, str) and name.strip() and isinstance(value, str):
                 fields.append((name, value))
-    return folder[:ATTRS_FOLDER_MAX], fields, payload.get("hidden") is True
+    trashed_at = payload.get("trashed_at") or ""
+    if not isinstance(trashed_at, str):
+        trashed_at = ""
+    return (folder[:ATTRS_FOLDER_MAX], fields, payload.get("hidden") is True,
+            payload.get("favorite") is True, trashed_at.strip()[:40])
+
+
+def attrs_edit(column, folder=None, fields=None, hidden=None, favorite=None,
+               trashed_at=None):
+    """Return an attributes column with only the named parts changed.
+
+    The point of the whole codec is that no path re-encodes a record without
+    the parts it did not touch. A caller flipping one flag -- favourite on, or a
+    trashed marker set or cleared -- passes only that argument; everything else
+    is read from `column` and carried through. `None` means keep; a real value
+    (including "" or False) means replace.
+    """
+    cur_folder, cur_fields, cur_hidden, cur_favorite, cur_trashed = \
+        decode_attrs(column)
+    return encode_attrs(
+        folder=cur_folder if folder is None else folder,
+        fields=cur_fields if fields is None else fields,
+        hidden=cur_hidden if hidden is None else hidden,
+        favorite=cur_favorite if favorite is None else favorite,
+        trashed_at=cur_trashed if trashed_at is None else trashed_at,
+    )
 
 
 # ----- record sanitising -----------------------------------------------------
@@ -924,6 +969,22 @@ RECORD_SCHEMAS = {
             ("database", FIELD_PLAIN, "line", False),
             ("username", FIELD_PLAIN, "line", True),
             ("password", FIELD_SECRET, "line", True),
+            ("notes", FIELD_PLAIN, "multiline", False),
+        ),
+    },
+    "certificate": {
+        "label": "Certificate",
+        "icon": "certificate",
+        # The certificate is public and is what the facts are derived from -- the
+        # subject, issuer, validity and fingerprint come out of these bytes (see
+        # x509_info), and the expiry feeds the expiration tracking. The private
+        # key is the secret half, held so the pair travels together; a bare
+        # certificate with no key is a valid record.
+        "derive": "cert",
+        "fields": (
+            ("certificate", FIELD_PLAIN, "multiline", True),
+            ("private_key", FIELD_SECRET, "multiline", False),
+            ("passphrase", FIELD_SECRET, "line", False),
             ("notes", FIELD_PLAIN, "multiline", False),
         ),
     },
@@ -1162,8 +1223,14 @@ def redact_record(record_type, values):
 
 
 def build_record_row(record_type, record_id, label, values, created,
-                     folder="", fields=None, hidden=False):
-    """One tab-separated typed-record row, sanitised and schema-checked."""
+                     folder="", fields=None, hidden=False, favorite=False,
+                     trashed_at=""):
+    """One tab-separated typed-record row, sanitised and schema-checked.
+
+    `favorite` and `trashed_at` are threaded through so an edit that rebuilds a
+    record's row from its form keeps the pin and the trashed marker it never
+    showed the form -- the same reason folder and custom fields are threaded.
+    """
     payload = encode_record_payload(record_type, values)
     # A custom field may not take a schema field's name. Both cross an export
     # in the same `fields` column and are told apart on the way back by
@@ -1176,17 +1243,21 @@ def build_record_row(record_type, record_id, label, values, created,
         raise VaultError(
             "a custom field may not reuse the field name %s on a %s record"
             % (", ".join(repr(name) for name in shadowed), record_type))
-    attrs = encode_attrs(folder=folder, fields=fields, hidden=hidden)
+    attrs = encode_attrs(folder=folder, fields=fields, hidden=hidden,
+                         favorite=favorite, trashed_at=trashed_at)
     return "\t".join((record_tag(record_type), str(record_id),
                       sanitize_field(label), payload, str(created),
                       attrs or "-"))
 
 
 def parse_record_row(line):
-    """(type, id, label, values, created, folder, fields, hidden) or None.
+    """(type, id, label, values, created, folder, fields, hidden, favorite,
+    trashed_at) or None.
 
     None for any line that is not a typed record, so a caller can walk a whole
-    vault and let this decide.
+    vault and let this decide. `favorite` and `trashed_at` (5.1.0) are appended
+    so index-based callers are undisturbed; a caller that unpacks the whole
+    tuple takes them too.
     """
     parts = line.split("\t")
     if len(parts) < 5:
@@ -1195,9 +1266,10 @@ def parse_record_row(line):
     if not record_type or record_type not in RECORD_SCHEMAS:
         return None
     values = decode_record_payload(record_type, parts[3])
-    folder, custom, hidden = decode_attrs(parts[5] if len(parts) > 5 else "")
+    folder, custom, hidden, favorite, trashed_at = \
+        decode_attrs(parts[5] if len(parts) > 5 else "")
     return (record_type, parts[1], parts[2], values, parts[4],
-            folder, custom, hidden)
+            folder, custom, hidden, favorite, trashed_at)
 
 
 # The column order every export writes and every headerless or positional
@@ -1713,6 +1785,245 @@ def _iso_from_epoch(seconds):
         return ""
 
 
+# ----- X.509 certificates -----------------------------------------------------
+# What SPM can say about a stored certificate without a certificate library.
+# The same discipline as the SSH and GPG parsers: a minimal DER walk over bytes
+# the vault already holds, every length checked against what is left so a
+# truncated file yields "unreadable" rather than a plausible-but-wrong fact. A
+# certificate is public, so unlike SSH and GPG this derives from a plain field,
+# not a secret -- and the one fact that matters most here, the expiry, is what
+# feeds the expiration tracking (roadmap 30) the same way a card's expiry does.
+
+CERT_PEM_HEAD = "-----BEGIN CERTIFICATE-----"
+CERT_PEM_TAIL = "-----END CERTIFICATE-----"
+
+# The object identifiers this parser names. Anything else is shown by its dotted
+# form rather than guessed at -- a wrong algorithm name is worse than a number.
+_OID_NAMES = {
+    "2.5.4.3": "CN", "2.5.4.10": "O", "2.5.4.11": "OU", "2.5.4.6": "C",
+    "2.5.4.7": "L", "2.5.4.8": "ST", "2.5.4.5": "serialNumber",
+    "1.2.840.113549.1.9.1": "E",
+    "1.2.840.113549.1.1.11": "SHA256-RSA",
+    "1.2.840.113549.1.1.12": "SHA384-RSA",
+    "1.2.840.113549.1.1.13": "SHA512-RSA",
+    "1.2.840.113549.1.1.5": "SHA1-RSA",
+    "1.2.840.113549.1.1.1": "RSA",
+    "1.2.840.10045.4.3.2": "ECDSA-SHA256",
+    "1.2.840.10045.4.3.3": "ECDSA-SHA384",
+    "1.2.840.10045.4.3.4": "ECDSA-SHA512",
+    "1.2.840.10045.2.1": "EC",
+    "1.3.101.112": "Ed25519",
+    "2.5.29.17": "subjectAltName",
+}
+_OID_SAN = "2.5.29.17"
+_OID_CN = "2.5.4.3"
+
+
+def _der_read(data, offset):
+    """One DER TLV at offset: (tag, is_constructed, content_bytes, next_offset).
+
+    Returns None on any truncation or malformed length rather than raising, so
+    the whole walk fails closed to "unreadable".
+    """
+    if offset < 0 or offset + 2 > len(data):
+        return None
+    tag = data[offset]
+    constructed = bool(tag & 0x20)
+    length = data[offset + 1]
+    pos = offset + 2
+    if length & 0x80:
+        n = length & 0x7F
+        if n == 0 or n > 4 or pos + n > len(data):
+            return None
+        length = int.from_bytes(data[pos:pos + n], "big")
+        pos += n
+    if pos + length > len(data):
+        return None
+    return (tag, constructed, data[pos:pos + length], pos + length)
+
+
+def _der_children(content, limit=256):
+    """Every TLV directly inside a constructed value, capped so a crafted file
+    cannot make this loop for long."""
+    out, offset = [], 0
+    while offset < len(content) and len(out) < limit:
+        item = _der_read(content, offset)
+        if item is None:
+            break
+        out.append(item)
+        offset = item[3]
+    return out
+
+
+def _der_oid(content):
+    """A dotted OID string from an OBJECT IDENTIFIER's contents."""
+    if not content:
+        return ""
+    first = content[0]
+    parts = [str(first // 40), str(first % 40)]
+    value = 0
+    for byte in content[1:]:
+        value = (value << 7) | (byte & 0x7F)
+        if not byte & 0x80:
+            parts.append(str(value))
+            value = 0
+    return ".".join(parts)
+
+
+def _der_name_cn(content):
+    """The common name of an X.509 Name (RDNSequence), or its first attribute.
+
+    A Name is a SEQUENCE OF RDN, each a SET OF AttributeTypeAndValue. This walks
+    for the CN and falls back to the first readable attribute, so a certificate
+    with only an organisation still names something rather than nothing.
+    """
+    first_any = ""
+    for _t, _c, rdn, _n in _der_children(content):
+        for _t2, _c2, atav, _n2 in _der_children(rdn):
+            kids = _der_children(atav)
+            if len(kids) < 2 or kids[0][0] != 0x06:
+                continue
+            oid = _der_oid(kids[0][2])
+            try:
+                text = kids[1][2].decode("utf-8", "replace").strip()
+            except Exception:
+                text = ""
+            if not text:
+                continue
+            if oid == _OID_CN:
+                return text
+            if not first_any:
+                first_any = text
+    return first_any
+
+
+def _der_time(content):
+    """A UTCTime or GeneralizedTime as an ISO date, or "" if unparseable."""
+    try:
+        raw = content.decode("ascii").strip()
+    except Exception:
+        return ""
+    digits = raw.rstrip("Z")
+    try:
+        if len(digits) >= 12 and len(digits) <= 13:      # YYMMDDHHMMSS (UTCTime)
+            year = int(digits[0:2])
+            year += 2000 if year < 50 else 1900
+            mo, da = int(digits[2:4]), int(digits[4:6])
+        elif len(digits) >= 14:                           # YYYYMMDDHHMMSS
+            year = int(digits[0:4])
+            mo, da = int(digits[4:6]), int(digits[6:8])
+        else:
+            return ""
+    except ValueError:
+        return ""
+    if not (1 <= mo <= 12 and 1 <= da <= 31):
+        return ""
+    return "%04d-%02d-%02d" % (year, mo, da)
+
+
+def _der_san_dns(extensions_content):
+    """dNSName entries from a subjectAltName extension, if present."""
+    for _t, _c, ext, _n in _der_children(extensions_content):
+        kids = _der_children(ext)
+        if not kids or kids[0][0] != 0x06 or _der_oid(kids[0][2]) != _OID_SAN:
+            continue
+        octets = kids[-1][2]                              # the OCTET STRING value
+        inner = _der_read(octets, 0)
+        if inner is None:
+            return []
+        names = []
+        for tag, _cst, val, _nx in _der_children(inner[2]):
+            if tag == 0x82:                               # [2] dNSName, IA5String
+                try:
+                    names.append(val.decode("ascii", "replace"))
+                except Exception:
+                    pass
+        return names
+    return []
+
+
+def x509_info(text):
+    """Public facts about a PEM certificate, derived without a crypto library.
+
+    {subject, issuer, not_before, not_after, serial, fingerprint, algorithm,
+    key_algorithm, sans, self_signed, problem}. Every field is "" or [] when it
+    cannot be read; `problem` says why nothing could be. Never a secret: a
+    certificate is public, and so is everything derived from it.
+    """
+    out = {"subject": "", "issuer": "", "not_before": "", "not_after": "",
+           "serial": "", "fingerprint": "", "algorithm": "", "key_algorithm": "",
+           "sans": [], "self_signed": False, "problem": ""}
+    text = (text or "").strip()
+    if CERT_PEM_HEAD not in text:
+        out["problem"] = "not a PEM certificate"
+        return out
+    try:
+        body = text.split(CERT_PEM_HEAD, 1)[1].split(CERT_PEM_TAIL, 1)[0]
+        der = base64.b64decode("".join(body.split()), validate=True)
+    except Exception:
+        out["problem"] = "the certificate is not valid base64"
+        return out
+    if len(der) > 1 << 20:
+        out["problem"] = "the certificate is implausibly large"
+        return out
+    out["fingerprint"] = ":".join(
+        "%02X" % b for b in hashlib.sha256(der).digest())
+    cert = _der_read(der, 0)
+    if cert is None or not cert[1]:
+        out["problem"] = "the certificate structure is unreadable"
+        return out
+    top = _der_children(cert[2])
+    if len(top) < 2:
+        out["problem"] = "the certificate structure is unreadable"
+        return out
+    tbs = _der_children(top[0][2])
+    if not tbs:
+        out["problem"] = "the certificate has no readable body"
+        return out
+    # tbsCertificate: optional [0] version, then serial, sigAlg, issuer,
+    # validity, subject, subjectPublicKeyInfo, ... extensions [3].
+    i = 0
+    if tbs and tbs[0][0] == 0xA0:            # EXPLICIT [0] version
+        i = 1
+    if i < len(tbs) and tbs[i][0] == 0x02:   # serialNumber INTEGER
+        out["serial"] = "".join("%02X" % b for b in tbs[i][2]) or "00"
+        i += 1
+    if i < len(tbs):                         # signature AlgorithmIdentifier
+        alg = _der_children(tbs[i][2])
+        if alg and alg[0][0] == 0x06:
+            oid = _der_oid(alg[0][2])
+            out["algorithm"] = _OID_NAMES.get(oid, oid)
+        i += 1
+    if i < len(tbs):                         # issuer Name
+        out["issuer"] = _der_name_cn(tbs[i][2])
+        i += 1
+    if i < len(tbs) and tbs[i][1]:           # validity SEQUENCE
+        times = _der_children(tbs[i][2])
+        if len(times) >= 2:
+            out["not_before"] = _der_time(times[0][2])
+            out["not_after"] = _der_time(times[1][2])
+        i += 1
+    if i < len(tbs):                         # subject Name
+        out["subject"] = _der_name_cn(tbs[i][2])
+        i += 1
+    if i < len(tbs) and tbs[i][1]:           # subjectPublicKeyInfo
+        spki = _der_children(tbs[i][2])
+        if spki and spki[0][1]:
+            algid = _der_children(spki[0][2])
+            if algid and algid[0][0] == 0x06:
+                oid = _der_oid(algid[0][2])
+                out["key_algorithm"] = _OID_NAMES.get(oid, oid)
+        i += 1
+    for _t, _c, val, _n in tbs[i:]:          # extensions [3] EXPLICIT
+        if _t == 0xA3:
+            inner = _der_read(val, 0)
+            if inner is not None:
+                out["sans"] = _der_san_dns(inner[2])
+            break
+    out["self_signed"] = bool(out["subject"]) and out["subject"] == out["issuer"]
+    return out
+
+
 # ----- derived record facts ---------------------------------------------------
 # Some record types can say more about themselves than they were told. An SSH
 # key knows its own type, size and fingerprint; a surface should be able to
@@ -1775,7 +2086,38 @@ def _derived_gpg(values):
     return rows
 
 
-RECORD_DERIVERS = {"ssh": _derived_ssh, "gpg": _derived_gpg}
+def _derived_cert(values):
+    info = x509_info(values.get("certificate", ""))
+    rows = []
+    if info["subject"]:
+        rows.append(("cert.subject", "Subject", info["subject"]))
+    if info["issuer"]:
+        rows.append(("cert.issuer", "Issuer", info["issuer"]))
+    if info["self_signed"]:
+        rows.append(("cert.selfsigned", "This certificate is self-signed", ""))
+    if info["not_before"]:
+        rows.append(("cert.not_before", "Valid from", info["not_before"]))
+    if info["not_after"]:
+        rows.append(("cert.not_after", "Expires", info["not_after"]))
+    if info["key_algorithm"]:
+        rows.append(("cert.key_algorithm", "Public key", info["key_algorithm"]))
+    if info["algorithm"]:
+        rows.append(("cert.algorithm", "Signature", info["algorithm"]))
+    if info["sans"]:
+        rows.append(("cert.sans", "Alternative names", ", ".join(info["sans"])))
+    if info["fingerprint"]:
+        rows.append(("cert.fingerprint", "SHA-256 fingerprint",
+                     info["fingerprint"]))
+    if info["serial"]:
+        rows.append(("cert.serial", "Serial", info["serial"]))
+    if info["problem"]:
+        rows.append(("cert.unreadable",
+                     "SPM cannot read this certificate", info["problem"]))
+    return rows
+
+
+RECORD_DERIVERS = {"ssh": _derived_ssh, "gpg": _derived_gpg,
+                   "cert": _derived_cert}
 
 
 def record_derived(record_type, values):
@@ -1844,8 +2186,14 @@ def json_line_safe(value):
 
 
 def attrs_export_columns(column):
-    """The folder and fields columns an export carries for one record."""
-    folder, fields, hidden = decode_attrs(column)
+    """The folder and fields columns an export carries for one record.
+
+    Favourite and the trashed marker are deliberately not exported: a trashed
+    record is excluded from every iteration and so never reaches an export at
+    all, and the favourite is a per-vault convenience rather than data, kept out
+    so the twenty export formats keep exactly the columns they round-trip today.
+    """
+    folder, fields, hidden, _favorite, _trashed = decode_attrs(column)
     return {
         "folder": folder,
         "fields": json_line_safe(
@@ -1894,7 +2242,16 @@ def attrs_from_export_row(row):
         return ""
 
 
-def iter_records(plaintext, record_type=""):
+def record_is_trashed(parsed):
+    """Whether a parsed record row is soft-deleted (roadmap 24).
+
+    One reader of the tuple position so a change to the row shape is a change
+    here and nowhere else.
+    """
+    return bool(parsed[9]) if len(parsed) > 9 else False
+
+
+def iter_records(plaintext, record_type="", include_trashed=False):
     """(line_index, parsed) for every typed record row, in vault order.
 
     The index is the caller's half of a rewrite: the dashboard edits and
@@ -1905,6 +2262,11 @@ def iter_records(plaintext, record_type=""):
     `record_type` narrows to one type. Ids are per type, so a caller holding
     only an id is holding half an address; every route that takes one takes
     the type with it.
+
+    `include_trashed` is False by default: a soft-deleted record (5.1.0) is
+    gone from every list, count and search until it is restored or purged. The
+    trash view, restore, permanent delete and id allocation are the callers
+    that pass True, because they are the ones that must still see it.
     """
     for index, line in enumerate((plaintext or "").splitlines()):
         if not line.startswith(RECORD_TAG_PREFIX):
@@ -1913,6 +2275,8 @@ def iter_records(plaintext, record_type=""):
         if parsed is None:
             continue
         if record_type and parsed[0] != record_type:
+            continue
+        if not include_trashed and record_is_trashed(parsed):
             continue
         yield index, parsed
 
@@ -1923,11 +2287,156 @@ def find_record(plaintext, record_type, record_id):
     Both halves of the address are required. A lookup by id alone would find
     the wifi record when the caller meant the server one, because each type
     counts from one.
+
+    Trashed records are included: restore and permanent-delete address a record
+    that no live list shows, and an edit route that refused to find it would
+    report a record it can see in the trash as missing.
     """
-    for index, parsed in iter_records(plaintext, record_type):
+    for index, parsed in iter_records(plaintext, record_type,
+                                      include_trashed=True):
         if parsed[1] == str(record_id):
             return index, parsed
     return None
+
+
+# ----- trash: soft delete, restore, and delayed permanent deletion (24) ------
+# A delete moves a row to the trash by stamping trashed_at in its attributes,
+# not by removing the line, so nothing is lost until a purge says so. A password
+# keeps its attributes in column 7 and a typed record in column 5; _attrs_col is
+# the one place that difference lives. Every mutation goes through attrs_edit, so
+# trashing or restoring a row never disturbs its folder, fields or hidden flag.
+
+TRASH_RETENTION_DAYS = 30
+
+
+def _attrs_col(parts):
+    """Which column holds a row's attributes, or None if the row has none."""
+    if parts and parts[0].startswith(RECORD_TAG_PREFIX):
+        return 5
+    if parts and parts[0].isdigit():
+        return 7
+    return None
+
+
+def _row_trashed_at(parts):
+    col = _attrs_col(parts)
+    if col is None or len(parts) <= col:
+        return ""
+    return decode_attrs(parts[col])[4]
+
+
+def trashed_items(plaintext):
+    """Every soft-deleted password and record, most recently trashed first.
+
+    Each item is {kind, type, id, label, trashed_at}. The kind is "record" for a
+    typed record (carrying its type) and "password" for a password entry, so a
+    trash view can address either back to its restore or its permanent delete.
+    """
+    items = []
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        trashed = _row_trashed_at(parts)
+        if not trashed:
+            continue
+        if _attrs_col(parts) == 5:
+            parsed = parse_record_row(line)
+            if parsed is None:
+                continue
+            items.append({"kind": "record", "type": parsed[0], "id": parsed[1],
+                          "label": parsed[2], "trashed_at": trashed})
+        else:
+            items.append({"kind": "password", "type": "password",
+                          "id": parts[0], "label": parts[1] if len(parts) > 1
+                          else "?", "trashed_at": trashed})
+    items.sort(key=lambda i: i["trashed_at"], reverse=True)
+    return items
+
+
+def set_trashed(plaintext, kind, record_type, record_id, on):
+    """Trash or restore one row by id. Returns (plaintext, changed).
+
+    `kind` is "record" (with its type) or "password". A record needs both halves
+    of its address; a password needs only its numeric id.
+    """
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()) if on else ""
+    lines = (plaintext or "").splitlines()
+    for i, line in enumerate(lines):
+        parts = line.split("\t")
+        col = _attrs_col(parts)
+        if col is None:
+            continue
+        if kind == "record":
+            if col != 5:
+                continue
+            parsed = parse_record_row(line)
+            if parsed is None or parsed[0] != record_type \
+                    or parsed[1] != str(record_id):
+                continue
+        else:
+            if col != 7 or parts[0] != str(record_id):
+                continue
+        while len(parts) <= col:
+            parts.append("")
+        parts[col] = attrs_edit(parts[col], trashed_at=now) or "-"
+        lines[i] = "\t".join(parts)
+        return "\n".join(lines) + "\n", True
+    return plaintext, False
+
+
+def set_favorite(plaintext, kind, record_type, record_id, on):
+    """Pin or unpin one row by id (roadmap 22). Returns (plaintext, changed)."""
+    lines = (plaintext or "").splitlines()
+    for i, line in enumerate(lines):
+        parts = line.split("\t")
+        col = _attrs_col(parts)
+        if col is None:
+            continue
+        if kind == "record":
+            if col != 5:
+                continue
+            parsed = parse_record_row(line)
+            if parsed is None or parsed[0] != record_type \
+                    or parsed[1] != str(record_id):
+                continue
+        else:
+            if col != 7 or parts[0] != str(record_id):
+                continue
+        while len(parts) <= col:
+            parts.append("")
+        parts[col] = attrs_edit(parts[col], favorite=bool(on)) or "-"
+        lines[i] = "\t".join(parts)
+        return "\n".join(lines) + "\n", True
+    return plaintext, False
+
+
+def purge_trash(plaintext, older_than_days=0, today=None):
+    """Permanently remove trashed rows. Returns (plaintext, removed_count).
+
+    `older_than_days` of 0 empties the trash outright; a positive number is the
+    delayed part of "delayed permanent deletion" -- only rows trashed at least
+    that many days ago go, so a recent delete is still recoverable. A row whose
+    trashed_at cannot be parsed is treated as old enough to remove, because it
+    was trashed by definition and leaving it would make the trash un-emptyable.
+    """
+    today = today or datetime.date.today()
+    kept, removed = [], 0
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        trashed = _row_trashed_at(parts)
+        if trashed:
+            drop = True
+            if older_than_days > 0:
+                try:
+                    when = datetime.datetime.strptime(
+                        trashed.replace("Z", ""), "%Y-%m-%dT%H:%M:%S").date()
+                    drop = (today - when).days >= older_than_days
+                except ValueError:
+                    drop = True
+            if drop:
+                removed += 1
+                continue
+        kept.append(line)
+    return "\n".join(kept) + ("\n" if kept else ""), removed
 
 
 def record_next_id(plaintext, record_type):
@@ -1943,21 +2452,31 @@ def record_next_id(plaintext, record_type):
     row stopped every new record of its type from being added.
     """
     highest = 0
-    for _index, parsed in iter_records(plaintext, record_type):
+    # Trashed rows are counted: their ids are still taken until a purge removes
+    # the row, so a new record must not be handed an id a trashed one still holds.
+    for _index, parsed in iter_records(plaintext, record_type,
+                                       include_trashed=True):
         if parsed[1].isdigit():
             highest = max(highest, int(parsed[1]))
     return str(highest + 1)
 
 
 def record_counts(plaintext):
-    """{type: n} for the types present, plus "" -> the total.
+    """{type: n} for the live types present, plus "" -> the total and
+    "__trash__" -> how many records are soft-deleted.
 
     The total is carried here rather than summed by each caller because the
     nav badge and the overview tile disagreeing about how many records a
-    vault holds is the class of defect a shared core exists to prevent.
+    vault holds is the class of defect a shared core exists to prevent. Trashed
+    records are excluded from the per-type and total counts -- a trashed record
+    is not in the list its count labels -- and reported separately so a Trash
+    entry can carry its own badge.
     """
-    counts = {"": 0}
-    for _index, parsed in iter_records(plaintext):
+    counts = {"": 0, "__trash__": 0}
+    for _index, parsed in iter_records(plaintext, include_trashed=True):
+        if record_is_trashed(parsed):
+            counts["__trash__"] += 1
+            continue
         counts[parsed[0]] = counts.get(parsed[0], 0) + 1
         counts[""] += 1
     return counts
@@ -1970,7 +2489,7 @@ def record_folders(plaintext):
         parts = line.split("\t")
         if not parts or parts[0].startswith("META_") or not parts[0].isdigit():
             continue
-        folder, _, _ = decode_attrs(parts[7] if len(parts) > 7 else "")
+        folder, _, _, _, _ = decode_attrs(parts[7] if len(parts) > 7 else "")
         if folder:
             seen.setdefault(folder.casefold(), folder)
     return [seen[k] for k in sorted(seen)]
@@ -2740,6 +3259,81 @@ def set_hidden_hosts(plaintext, raw):
     return "\n".join(rows) + "\n"
 
 
+# ----- saved searches / smart collections (roadmap 28) -----------------------
+# A named query the user can run again. It lives in one META_SAVED_SEARCHES row
+# for the same reason the hidden-host list does: it is vault-wide data, not a
+# per-record attribute, and a single row keeps it out of the record space where
+# a stray tab or a rename could disturb it. The query is the same string the
+# search box already takes, so a saved search is a "smart collection" -- it
+# re-runs rather than freezing a membership that would drift.
+
+SAVED_SEARCHES_TAG = "META_SAVED_SEARCHES"
+SAVED_SEARCH_MAX = 64
+SAVED_SEARCH_NAME_MAX = 80
+SAVED_SEARCH_QUERY_MAX = 256
+
+
+def saved_searches(plaintext):
+    """[{name, query}] this vault has saved, in stored order."""
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if parts[0] == SAVED_SEARCHES_TAG and len(parts) > 1:
+            try:
+                data = json.loads(base64.b64decode(parts[1], validate=True)
+                                  .decode("utf-8"))
+            except Exception:
+                return []
+            out = []
+            if isinstance(data, list):
+                for item in data[:SAVED_SEARCH_MAX]:
+                    if not isinstance(item, dict):
+                        continue
+                    name, query = item.get("name"), item.get("query")
+                    if (isinstance(name, str) and name.strip()
+                            and isinstance(query, str)):
+                        out.append({"name": name.strip()[:SAVED_SEARCH_NAME_MAX],
+                                    "query": query[:SAVED_SEARCH_QUERY_MAX]})
+            return out
+    return []
+
+
+def _write_saved_searches(plaintext, items):
+    rows = [line for line in (plaintext or "").splitlines()
+            if line.split("\t")[0] != SAVED_SEARCHES_TAG]
+    if items:
+        raw = json.dumps([{"name": i["name"], "query": i["query"]}
+                          for i in items],
+                         separators=(",", ":"), ensure_ascii=False)
+        col = base64.b64encode(raw.encode("utf-8")).decode("ascii")
+        rows.append("%s\t%s\t-\t-\t-\t-" % (SAVED_SEARCHES_TAG, col))
+    return "\n".join(rows) + "\n"
+
+
+def set_saved_search(plaintext, name, query):
+    """Add or replace a saved search by name (case-insensitive). Returns plaintext."""
+    name = (name or "").strip()[:SAVED_SEARCH_NAME_MAX]
+    query = (query or "").strip()[:SAVED_SEARCH_QUERY_MAX]
+    if not name:
+        raise VaultError("a saved search needs a name")
+    if not query:
+        raise VaultError("a saved search needs a query")
+    items = [i for i in saved_searches(plaintext)
+             if i["name"].casefold() != name.casefold()]
+    if len(items) >= SAVED_SEARCH_MAX:
+        raise VaultError("this vault already holds the maximum of %d saved searches"
+                         % SAVED_SEARCH_MAX)
+    items.append({"name": name, "query": query})
+    return _write_saved_searches(plaintext, items)
+
+
+def delete_saved_search(plaintext, name):
+    """Remove a saved search by name. Returns plaintext (unchanged if absent)."""
+    name = (name or "").strip()
+    items = [i for i in saved_searches(plaintext)
+             if i["name"].casefold() != name.casefold()]
+    return _write_saved_searches(plaintext, items)
+
+
 def looks_sensitive(label, url, hosts):
     """Whether an entry matches the vault's own list.
 
@@ -2914,7 +3508,11 @@ def tidy_proposals(plaintext):
         record_id, label = parts[0], parts[1]
         notes = parts[4] if len(parts) > 4 else ""
         attrs = parts[7] if len(parts) > 7 else ""
-        folder, fields, hidden = decode_attrs(attrs)
+        folder, fields, hidden, favorite, trashed_at = decode_attrs(attrs)
+        # A soft-deleted entry is not in any list; tidy has nothing to propose
+        # for it and should not resurface it in a review.
+        if trashed_at:
+            continue
 
         changes = {}
         proposed_folder = folder_from_notes(notes)
@@ -2998,14 +3596,16 @@ def apply_tidy(plaintext, selections):
         # would make the second overwrite whatever the first had just written,
         # because encode_attrs takes the whole column and not a patch.
         if "folder" in changes or "hidden" in changes:
-            folder, fields, hidden = decode_attrs(parts[7])
+            folder, fields, hidden, favorite, trashed_at = decode_attrs(parts[7])
             if "folder" in changes:
                 folder = changes["folder"]["to"]
             if "hidden" in changes:
                 # Only when the review said so. An unticked row keeps the
                 # decision it already had.
                 hidden = bool(chosen[record_id].get("hidden", True))
-            parts[7] = encode_attrs(folder, fields, hidden)
+            # favorite and trashed_at are read and written back untouched: tidy
+            # never proposes them, and re-encoding without them would drop them.
+            parts[7] = encode_attrs(folder, fields, hidden, favorite, trashed_at)
             touched = True
 
         out.append("\t".join(parts))
@@ -4132,6 +4732,122 @@ def security_report(plaintext, rotation_days=365, check_breaches=False,
     return report
 
 
+# ----- expiration tracking (roadmap 30) and its in-app surfacing (31) --------
+# Several record types already carry an expiry date -- an API token, a card, an
+# identity document, a licence -- and a certificate derives one from its own
+# bytes. Nothing brought them together, so a secret expired with no warning
+# anywhere. expiry_scan is the one pass that finds every dated secret and says
+# how long each has, so the CLI (`spm expiring`) and the Dashboard show the same
+# list. No daemon and no network: it reads dates the vault already holds.
+#
+# A field counts as an expiry when the schema draws it as a date or a month and
+# names it `expires` or `expiry`. That keeps this schema-driven -- a new type
+# with an `expires` date is tracked without a line here -- rather than a
+# hand-listed set of type/field pairs that a new type would be forgotten from.
+
+EXPIRY_FIELD_NAMES = ("expires", "expiry")
+
+
+def _parse_expiry_date(value, widget):
+    """A datetime.date for an expiry value, or None if it is blank or unreadable.
+
+    A `date` field is YYYY-MM-DD. A `month` field (a card) is YYYY-MM and the
+    card is good through the end of that month, so it resolves to the last day.
+    Tolerant: an unparseable value tracks nothing rather than raising.
+    """
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        if widget == "month" or (len(value) == 7 and value[4] == "-"):
+            year, month = int(value[0:4]), int(value[5:7])
+            if not (1 <= month <= 12):
+                return None
+            if month == 12:
+                nxt = datetime.date(year + 1, 1, 1)
+            else:
+                nxt = datetime.date(year, month + 1, 1)
+            return nxt - datetime.timedelta(days=1)
+        return datetime.date(int(value[0:4]), int(value[5:7]), int(value[8:10]))
+    except (ValueError, IndexError):
+        return None
+
+
+def expiry_status(days_left, horizon_days):
+    """expired | expiring | ok for a number of days remaining."""
+    if days_left < 0:
+        return "expired"
+    if days_left <= horizon_days:
+        return "expiring"
+    return "ok"
+
+
+def expiry_scan(plaintext, horizon_days=30, rotation_days=0, today=None):
+    """Every dated secret and how long it has, soonest first.
+
+    Each entry is {kind, type, id, label, field, expires_on, days_left, status}.
+    `kind` is "record" for a typed record (certificates report their derived
+    not_after) and "password" for a password past its rotation window, included
+    only when `rotation_days` is set so the caller opts into that noisier class.
+    Trashed records are excluded -- a soft-deleted secret is not one to warn
+    about. Returns only expired and expiring entries; `horizon_days` is the
+    window an "expiring" item falls inside.
+    """
+    today = today or datetime.date.today()
+    out = []
+
+    def add(kind, rtype, rid, label, field, when):
+        if when is None:
+            return
+        days_left = (when - today).days
+        status = expiry_status(days_left, horizon_days)
+        if status == "ok":
+            return
+        out.append({"kind": kind, "type": rtype, "id": rid,
+                    "label": label, "field": field,
+                    "expires_on": when.isoformat(), "days_left": days_left,
+                    "status": status})
+
+    for _index, parsed in iter_records(plaintext):
+        rtype, rid, label, values = parsed[0], parsed[1], parsed[2], parsed[3]
+        if rtype == "certificate":
+            info = x509_info(values.get("certificate", ""))
+            add("record", rtype, rid, label, "not_after",
+                _parse_expiry_date(info.get("not_after", ""), "date"))
+            continue
+        for name, _kind, widget, _req in record_fields(rtype):
+            if name in EXPIRY_FIELD_NAMES and widget in ("date", "month"):
+                add("record", rtype, rid, label, name,
+                    _parse_expiry_date(values.get(name, ""), widget))
+
+    if rotation_days and rotation_days > 0:
+        for line in plaintext.splitlines():
+            if not line or line.startswith("#") or line.startswith("META_"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 6 or not parts[0].isdigit():
+                continue
+            if len(parts) > 7 and decode_attrs(parts[7])[4]:   # trashed
+                continue
+            try:
+                stamp = datetime.datetime.strptime(
+                    parts[5].replace("Z", ""), "%Y-%m-%dT%H:%M:%S").date()
+            except (ValueError, IndexError):
+                continue
+            add("password", "password", parts[0], parts[1] or "?", "rotation",
+                stamp + datetime.timedelta(days=rotation_days))
+
+    out.sort(key=lambda e: (e["expires_on"], e["type"], e["id"]))
+    return out
+
+
+def expiry_summary(scan):
+    """{expired, expiring, total} counts for a scan, for a badge or a tile."""
+    expired = sum(1 for e in scan if e["status"] == "expired")
+    return {"expired": expired, "expiring": len(scan) - expired,
+            "total": len(scan)}
+
+
 # ----- typed records across an export ----------------------------------------
 # A record that cannot leave is a record you do not own, and this project has
 # already paid for finding that out late: until 4.1.0 every one of the twenty
@@ -4188,7 +4904,7 @@ def record_from_export_row(row):
     record_type = str(row.get("type", "") or "").strip()
     if record_type not in RECORD_SCHEMAS:
         return None
-    _folder, pairs, _hidden = decode_attrs(attrs_from_export_row(row))
+    _folder, pairs, _hidden, _fav, _trash = decode_attrs(attrs_from_export_row(row))
     known = {name for name, _k, _w, _r in record_fields(record_type)}
     values, custom = {}, []
     for name, value in pairs:
@@ -4644,6 +5360,22 @@ def main(argv):
                 # records, so the rule lives with the rows it reads.
                 with open(argv[3], "r", encoding="utf-8") as handle:
                     sys.stdout.write(record_next_id(handle.read(), argv[4]) + "\n")
+            elif op == "live-rows":
+                # live-rows <plainfile> [type] ; stdout: the REC rows that are
+                # not soft-deleted, verbatim. The CLI list awks this so a trashed
+                # record is absent from `record list` the way it is from the
+                # Dashboard -- the trash filter living in one place, the core.
+                want = argv[4] if len(argv) > 4 else ""
+                with open(argv[3], "r", encoding="utf-8", errors="replace") as handle:
+                    for line in handle.read().splitlines():
+                        if not line.startswith(RECORD_TAG_PREFIX):
+                            continue
+                        parsed = parse_record_row(line)
+                        if parsed is None or record_is_trashed(parsed):
+                            continue
+                        if want and parsed[0] != want:
+                            continue
+                        sys.stdout.write(line + "\n")
             elif op == "row":
                 # row <type> <id> <label> <created> [--folder F] [--hidden]
                 # stdin: "field<TAB>base64(value)" lines
@@ -4665,7 +5397,7 @@ def main(argv):
                 parsed = parse_record_row(sys.stdin.read().rstrip("\n"))
                 if parsed is None:
                     return 0
-                rtype, rid, label, values, created, folder, _f, hidden = parsed
+                rtype, rid, label, values, created, folder, _f, hidden, _fav, _tr = parsed
                 for key, value in ((".type", rtype), (".id", rid),
                                    (".label", label), (".created", created),
                                    (".folder", folder),
@@ -4997,9 +5729,11 @@ def main(argv):
                                           "--hidden" in argv[3:]))
         elif command == "attrs-decode":
             # attrs-decode <column> ; stdout: one JSON document
-            folder, fields, hidden = decode_attrs(argv[2] if len(argv) > 2 else "")
+            folder, fields, hidden, favorite, trashed_at = \
+                decode_attrs(argv[2] if len(argv) > 2 else "")
             sys.stdout.write(json.dumps(
-                {"folder": folder, "hidden": hidden,
+                {"folder": folder, "hidden": hidden, "favorite": favorite,
+                 "trashed_at": trashed_at,
                  "fields": [{"name": n, "value": v} for n, v in fields]}) + "\n")
         elif command == "folders":
             # folders <plainfile> ; stdout: one folder per line
@@ -5014,6 +5748,51 @@ def main(argv):
             with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
                 report = security_report(handle.read(), days, check_breaches)
             sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        elif command == "expiring":
+            # expiring <plainfile> [horizon-days] [rotation-days]
+            # stdout: one JSON document; secret-free.
+            horizon = int(argv[3]) if len(argv) > 3 and argv[3] else 30
+            rotation = int(argv[4]) if len(argv) > 4 and argv[4] else 0
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                scan = expiry_scan(handle.read(), horizon, rotation)
+            sys.stdout.write(json.dumps(
+                {"items": scan, "summary": expiry_summary(scan)}, indent=2) + "\n")
+        elif command == "trash-list":
+            # trash-list <plainfile> ; stdout: one JSON document
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.write(json.dumps(
+                    {"items": trashed_items(handle.read())}, indent=2) + "\n")
+        elif command in ("trash-set", "favorite-set"):
+            # <cmd> <plainfile> <kind> <record-type> <id> <0|1>
+            # stdout: the new plaintext; exit 3 if nothing matched.
+            kind, rtype, rid, flag = argv[3], argv[4], argv[5], argv[6] == "1"
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            fn = set_trashed if command == "trash-set" else set_favorite
+            new_plain, changed = fn(plaintext, kind, rtype, rid, flag)
+            sys.stdout.write(new_plain)
+            if not changed:
+                sys.exit(3)
+        elif command == "purge-trash":
+            # purge-trash <plainfile> [older-than-days]
+            # stdout: the new plaintext; stderr: the number removed.
+            days = int(argv[3]) if len(argv) > 3 and argv[3] else 0
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                new_plain, removed = purge_trash(handle.read(), days)
+            sys.stdout.write(new_plain)
+            sys.stderr.write("%d\n" % removed)
+        elif command == "saved-searches":
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.write(json.dumps(
+                    {"searches": saved_searches(handle.read())}, indent=2) + "\n")
+        elif command in ("saved-search-set", "saved-search-delete"):
+            # saved-search-set <plainfile> <name> <query> | -delete <plainfile> <name>
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            if command == "saved-search-set":
+                sys.stdout.write(set_saved_search(plaintext, argv[3], argv[4]))
+            else:
+                sys.stdout.write(delete_saved_search(plaintext, argv[3]))
         elif command == "events":
             # events <vault> [limit] ; stdout: one JSON document
             limit = int(argv[3]) if len(argv) > 3 and argv[3] else 0

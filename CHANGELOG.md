@@ -7,6 +7,48 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-09-14
+
+Six roadmap items, shipped together because they share their machinery. No vault
+format change -- 5.1.0 reads and writes exactly the vaults 5.0.3 does; the new
+per-record flags and the saved-search row are additive within format 6, and a
+5.0.x build still opens a 5.1.0 vault.
+
+### Added
+- **Trash with restore and delayed permanent deletion (roadmap 24).** Deleting a
+  password or a typed record now moves it to a Trash, from which it can be
+  restored; permanent deletion is a second, explicit step (Empty trash, or the
+  per-item Delete forever). A trashed record is gone from every list, count,
+  search and security score until then. The state is a `trashed_at` stamp in the
+  record's own attributes column, so every path that already moves a record
+  carries it. In the CLI: `spm trash list|restore|empty|purge`.
+- **Favourites (roadmap 22).** A password or typed record can be pinned with a
+  star; favourites sort to the top of their list. Stored as a `favorite` flag in
+  the same attributes column. In the CLI: `spm favorite [--off] <type> <id>`.
+- **A Certificate record type (roadmap 32).** Store an X.509 certificate (and
+  optionally its private key); the subject, issuer, validity, SANs, algorithms
+  and SHA-256 fingerprint are derived from the certificate in pure Python --
+  matching `openssl x509` without a certificate library, a keychain, or the
+  private key -- the same way SSH and GPG keys describe themselves. It is a
+  schema entry, so it appears across the CLI and the Dashboard from one
+  definition.
+- **Expiration tracking for every dated secret (roadmap 30) and in-app
+  notification (roadmap 31).** One scan finds every secret with an expiry date --
+  API tokens, cards, identity documents, licences and now certificates -- and an
+  Expiring page (with a sidebar badge) and the `spm expiring` command list what
+  has expired or is due within 30 days. No daemon and no network: it reads dates
+  the vault already holds.
+- **Saved searches / smart collections (roadmap 28).** A search can be saved by
+  name and re-run from the search page; because it re-runs rather than freezing a
+  membership, it finds records added since. Stored in one `META_SAVED_SEARCHES`
+  row. In the CLI: `spm searches list|save|delete`.
+
+### Notes
+- Favourite and trashed markers are per-vault and are not carried across an
+  export: a trashed record is excluded from an export entirely, and the
+  favourite is a local convenience, so the twenty export formats keep exactly the
+  columns they round-trip today.
+
 ## [5.0.3] - 2026-09-13
 
 A Dashboard navigation option. 5.0.2 made the sidebar's record categories always

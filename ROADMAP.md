@@ -10,6 +10,31 @@ and cryptography in the smallest auditable component, and make the CLI, the SPM
 Dashboard, sync and the browser extension clients of that core rather than
 co-owners of it. That review is a design concept, not a formal security audit.
 
+## Shipped in 5.1.0 — lifecycle, safety and a self-describing certificate
+
+Six backlog items delivered together because they share their machinery, with no
+vault format change (format 6, additive only).
+
+- **Trash with restore and delayed permanent deletion — shipped in 5.1.0 (item
+  24).** A delete moves a password or typed record to a Trash; it is gone from
+  every list, count, search and the security score until it is restored or
+  permanently deleted, which is always a separate step. The state is a
+  `trashed_at` stamp in the record's own attributes column, so every path that
+  moves a record carries it. CLI: `spm trash list|restore|empty|purge`.
+- **Favourites — shipped in 5.1.0 (item 22).** A `favorite` flag in the same
+  attributes column pins a record to the top of its list. CLI: `spm favorite`.
+- **Certificate record type — shipped in 5.1.0 (item 32).** An X.509 certificate
+  describes itself: subject, issuer, validity, SANs, algorithms and SHA-256
+  fingerprint are derived in pure Python, matching `openssl x509` without a
+  certificate library or the private key — the SSH/GPG pattern applied to certs.
+- **Expiration tracking and in-app notification — shipped in 5.1.0 (items 30 and
+  31).** One scan finds every dated secret — tokens, cards, identities, licences
+  and certificates — and an Expiring page plus `spm expiring` list what has
+  expired or is due within 30 days. No daemon, no network.
+- **Saved searches / smart collections — shipped in 5.1.0 (item 28).** A named
+  query, re-run rather than frozen, stored in one `META_SAVED_SEARCHES` row. CLI:
+  `spm searches list|save|delete`.
+
 ## Shipped in 5.0.0 — typed records, and keys that describe themselves
 
 - **Typed records, from one schema — shipped in 5.0.0.** A password manager

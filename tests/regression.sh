@@ -2307,12 +2307,30 @@ def unnamed(markup):
     return bad
 
 
+_trash_items = [{"kind": "record", "type": "api-token", "id": "1",
+                 "label": "CI", "trashed_at": "2026-09-14T00:00:00Z"},
+                {"kind": "password", "type": "password", "id": "2",
+                 "label": "GitHub", "trashed_at": "2026-09-14T00:00:00Z"}]
+_expiry_scan = [{"kind": "record", "type": "api-token", "id": "1",
+                 "label": "CI", "field": "expires", "expires_on": "2026-09-20",
+                 "days_left": 6, "status": "expiring"},
+                {"kind": "record", "type": "certificate", "id": "1",
+                 "label": "Cert", "field": "not_after",
+                 "expires_on": "2026-09-01", "days_left": -13,
+                 "status": "expired"}]
 pages = {
     "add form": web.build_entry_form("Add", "/v", "/add"),
     "edit form": web.build_entry_form("Edit", "/v", "/edit",
                                       values={"id": "1", "name": "n"}),
     "note form": web.build_note_form("Note", "/v", "/notes-add"),
     "transfer": web.transfer_page(),
+    # 5.1.0 pages, so their controls (restore/delete/empty forms, the favourite
+    # stars, the save-search input) go through the same accessible-name check.
+    "trash": web.trash_page(_trash_items, "csrf-token"),
+    "expiring": web.expiring_page(_expiry_scan),
+    "saved searches": web.saved_searches_bar(
+        [{"name": "Tokens", "query": "type:api-token"}], "type:api-token",
+        "csrf-token"),
 }
 for name, markup in pages.items():
     bad = unnamed(markup)
@@ -2354,6 +2372,51 @@ if 'id="recnav-toggle"' not in settings:
     sys.exit("Settings does not offer the Records-layout toggle")
 if 'data-i18n="settings.sidebar.nested"' not in settings:
     sys.exit("the Records-layout toggle carries no translatable label")
+
+# 5.1.0: certificate is a record type like any other, so it appears in the
+# submenu generated from the schema without a line here (roadmap 32).
+if "certificate" not in web.core.RECORD_TYPES:
+    sys.exit("the certificate record type is not registered")
+if 'href="/records?type=certificate"' not in nav:
+    sys.exit("the Records submenu has no certificate row")
+
+# The sidebar gains Expiring and Trash entries, each with a badge counter, and
+# both are generated from NAV_SECTIONS like every other entry (roadmap 24/30/31).
+full_nav = web._nav_html("trash", {"__trash__": 3, "__expiring__": 2})
+if 'href="/expiring"' not in full_nav or 'data-i18n="nav.expiring"' not in full_nav:
+    sys.exit("the sidebar has no Expiring entry")
+if 'href="/trash"' not in full_nav or 'data-i18n="nav.trash"' not in full_nav:
+    sys.exit("the sidebar has no Trash entry")
+for badge in (">3<", ">2<"):
+    if badge not in full_nav:
+        sys.exit("a sidebar counter for trash/expiring is missing: %s" % badge)
+
+# The Trash page offers restore and permanent delete for both a record and a
+# password, plus emptying the whole trash (roadmap 24).
+trash_html = web.trash_page(_trash_items, "csrf-token")
+for needle in ('action="/trash-restore"', 'action="/trash-delete"',
+               'action="/trash-empty"', 'data-i18n="trash.restore"',
+               'data-i18n="trash.delete_forever"'):
+    if needle not in trash_html:
+        sys.exit("the Trash page is missing %s" % needle)
+if web.trash_page([], "csrf-token").count("data-i18n=\"trash.empty.t\"") != 1:
+    sys.exit("the empty Trash page has no empty state")
+
+# The Expiring page buckets expired and expiring and links each item back to it.
+exp_html = web.expiring_page(_expiry_scan)
+for needle in ('data-i18n="expiring.status.expired"',
+               'data-i18n="expiring.status.soon"',
+               '/records-view?type=certificate'):
+    if needle not in exp_html:
+        sys.exit("the Expiring page is missing %s" % needle)
+
+# The favourite star is an accessible toggle that posts the flipped state.
+star = web._favorite_toggle("record", "api-token", "1", False, "/records")
+if 'action="/favorite"' not in star or 'aria-pressed="false"' not in star:
+    sys.exit("the favourite toggle is not an accessible form control")
+star_on = web._favorite_toggle("record", "api-token", "1", True, "/records")
+if 'aria-pressed="true"' not in star_on or 'fav-on' not in star_on:
+    sys.exit("the favourite toggle does not reflect the pinned state")
 
 # Bitwarden entries belong on the import form. They shipped on the export form
 # in 3.4.3, which made the feature unreachable from the picker: the tests
@@ -4292,7 +4355,7 @@ if rows["4"][1] != "My Bank":
     sys.exit("a record with nothing to tidy was changed: %r" % rows["4"][1])
 
 for record_id, folder in (("1", "Main Database"), ("2", "Security")):
-    got, _, _ = core.decode_attrs(rows[record_id][7] if len(rows[record_id]) > 7 else "")
+    got, _, _, _, _ = core.decode_attrs(rows[record_id][7] if len(rows[record_id]) > 7 else "")
     if got != folder:
         sys.exit("record %s went to folder %r, expected %r"
                  % (record_id, got, folder))
@@ -5568,7 +5631,7 @@ def load(path):
             if parts[0].startswith("META_"):
                 continue
             if parts[0].isdigit():
-                folder, fields, hidden = core.decode_attrs(
+                folder, fields, hidden, _fav, _tr = core.decode_attrs(
                     parts[7] if len(parts) > 7 else "")
                 records[("password", parts[0])] = {
                     "label": parts[1], "username": parts[2],
@@ -6206,11 +6269,16 @@ case "$rec_reveal" in
 	*) rec_fail '--reveal did not show the secret' ;;
 esac
 
-# Listing must name every type and never read the payload column.
+# Listing must name every type and never read the payload column. Matched with
+# a case glob rather than `printf | grep -q`: grep -q closes the pipe at the
+# first hit, so under `set -o pipefail` the producer can die of SIGPIPE and the
+# pipeline reports failure on the path where the type was in fact listed.
 rec_list="$(rec_core cmd_record_list 2>&1)"
 for rec_type in $rec_types; do
-	printf '%s' "$rec_list" | grep -q "$rec_type" ||
-		rec_fail "list omitted $rec_type"
+	case "$rec_list" in
+		*"$rec_type"*) ;;
+		*) rec_fail "list omitted $rec_type" ;;
+	esac
 done
 if printf '%s' "$rec_list" | grep -q 'value-password'; then
 	rec_fail 'list printed a secret'
@@ -6600,8 +6668,10 @@ _url, refused = post("/records-add", fields, form)
 assert "requires a value" in refused, "a missing required field was accepted"
 assert "missing required" in refused, "the refused form lost what was typed"
 
-# Delete every record this test made, and prove each one is gone from both
-# surfaces rather than only from the page that deleted it.
+# Delete every record this test made. A delete now moves the record to the
+# trash (5.1.0), so prove each one has left every live surface -- the records
+# page and a live core iteration -- and is marked trashed rather than removed,
+# which is what makes it restorable.
 listing = get("/records")
 for record_type, record_id in made:
     post("/records-delete", [("type", record_type), ("id", record_id)], listing)
@@ -6609,12 +6679,26 @@ final = get("/records")
 for record_type, record_id in made:
     assert "/records-view?type=%s&amp;id=%s" % (
         urllib.parse.quote(record_type), record_id) not in final, \
-        "%s %s survived its delete" % (record_type, record_id)
+        "%s %s survived its delete on the records page" % (record_type, record_id)
 
+plaintext = vault_plaintext()
+live = {(p[0], p[1]) for _idx, p in core.iter_records(plaintext)}
+for record_type, record_id in made:
+    assert (record_type, record_id) not in live, \
+        "the CLI still lists the %s the Dashboard deleted" % record_type
+    found = core.find_record(plaintext, record_type, record_id)
+    assert found is not None and core.record_is_trashed(found[1]), \
+        "the Dashboard delete did not move the %s to the trash" % record_type
+
+# Emptying the trash is the only permanent delete. After it, every record is
+# gone from the vault entirely -- which both tests /trash-empty and leaves a
+# clean vault for the SSH block below. Restore round-trips are pinned in the
+# core suite, where the cleanup is controlled.
+post("/trash-empty", [], get("/trash"))
 plaintext = vault_plaintext()
 for record_type, record_id in made:
     assert core.find_record(plaintext, record_type, record_id) is None, \
-        "the CLI still sees the %s the Dashboard deleted" % record_type
+        "emptying the trash did not permanently delete the %s" % record_type
 
 # An ssh-key record shows what the core derives from the key, and still hides
 # the key. The container is built here rather than shelling out to ssh-keygen,
@@ -6659,6 +6743,9 @@ for line in key_text.splitlines()[1:-1]:
         "the record page printed the private key body outside the reveal control"
 ssh_id = url.rsplit("id=", 1)[1]
 post("/records-delete", [("type", "ssh-key"), ("id", ssh_id)], get("/records"))
+# Permanently clear it: a soft delete would leave this key in the trash holding
+# id 1, and the shell SSH block below imports keys and reads them back by id.
+post("/trash-empty", [], get("/trash"))
 
 # A gpg-key record shows the same kind of derived panel, from the same code
 # path -- the record page asks the core for a type's derived rows and its
@@ -6709,6 +6796,9 @@ for line in gpg_key_text.splitlines()[2:-1]:
         "the record page printed the secret key body outside the reveal control"
 gpg_id = url.rsplit("id=", 1)[1]
 post("/records-delete", [("type", "gpg-key"), ("id", gpg_id)], get("/records"))
+# As with the SSH key above: purge it so the shell GPG block reads its own
+# imported key back by id rather than this trashed one.
+post("/trash-empty", [], get("/trash"))
 
 sys.stdout.write("  dashboard records: %d schemas add, list, filter, view "
                  "redacted, edit, refuse and delete over HTTP, and the CLI "
@@ -7195,7 +7285,7 @@ found = None
 for line in open(sys.argv[1], "r", encoding="utf-8").read().split("\n"):
     parts = line.split("\t")
     if parts and parts[0].isdigit() and len(parts) > 7:
-        folder, fields, hidden = core.decode_attrs(parts[7])
+        folder, fields, hidden, _fav, _tr = core.decode_attrs(parts[7])
         got = dict(fields)
         if set(want) <= set(got):
             found = got
