@@ -1025,7 +1025,7 @@ def t_fault_write_refuses_a_read_only_directory():
 
 def t_attrs_roundtrip():
     blob = core.encode_attrs("Work", [("API Key", "abc123"), ("PIN", "0000")])
-    folder, fields, hidden = core.decode_attrs(blob)
+    folder, fields, hidden, _, _ = core.decode_attrs(blob)
     assert hidden is False, "a record that never asked to be hidden must not be"
     eq(folder, "Work")
     eq(fields, [("API Key", "abc123"), ("PIN", "0000")])
@@ -1037,11 +1037,11 @@ def t_attrs_empty_is_empty():
     eq(core.encode_attrs("", []), "")
     eq(core.encode_attrs(None, None), "")
     eq(core.encode_attrs("   ", [("", "value")]), "")
-    eq(core.decode_attrs(""), ("", [], False))
+    eq(core.decode_attrs(""), ("", [], False, False, ""))
     # The flag alone is worth an attributes column; the other two being empty
     # must not throw it away.
     assert core.encode_attrs("", [], True)
-    eq(core.decode_attrs(core.encode_attrs("", [], True)), ("", [], True))
+    eq(core.decode_attrs(core.encode_attrs("", [], True)), ("", [], True, False, ""))
     eq(core.encode_attrs("", [], False), "")
 
 
@@ -1051,14 +1051,14 @@ def t_attrs_survive_hostile_values():
     nasty = "tab\there\nnewline\ttoo"
     blob = core.encode_attrs("Fold\ter", [("na\nme", nasty)])
     assert "\t" not in blob and "\n" not in blob, "the encoded column is not one line"
-    folder, fields, _ = core.decode_attrs(blob)
+    folder, fields, _, _, _ = core.decode_attrs(blob)
     eq(folder, "Fold\ter")
     eq(fields, [("na\nme", nasty)])
 
 
 def t_attrs_carry_unicode():
     blob = core.encode_attrs("仕事", [("キー", "値 — ok")])
-    eq(core.decode_attrs(blob), ("仕事", [("キー", "値 — ok")], False))
+    eq(core.decode_attrs(blob), ("仕事", [("キー", "値 — ok")], False, False, ""))
 
 
 def t_attrs_refuse_nonsense():
@@ -1081,7 +1081,7 @@ def t_attrs_never_raise_on_read():
                  base64.b64encode('{"folder": 7}'.encode()).decode(),
                  base64.b64encode('{"fields": "nope"}'.encode()).decode(),
                  base64.b64encode('{"fields": [1, 2, {"name": "ok"}]}'.encode()).decode()):
-        folder, fields, _ = core.decode_attrs(junk)
+        folder, fields, _, _, _ = core.decode_attrs(junk)
         assert isinstance(folder, str) and isinstance(fields, list), junk
 
 
@@ -1707,7 +1707,7 @@ def t_apply_tidy_writes_the_reviewed_name_not_the_guess():
     assert changed == 1
     row = [l for l in updated.splitlines() if l.startswith("1\t")][0].split("\t")
     assert row[1] == "Cerberus", row[1]
-    folder, _, _ = core.decode_attrs(row[7])
+    folder, _, _, _, _ = core.decode_attrs(row[7])
     assert folder == "Security"
     assert "com.lsdroid.cerberuss" in row[4], "the original was not kept"
 
@@ -2279,7 +2279,7 @@ def t_record_roundtrip_every_type():
         eq(len(row.splitlines()), 1, "%s wrote a row that splits" % name)
         parsed = core.parse_record_row(row)
         assert parsed is not None, name
-        got_type, rid, label, got, created, folder, custom, hidden = parsed
+        got_type, rid, label, got, created, folder, custom, hidden, _fav, _tr = parsed
         eq(got_type, name)
         eq(rid, "7")
         eq(label, "a label")
@@ -2426,7 +2426,7 @@ def t_record_survives_an_export_round_trip():
         row = core.build_record_row(name, "3", "a label", values,
                                     "2026-01-01T00:00:00Z", folder="Work",
                                     fields=custom, hidden=True)
-        rtype, rid, label, got, created, folder, gotc, hidden = \
+        rtype, rid, label, got, created, folder, gotc, hidden, _fav, _tr = \
             core.parse_record_row(row)
         exported = core.record_export_row(rtype, rid, label, got, created,
                                           folder, gotc, hidden)
@@ -2509,7 +2509,7 @@ def t_a_break_character_survives_an_export_round_trip():
               "notes": "line one\nline two line three"}
     row = core.build_record_row("wifi", "1", "home", values, "t",
                                 fields=[("ticket", "SPM 42")])
-    rtype, rid, label, got, created, folder, custom, hidden = \
+    rtype, rid, label, got, created, folder, custom, hidden, _fav, _tr = \
         core.parse_record_row(row)
     eq(got, values, "a break character did not survive the vault row")
     exported = core.record_export_row(rtype, rid, label, got, created,
@@ -3034,6 +3034,149 @@ def t_gpg_derived_rows_come_from_the_schema_not_a_branch():
     assert "gpg.keyid" in keys, "the derived rows carry no key id"
     eq(core.record_derived("wifi", {"password": "x"}), [],
        "a type with no deriver returned rows")
+
+
+# ----- 5.1.0: favourites, trash, expiry, certificates, saved searches --------
+
+def t_attrs_carry_favorite_and_trashed():
+    """The two 5.1.0 flags round-trip and are empty-when-unused."""
+    eq(core.decode_attrs(core.encode_attrs("", [], False, True, "")),
+       ("", [], False, True, ""))
+    when = "2026-09-14T00:00:00Z"
+    eq(core.decode_attrs(core.encode_attrs("F", [], True, True, when)),
+       ("F", [], True, True, when))
+    # A record using none of the flags is still byte-identical to before.
+    eq(core.encode_attrs("", [], False, False, ""), "")
+
+
+def t_attrs_edit_preserves_the_rest():
+    """Flipping one flag keeps folder, fields, hidden and the other flag."""
+    blob = core.encode_attrs("Work", [("k", "v")], True, True, "")
+    # Set trashed; folder/fields/hidden/favorite must survive.
+    trashed = core.attrs_edit(blob, trashed_at="2026-09-14T00:00:00Z")
+    eq(core.decode_attrs(trashed),
+       ("Work", [("k", "v")], True, True, "2026-09-14T00:00:00Z"))
+    # Clear favourite only.
+    unfav = core.attrs_edit(trashed, favorite=False)
+    f, fields, hidden, fav, tr = core.decode_attrs(unfav)
+    eq((f, fields, hidden, fav), ("Work", [("k", "v")], True, False))
+    assert tr, "attrs_edit dropped the trashed marker it was not asked to touch"
+
+
+def t_trash_hides_from_live_and_counts():
+    plain = (core.build_record_row("api-token", "1", "T",
+                                   {"service": "s", "token": "x"}, "C") + "\n")
+    live = [p[1] for _i, p in core.iter_records(plain)]
+    eq(live, ["1"])
+    trashed, changed = core.set_trashed(plain, "record", "api-token", "1", True)
+    assert changed
+    eq([p for _i, p in core.iter_records(trashed)], [])
+    eq(core.iter_records(trashed, include_trashed=True) and
+       len(list(core.iter_records(trashed, include_trashed=True))), 1)
+    counts = core.record_counts(trashed)
+    eq((counts[""], counts["__trash__"]), (0, 1))
+    items = core.trashed_items(trashed)
+    eq((len(items), items[0]["type"], items[0]["id"]), (1, "api-token", "1"))
+    # find_record still sees it, so restore/permanent-delete can address it.
+    assert core.find_record(trashed, "api-token", "1") is not None
+
+
+def t_trash_restore_and_purge():
+    plain = (core.build_record_row("wifi", "1", "W", {"ssid": "n", "password": "p"}, "C") + "\n")
+    trashed, _ = core.set_trashed(plain, "record", "wifi", "1", True)
+    restored, changed = core.set_trashed(trashed, "record", "wifi", "1", False)
+    assert changed
+    eq([p[1] for _i, p in core.iter_records(restored)], ["1"])
+    # Purge removes only trashed rows; a live one stays.
+    purged, removed = core.purge_trash(trashed, older_than_days=0)
+    eq(removed, 1)
+    eq(list(core.iter_records(purged, include_trashed=True)), [])
+    # A recent trash is spared by a positive retention window.
+    kept, removed2 = core.purge_trash(trashed, older_than_days=30)
+    eq(removed2, 0)
+
+
+def t_favorite_toggle():
+    plain = (core.build_record_row("server", "1", "S", {"hostname": "h", "username": "u"}, "C") + "\n")
+    on, changed = core.set_favorite(plain, "record", "server", "1", True)
+    assert changed
+    assert core.find_record(on, "server", "1")[1][8] is True, "favourite not set"
+    off, _ = core.set_favorite(on, "record", "server", "1", False)
+    assert core.find_record(off, "server", "1")[1][8] is False
+
+
+def t_expiry_scan_buckets():
+    import datetime as _dt
+    today = _dt.date(2026, 9, 14)
+    soon = (today + _dt.timedelta(days=6)).isoformat()
+    past = (today - _dt.timedelta(days=3)).isoformat()
+    far = (today + _dt.timedelta(days=400)).isoformat()
+    plain = "\n".join([
+        core.build_record_row("api-token", "1", "soon",
+                              {"service": "s", "token": "x", "expires": soon}, "C"),
+        core.build_record_row("identity", "1", "past",
+                              {"full_name": "n", "document_number": "d",
+                               "expires": past}, "C"),
+        core.build_record_row("software-license", "1", "far",
+                              {"product": "p", "license_key": "k",
+                               "expires": far}, "C"),
+    ]) + "\n"
+    scan = core.expiry_scan(plain, horizon_days=30, today=today)
+    by = {e["type"]: e["status"] for e in scan}
+    eq(by.get("api-token"), "expiring")
+    eq(by.get("identity"), "expired")
+    assert "software-license" not in by, "a record well outside the window was listed"
+    summary = core.expiry_summary(scan)
+    eq((summary["expired"], summary["expiring"]), (1, 1))
+
+
+def t_certificate_deriver_matches_openssl():
+    import tempfile as _tf
+    d = _tf.mkdtemp()
+    try:
+        cert = os.path.join(d, "c.pem")
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048",
+                        "-nodes", "-keyout", os.path.join(d, "k.pem"),
+                        "-out", cert, "-days", "20",
+                        "-subj", "/CN=core.example.invalid/O=SPM",
+                        "-addext", "subjectAltName=DNS:core.example.invalid"],
+                       check=True, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+        pem = open(cert).read()
+        info = core.x509_info(pem)
+        eq(info["problem"], "")
+        eq(info["subject"], "core.example.invalid")
+        assert info["self_signed"], "a self-signed cert was not recognised"
+        assert "core.example.invalid" in info["sans"]
+        truth = subprocess.run(["openssl", "x509", "-in", cert, "-noout",
+                                "-fingerprint", "-sha256"],
+                               capture_output=True, text=True, check=True).stdout
+        want = truth.split("=", 1)[1].strip()
+        eq(info["fingerprint"], want, "fingerprint disagrees with openssl")
+        # The deriver surfaces the expiry, which feeds expiry_scan.
+        keys = [k for k, _e, _v in core.record_derived("certificate",
+                                                       {"certificate": pem})]
+        assert "cert.not_after" in keys and "cert.fingerprint" in keys
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def t_saved_searches_crud():
+    plain = "1\tExample\tuser\tsecret\thttps://x\t2025-01-01T00:00:00Z\n"
+    p = core.set_saved_search(plain, "Tokens", "type:api-token")
+    p = core.set_saved_search(p, "Cards", "type:credit-card")
+    got = core.saved_searches(p)
+    eq([s["name"] for s in got], ["Tokens", "Cards"])
+    # Re-saving a name replaces rather than duplicates.
+    p = core.set_saved_search(p, "tokens", "type:api-token expires:<30d")
+    got = core.saved_searches(p)
+    eq(len(got), 2)
+    eq([s["query"] for s in got if s["name"].lower() == "tokens"][0],
+       "type:api-token expires:<30d")
+    p = core.delete_saved_search(p, "Cards")
+    eq([s["name"] for s in core.saved_searches(p)], ["tokens"])
+    raises(core.VaultError, lambda: core.set_saved_search(plain, "", "q"))
+    raises(core.VaultError, lambda: core.set_saved_search(plain, "n", ""))
 
 
 for name, fn in sorted(globals().items()):

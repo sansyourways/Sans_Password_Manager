@@ -164,6 +164,19 @@ WEB_CATALOGUES = {
         "btn.restore": "Restore",
         "btn.show": "Show",
         "btn.view": "View",
+        "cert.algorithm": "Signature",
+        "cert.derived.d": "Read from the certificate rather than typed beside it, so it cannot disagree with the certificate it describes.",
+        "cert.derived.t": "Derived from the certificate",
+        "cert.fingerprint": "SHA-256 fingerprint",
+        "cert.issuer": "Issuer",
+        "cert.key_algorithm": "Public key",
+        "cert.not_after": "Expires",
+        "cert.not_before": "Valid from",
+        "cert.sans": "Alternative names",
+        "cert.selfsigned": "This certificate is self-signed",
+        "cert.serial": "Serial",
+        "cert.subject": "Subject",
+        "cert.unreadable": "SPM cannot read this certificate",
         "chip.online": "Online \u00b7 read / write",
         "confirm.delete_authenticator": "Delete this authenticator?",
         "confirm.delete_backup": "Delete these backup codes?",
@@ -171,6 +184,8 @@ WEB_CATALOGUES = {
         "confirm.delete_passphrase": "Delete this passphrase?",
         "confirm.delete_record": "Delete this record?",
         "confirm.restore_snapshot": "Restore this snapshot? The current vault is archived first.",
+        "confirm.trash_delete": "Permanently delete this item? This cannot be undone.",
+        "confirm.trash_empty": "Permanently delete everything in the trash? This cannot be undone.",
         "empty.auth.d": "Add a TOTP secret to generate 2FA codes.",
         "empty.auth.t": "No authenticators",
         "empty.backups.d": "Keep one-time recovery codes safe here.",
@@ -213,6 +228,14 @@ WEB_CATALOGUES = {
         "events.kind": "Event",
         "events.outcome": "Outcome",
         "events.when": "When (UTC)",
+        "expiring.col.days": "Days",
+        "expiring.col.expires": "Expires",
+        "expiring.empty.d": "No secret with an expiry date is due within the next 30 days.",
+        "expiring.empty.t": "Nothing is expiring",
+        "expiring.status.expired": "Expired",
+        "expiring.status.soon": "Expiring",
+        "expiring.summary.expired": "Expired",
+        "expiring.summary.soon": "Expiring soon",
         "filters.clear": "Clear filters",
         "filters.desc": "Narrow this list by folder or tag. Active filters stay in the page address.",
         "filters.folders": "Folders",
@@ -328,6 +351,7 @@ WEB_CATALOGUES = {
         "nav.collapse": "Collapse sidebar",
         "nav.events": "Security Events",
         "nav.expand": "Expand sidebar",
+        "nav.expiring": "Expiring",
         "nav.generator": "Generator",
         "nav.group.settings": "Settings",
         "nav.group.tools": "Tools",
@@ -343,6 +367,7 @@ WEB_CATALOGUES = {
         "nav.security": "Security",
         "nav.settings": "Settings",
         "nav.transfer": "Export / Import",
+        "nav.trash": "Trash",
         "nav.unlock": "Biometric Unlock",
         "note.field.content": "Content",
         "note.field.title": "Title",
@@ -377,6 +402,7 @@ WEB_CATALOGUES = {
         "record.field.address": "Address",
         "record.field.brand": "Brand",
         "record.field.cardholder": "Cardholder",
+        "record.field.certificate": "Certificate",
         "record.field.comment": "Comment",
         "record.field.cvv": "CVV",
         "record.field.database": "Database",
@@ -413,6 +439,7 @@ WEB_CATALOGUES = {
         "record.field.username": "Username",
         "record.field.version": "Version",
         "record.type.api-token": "API Token",
+        "record.type.certificate": "Certificate",
         "record.type.credit-card": "Credit Card",
         "record.type.db-credential": "Database Credential",
         "record.type.gpg-key": "GPG Key",
@@ -432,6 +459,8 @@ WEB_CATALOGUES = {
         "search.label": "Search this vault",
         "search.no_results": "Nothing matches your search",
         "search.placeholder": "Search this vault...",
+        "search.save": "Save search",
+        "search.saved": "Saved searches",
         "search.title": "Search",
         "section.authenticators": "Authenticators (TOTP)",
         "section.authenticators_desc": "Store 2FA secrets and view live codes.",
@@ -536,10 +565,13 @@ WEB_CATALOGUES = {
         "table.algo": "Algo",
         "table.every": "Every",
         "table.id": "ID",
+        "table.item": "Item",
         "table.label": "Label",
         "table.name": "Name",
         "table.service": "Service",
+        "table.status": "Status",
         "table.title": "Title",
+        "table.type": "Type",
         "table.username": "Username",
         "tags.all": "All",
         "tidy.apply": "Apply to selected",
@@ -562,6 +594,13 @@ WEB_CATALOGUES = {
         "tidy.title": "Tidy imported entries",
         "toast.copy_fail": "Copy failed.",
         "toast.copy_success": "Copied to clipboard.",
+        "trash.delete_forever": "Delete forever",
+        "trash.deleted": "Deleted",
+        "trash.empty": "Empty trash",
+        "trash.empty.d": "Deleted passwords and records rest here until you restore or permanently delete them.",
+        "trash.empty.t": "The trash is empty",
+        "trash.restore": "Restore",
+        "trash.sub": "Deleted items are kept here so a delete can be undone.",
         "unlock.btn": "Unlock with biometrics",
         "unlock.empty": "No device registered yet",
         "unlock.empty_sub": "Register one below, or keep using your master password",
@@ -636,6 +675,19 @@ WEB_CATALOGUES = {
         "btn.restore": "\u0627\u0633\u062a\u0639\u0627\u062f\u0629",
         "btn.show": "\u0625\u0638\u0647\u0627\u0631",
         "btn.view": "\u0639\u0631\u0636",
+        "cert.algorithm": "\u0627\u0644\u062a\u0648\u0642\u064a\u0639",
+        "cert.derived.d": "\u064a\u064f\u0642\u0631\u0623 \u0645\u0646 \u0627\u0644\u0634\u0647\u0627\u062f\u0629 \u0628\u062f\u0644\u0627\u064b \u0645\u0646 \u0643\u062a\u0627\u0628\u062a\u0647 \u0628\u062c\u0627\u0646\u0628\u0647\u0627\u060c \u0644\u0630\u0627 \u0644\u0627 \u064a\u0645\u0643\u0646 \u0623\u0646 \u064a\u062a\u0639\u0627\u0631\u0636 \u0645\u0639 \u0627\u0644\u0634\u0647\u0627\u062f\u0629 \u0627\u0644\u062a\u064a \u064a\u0635\u0641\u0647\u0627.",
+        "cert.derived.t": "\u0645\u0634\u062a\u0642 \u0645\u0646 \u0627\u0644\u0634\u0647\u0627\u062f\u0629",
+        "cert.fingerprint": "\u0628\u0635\u0645\u0629 SHA-256",
+        "cert.issuer": "\u062c\u0647\u0629 \u0627\u0644\u0625\u0635\u062f\u0627\u0631",
+        "cert.key_algorithm": "\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0639\u0627\u0645",
+        "cert.not_after": "\u064a\u0646\u062a\u0647\u064a",
+        "cert.not_before": "\u0635\u0627\u0644\u062d \u0645\u0646",
+        "cert.sans": "\u0623\u0633\u0645\u0627\u0621 \u0628\u062f\u064a\u0644\u0629",
+        "cert.selfsigned": "\u0647\u0630\u0647 \u0627\u0644\u0634\u0647\u0627\u062f\u0629 \u0645\u0648\u0642\u0651\u0639\u0629 \u0630\u0627\u062a\u064a\u064b\u0627",
+        "cert.serial": "\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u062a\u0633\u0644\u0633\u0644\u064a",
+        "cert.subject": "\u0627\u0644\u0645\u0648\u0636\u0648\u0639",
+        "cert.unreadable": "\u0644\u0627 \u064a\u0633\u062a\u0637\u064a\u0639 SPM \u0642\u0631\u0627\u0621\u0629 \u0647\u0630\u0647 \u0627\u0644\u0634\u0647\u0627\u062f\u0629",
         "chip.online": "\u0645\u062a\u0635\u0644 \u00b7 \u0642\u0631\u0627\u0621\u0629 / \u0643\u062a\u0627\u0628\u0629",
         "confirm.delete_authenticator": "\u0647\u0644 \u062a\u062d\u0630\u0641 \u0623\u062f\u0627\u0629 \u0627\u0644\u0645\u0635\u0627\u062f\u0642\u0629 \u0647\u0630\u0647\u061f",
         "confirm.delete_backup": "\u0647\u0644 \u062a\u062d\u0630\u0641 \u0631\u0645\u0648\u0632 \u0627\u0644\u0646\u0633\u062e \u0627\u0644\u0627\u062d\u062a\u064a\u0627\u0637\u064a \u0647\u0630\u0647\u061f",
@@ -643,6 +695,8 @@ WEB_CATALOGUES = {
         "confirm.delete_passphrase": "\u0647\u0644 \u062a\u062d\u0630\u0641 \u0639\u0628\u0627\u0631\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0647\u0630\u0647\u061f",
         "confirm.delete_record": "\u062d\u0630\u0641 \u0647\u0630\u0627 \u0627\u0644\u0633\u062c\u0644\u061f",
         "confirm.restore_snapshot": "\u0647\u0644 \u062a\u0633\u062a\u0639\u064a\u062f \u0647\u0630\u0647 \u0627\u0644\u0646\u0633\u062e\u0629\u061f \u0633\u062a\u064f\u0624\u0631\u0634\u064e\u0641 \u0627\u0644\u062e\u0632\u0646\u0629 \u0627\u0644\u062d\u0627\u0644\u064a\u0629 \u0623\u0648\u0644\u064b\u0627.",
+        "confirm.trash_delete": "\u062d\u0630\u0641 \u0647\u0630\u0627 \u0627\u0644\u0639\u0646\u0635\u0631 \u0646\u0647\u0627\u0626\u064a\u064b\u0627\u061f \u0644\u0627 \u064a\u0645\u0643\u0646 \u0627\u0644\u062a\u0631\u0627\u062c\u0639 \u0639\u0646 \u0630\u0644\u0643.",
+        "confirm.trash_empty": "\u062d\u0630\u0641 \u0643\u0644 \u0645\u0627 \u0641\u064a \u0627\u0644\u0645\u0647\u0645\u0644\u0627\u062a \u0646\u0647\u0627\u0626\u064a\u064b\u0627\u061f \u0644\u0627 \u064a\u0645\u0643\u0646 \u0627\u0644\u062a\u0631\u0627\u062c\u0639 \u0639\u0646 \u0630\u0644\u0643.",
         "empty.auth.d": "\u0623\u0636\u0641 \u0633\u0631 TOTP \u0644\u062a\u0648\u0644\u064a\u062f \u0631\u0645\u0648\u0632 \u0627\u0644\u0645\u0635\u0627\u062f\u0642\u0629 \u0627\u0644\u062b\u0646\u0627\u0626\u064a\u0629.",
         "empty.auth.t": "\u0644\u0627 \u062a\u0648\u062c\u062f \u0623\u062f\u0648\u0627\u062a \u0645\u0635\u0627\u062f\u0642\u0629",
         "empty.backups.d": "\u0627\u062d\u0641\u0638 \u0647\u0646\u0627 \u0631\u0645\u0648\u0632 \u0627\u0644\u0627\u0633\u062a\u0631\u062f\u0627\u062f \u0630\u0627\u062a \u0627\u0644\u0627\u0633\u062a\u062e\u062f\u0627\u0645 \u0627\u0644\u0648\u0627\u062d\u062f \u0641\u064a \u0623\u0645\u0627\u0646.",
@@ -685,6 +739,14 @@ WEB_CATALOGUES = {
         "events.kind": "\u0627\u0644\u062d\u062f\u062b",
         "events.outcome": "\u0627\u0644\u0646\u062a\u064a\u062c\u0629",
         "events.when": "\u0627\u0644\u0648\u0642\u062a (UTC)",
+        "expiring.col.days": "\u0623\u064a\u0627\u0645",
+        "expiring.col.expires": "\u064a\u0646\u062a\u0647\u064a",
+        "expiring.empty.d": "\u0644\u0627 \u064a\u0648\u062c\u062f \u0633\u0631 \u0644\u0647 \u062a\u0627\u0631\u064a\u062e \u0627\u0646\u062a\u0647\u0627\u0621 \u062e\u0644\u0627\u0644 \u0627\u0644\u0623\u064a\u0627\u0645 \u0627\u0644\u062b\u0644\u0627\u062b\u064a\u0646 \u0627\u0644\u0642\u0627\u062f\u0645\u0629.",
+        "expiring.empty.t": "\u0644\u0627 \u0634\u064a\u0621 \u064a\u0646\u062a\u0647\u064a",
+        "expiring.status.expired": "\u0645\u0646\u062a\u0647\u064a\u0629",
+        "expiring.status.soon": "\u062a\u0646\u062a\u0647\u064a",
+        "expiring.summary.expired": "\u0645\u0646\u062a\u0647\u064a\u0629",
+        "expiring.summary.soon": "\u062a\u0646\u062a\u0647\u064a \u0642\u0631\u064a\u0628\u064b\u0627",
         "filters.clear": "\u0645\u0633\u062d \u0627\u0644\u062a\u0635\u0641\u064a\u0629",
         "filters.desc": "\u0636\u064a\u0651\u0642 \u0647\u0630\u0647 \u0627\u0644\u0642\u0627\u0626\u0645\u0629 \u062d\u0633\u0628 \u0627\u0644\u0645\u062c\u0644\u062f \u0623\u0648 \u0627\u0644\u0648\u0633\u0645. \u062a\u0628\u0642\u0649 \u0639\u0648\u0627\u0645\u0644 \u0627\u0644\u062a\u0635\u0641\u064a\u0629 \u0627\u0644\u0641\u0639\u0651\u0627\u0644\u0629 \u0641\u064a \u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u0635\u0641\u062d\u0629.",
         "filters.folders": "\u0627\u0644\u0645\u062c\u0644\u062f\u0627\u062a",
@@ -800,6 +862,7 @@ WEB_CATALOGUES = {
         "nav.collapse": "\u0637\u064a\u0651 \u0627\u0644\u0634\u0631\u064a\u0637 \u0627\u0644\u062c\u0627\u0646\u0628\u064a",
         "nav.events": "\u0623\u062d\u062f\u0627\u062b \u0627\u0644\u0623\u0645\u0627\u0646",
         "nav.expand": "\u062a\u0648\u0633\u064a\u0639 \u0627\u0644\u0634\u0631\u064a\u0637 \u0627\u0644\u062c\u0627\u0646\u0628\u064a",
+        "nav.expiring": "\u062a\u0646\u062a\u0647\u064a \u0642\u0631\u064a\u0628\u064b\u0627",
         "nav.generator": "\u0627\u0644\u0645\u0648\u0644\u0651\u062f",
         "nav.group.settings": "\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a",
         "nav.group.tools": "\u0623\u062f\u0648\u0627\u062a",
@@ -815,6 +878,7 @@ WEB_CATALOGUES = {
         "nav.security": "\u0627\u0644\u0623\u0645\u0627\u0646",
         "nav.settings": "\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a",
         "nav.transfer": "\u062a\u0635\u062f\u064a\u0631 / \u0627\u0633\u062a\u064a\u0631\u0627\u062f",
+        "nav.trash": "\u0627\u0644\u0645\u0647\u0645\u0644\u0627\u062a",
         "nav.unlock": "\u0641\u062a\u062d \u0627\u0644\u0642\u0641\u0644 \u0628\u0627\u0644\u0628\u0635\u0645\u0629",
         "note.field.content": "\u0627\u0644\u0645\u062d\u062a\u0648\u0649",
         "note.field.title": "\u0627\u0644\u0639\u0646\u0648\u0627\u0646",
@@ -849,6 +913,7 @@ WEB_CATALOGUES = {
         "record.field.address": "\u0627\u0644\u0639\u0646\u0648\u0627\u0646",
         "record.field.brand": "\u0646\u0648\u0639 \u0627\u0644\u0628\u0637\u0627\u0642\u0629",
         "record.field.cardholder": "\u062d\u0627\u0645\u0644 \u0627\u0644\u0628\u0637\u0627\u0642\u0629",
+        "record.field.certificate": "\u0634\u0647\u0627\u062f\u0629",
         "record.field.comment": "\u062a\u0639\u0644\u064a\u0642",
         "record.field.cvv": "\u0631\u0645\u0632 \u0627\u0644\u062a\u062d\u0642\u0642",
         "record.field.database": "\u0642\u0627\u0639\u062f\u0629 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a",
@@ -885,6 +950,7 @@ WEB_CATALOGUES = {
         "record.field.username": "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645",
         "record.field.version": "\u0627\u0644\u0625\u0635\u062f\u0627\u0631",
         "record.type.api-token": "\u0631\u0645\u0632 API",
+        "record.type.certificate": "\u0634\u0647\u0627\u062f\u0629",
         "record.type.credit-card": "\u0628\u0637\u0627\u0642\u0629 \u0627\u0626\u062a\u0645\u0627\u0646",
         "record.type.db-credential": "\u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0639\u062a\u0645\u0627\u062f \u0642\u0627\u0639\u062f\u0629 \u0628\u064a\u0627\u0646\u0627\u062a",
         "record.type.gpg-key": "\u0645\u0641\u062a\u0627\u062d GPG",
@@ -904,6 +970,8 @@ WEB_CATALOGUES = {
         "search.label": "\u0627\u0628\u062d\u062b \u0641\u064a \u0647\u0630\u0647 \u0627\u0644\u062e\u0632\u0646\u0629",
         "search.no_results": "\u0644\u0627 \u0634\u064a\u0621 \u064a\u0637\u0627\u0628\u0642 \u0628\u062d\u062b\u0643",
         "search.placeholder": "\u0627\u0628\u062d\u062b \u0641\u064a \u0647\u0630\u0647 \u0627\u0644\u062e\u0632\u0646\u0629...",
+        "search.save": "\u062d\u0641\u0638 \u0627\u0644\u0628\u062d\u062b",
+        "search.saved": "\u0639\u0645\u0644\u064a\u0627\u062a \u0627\u0644\u0628\u062d\u062b \u0627\u0644\u0645\u062d\u0641\u0648\u0638\u0629",
         "search.title": "\u0628\u062d\u062b",
         "section.authenticators": "\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0645\u0635\u0627\u062f\u0642\u0629 (TOTP)",
         "section.authenticators_desc": "\u0627\u062d\u0641\u0638 \u0623\u0633\u0631\u0627\u0631 \u0627\u0644\u0645\u0635\u0627\u062f\u0642\u0629 \u0627\u0644\u062b\u0646\u0627\u0626\u064a\u0629 \u0648\u0627\u0639\u0631\u0636 \u0627\u0644\u0631\u0645\u0648\u0632 \u0627\u0644\u062d\u064a\u0629.",
@@ -1008,10 +1076,13 @@ WEB_CATALOGUES = {
         "table.algo": "\u0627\u0644\u062e\u0648\u0627\u0631\u0632\u0645\u064a\u0629",
         "table.every": "\u0643\u0644",
         "table.id": "\u0627\u0644\u0645\u0639\u0631\u0651\u0641",
+        "table.item": "\u0627\u0644\u0639\u0646\u0635\u0631",
         "table.label": "\u0627\u0644\u062a\u0633\u0645\u064a\u0629",
         "table.name": "\u0627\u0644\u0627\u0633\u0645",
         "table.service": "\u0627\u0644\u062e\u062f\u0645\u0629",
+        "table.status": "\u0627\u0644\u062d\u0627\u0644\u0629",
         "table.title": "\u0627\u0644\u0639\u0646\u0648\u0627\u0646",
+        "table.type": "\u0627\u0644\u0646\u0648\u0639",
         "table.username": "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645",
         "tags.all": "\u0627\u0644\u0643\u0644",
         "tidy.apply": "\u0637\u0628\u0651\u0642 \u0639\u0644\u0649 \u0627\u0644\u0645\u062d\u062f\u062f",
@@ -1034,6 +1105,13 @@ WEB_CATALOGUES = {
         "tidy.title": "\u062a\u0631\u062a\u064a\u0628 \u0627\u0644\u0645\u062f\u062e\u0644\u0627\u062a \u0627\u0644\u0645\u0633\u062a\u0648\u0631\u062f\u0629",
         "toast.copy_fail": "\u062a\u0639\u0630\u0651\u0631 \u0627\u0644\u0646\u0633\u062e.",
         "toast.copy_success": "\u0646\u064f\u0633\u062e \u0625\u0644\u0649 \u0627\u0644\u062d\u0627\u0641\u0638\u0629.",
+        "trash.delete_forever": "\u062d\u0630\u0641 \u0646\u0647\u0627\u0626\u064a",
+        "trash.deleted": "\u062d\u064f\u0630\u0641",
+        "trash.empty": "\u0625\u0641\u0631\u0627\u063a \u0627\u0644\u0645\u0647\u0645\u0644\u0627\u062a",
+        "trash.empty.d": "\u062a\u0628\u0642\u0649 \u0643\u0644\u0645\u0627\u062a \u0627\u0644\u0645\u0631\u0648\u0631 \u0648\u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0627\u0644\u0645\u062d\u0630\u0648\u0641\u0629 \u0647\u0646\u0627 \u062d\u062a\u0649 \u062a\u0633\u062a\u0639\u064a\u062f\u0647\u0627 \u0623\u0648 \u062a\u062d\u0630\u0641\u0647\u0627 \u0646\u0647\u0627\u0626\u064a\u064b\u0627.",
+        "trash.empty.t": "\u0627\u0644\u0645\u0647\u0645\u0644\u0627\u062a \u0641\u0627\u0631\u063a\u0629",
+        "trash.restore": "\u0627\u0633\u062a\u0639\u0627\u062f\u0629",
+        "trash.sub": "\u062a\u064f\u062d\u0641\u0638 \u0627\u0644\u0639\u0646\u0627\u0635\u0631 \u0627\u0644\u0645\u062d\u0630\u0648\u0641\u0629 \u0647\u0646\u0627 \u062d\u062a\u0649 \u064a\u0645\u0643\u0646 \u0627\u0644\u062a\u0631\u0627\u062c\u0639 \u0639\u0646 \u0627\u0644\u062d\u0630\u0641.",
         "unlock.btn": "\u0627\u0641\u062a\u062d \u0627\u0644\u0642\u0641\u0644 \u0628\u0627\u0644\u0628\u0635\u0645\u0629",
         "unlock.empty": "\u0644\u0645 \u064a\u064f\u0633\u062c\u064e\u0651\u0644 \u0623\u064a \u062c\u0647\u0627\u0632 \u0628\u0639\u062f",
         "unlock.empty_sub": "\u0633\u062c\u0651\u0644 \u062c\u0647\u0627\u0632\u064b\u0627 \u0641\u064a \u0627\u0644\u0623\u0633\u0641\u0644\u060c \u0623\u0648 \u0648\u0627\u0635\u0644 \u0627\u0633\u062a\u062e\u062f\u0627\u0645 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629",
@@ -1108,6 +1186,19 @@ WEB_CATALOGUES = {
         "btn.restore": "Wiederherstellen",
         "btn.show": "Anzeigen",
         "btn.view": "Ansehen",
+        "cert.algorithm": "Signatur",
+        "cert.derived.d": "Aus dem Zertifikat gelesen statt daneben eingetippt, sodass es nicht vom beschriebenen Zertifikat abweichen kann.",
+        "cert.derived.t": "Aus dem Zertifikat abgeleitet",
+        "cert.fingerprint": "SHA-256-Fingerabdruck",
+        "cert.issuer": "Aussteller",
+        "cert.key_algorithm": "\u00d6ffentlicher Schl\u00fcssel",
+        "cert.not_after": "L\u00e4uft ab",
+        "cert.not_before": "G\u00fcltig ab",
+        "cert.sans": "Alternative Namen",
+        "cert.selfsigned": "Dieses Zertifikat ist selbstsigniert",
+        "cert.serial": "Seriennummer",
+        "cert.subject": "Betreff",
+        "cert.unreadable": "SPM kann dieses Zertifikat nicht lesen",
         "chip.online": "Online \u00b7 Lesen / Schreiben",
         "confirm.delete_authenticator": "Diesen Authentifikator l\u00f6schen?",
         "confirm.delete_backup": "Diese Backup-Codes l\u00f6schen?",
@@ -1115,6 +1206,8 @@ WEB_CATALOGUES = {
         "confirm.delete_passphrase": "Diese Passphrase l\u00f6schen?",
         "confirm.delete_record": "Diesen Datensatz l\u00f6schen?",
         "confirm.restore_snapshot": "Diese Sicherung wiederherstellen? Der aktuelle Tresor wird vorher archiviert.",
+        "confirm.trash_delete": "Dieses Element endg\u00fcltig l\u00f6schen? Dies kann nicht r\u00fcckg\u00e4ngig gemacht werden.",
+        "confirm.trash_empty": "Alles im Papierkorb endg\u00fcltig l\u00f6schen? Dies kann nicht r\u00fcckg\u00e4ngig gemacht werden.",
         "empty.auth.d": "F\u00fcge ein TOTP-Geheimnis hinzu, um 2FA-Codes zu erzeugen.",
         "empty.auth.t": "Keine Authentifikatoren",
         "empty.backups.d": "Bewahre hier einmalige Wiederherstellungscodes sicher auf.",
@@ -1157,6 +1250,14 @@ WEB_CATALOGUES = {
         "events.kind": "Ereignis",
         "events.outcome": "Ergebnis",
         "events.when": "Wann (UTC)",
+        "expiring.col.days": "Tage",
+        "expiring.col.expires": "L\u00e4uft ab",
+        "expiring.empty.d": "Kein Geheimnis mit Ablaufdatum ist in den n\u00e4chsten 30 Tagen f\u00e4llig.",
+        "expiring.empty.t": "Nichts l\u00e4uft ab",
+        "expiring.status.expired": "Abgelaufen",
+        "expiring.status.soon": "L\u00e4uft ab",
+        "expiring.summary.expired": "Abgelaufen",
+        "expiring.summary.soon": "L\u00e4uft bald ab",
         "filters.clear": "Filter zur\u00fccksetzen",
         "filters.desc": "Grenze diese Liste nach Ordner oder Schlagwort ein. Aktive Filter bleiben in der Seitenadresse erhalten.",
         "filters.folders": "Ordner",
@@ -1272,6 +1373,7 @@ WEB_CATALOGUES = {
         "nav.collapse": "Seitenleiste einklappen",
         "nav.events": "Sicherheitsereignisse",
         "nav.expand": "Seitenleiste ausklappen",
+        "nav.expiring": "Ablaufend",
         "nav.generator": "Generator",
         "nav.group.settings": "Einstellungen",
         "nav.group.tools": "Werkzeuge",
@@ -1287,6 +1389,7 @@ WEB_CATALOGUES = {
         "nav.security": "Sicherheit",
         "nav.settings": "Einstellungen",
         "nav.transfer": "Exportieren / Importieren",
+        "nav.trash": "Papierkorb",
         "nav.unlock": "Biometrisches Entsperren",
         "note.field.content": "Inhalt",
         "note.field.title": "Titel",
@@ -1321,6 +1424,7 @@ WEB_CATALOGUES = {
         "record.field.address": "Adresse",
         "record.field.brand": "Kartenanbieter",
         "record.field.cardholder": "Karteninhaber",
+        "record.field.certificate": "Zertifikat",
         "record.field.comment": "Kommentar",
         "record.field.cvv": "Pr\u00fcfnummer",
         "record.field.database": "Datenbank",
@@ -1357,6 +1461,7 @@ WEB_CATALOGUES = {
         "record.field.username": "Benutzername",
         "record.field.version": "Version",
         "record.type.api-token": "API-Token",
+        "record.type.certificate": "Zertifikat",
         "record.type.credit-card": "Kreditkarte",
         "record.type.db-credential": "Datenbank-Zugang",
         "record.type.gpg-key": "GPG-Schl\u00fcssel",
@@ -1376,6 +1481,8 @@ WEB_CATALOGUES = {
         "search.label": "Diesen Tresor durchsuchen",
         "search.no_results": "Nichts passt zu deiner Suche",
         "search.placeholder": "Diesen Tresor durchsuchen...",
+        "search.save": "Suche speichern",
+        "search.saved": "Gespeicherte Suchen",
         "search.title": "Suchen",
         "section.authenticators": "Authentifikatoren (TOTP)",
         "section.authenticators_desc": "Bewahre 2FA-Geheimnisse auf und sieh laufende Codes.",
@@ -1480,10 +1587,13 @@ WEB_CATALOGUES = {
         "table.algo": "Algo",
         "table.every": "Alle",
         "table.id": "ID",
+        "table.item": "Element",
         "table.label": "Bezeichnung",
         "table.name": "Name",
         "table.service": "Dienst",
+        "table.status": "Status",
         "table.title": "Titel",
+        "table.type": "Typ",
         "table.username": "Benutzername",
         "tags.all": "Alle",
         "tidy.apply": "Auf Auswahl anwenden",
@@ -1506,6 +1616,13 @@ WEB_CATALOGUES = {
         "tidy.title": "Importierte Eintr\u00e4ge aufr\u00e4umen",
         "toast.copy_fail": "Kopieren fehlgeschlagen.",
         "toast.copy_success": "In die Zwischenablage kopiert.",
+        "trash.delete_forever": "Endg\u00fcltig l\u00f6schen",
+        "trash.deleted": "Gel\u00f6scht",
+        "trash.empty": "Papierkorb leeren",
+        "trash.empty.d": "Gel\u00f6schte Passw\u00f6rter und Datens\u00e4tze bleiben hier, bis Sie sie wiederherstellen oder endg\u00fcltig l\u00f6schen.",
+        "trash.empty.t": "Der Papierkorb ist leer",
+        "trash.restore": "Wiederherstellen",
+        "trash.sub": "Gel\u00f6schte Eintr\u00e4ge bleiben hier, damit ein L\u00f6schen r\u00fcckg\u00e4ngig gemacht werden kann.",
         "unlock.btn": "Biometrisch entsperren",
         "unlock.empty": "Noch kein Ger\u00e4t registriert",
         "unlock.empty_sub": "Registriere unten eines, oder benutze weiterhin dein Hauptpasswort",
@@ -1580,6 +1697,19 @@ WEB_CATALOGUES = {
         "btn.restore": "Restaurar",
         "btn.show": "Mostrar",
         "btn.view": "Ver",
+        "cert.algorithm": "Firma",
+        "cert.derived.d": "Se lee del certificado en lugar de escribirse junto a \u00e9l, por lo que no puede contradecir al certificado que describe.",
+        "cert.derived.t": "Derivado del certificado",
+        "cert.fingerprint": "Huella SHA-256",
+        "cert.issuer": "Emisor",
+        "cert.key_algorithm": "Clave p\u00fablica",
+        "cert.not_after": "Caduca",
+        "cert.not_before": "V\u00e1lido desde",
+        "cert.sans": "Nombres alternativos",
+        "cert.selfsigned": "Este certificado es autofirmado",
+        "cert.serial": "N\u00famero de serie",
+        "cert.subject": "Sujeto",
+        "cert.unreadable": "SPM no puede leer este certificado",
         "chip.online": "En l\u00ednea \u00b7 lectura / escritura",
         "confirm.delete_authenticator": "\u00bfEliminar este autenticador?",
         "confirm.delete_backup": "\u00bfEliminar estos c\u00f3digos de respaldo?",
@@ -1587,6 +1717,8 @@ WEB_CATALOGUES = {
         "confirm.delete_passphrase": "\u00bfEliminar esta frase de contrase\u00f1a?",
         "confirm.delete_record": "\u00bfEliminar este registro?",
         "confirm.restore_snapshot": "\u00bfRestaurar esta copia? La caja fuerte actual se archiva antes.",
+        "confirm.trash_delete": "\u00bfEliminar este elemento para siempre? No se puede deshacer.",
+        "confirm.trash_empty": "\u00bfEliminar para siempre todo lo que hay en la papelera? No se puede deshacer.",
         "empty.auth.d": "A\u00f1ade un secreto TOTP para generar c\u00f3digos de 2FA.",
         "empty.auth.t": "No hay autenticadores",
         "empty.backups.d": "Guarda aqu\u00ed a buen recaudo los c\u00f3digos de recuperaci\u00f3n de un solo uso.",
@@ -1629,6 +1761,14 @@ WEB_CATALOGUES = {
         "events.kind": "Evento",
         "events.outcome": "Resultado",
         "events.when": "Cu\u00e1ndo (UTC)",
+        "expiring.col.days": "D\u00edas",
+        "expiring.col.expires": "Caduca",
+        "expiring.empty.d": "Ning\u00fan secreto con fecha de caducidad vence en los pr\u00f3ximos 30 d\u00edas.",
+        "expiring.empty.t": "Nada est\u00e1 caducando",
+        "expiring.status.expired": "Caducado",
+        "expiring.status.soon": "Caducando",
+        "expiring.summary.expired": "Caducado",
+        "expiring.summary.soon": "Caduca pronto",
         "filters.clear": "Quitar filtros",
         "filters.desc": "Filtra esta lista por carpeta o etiqueta. Los filtros activos se conservan en la direcci\u00f3n de la p\u00e1gina.",
         "filters.folders": "Carpetas",
@@ -1744,6 +1884,7 @@ WEB_CATALOGUES = {
         "nav.collapse": "Contraer la barra lateral",
         "nav.events": "Eventos de seguridad",
         "nav.expand": "Expandir la barra lateral",
+        "nav.expiring": "Caducando",
         "nav.generator": "Generador",
         "nav.group.settings": "Ajustes",
         "nav.group.tools": "Herramientas",
@@ -1759,6 +1900,7 @@ WEB_CATALOGUES = {
         "nav.security": "Seguridad",
         "nav.settings": "Ajustes",
         "nav.transfer": "Exportar / Importar",
+        "nav.trash": "Papelera",
         "nav.unlock": "Desbloqueo biom\u00e9trico",
         "note.field.content": "Contenido",
         "note.field.title": "T\u00edtulo",
@@ -1793,6 +1935,7 @@ WEB_CATALOGUES = {
         "record.field.address": "Direcci\u00f3n",
         "record.field.brand": "Marca",
         "record.field.cardholder": "Titular",
+        "record.field.certificate": "Certificado",
         "record.field.comment": "Comentario",
         "record.field.cvv": "CVV",
         "record.field.database": "Base de datos",
@@ -1829,6 +1972,7 @@ WEB_CATALOGUES = {
         "record.field.username": "Usuario",
         "record.field.version": "Versi\u00f3n",
         "record.type.api-token": "Token de API",
+        "record.type.certificate": "Certificado",
         "record.type.credit-card": "Tarjeta de cr\u00e9dito",
         "record.type.db-credential": "Credencial de base de datos",
         "record.type.gpg-key": "Clave GPG",
@@ -1848,6 +1992,8 @@ WEB_CATALOGUES = {
         "search.label": "Buscar en esta caja fuerte",
         "search.no_results": "Nada coincide con tu b\u00fasqueda",
         "search.placeholder": "Buscar en esta caja fuerte...",
+        "search.save": "Guardar b\u00fasqueda",
+        "search.saved": "B\u00fasquedas guardadas",
         "search.title": "Buscar",
         "section.authenticators": "Autenticadores (TOTP)",
         "section.authenticators_desc": "Guarda secretos de 2FA y consulta c\u00f3digos en vivo.",
@@ -1952,10 +2098,13 @@ WEB_CATALOGUES = {
         "table.algo": "Algoritmo",
         "table.every": "Cada",
         "table.id": "ID",
+        "table.item": "Elemento",
         "table.label": "Etiqueta",
         "table.name": "Nombre",
         "table.service": "Servicio",
+        "table.status": "Estado",
         "table.title": "T\u00edtulo",
+        "table.type": "Tipo",
         "table.username": "Usuario",
         "tags.all": "Todas",
         "tidy.apply": "Aplicar a lo seleccionado",
@@ -1978,6 +2127,13 @@ WEB_CATALOGUES = {
         "tidy.title": "Ordenar las entradas importadas",
         "toast.copy_fail": "No se ha podido copiar.",
         "toast.copy_success": "Copiado al portapapeles.",
+        "trash.delete_forever": "Eliminar para siempre",
+        "trash.deleted": "Eliminado",
+        "trash.empty": "Vaciar papelera",
+        "trash.empty.d": "Las contrase\u00f1as y registros eliminados permanecen aqu\u00ed hasta que los restaure o los elimine definitivamente.",
+        "trash.empty.t": "La papelera est\u00e1 vac\u00eda",
+        "trash.restore": "Restaurar",
+        "trash.sub": "Los elementos eliminados se guardan aqu\u00ed para poder deshacer una eliminaci\u00f3n.",
         "unlock.btn": "Desbloquear con biometr\u00eda",
         "unlock.empty": "A\u00fan no hay ning\u00fan dispositivo registrado",
         "unlock.empty_sub": "Registra uno abajo, o sigue usando tu contrase\u00f1a maestra",
@@ -2052,6 +2208,19 @@ WEB_CATALOGUES = {
         "btn.restore": "Restaurer",
         "btn.show": "Afficher",
         "btn.view": "Consulter",
+        "cert.algorithm": "Signature",
+        "cert.derived.d": "Lu depuis le certificat au lieu d'\u00eatre saisi \u00e0 c\u00f4t\u00e9, il ne peut donc pas contredire le certificat qu'il d\u00e9crit.",
+        "cert.derived.t": "D\u00e9riv\u00e9 du certificat",
+        "cert.fingerprint": "Empreinte SHA-256",
+        "cert.issuer": "\u00c9metteur",
+        "cert.key_algorithm": "Cl\u00e9 publique",
+        "cert.not_after": "Expire",
+        "cert.not_before": "Valide \u00e0 partir de",
+        "cert.sans": "Autres noms",
+        "cert.selfsigned": "Ce certificat est auto-sign\u00e9",
+        "cert.serial": "Num\u00e9ro de s\u00e9rie",
+        "cert.subject": "Sujet",
+        "cert.unreadable": "SPM ne peut pas lire ce certificat",
         "chip.online": "En ligne \u00b7 lecture / \u00e9criture",
         "confirm.delete_authenticator": "Supprimer cet authentificateur ?",
         "confirm.delete_backup": "Supprimer ces codes de secours ?",
@@ -2059,6 +2228,8 @@ WEB_CATALOGUES = {
         "confirm.delete_passphrase": "Supprimer cette phrase secr\u00e8te ?",
         "confirm.delete_record": "Supprimer cette fiche ?",
         "confirm.restore_snapshot": "Restaurer cet instantan\u00e9 ? Le coffre actuel est archiv\u00e9 au pr\u00e9alable.",
+        "confirm.trash_delete": "Supprimer d\u00e9finitivement cet \u00e9l\u00e9ment ? Cette action est irr\u00e9versible.",
+        "confirm.trash_empty": "Supprimer d\u00e9finitivement tout le contenu de la corbeille ? Cette action est irr\u00e9versible.",
         "empty.auth.d": "Ajoutez un secret TOTP pour g\u00e9n\u00e9rer des codes 2FA.",
         "empty.auth.t": "Aucun authentificateur",
         "empty.backups.d": "Gardez ici vos codes de r\u00e9cup\u00e9ration \u00e0 usage unique.",
@@ -2101,6 +2272,14 @@ WEB_CATALOGUES = {
         "events.kind": "\u00c9v\u00e9nement",
         "events.outcome": "R\u00e9sultat",
         "events.when": "Quand (UTC)",
+        "expiring.col.days": "Jours",
+        "expiring.col.expires": "Expire",
+        "expiring.empty.d": "Aucun secret avec une date d'expiration n'arrive \u00e0 \u00e9ch\u00e9ance dans les 30 prochains jours.",
+        "expiring.empty.t": "Rien n'expire",
+        "expiring.status.expired": "Expir\u00e9",
+        "expiring.status.soon": "Expiration",
+        "expiring.summary.expired": "Expir\u00e9",
+        "expiring.summary.soon": "Expire bient\u00f4t",
         "filters.clear": "Effacer les filtres",
         "filters.desc": "Restreignez cette liste par dossier ou par \u00e9tiquette. Les filtres actifs restent dans l'adresse de la page.",
         "filters.folders": "Dossiers",
@@ -2216,6 +2395,7 @@ WEB_CATALOGUES = {
         "nav.collapse": "R\u00e9duire la barre lat\u00e9rale",
         "nav.events": "\u00c9v\u00e9nements de s\u00e9curit\u00e9",
         "nav.expand": "D\u00e9ployer la barre lat\u00e9rale",
+        "nav.expiring": "Expiration",
         "nav.generator": "G\u00e9n\u00e9rateur",
         "nav.group.settings": "Param\u00e8tres",
         "nav.group.tools": "Outils",
@@ -2231,6 +2411,7 @@ WEB_CATALOGUES = {
         "nav.security": "S\u00e9curit\u00e9",
         "nav.settings": "Param\u00e8tres",
         "nav.transfer": "Exporter / Importer",
+        "nav.trash": "Corbeille",
         "nav.unlock": "D\u00e9verrouillage biom\u00e9trique",
         "note.field.content": "Contenu",
         "note.field.title": "Titre",
@@ -2265,6 +2446,7 @@ WEB_CATALOGUES = {
         "record.field.address": "Adresse",
         "record.field.brand": "Marque",
         "record.field.cardholder": "Titulaire",
+        "record.field.certificate": "Certificat",
         "record.field.comment": "Commentaire",
         "record.field.cvv": "Cryptogramme",
         "record.field.database": "Base de donn\u00e9es",
@@ -2301,6 +2483,7 @@ WEB_CATALOGUES = {
         "record.field.username": "Nom d'utilisateur",
         "record.field.version": "Version",
         "record.type.api-token": "Jeton d'API",
+        "record.type.certificate": "Certificat",
         "record.type.credit-card": "Carte bancaire",
         "record.type.db-credential": "Identifiant de base de donn\u00e9es",
         "record.type.gpg-key": "Cl\u00e9 GPG",
@@ -2320,6 +2503,8 @@ WEB_CATALOGUES = {
         "search.label": "Rechercher dans ce coffre",
         "search.no_results": "Aucun r\u00e9sultat pour votre recherche",
         "search.placeholder": "Rechercher dans ce coffre...",
+        "search.save": "Enregistrer la recherche",
+        "search.saved": "Recherches enregistr\u00e9es",
         "search.title": "Rechercher",
         "section.authenticators": "Authentificateurs (TOTP)",
         "section.authenticators_desc": "Conservez des secrets 2FA et consultez les codes en direct.",
@@ -2424,10 +2609,13 @@ WEB_CATALOGUES = {
         "table.algo": "Algo",
         "table.every": "Toutes les",
         "table.id": "ID",
+        "table.item": "\u00c9l\u00e9ment",
         "table.label": "Libell\u00e9",
         "table.name": "Nom",
         "table.service": "Service",
+        "table.status": "Statut",
         "table.title": "Titre",
+        "table.type": "Type",
         "table.username": "Identifiant",
         "tags.all": "Toutes",
         "tidy.apply": "Appliquer \u00e0 la s\u00e9lection",
@@ -2450,6 +2638,13 @@ WEB_CATALOGUES = {
         "tidy.title": "Ranger les fiches import\u00e9es",
         "toast.copy_fail": "La copie a \u00e9chou\u00e9.",
         "toast.copy_success": "Copi\u00e9 dans le presse-papiers.",
+        "trash.delete_forever": "Supprimer d\u00e9finitivement",
+        "trash.deleted": "Supprim\u00e9",
+        "trash.empty": "Vider la corbeille",
+        "trash.empty.d": "Les mots de passe et enregistrements supprim\u00e9s restent ici jusqu'\u00e0 ce que vous les restauriez ou les supprimiez d\u00e9finitivement.",
+        "trash.empty.t": "La corbeille est vide",
+        "trash.restore": "Restaurer",
+        "trash.sub": "Les \u00e9l\u00e9ments supprim\u00e9s sont conserv\u00e9s ici pour pouvoir annuler une suppression.",
         "unlock.btn": "D\u00e9verrouiller par biom\u00e9trie",
         "unlock.empty": "Aucun appareil enregistr\u00e9 pour l'instant",
         "unlock.empty_sub": "Enregistrez-en un ci-dessous, ou continuez avec votre mot de passe ma\u00eetre",
@@ -2524,6 +2719,19 @@ WEB_CATALOGUES = {
         "btn.restore": "\u092a\u0941\u0928\u0930\u094d\u0938\u094d\u0925\u093e\u092a\u093f\u0924 \u0915\u0930\u0947\u0902",
         "btn.show": "\u0926\u093f\u0916\u093e\u090f\u0901",
         "btn.view": "\u0926\u0947\u0916\u0947\u0902",
+        "cert.algorithm": "\u0939\u0938\u094d\u0924\u093e\u0915\u094d\u0937\u0930",
+        "cert.derived.d": "\u0907\u0938\u0947 \u092c\u0917\u0932 \u092e\u0947\u0902 \u091f\u093e\u0907\u092a \u0915\u0930\u0928\u0947 \u0915\u0947 \u092c\u091c\u093e\u092f \u092a\u094d\u0930\u092e\u093e\u0923\u092a\u0924\u094d\u0930 \u0938\u0947 \u092a\u0922\u093c\u093e \u091c\u093e\u0924\u093e \u0939\u0948, \u0907\u0938\u0932\u093f\u090f \u092f\u0939 \u0935\u0930\u094d\u0923\u093f\u0924 \u092a\u094d\u0930\u092e\u093e\u0923\u092a\u0924\u094d\u0930 \u0938\u0947 \u0905\u0938\u0939\u092e\u0924 \u0928\u0939\u0940\u0902 \u0939\u094b \u0938\u0915\u0924\u093e\u0964",
+        "cert.derived.t": "\u092a\u094d\u0930\u092e\u093e\u0923\u092a\u0924\u094d\u0930 \u0938\u0947 \u0935\u094d\u092f\u0941\u0924\u094d\u092a\u0928\u094d\u0928",
+        "cert.fingerprint": "SHA-256 \u092b\u093c\u093f\u0902\u0917\u0930\u092a\u094d\u0930\u093f\u0902\u091f",
+        "cert.issuer": "\u091c\u093e\u0930\u0940\u0915\u0930\u094d\u0924\u093e",
+        "cert.key_algorithm": "\u0938\u093e\u0930\u094d\u0935\u091c\u0928\u093f\u0915 \u0915\u0941\u0902\u091c\u0940",
+        "cert.not_after": "\u0938\u092e\u093e\u092a\u094d\u0924 \u0939\u094b\u0924\u093e \u0939\u0948",
+        "cert.not_before": "\u0907\u0938\u0938\u0947 \u092e\u093e\u0928\u094d\u092f",
+        "cert.sans": "\u0935\u0948\u0915\u0932\u094d\u092a\u093f\u0915 \u0928\u093e\u092e",
+        "cert.selfsigned": "\u092f\u0939 \u092a\u094d\u0930\u092e\u093e\u0923\u092a\u0924\u094d\u0930 \u0938\u094d\u0935-\u0939\u0938\u094d\u0924\u093e\u0915\u094d\u0937\u0930\u093f\u0924 \u0939\u0948",
+        "cert.serial": "\u0938\u0940\u0930\u093f\u092f\u0932",
+        "cert.subject": "\u0935\u093f\u0937\u092f",
+        "cert.unreadable": "SPM \u092f\u0939 \u092a\u094d\u0930\u092e\u093e\u0923\u092a\u0924\u094d\u0930 \u0928\u0939\u0940\u0902 \u092a\u0922\u093c \u0938\u0915\u0924\u093e",
         "chip.online": "\u0911\u0928\u0932\u093e\u0907\u0928 \u00b7 \u092a\u0922\u093c\u0928\u093e / \u0932\u093f\u0916\u0928\u093e",
         "confirm.delete_authenticator": "\u092f\u0939 \u092a\u094d\u0930\u092e\u093e\u0923\u0915 \u092e\u093f\u091f\u093e\u090f\u0901?",
         "confirm.delete_backup": "\u092f\u0947 \u092c\u0948\u0915\u0905\u092a \u0915\u094b\u0921 \u092e\u093f\u091f\u093e\u090f\u0901?",
@@ -2531,6 +2739,8 @@ WEB_CATALOGUES = {
         "confirm.delete_passphrase": "\u092f\u0939 \u092a\u093e\u0938\u092b\u093c\u094d\u0930\u0947\u091c\u093c \u092e\u093f\u091f\u093e\u090f\u0901?",
         "confirm.delete_record": "\u092f\u0939 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0939\u091f\u093e\u090f\u0901?",
         "confirm.restore_snapshot": "\u092f\u0939 \u0938\u094d\u0928\u0948\u092a\u0936\u0949\u091f \u092a\u0941\u0928\u0930\u094d\u0938\u094d\u0925\u093e\u092a\u093f\u0924 \u0915\u0930\u0947\u0902? \u092e\u094c\u091c\u0942\u0926\u093e \u0924\u093f\u091c\u094b\u0930\u0940 \u092a\u0939\u0932\u0947 \u0938\u0902\u0917\u094d\u0930\u0939 \u0915\u0930 \u0932\u0940 \u091c\u093e\u090f\u0917\u0940\u0964",
+        "confirm.trash_delete": "\u0907\u0938 \u0906\u0907\u091f\u092e \u0915\u094b \u0939\u092e\u0947\u0936\u093e \u0915\u0947 \u0932\u093f\u090f \u0939\u091f\u093e\u090f\u0901? \u0907\u0938\u0947 \u092a\u0942\u0930\u094d\u0935\u0935\u0924 \u0928\u0939\u0940\u0902 \u0915\u093f\u092f\u093e \u091c\u093e \u0938\u0915\u0924\u093e\u0964",
+        "confirm.trash_empty": "\u0915\u091a\u0930\u0947 \u092e\u0947\u0902 \u0938\u092c \u0915\u0941\u091b \u0939\u092e\u0947\u0936\u093e \u0915\u0947 \u0932\u093f\u090f \u0939\u091f\u093e\u090f\u0901? \u0907\u0938\u0947 \u092a\u0942\u0930\u094d\u0935\u0935\u0924 \u0928\u0939\u0940\u0902 \u0915\u093f\u092f\u093e \u091c\u093e \u0938\u0915\u0924\u093e\u0964",
         "empty.auth.d": "\u0926\u094b-\u091a\u0930\u0923\u0940\u092f \u0915\u094b\u0921 \u092c\u0928\u093e\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u0915\u094b\u0908 TOTP \u0917\u094b\u092a\u0928\u0940\u092f \u092e\u093e\u0928 \u091c\u094b\u0921\u093c\u0947\u0902\u0964",
         "empty.auth.t": "\u0915\u094b\u0908 \u092a\u094d\u0930\u092e\u093e\u0923\u0915 \u0928\u0939\u0940\u0902",
         "empty.backups.d": "\u090f\u0915 \u092c\u093e\u0930 \u0915\u093e\u092e \u0906\u0928\u0947 \u0935\u093e\u0932\u0947 \u0930\u093f\u0915\u0935\u0930\u0940 \u0915\u094b\u0921 \u092f\u0939\u093e\u0901 \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0930\u0916\u0947\u0902\u0964",
@@ -2573,6 +2783,14 @@ WEB_CATALOGUES = {
         "events.kind": "\u0918\u091f\u0928\u093e",
         "events.outcome": "\u092a\u0930\u093f\u0923\u093e\u092e",
         "events.when": "\u0915\u092c (UTC)",
+        "expiring.col.days": "\u0926\u093f\u0928",
+        "expiring.col.expires": "\u0938\u092e\u093e\u092a\u094d\u0924\u093f",
+        "expiring.empty.d": "\u0905\u0917\u0932\u0947 30 \u0926\u093f\u0928\u094b\u0902 \u092e\u0947\u0902 \u0938\u092e\u093e\u092a\u094d\u0924\u093f \u0924\u093f\u0925\u093f \u0935\u093e\u0932\u093e \u0915\u094b\u0908 \u092d\u0940 \u0930\u0939\u0938\u094d\u092f \u0926\u0947\u092f \u0928\u0939\u0940\u0902 \u0939\u0948\u0964",
+        "expiring.empty.t": "\u0915\u0941\u091b \u092d\u0940 \u0938\u092e\u093e\u092a\u094d\u0924 \u0928\u0939\u0940\u0902 \u0939\u094b \u0930\u0939\u093e",
+        "expiring.status.expired": "\u0938\u092e\u093e\u092a\u094d\u0924",
+        "expiring.status.soon": "\u0938\u092e\u093e\u092a\u094d\u0924\u093f",
+        "expiring.summary.expired": "\u0938\u092e\u093e\u092a\u094d\u0924",
+        "expiring.summary.soon": "\u091c\u0932\u094d\u0926 \u0938\u092e\u093e\u092a\u094d\u0924",
         "filters.clear": "\u091b\u0901\u091f\u093e\u0908 \u0939\u091f\u093e\u090f\u0901",
         "filters.desc": "\u0907\u0938 \u0938\u0942\u091a\u0940 \u0915\u094b \u092b\u093c\u094b\u0932\u094d\u0921\u0930 \u092f\u093e \u091f\u0948\u0917 \u0938\u0947 \u091b\u093e\u0901\u091f\u0947\u0902\u0964 \u0932\u093e\u0917\u0942 \u091b\u0901\u091f\u093e\u0908 \u092a\u0947\u091c \u0915\u0947 \u092a\u0924\u0947 \u092e\u0947\u0902 \u092c\u0928\u0940 \u0930\u0939\u0924\u0940 \u0939\u0948\u0964",
         "filters.folders": "\u092b\u093c\u094b\u0932\u094d\u0921\u0930",
@@ -2688,6 +2906,7 @@ WEB_CATALOGUES = {
         "nav.collapse": "\u0938\u093e\u0907\u0921\u092c\u093e\u0930 \u0938\u092e\u0947\u091f\u0947\u0902",
         "nav.events": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0918\u091f\u0928\u093e\u090f\u0901",
         "nav.expand": "\u0938\u093e\u0907\u0921\u092c\u093e\u0930 \u092b\u0948\u0932\u093e\u090f\u0901",
+        "nav.expiring": "\u0938\u092e\u093e\u092a\u094d\u0924\u093f",
         "nav.generator": "\u091c\u0928\u0930\u0947\u091f\u0930",
         "nav.group.settings": "\u0938\u0947\u091f\u093f\u0902\u0917",
         "nav.group.tools": "\u0909\u092a\u0915\u0930\u0923",
@@ -2703,6 +2922,7 @@ WEB_CATALOGUES = {
         "nav.security": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e",
         "nav.settings": "\u0938\u0947\u091f\u093f\u0902\u0917",
         "nav.transfer": "\u0928\u093f\u0930\u094d\u092f\u093e\u0924 / \u0906\u092f\u093e\u0924",
+        "nav.trash": "\u0915\u091a\u0930\u093e",
         "nav.unlock": "\u092c\u093e\u092f\u094b\u092e\u0947\u091f\u094d\u0930\u093f\u0915 \u0905\u0928\u0932\u0949\u0915",
         "note.field.content": "\u0938\u093e\u092e\u0917\u094d\u0930\u0940",
         "note.field.title": "\u0936\u0940\u0930\u094d\u0937\u0915",
@@ -2737,6 +2957,7 @@ WEB_CATALOGUES = {
         "record.field.address": "\u092a\u0924\u093e",
         "record.field.brand": "\u0915\u093e\u0930\u094d\u0921 \u092c\u094d\u0930\u093e\u0902\u0921",
         "record.field.cardholder": "\u0915\u093e\u0930\u094d\u0921\u0927\u093e\u0930\u0915",
+        "record.field.certificate": "\u092a\u094d\u0930\u092e\u093e\u0923\u092a\u0924\u094d\u0930",
         "record.field.comment": "\u091f\u093f\u092a\u094d\u092a\u0923\u0940",
         "record.field.cvv": "CVV",
         "record.field.database": "\u0921\u0947\u091f\u093e\u092c\u0947\u0938",
@@ -2773,6 +2994,7 @@ WEB_CATALOGUES = {
         "record.field.username": "\u0909\u092a\u092f\u094b\u0917\u0915\u0930\u094d\u0924\u093e \u0928\u093e\u092e",
         "record.field.version": "\u0938\u0902\u0938\u094d\u0915\u0930\u0923",
         "record.type.api-token": "API \u091f\u094b\u0915\u0928",
+        "record.type.certificate": "\u092a\u094d\u0930\u092e\u093e\u0923\u092a\u0924\u094d\u0930",
         "record.type.credit-card": "\u0915\u094d\u0930\u0947\u0921\u093f\u091f \u0915\u093e\u0930\u094d\u0921",
         "record.type.db-credential": "\u0921\u0947\u091f\u093e\u092c\u0947\u0938 \u0915\u094d\u0930\u0947\u0921\u0947\u0902\u0936\u093f\u092f\u0932",
         "record.type.gpg-key": "GPG \u0915\u0941\u0902\u091c\u0940",
@@ -2792,6 +3014,8 @@ WEB_CATALOGUES = {
         "search.label": "\u0907\u0938 \u0924\u093f\u091c\u094b\u0930\u0940 \u092e\u0947\u0902 \u0916\u094b\u091c\u0947\u0902",
         "search.no_results": "\u0906\u092a\u0915\u0940 \u0916\u094b\u091c \u0938\u0947 \u0915\u0941\u091b \u092e\u0947\u0932 \u0928\u0939\u0940\u0902 \u0916\u093e\u0924\u093e",
         "search.placeholder": "\u0907\u0938 \u0924\u093f\u091c\u094b\u0930\u0940 \u092e\u0947\u0902 \u0916\u094b\u091c\u0947\u0902...",
+        "search.save": "\u0916\u094b\u091c \u0938\u0939\u0947\u091c\u0947\u0902",
+        "search.saved": "\u0938\u0939\u0947\u091c\u0940 \u0917\u0908 \u0916\u094b\u091c\u0947\u0902",
         "search.title": "\u0916\u094b\u091c\u0947\u0902",
         "section.authenticators": "\u092a\u094d\u0930\u092e\u093e\u0923\u0915 (TOTP)",
         "section.authenticators_desc": "\u0926\u094b-\u091a\u0930\u0923\u0940\u092f \u092a\u094d\u0930\u092e\u093e\u0923\u0940\u0915\u0930\u0923 \u0915\u0947 \u0917\u094b\u092a\u0928\u0940\u092f \u092e\u093e\u0928 \u0930\u0916\u0947\u0902 \u0914\u0930 \u091a\u093e\u0932\u0942 \u0915\u094b\u0921 \u0926\u0947\u0916\u0947\u0902\u0964",
@@ -2896,10 +3120,13 @@ WEB_CATALOGUES = {
         "table.algo": "\u090f\u0932\u094d\u0917\u094b",
         "table.every": "\u0939\u0930",
         "table.id": "ID",
+        "table.item": "\u0906\u0907\u091f\u092e",
         "table.label": "\u0932\u0947\u092c\u0932",
         "table.name": "\u0928\u093e\u092e",
         "table.service": "\u0938\u0947\u0935\u093e",
+        "table.status": "\u0938\u094d\u0925\u093f\u0924\u093f",
         "table.title": "\u0936\u0940\u0930\u094d\u0937\u0915",
+        "table.type": "\u092a\u094d\u0930\u0915\u093e\u0930",
         "table.username": "\u0909\u092a\u092f\u094b\u0917\u0915\u0930\u094d\u0924\u093e \u0928\u093e\u092e",
         "tags.all": "\u0938\u092d\u0940",
         "tidy.apply": "\u091a\u0941\u0928\u0940 \u0917\u0908 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u094b\u0902 \u092a\u0930 \u0932\u093e\u0917\u0942 \u0915\u0930\u0947\u0902",
@@ -2922,6 +3149,13 @@ WEB_CATALOGUES = {
         "tidy.title": "\u0906\u092f\u093e\u0924 \u0915\u0940 \u0917\u0908 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u093e\u0901 \u0935\u094d\u092f\u0935\u0938\u094d\u0925\u093f\u0924 \u0915\u0930\u0947\u0902",
         "toast.copy_fail": "\u0915\u0949\u092a\u0940 \u0928\u0939\u0940\u0902 \u0939\u094b \u0938\u0915\u093e\u0964",
         "toast.copy_success": "\u0915\u094d\u0932\u093f\u092a\u092c\u094b\u0930\u094d\u0921 \u092a\u0930 \u0915\u0949\u092a\u0940 \u0939\u094b \u0917\u092f\u093e\u0964",
+        "trash.delete_forever": "\u0939\u092e\u0947\u0936\u093e \u0915\u0947 \u0932\u093f\u090f \u0939\u091f\u093e\u090f\u0901",
+        "trash.deleted": "\u0939\u091f\u093e\u092f\u093e \u0917\u092f\u093e",
+        "trash.empty": "\u0915\u091a\u0930\u093e \u0916\u093e\u0932\u0940 \u0915\u0930\u0947\u0902",
+        "trash.empty.d": "\u0939\u091f\u093e\u090f \u0917\u090f \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0914\u0930 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u092f\u0939\u093e\u0901 \u0924\u092c \u0924\u0915 \u0930\u0939\u0924\u0947 \u0939\u0948\u0902 \u091c\u092c \u0924\u0915 \u0906\u092a \u0909\u0928\u094d\u0939\u0947\u0902 \u092a\u0941\u0928\u0930\u094d\u0938\u094d\u0925\u093e\u092a\u093f\u0924 \u092f\u093e \u0938\u094d\u0925\u093e\u092f\u0940 \u0930\u0942\u092a \u0938\u0947 \u0939\u091f\u093e \u0928\u0939\u0940\u0902 \u0926\u0947\u0924\u0947\u0964",
+        "trash.empty.t": "\u0915\u091a\u0930\u093e \u0916\u093e\u0932\u0940 \u0939\u0948",
+        "trash.restore": "\u092a\u0941\u0928\u0930\u094d\u0938\u094d\u0925\u093e\u092a\u093f\u0924 \u0915\u0930\u0947\u0902",
+        "trash.sub": "\u0939\u091f\u093e\u090f \u0917\u090f \u0906\u0907\u091f\u092e \u092f\u0939\u093e\u0901 \u0930\u0916\u0947 \u091c\u093e\u0924\u0947 \u0939\u0948\u0902 \u0924\u093e\u0915\u093f \u0939\u091f\u093e\u0928\u093e \u092a\u0942\u0930\u094d\u0935\u0935\u0924 \u0915\u093f\u092f\u093e \u091c\u093e \u0938\u0915\u0947\u0964",
         "unlock.btn": "\u092c\u093e\u092f\u094b\u092e\u0947\u091f\u094d\u0930\u093f\u0915 \u0938\u0947 \u0905\u0928\u0932\u0949\u0915 \u0915\u0930\u0947\u0902",
         "unlock.empty": "\u0905\u092d\u0940 \u0915\u094b\u0908 \u0921\u093f\u0935\u093e\u0907\u0938 \u092a\u0902\u091c\u0940\u0915\u0943\u0924 \u0928\u0939\u0940\u0902 \u0939\u0948",
         "unlock.empty_sub": "\u0928\u0940\u091a\u0947 \u090f\u0915 \u092a\u0902\u091c\u0940\u0915\u0943\u0924 \u0915\u0930\u0947\u0902, \u092f\u093e \u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0915\u093e \u0909\u092a\u092f\u094b\u0917 \u091c\u093e\u0930\u0940 \u0930\u0916\u0947\u0902",
@@ -2996,6 +3230,19 @@ WEB_CATALOGUES = {
         "btn.restore": "Pulihkan",
         "btn.show": "Tampilkan",
         "btn.view": "Lihat",
+        "cert.algorithm": "Tanda tangan",
+        "cert.derived.d": "Dibaca dari sertifikat, bukan diketik di sampingnya, sehingga tidak bisa bertentangan dengan sertifikat yang dijelaskannya.",
+        "cert.derived.t": "Berasal dari sertifikat",
+        "cert.fingerprint": "Sidik jari SHA-256",
+        "cert.issuer": "Penerbit",
+        "cert.key_algorithm": "Kunci publik",
+        "cert.not_after": "Kedaluwarsa",
+        "cert.not_before": "Berlaku dari",
+        "cert.sans": "Nama alternatif",
+        "cert.selfsigned": "Sertifikat ini ditandatangani sendiri",
+        "cert.serial": "Serial",
+        "cert.subject": "Subjek",
+        "cert.unreadable": "SPM tidak dapat membaca sertifikat ini",
         "chip.online": "Online \u00b7 baca / tulis",
         "confirm.delete_authenticator": "Hapus autentikator ini?",
         "confirm.delete_backup": "Hapus kode cadangan ini?",
@@ -3003,6 +3250,8 @@ WEB_CATALOGUES = {
         "confirm.delete_passphrase": "Hapus frasa sandi ini?",
         "confirm.delete_record": "Hapus record ini?",
         "confirm.restore_snapshot": "Pulihkan snapshot ini? Brankas saat ini diarsipkan dulu.",
+        "confirm.trash_delete": "Hapus permanen item ini? Tindakan ini tidak dapat dibatalkan.",
+        "confirm.trash_empty": "Hapus permanen semua isi sampah? Tindakan ini tidak dapat dibatalkan.",
         "empty.auth.d": "Tambahkan secret TOTP untuk membuat kode 2FA.",
         "empty.auth.t": "Belum ada autentikator",
         "empty.backups.d": "Simpan kode pemulihan sekali pakai dengan aman di sini.",
@@ -3045,6 +3294,14 @@ WEB_CATALOGUES = {
         "events.kind": "Peristiwa",
         "events.outcome": "Hasil",
         "events.when": "Waktu (UTC)",
+        "expiring.col.days": "Hari",
+        "expiring.col.expires": "Kedaluwarsa",
+        "expiring.empty.d": "Tidak ada rahasia dengan tanggal kedaluwarsa dalam 30 hari ke depan.",
+        "expiring.empty.t": "Tidak ada yang kedaluwarsa",
+        "expiring.status.expired": "Kedaluwarsa",
+        "expiring.status.soon": "Kedaluwarsa",
+        "expiring.summary.expired": "Kedaluwarsa",
+        "expiring.summary.soon": "Segera kedaluwarsa",
         "filters.clear": "Hapus filter",
         "filters.desc": "Saring daftar ini menurut folder atau tag. Filter aktif tersimpan di alamat halaman.",
         "filters.folders": "Folder",
@@ -3160,6 +3417,7 @@ WEB_CATALOGUES = {
         "nav.collapse": "Ciutkan bilah sisi",
         "nav.events": "Peristiwa Keamanan",
         "nav.expand": "Bentangkan bilah sisi",
+        "nav.expiring": "Kedaluwarsa",
         "nav.generator": "Generator",
         "nav.group.settings": "Pengaturan",
         "nav.group.tools": "Alat",
@@ -3175,6 +3433,7 @@ WEB_CATALOGUES = {
         "nav.security": "Keamanan",
         "nav.settings": "Pengaturan",
         "nav.transfer": "Ekspor / Impor",
+        "nav.trash": "Sampah",
         "nav.unlock": "Buka Biometrik",
         "note.field.content": "Konten",
         "note.field.title": "Judul",
@@ -3209,6 +3468,7 @@ WEB_CATALOGUES = {
         "record.field.address": "Alamat",
         "record.field.brand": "Merek",
         "record.field.cardholder": "Nama pemegang kartu",
+        "record.field.certificate": "Sertifikat",
         "record.field.comment": "Komentar",
         "record.field.cvv": "CVV",
         "record.field.database": "Basis data",
@@ -3245,6 +3505,7 @@ WEB_CATALOGUES = {
         "record.field.username": "Nama pengguna",
         "record.field.version": "Versi",
         "record.type.api-token": "Token API",
+        "record.type.certificate": "Sertifikat",
         "record.type.credit-card": "Kartu Kredit",
         "record.type.db-credential": "Kredensial Basis Data",
         "record.type.gpg-key": "Kunci GPG",
@@ -3264,6 +3525,8 @@ WEB_CATALOGUES = {
         "search.label": "Cari di brankas ini",
         "search.no_results": "Tidak ada yang cocok dengan pencarian",
         "search.placeholder": "Cari di brankas ini...",
+        "search.save": "Simpan pencarian",
+        "search.saved": "Pencarian tersimpan",
         "search.title": "Cari",
         "section.authenticators": "Autentikator (TOTP)",
         "section.authenticators_desc": "Simpan rahasia 2FA dan lihat kode langsung.",
@@ -3368,10 +3631,13 @@ WEB_CATALOGUES = {
         "table.algo": "Algo",
         "table.every": "Interval",
         "table.id": "ID",
+        "table.item": "Item",
         "table.label": "Label",
         "table.name": "Nama",
         "table.service": "Layanan",
+        "table.status": "Status",
         "table.title": "Judul",
+        "table.type": "Tipe",
         "table.username": "Pengguna",
         "tags.all": "Semua",
         "tidy.apply": "Terapkan pada yang dipilih",
@@ -3394,6 +3660,13 @@ WEB_CATALOGUES = {
         "tidy.title": "Rapikan entri hasil impor",
         "toast.copy_fail": "Gagal menyalin.",
         "toast.copy_success": "Disalin ke clipboard.",
+        "trash.delete_forever": "Hapus permanen",
+        "trash.deleted": "Dihapus",
+        "trash.empty": "Kosongkan sampah",
+        "trash.empty.d": "Kata sandi dan catatan yang dihapus tersimpan di sini sampai Anda memulihkan atau menghapusnya permanen.",
+        "trash.empty.t": "Sampah kosong",
+        "trash.restore": "Pulihkan",
+        "trash.sub": "Item yang dihapus disimpan di sini agar penghapusan dapat dibatalkan.",
         "unlock.btn": "Buka dengan biometrik",
         "unlock.empty": "Belum ada perangkat terdaftar",
         "unlock.empty_sub": "Daftarkan di bawah, atau tetap pakai kata sandi master",
@@ -3468,6 +3741,19 @@ WEB_CATALOGUES = {
         "btn.restore": "\u5fa9\u5143",
         "btn.show": "\u8868\u793a",
         "btn.view": "\u8868\u793a",
+        "cert.algorithm": "\u7f72\u540d",
+        "cert.derived.d": "\u6a2a\u306b\u5165\u529b\u3059\u308b\u306e\u3067\u306f\u306a\u304f\u8a3c\u660e\u66f8\u304b\u3089\u8aad\u307f\u53d6\u308b\u305f\u3081\u3001\u8a18\u8ff0\u5bfe\u8c61\u306e\u8a3c\u660e\u66f8\u3068\u98df\u3044\u9055\u3046\u3053\u3068\u304c\u3042\u308a\u307e\u305b\u3093\u3002",
+        "cert.derived.t": "\u8a3c\u660e\u66f8\u304b\u3089\u5c0e\u51fa",
+        "cert.fingerprint": "SHA-256 \u30d5\u30a3\u30f3\u30ac\u30fc\u30d7\u30ea\u30f3\u30c8",
+        "cert.issuer": "\u767a\u884c\u8005",
+        "cert.key_algorithm": "\u516c\u958b\u9375",
+        "cert.not_after": "\u6709\u52b9\u671f\u9650",
+        "cert.not_before": "\u6709\u52b9\u958b\u59cb",
+        "cert.sans": "\u5225\u540d",
+        "cert.selfsigned": "\u3053\u306e\u8a3c\u660e\u66f8\u306f\u81ea\u5df1\u7f72\u540d\u3067\u3059",
+        "cert.serial": "\u30b7\u30ea\u30a2\u30eb",
+        "cert.subject": "\u30b5\u30d6\u30b8\u30a7\u30af\u30c8",
+        "cert.unreadable": "SPM \u306f\u3053\u306e\u8a3c\u660e\u66f8\u3092\u8aad\u307f\u53d6\u308c\u307e\u305b\u3093",
         "chip.online": "\u30aa\u30f3\u30e9\u30a4\u30f3 \u00b7 \u8aad\u307f/\u66f8\u304d",
         "confirm.delete_authenticator": "\u3053\u306e\u8a8d\u8a3c\u60c5\u5831\u3092\u524a\u9664\u3057\u307e\u3059\u304b\uff1f",
         "confirm.delete_backup": "\u3053\u308c\u3089\u306e\u30d0\u30c3\u30af\u30a2\u30c3\u30d7\u30b3\u30fc\u30c9\u3092\u524a\u9664\u3057\u307e\u3059\u304b\uff1f",
@@ -3475,6 +3761,8 @@ WEB_CATALOGUES = {
         "confirm.delete_passphrase": "\u3053\u306e\u30d1\u30b9\u30d5\u30ec\u30fc\u30ba\u3092\u524a\u9664\u3057\u307e\u3059\u304b\uff1f",
         "confirm.delete_record": "\u3053\u306e\u30ec\u30b3\u30fc\u30c9\u3092\u524a\u9664\u3057\u307e\u3059\u304b\uff1f",
         "confirm.restore_snapshot": "\u3053\u306e\u30b9\u30ca\u30c3\u30d7\u30b7\u30e7\u30c3\u30c8\u3092\u5fa9\u5143\u3057\u307e\u3059\u304b\uff1f\u73fe\u5728\u306e\u30dc\u30fc\u30eb\u30c8\u306f\u5148\u306b\u4fdd\u5b58\u3055\u308c\u307e\u3059\u3002",
+        "confirm.trash_delete": "\u3053\u306e\u9805\u76ee\u3092\u5b8c\u5168\u306b\u524a\u9664\u3057\u307e\u3059\u304b\uff1f \u3053\u306e\u64cd\u4f5c\u306f\u53d6\u308a\u6d88\u305b\u307e\u305b\u3093\u3002",
+        "confirm.trash_empty": "\u30b4\u30df\u7bb1\u306e\u4e2d\u8eab\u3092\u3059\u3079\u3066\u5b8c\u5168\u306b\u524a\u9664\u3057\u307e\u3059\u304b\uff1f \u3053\u306e\u64cd\u4f5c\u306f\u53d6\u308a\u6d88\u305b\u307e\u305b\u3093\u3002",
         "empty.auth.d": "TOTP \u30b7\u30fc\u30af\u30ec\u30c3\u30c8\u3092\u8ffd\u52a0\u3057\u3066 2FA \u30b3\u30fc\u30c9\u3092\u751f\u6210\u3057\u307e\u3059\u3002",
         "empty.auth.t": "\u8a8d\u8a3c\u30a2\u30d7\u30ea\u304c\u3042\u308a\u307e\u305b\u3093",
         "empty.backups.d": "\u4f7f\u3044\u6368\u3066\u306e\u5fa9\u65e7\u30b3\u30fc\u30c9\u3092\u3053\u3053\u306b\u5b89\u5168\u306b\u4fdd\u7ba1\u3057\u307e\u3059\u3002",
@@ -3517,6 +3805,14 @@ WEB_CATALOGUES = {
         "events.kind": "\u30a4\u30d9\u30f3\u30c8",
         "events.outcome": "\u7d50\u679c",
         "events.when": "\u65e5\u6642 (UTC)",
+        "expiring.col.days": "\u65e5\u6570",
+        "expiring.col.expires": "\u6709\u52b9\u671f\u9650",
+        "expiring.empty.d": "\u4eca\u5f8c30\u65e5\u4ee5\u5185\u306b\u671f\u9650\u304c\u6765\u308b\u3001\u6709\u52b9\u671f\u9650\u4ed8\u304d\u306e\u30b7\u30fc\u30af\u30ec\u30c3\u30c8\u306f\u3042\u308a\u307e\u305b\u3093\u3002",
+        "expiring.empty.t": "\u671f\u9650\u5207\u308c\u306f\u3042\u308a\u307e\u305b\u3093",
+        "expiring.status.expired": "\u671f\u9650\u5207\u308c",
+        "expiring.status.soon": "\u671f\u9650\u9593\u8fd1",
+        "expiring.summary.expired": "\u671f\u9650\u5207\u308c",
+        "expiring.summary.soon": "\u307e\u3082\u306a\u304f\u671f\u9650\u5207\u308c",
         "filters.clear": "\u30d5\u30a3\u30eb\u30bf\u30fc\u3092\u89e3\u9664",
         "filters.desc": "\u30d5\u30a9\u30eb\u30c0\u307e\u305f\u306f\u30bf\u30b0\u3067\u7d5e\u308a\u8fbc\u307f\u307e\u3059\u3002\u6709\u52b9\u306a\u30d5\u30a3\u30eb\u30bf\u30fc\u306f\u30da\u30fc\u30b8\u306e\u30a2\u30c9\u30ec\u30b9\u306b\u4fdd\u6301\u3055\u308c\u307e\u3059\u3002",
         "filters.folders": "\u30d5\u30a9\u30eb\u30c0",
@@ -3632,6 +3928,7 @@ WEB_CATALOGUES = {
         "nav.collapse": "\u30b5\u30a4\u30c9\u30d0\u30fc\u3092\u6298\u308a\u305f\u305f\u3080",
         "nav.events": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30a4\u30d9\u30f3\u30c8",
         "nav.expand": "\u30b5\u30a4\u30c9\u30d0\u30fc\u3092\u5c55\u958b",
+        "nav.expiring": "\u6709\u52b9\u671f\u9650",
         "nav.generator": "\u30b8\u30a7\u30cd\u30ec\u30fc\u30bf\u30fc",
         "nav.group.settings": "\u8a2d\u5b9a",
         "nav.group.tools": "\u30c4\u30fc\u30eb",
@@ -3647,6 +3944,7 @@ WEB_CATALOGUES = {
         "nav.security": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3",
         "nav.settings": "\u8a2d\u5b9a",
         "nav.transfer": "\u30a8\u30af\u30b9\u30dd\u30fc\u30c8 / \u30a4\u30f3\u30dd\u30fc\u30c8",
+        "nav.trash": "\u30b4\u30df\u7bb1",
         "nav.unlock": "\u751f\u4f53\u8a8d\u8a3c\u30ed\u30c3\u30af\u89e3\u9664",
         "note.field.content": "\u5185\u5bb9",
         "note.field.title": "\u30bf\u30a4\u30c8\u30eb",
@@ -3681,6 +3979,7 @@ WEB_CATALOGUES = {
         "record.field.address": "\u4f4f\u6240",
         "record.field.brand": "\u30d6\u30e9\u30f3\u30c9",
         "record.field.cardholder": "\u540d\u7fa9\u4eba",
+        "record.field.certificate": "\u8a3c\u660e\u66f8",
         "record.field.comment": "\u30b3\u30e1\u30f3\u30c8",
         "record.field.cvv": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30b3\u30fc\u30c9",
         "record.field.database": "\u30c7\u30fc\u30bf\u30d9\u30fc\u30b9",
@@ -3717,6 +4016,7 @@ WEB_CATALOGUES = {
         "record.field.username": "\u30e6\u30fc\u30b6\u30fc\u540d",
         "record.field.version": "\u30d0\u30fc\u30b8\u30e7\u30f3",
         "record.type.api-token": "API \u30c8\u30fc\u30af\u30f3",
+        "record.type.certificate": "\u8a3c\u660e\u66f8",
         "record.type.credit-card": "\u30af\u30ec\u30b8\u30c3\u30c8\u30ab\u30fc\u30c9",
         "record.type.db-credential": "\u30c7\u30fc\u30bf\u30d9\u30fc\u30b9\u8a8d\u8a3c\u60c5\u5831",
         "record.type.gpg-key": "GPG\u9375",
@@ -3736,6 +4036,8 @@ WEB_CATALOGUES = {
         "search.label": "\u3053\u306e\u4fdd\u7ba1\u5eab\u3092\u691c\u7d22",
         "search.no_results": "\u691c\u7d22\u6761\u4ef6\u306b\u4e00\u81f4\u3059\u308b\u9805\u76ee\u306f\u3042\u308a\u307e\u305b\u3093",
         "search.placeholder": "\u3053\u306e\u4fdd\u7ba1\u5eab\u3092\u691c\u7d22...",
+        "search.save": "\u691c\u7d22\u3092\u4fdd\u5b58",
+        "search.saved": "\u4fdd\u5b58\u3057\u305f\u691c\u7d22",
         "search.title": "\u691c\u7d22",
         "section.authenticators": "\u8a8d\u8a3c\u30a2\u30d7\u30ea (TOTP)",
         "section.authenticators_desc": "2FA\u30b7\u30fc\u30af\u30ec\u30c3\u30c8\u3092\u4fdd\u5b58\u3057\u30e9\u30a4\u30d6\u30b3\u30fc\u30c9\u3092\u8868\u793a\u3002",
@@ -3840,10 +4142,13 @@ WEB_CATALOGUES = {
         "table.algo": "\u65b9\u5f0f",
         "table.every": "\u5468\u671f",
         "table.id": "ID",
+        "table.item": "\u9805\u76ee",
         "table.label": "\u30e9\u30d9\u30eb",
         "table.name": "\u540d\u524d",
         "table.service": "\u30b5\u30fc\u30d3\u30b9",
+        "table.status": "\u30b9\u30c6\u30fc\u30bf\u30b9",
         "table.title": "\u30bf\u30a4\u30c8\u30eb",
+        "table.type": "\u7a2e\u985e",
         "table.username": "\u30e6\u30fc\u30b6\u30fc\u540d",
         "tags.all": "\u3059\u3079\u3066",
         "tidy.apply": "\u9078\u629e\u3057\u305f\u9805\u76ee\u306b\u9069\u7528",
@@ -3866,6 +4171,13 @@ WEB_CATALOGUES = {
         "tidy.title": "\u30a4\u30f3\u30dd\u30fc\u30c8\u3057\u305f\u9805\u76ee\u3092\u6574\u7406",
         "toast.copy_fail": "\u30b3\u30d4\u30fc\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002",
         "toast.copy_success": "\u30af\u30ea\u30c3\u30d7\u30dc\u30fc\u30c9\u306b\u30b3\u30d4\u30fc\u3057\u307e\u3057\u305f\u3002",
+        "trash.delete_forever": "\u5b8c\u5168\u306b\u524a\u9664",
+        "trash.deleted": "\u524a\u9664\u65e5",
+        "trash.empty": "\u30b4\u30df\u7bb1\u3092\u7a7a\u306b\u3059\u308b",
+        "trash.empty.d": "\u524a\u9664\u3057\u305f\u30d1\u30b9\u30ef\u30fc\u30c9\u3084\u30ec\u30b3\u30fc\u30c9\u306f\u3001\u5fa9\u5143\u3059\u308b\u304b\u5b8c\u5168\u306b\u524a\u9664\u3059\u308b\u307e\u3067\u3053\u3053\u306b\u6b8b\u308a\u307e\u3059\u3002",
+        "trash.empty.t": "\u30b4\u30df\u7bb1\u306f\u7a7a\u3067\u3059",
+        "trash.restore": "\u5fa9\u5143",
+        "trash.sub": "\u524a\u9664\u3057\u305f\u9805\u76ee\u306f\u53d6\u308a\u6d88\u305b\u308b\u3088\u3046\u3053\u3053\u306b\u4fdd\u7ba1\u3055\u308c\u307e\u3059\u3002",
         "unlock.btn": "\u751f\u4f53\u8a8d\u8a3c\u3067\u89e3\u9664",
         "unlock.empty": "\u767b\u9332\u6e08\u307f\u306e\u7aef\u672b\u306f\u3042\u308a\u307e\u305b\u3093",
         "unlock.empty_sub": "\u4e0b\u304b\u3089\u767b\u9332\u3059\u308b\u304b\u3001\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u4f7f\u3044\u7d9a\u3051\u3066\u304f\u3060\u3055\u3044",
@@ -3940,6 +4252,19 @@ WEB_CATALOGUES = {
         "btn.restore": "\ubcf5\uc6d0",
         "btn.show": "\ud45c\uc2dc",
         "btn.view": "\ubcf4\uae30",
+        "cert.algorithm": "\uc11c\uba85",
+        "cert.derived.d": "\uc606\uc5d0 \uc785\ub825\ud558\ub294 \ub300\uc2e0 \uc778\uc99d\uc11c\uc5d0\uc11c \uc77d\uc5b4\uc624\ubbc0\ub85c \uc124\uba85\ud558\ub294 \uc778\uc99d\uc11c\uc640 \uc5b4\uae0b\ub0a0 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "cert.derived.t": "\uc778\uc99d\uc11c\uc5d0\uc11c \ub3c4\ucd9c\ub428",
+        "cert.fingerprint": "SHA-256 \uc9c0\ubb38",
+        "cert.issuer": "\ubc1c\uae09\uc790",
+        "cert.key_algorithm": "\uacf5\uac1c \ud0a4",
+        "cert.not_after": "\ub9cc\ub8cc",
+        "cert.not_before": "\uc720\ud6a8 \uc2dc\uc791",
+        "cert.sans": "\ub300\uccb4 \uc774\ub984",
+        "cert.selfsigned": "\uc774 \uc778\uc99d\uc11c\ub294 \uc790\uccb4 \uc11c\uba85\ub418\uc5c8\uc2b5\ub2c8\ub2e4",
+        "cert.serial": "\uc77c\ub828\ubc88\ud638",
+        "cert.subject": "\uc8fc\uccb4",
+        "cert.unreadable": "SPM\uc774 \uc774 \uc778\uc99d\uc11c\ub97c \uc77d\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4",
         "chip.online": "\uc628\ub77c\uc778 \u00b7 \uc77d\uae30 / \uc4f0\uae30",
         "confirm.delete_authenticator": "\uc774 \uc778\uc99d\uae30\ub97c \uc0ad\uc81c\ud560\uae4c\uc694?",
         "confirm.delete_backup": "\uc774 \ubc31\uc5c5 \ucf54\ub4dc\ub97c \uc0ad\uc81c\ud560\uae4c\uc694?",
@@ -3947,6 +4272,8 @@ WEB_CATALOGUES = {
         "confirm.delete_passphrase": "\uc774 \ud328\uc2a4\ud504\ub808\uc774\uc988\ub97c \uc0ad\uc81c\ud560\uae4c\uc694?",
         "confirm.delete_record": "\uc774 \ub808\ucf54\ub4dc\ub97c \uc0ad\uc81c\ud560\uae4c\uc694?",
         "confirm.restore_snapshot": "\uc774 \uc2a4\ub0c5\uc20f\uc744 \ubcf5\uc6d0\ud560\uae4c\uc694? \ud604\uc7ac \uae08\uace0\ub294 \uba3c\uc800 \ubcf4\uad00\ub429\ub2c8\ub2e4.",
+        "confirm.trash_delete": "\uc774 \ud56d\ubaa9\uc744 \uc601\uad6c\uc801\uc73c\ub85c \uc0ad\uc81c\ud558\uc2dc\uaca0\uc2b5\ub2c8\uae4c? \ucde8\uc18c\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "confirm.trash_empty": "\ud734\uc9c0\ud1b5\uc758 \ubaa8\ub4e0 \ud56d\ubaa9\uc744 \uc601\uad6c\uc801\uc73c\ub85c \uc0ad\uc81c\ud558\uc2dc\uaca0\uc2b5\ub2c8\uae4c? \ucde8\uc18c\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.",
         "empty.auth.d": "TOTP \ube44\ubc00 \uac12\uc744 \ucd94\uac00\ud558\uba74 2\ub2e8\uacc4 \uc778\uc99d \ucf54\ub4dc\ub97c \ub9cc\ub4e4 \uc218 \uc788\uc2b5\ub2c8\ub2e4.",
         "empty.auth.t": "\uc778\uc99d\uae30\uac00 \uc5c6\uc2b5\ub2c8\ub2e4",
         "empty.backups.d": "\uc77c\ud68c\uc6a9 \ubcf5\uad6c \ucf54\ub4dc\ub97c \uc5ec\uae30\uc5d0 \uc548\uc804\ud558\uac8c \ubcf4\uad00\ud558\uc138\uc694.",
@@ -3989,6 +4316,14 @@ WEB_CATALOGUES = {
         "events.kind": "\uc774\ubca4\ud2b8",
         "events.outcome": "\uacb0\uacfc",
         "events.when": "\uc2dc\uac01 (UTC)",
+        "expiring.col.days": "\uc77c\uc218",
+        "expiring.col.expires": "\ub9cc\ub8cc",
+        "expiring.empty.d": "\ud5a5\ud6c4 30\uc77c \uc774\ub0b4\uc5d0 \ub9cc\ub8cc\ub418\ub294 \ub9cc\ub8cc\uc77c\uc774 \uc788\ub294 \ube44\ubc00\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "expiring.empty.t": "\ub9cc\ub8cc \uc608\uc815 \ud56d\ubaa9\uc774 \uc5c6\uc2b5\ub2c8\ub2e4",
+        "expiring.status.expired": "\ub9cc\ub8cc\ub428",
+        "expiring.status.soon": "\ub9cc\ub8cc \uc784\ubc15",
+        "expiring.summary.expired": "\ub9cc\ub8cc\ub428",
+        "expiring.summary.soon": "\uace7 \ub9cc\ub8cc",
         "filters.clear": "\ud544\ud130 \uc9c0\uc6b0\uae30",
         "filters.desc": "\ud3f4\ub354\ub098 \ud0dc\uadf8\ub85c \ubaa9\ub85d\uc744 \uc881\ud799\ub2c8\ub2e4. \uc801\uc6a9\ud55c \ud544\ud130\ub294 \ud398\uc774\uc9c0 \uc8fc\uc18c\uc5d0 \ub0a8\uc2b5\ub2c8\ub2e4.",
         "filters.folders": "\ud3f4\ub354",
@@ -4104,6 +4439,7 @@ WEB_CATALOGUES = {
         "nav.collapse": "\uc0ac\uc774\ub4dc\ubc14 \uc811\uae30",
         "nav.events": "\ubcf4\uc548 \uc774\ubca4\ud2b8",
         "nav.expand": "\uc0ac\uc774\ub4dc\ubc14 \ud3bc\uce58\uae30",
+        "nav.expiring": "\ub9cc\ub8cc \uc608\uc815",
         "nav.generator": "\uc0dd\uc131\uae30",
         "nav.group.settings": "\uc124\uc815",
         "nav.group.tools": "\ub3c4\uad6c",
@@ -4119,6 +4455,7 @@ WEB_CATALOGUES = {
         "nav.security": "\ubcf4\uc548",
         "nav.settings": "\uc124\uc815",
         "nav.transfer": "\ub0b4\ubcf4\ub0b4\uae30 / \uac00\uc838\uc624\uae30",
+        "nav.trash": "\ud734\uc9c0\ud1b5",
         "nav.unlock": "\uc0dd\uccb4 \uc778\uc2dd \uc7a0\uae08 \ud574\uc81c",
         "note.field.content": "\ub0b4\uc6a9",
         "note.field.title": "\uc81c\ubaa9",
@@ -4153,6 +4490,7 @@ WEB_CATALOGUES = {
         "record.field.address": "\uc8fc\uc18c",
         "record.field.brand": "\ube0c\ub79c\ub4dc",
         "record.field.cardholder": "\uce74\ub4dc \uc18c\uc720\uc790",
+        "record.field.certificate": "\uc778\uc99d\uc11c",
         "record.field.comment": "\uc8fc\uc11d",
         "record.field.cvv": "CVC",
         "record.field.database": "\ub370\uc774\ud130\ubca0\uc774\uc2a4",
@@ -4189,6 +4527,7 @@ WEB_CATALOGUES = {
         "record.field.username": "\uc0ac\uc6a9\uc790 \uc774\ub984",
         "record.field.version": "\ubc84\uc804",
         "record.type.api-token": "API \ud1a0\ud070",
+        "record.type.certificate": "\uc778\uc99d\uc11c",
         "record.type.credit-card": "\uc2e0\uc6a9\uce74\ub4dc",
         "record.type.db-credential": "\ub370\uc774\ud130\ubca0\uc774\uc2a4 \uc790\uaca9 \uc99d\uba85",
         "record.type.gpg-key": "GPG \ud0a4",
@@ -4208,6 +4547,8 @@ WEB_CATALOGUES = {
         "search.label": "\uc774 \uae08\uace0\uc5d0\uc11c \uac80\uc0c9",
         "search.no_results": "\uac80\uc0c9\uacfc \uc77c\uce58\ud558\ub294 \uac83\uc774 \uc5c6\uc2b5\ub2c8\ub2e4",
         "search.placeholder": "\uc774 \uae08\uace0\uc5d0\uc11c \uac80\uc0c9...",
+        "search.save": "\uac80\uc0c9 \uc800\uc7a5",
+        "search.saved": "\uc800\uc7a5\ub41c \uac80\uc0c9",
         "search.title": "\uac80\uc0c9",
         "section.authenticators": "\uc778\uc99d\uae30 (TOTP)",
         "section.authenticators_desc": "2\ub2e8\uacc4 \uc778\uc99d \ube44\ubc00 \uac12\uc744 \ubcf4\uad00\ud558\uace0 \uc2e4\uc2dc\uac04 \ucf54\ub4dc\ub97c \ud655\uc778\ud569\ub2c8\ub2e4.",
@@ -4312,10 +4653,13 @@ WEB_CATALOGUES = {
         "table.algo": "\uc54c\uace0\ub9ac\uc998",
         "table.every": "\uc8fc\uae30",
         "table.id": "ID",
+        "table.item": "\ud56d\ubaa9",
         "table.label": "\uc774\ub984\ud45c",
         "table.name": "\uc774\ub984",
         "table.service": "\uc11c\ube44\uc2a4",
+        "table.status": "\uc0c1\ud0dc",
         "table.title": "\uc81c\ubaa9",
+        "table.type": "\uc720\ud615",
         "table.username": "\uc0ac\uc6a9\uc790 \uc774\ub984",
         "tags.all": "\uc804\uccb4",
         "tidy.apply": "\uc120\ud0dd\ud55c \ud56d\ubaa9\uc5d0 \uc801\uc6a9",
@@ -4338,6 +4682,13 @@ WEB_CATALOGUES = {
         "tidy.title": "\uac00\uc838\uc628 \ud56d\ubaa9 \uc815\ub9ac",
         "toast.copy_fail": "\ubcf5\uc0ac\uc5d0 \uc2e4\ud328\ud588\uc2b5\ub2c8\ub2e4.",
         "toast.copy_success": "\ud074\ub9bd\ubcf4\ub4dc\uc5d0 \ubcf5\uc0ac\ud588\uc2b5\ub2c8\ub2e4.",
+        "trash.delete_forever": "\uc601\uad6c \uc0ad\uc81c",
+        "trash.deleted": "\uc0ad\uc81c\ub428",
+        "trash.empty": "\ud734\uc9c0\ud1b5 \ube44\uc6b0\uae30",
+        "trash.empty.d": "\uc0ad\uc81c\ub41c \ube44\ubc00\ubc88\ud638\uc640 \ub808\ucf54\ub4dc\ub294 \ubcf5\uc6d0\ud558\uac70\ub098 \uc601\uad6c \uc0ad\uc81c\ud560 \ub54c\uae4c\uc9c0 \uc5ec\uae30\uc5d0 \ub0a8\uc544 \uc788\uc2b5\ub2c8\ub2e4.",
+        "trash.empty.t": "\ud734\uc9c0\ud1b5\uc774 \ube44\uc5b4 \uc788\uc2b5\ub2c8\ub2e4",
+        "trash.restore": "\ubcf5\uc6d0",
+        "trash.sub": "\uc0ad\uc81c\ub41c \ud56d\ubaa9\uc740 \uc0ad\uc81c\ub97c \ucde8\uc18c\ud560 \uc218 \uc788\ub3c4\ub85d \uc5ec\uae30\uc5d0 \ubcf4\uad00\ub429\ub2c8\ub2e4.",
         "unlock.btn": "\uc0dd\uccb4 \uc778\uc2dd\uc73c\ub85c \uc7a0\uae08 \ud574\uc81c",
         "unlock.empty": "\uc544\uc9c1 \ub4f1\ub85d\ub41c \uae30\uae30\uac00 \uc5c6\uc2b5\ub2c8\ub2e4",
         "unlock.empty_sub": "\uc544\ub798\uc5d0\uc11c \ub4f1\ub85d\ud558\uac70\ub098, \uacc4\uc18d \ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638\ub97c \uc0ac\uc6a9\ud558\uc138\uc694",
@@ -4412,6 +4763,19 @@ WEB_CATALOGUES = {
         "btn.restore": "Restaurar",
         "btn.show": "Mostrar",
         "btn.view": "Ver",
+        "cert.algorithm": "Assinatura",
+        "cert.derived.d": "Lido do certificado em vez de digitado ao lado, portanto n\u00e3o pode divergir do certificado que descreve.",
+        "cert.derived.t": "Derivado do certificado",
+        "cert.fingerprint": "Impress\u00e3o digital SHA-256",
+        "cert.issuer": "Emissor",
+        "cert.key_algorithm": "Chave p\u00fablica",
+        "cert.not_after": "Expira",
+        "cert.not_before": "V\u00e1lido a partir de",
+        "cert.sans": "Nomes alternativos",
+        "cert.selfsigned": "Este certificado \u00e9 autoassinado",
+        "cert.serial": "N\u00famero de s\u00e9rie",
+        "cert.subject": "Assunto",
+        "cert.unreadable": "O SPM n\u00e3o consegue ler este certificado",
         "chip.online": "On-line \u00b7 leitura / grava\u00e7\u00e3o",
         "confirm.delete_authenticator": "Excluir este autenticador?",
         "confirm.delete_backup": "Excluir estes c\u00f3digos de backup?",
@@ -4419,6 +4783,8 @@ WEB_CATALOGUES = {
         "confirm.delete_passphrase": "Excluir esta frase secreta?",
         "confirm.delete_record": "Excluir este registro?",
         "confirm.restore_snapshot": "Restaurar esta c\u00f3pia? O cofre atual \u00e9 arquivado antes.",
+        "confirm.trash_delete": "Excluir este item permanentemente? Isso n\u00e3o pode ser desfeito.",
+        "confirm.trash_empty": "Excluir permanentemente tudo na lixeira? Isso n\u00e3o pode ser desfeito.",
         "empty.auth.d": "Adicione um segredo TOTP para gerar c\u00f3digos de 2FA.",
         "empty.auth.t": "Nenhum autenticador",
         "empty.backups.d": "Mantenha aqui, em seguran\u00e7a, seus c\u00f3digos de recupera\u00e7\u00e3o de uso \u00fanico.",
@@ -4461,6 +4827,14 @@ WEB_CATALOGUES = {
         "events.kind": "Evento",
         "events.outcome": "Resultado",
         "events.when": "Quando (UTC)",
+        "expiring.col.days": "Dias",
+        "expiring.col.expires": "Expira",
+        "expiring.empty.d": "Nenhum segredo com data de expira\u00e7\u00e3o vence nos pr\u00f3ximos 30 dias.",
+        "expiring.empty.t": "Nada est\u00e1 expirando",
+        "expiring.status.expired": "Expirado",
+        "expiring.status.soon": "Expirando",
+        "expiring.summary.expired": "Expirado",
+        "expiring.summary.soon": "Expira em breve",
         "filters.clear": "Limpar filtros",
         "filters.desc": "Filtre esta lista por pasta ou etiqueta. Os filtros ativos permanecem no endere\u00e7o da p\u00e1gina.",
         "filters.folders": "Pastas",
@@ -4576,6 +4950,7 @@ WEB_CATALOGUES = {
         "nav.collapse": "Recolher a barra lateral",
         "nav.events": "Eventos de seguran\u00e7a",
         "nav.expand": "Expandir a barra lateral",
+        "nav.expiring": "Expirando",
         "nav.generator": "Gerador",
         "nav.group.settings": "Configura\u00e7\u00f5es",
         "nav.group.tools": "Ferramentas",
@@ -4591,6 +4966,7 @@ WEB_CATALOGUES = {
         "nav.security": "Seguran\u00e7a",
         "nav.settings": "Configura\u00e7\u00f5es",
         "nav.transfer": "Exportar / Importar",
+        "nav.trash": "Lixeira",
         "nav.unlock": "Desbloqueio biom\u00e9trico",
         "note.field.content": "Conte\u00fado",
         "note.field.title": "T\u00edtulo",
@@ -4625,6 +5001,7 @@ WEB_CATALOGUES = {
         "record.field.address": "Endere\u00e7o",
         "record.field.brand": "Bandeira",
         "record.field.cardholder": "Titular",
+        "record.field.certificate": "Certificado",
         "record.field.comment": "Coment\u00e1rio",
         "record.field.cvv": "CVV",
         "record.field.database": "Banco de dados",
@@ -4661,6 +5038,7 @@ WEB_CATALOGUES = {
         "record.field.username": "Usu\u00e1rio",
         "record.field.version": "Vers\u00e3o",
         "record.type.api-token": "Token de API",
+        "record.type.certificate": "Certificado",
         "record.type.credit-card": "Cart\u00e3o de cr\u00e9dito",
         "record.type.db-credential": "Credencial de banco de dados",
         "record.type.gpg-key": "Chave GPG",
@@ -4680,6 +5058,8 @@ WEB_CATALOGUES = {
         "search.label": "Buscar neste cofre",
         "search.no_results": "Nada corresponde \u00e0 sua busca",
         "search.placeholder": "Buscar neste cofre...",
+        "search.save": "Salvar pesquisa",
+        "search.saved": "Pesquisas salvas",
         "search.title": "Buscar",
         "section.authenticators": "Autenticadores (TOTP)",
         "section.authenticators_desc": "Guarde segredos de 2FA e veja c\u00f3digos ao vivo.",
@@ -4784,10 +5164,13 @@ WEB_CATALOGUES = {
         "table.algo": "Algoritmo",
         "table.every": "A cada",
         "table.id": "ID",
+        "table.item": "Item",
         "table.label": "R\u00f3tulo",
         "table.name": "Nome",
         "table.service": "Servi\u00e7o",
+        "table.status": "Status",
         "table.title": "T\u00edtulo",
+        "table.type": "Tipo",
         "table.username": "Usu\u00e1rio",
         "tags.all": "Todas",
         "tidy.apply": "Aplicar aos selecionados",
@@ -4810,6 +5193,13 @@ WEB_CATALOGUES = {
         "tidy.title": "Organizar entradas importadas",
         "toast.copy_fail": "A c\u00f3pia falhou.",
         "toast.copy_success": "Copiado para a \u00e1rea de transfer\u00eancia.",
+        "trash.delete_forever": "Excluir permanentemente",
+        "trash.deleted": "Exclu\u00eddo",
+        "trash.empty": "Esvaziar lixeira",
+        "trash.empty.d": "Senhas e registros exclu\u00eddos ficam aqui at\u00e9 voc\u00ea restaur\u00e1-los ou exclu\u00ed-los permanentemente.",
+        "trash.empty.t": "A lixeira est\u00e1 vazia",
+        "trash.restore": "Restaurar",
+        "trash.sub": "Os itens exclu\u00eddos ficam aqui para que uma exclus\u00e3o possa ser desfeita.",
         "unlock.btn": "Desbloquear com biometria",
         "unlock.empty": "Nenhum dispositivo registrado ainda",
         "unlock.empty_sub": "Registre um abaixo, ou continue usando sua senha mestra",
@@ -4884,6 +5274,19 @@ WEB_CATALOGUES = {
         "btn.restore": "\u0412\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c",
         "btn.show": "\u041f\u043e\u043a\u0430\u0437\u0430\u0442\u044c",
         "btn.view": "\u0421\u043c\u043e\u0442\u0440\u0435\u0442\u044c",
+        "cert.algorithm": "\u041f\u043e\u0434\u043f\u0438\u0441\u044c",
+        "cert.derived.d": "\u0421\u0447\u0438\u0442\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0438\u0437 \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u0430, \u0430 \u043d\u0435 \u0432\u0432\u043e\u0434\u0438\u0442\u0441\u044f \u0440\u044f\u0434\u043e\u043c, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u043f\u0440\u043e\u0442\u0438\u0432\u043e\u0440\u0435\u0447\u0438\u0442\u044c \u043e\u043f\u0438\u0441\u044b\u0432\u0430\u0435\u043c\u043e\u043c\u0443 \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u0443.",
+        "cert.derived.t": "\u0412\u044b\u0447\u0438\u0441\u043b\u0435\u043d\u043e \u0438\u0437 \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u0430",
+        "cert.fingerprint": "\u041e\u0442\u043f\u0435\u0447\u0430\u0442\u043e\u043a SHA-256",
+        "cert.issuer": "\u0418\u0437\u0434\u0430\u0442\u0435\u043b\u044c",
+        "cert.key_algorithm": "\u041e\u0442\u043a\u0440\u044b\u0442\u044b\u0439 \u043a\u043b\u044e\u0447",
+        "cert.not_after": "\u0418\u0441\u0442\u0435\u043a\u0430\u0435\u0442",
+        "cert.not_before": "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0442\u0435\u043b\u0435\u043d \u0441",
+        "cert.sans": "\u0410\u043b\u044c\u0442\u0435\u0440\u043d\u0430\u0442\u0438\u0432\u043d\u044b\u0435 \u0438\u043c\u0435\u043d\u0430",
+        "cert.selfsigned": "\u042d\u0442\u043e\u0442 \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442 \u0441\u0430\u043c\u043e\u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u0439",
+        "cert.serial": "\u0421\u0435\u0440\u0438\u0439\u043d\u044b\u0439 \u043d\u043e\u043c\u0435\u0440",
+        "cert.subject": "\u0421\u0443\u0431\u044a\u0435\u043a\u0442",
+        "cert.unreadable": "SPM \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0442\u044c \u044d\u0442\u043e\u0442 \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442",
         "chip.online": "\u0412 \u0441\u0435\u0442\u0438 \u00b7 \u0447\u0442\u0435\u043d\u0438\u0435 / \u0437\u0430\u043f\u0438\u0441\u044c",
         "confirm.delete_authenticator": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u044d\u0442\u043e\u0442 \u0430\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440?",
         "confirm.delete_backup": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u044d\u0442\u0438 \u0440\u0435\u0437\u0435\u0440\u0432\u043d\u044b\u0435 \u043a\u043e\u0434\u044b?",
@@ -4891,6 +5294,8 @@ WEB_CATALOGUES = {
         "confirm.delete_passphrase": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u044d\u0442\u0443 \u043f\u0430\u0440\u043e\u043b\u044c\u043d\u0443\u044e \u0444\u0440\u0430\u0437\u0443?",
         "confirm.delete_record": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u044d\u0442\u0443 \u0437\u0430\u043f\u0438\u0441\u044c?",
         "confirm.restore_snapshot": "\u0412\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u044d\u0442\u043e\u0442 \u0441\u043d\u0438\u043c\u043e\u043a? \u0422\u0435\u043a\u0443\u0449\u0435\u0435 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u0441\u043d\u0430\u0447\u0430\u043b\u0430 \u0431\u0443\u0434\u0435\u0442 \u0437\u0430\u0430\u0440\u0445\u0438\u0432\u0438\u0440\u043e\u0432\u0430\u043d\u043e.",
+        "confirm.trash_delete": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u044d\u0442\u043e\u0442 \u044d\u043b\u0435\u043c\u0435\u043d\u0442 \u043d\u0430\u0432\u0441\u0435\u0433\u0434\u0430? \u042d\u0442\u043e \u043d\u0435\u043b\u044c\u0437\u044f \u043e\u0442\u043c\u0435\u043d\u0438\u0442\u044c.",
+        "confirm.trash_empty": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0432\u0441\u0451 \u0432 \u043a\u043e\u0440\u0437\u0438\u043d\u0435 \u043d\u0430\u0432\u0441\u0435\u0433\u0434\u0430? \u042d\u0442\u043e \u043d\u0435\u043b\u044c\u0437\u044f \u043e\u0442\u043c\u0435\u043d\u0438\u0442\u044c.",
         "empty.auth.d": "\u0414\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u0441\u0435\u043a\u0440\u0435\u0442 TOTP, \u0447\u0442\u043e\u0431\u044b \u0432\u044b\u0447\u0438\u0441\u043b\u044f\u0442\u044c \u043a\u043e\u0434\u044b \u0434\u0432\u0443\u0445\u0444\u0430\u043a\u0442\u043e\u0440\u043d\u043e\u0439 \u0430\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u0438.",
         "empty.auth.t": "\u041d\u0435\u0442 \u0430\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440\u043e\u0432",
         "empty.backups.d": "\u0414\u0435\u0440\u0436\u0438\u0442\u0435 \u0437\u0434\u0435\u0441\u044c \u043e\u0434\u043d\u043e\u0440\u0430\u0437\u043e\u0432\u044b\u0435 \u043a\u043e\u0434\u044b \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f \u0432 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438.",
@@ -4933,6 +5338,14 @@ WEB_CATALOGUES = {
         "events.kind": "\u0421\u043e\u0431\u044b\u0442\u0438\u0435",
         "events.outcome": "\u0420\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442",
         "events.when": "\u041a\u043e\u0433\u0434\u0430 (UTC)",
+        "expiring.col.days": "\u0414\u043d\u0435\u0439",
+        "expiring.col.expires": "\u0418\u0441\u0442\u0435\u043a\u0430\u0435\u0442",
+        "expiring.empty.d": "\u041d\u0438 \u043e\u0434\u0438\u043d \u0441\u0435\u043a\u0440\u0435\u0442 \u0441 \u0434\u0430\u0442\u043e\u0439 \u0438\u0441\u0442\u0435\u0447\u0435\u043d\u0438\u044f \u043d\u0435 \u0438\u0441\u0442\u0435\u043a\u0430\u0435\u0442 \u0432 \u0431\u043b\u0438\u0436\u0430\u0439\u0448\u0438\u0435 30 \u0434\u043d\u0435\u0439.",
+        "expiring.empty.t": "\u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u0438\u0441\u0442\u0435\u043a\u0430\u0435\u0442",
+        "expiring.status.expired": "\u0418\u0441\u0442\u0451\u043a",
+        "expiring.status.soon": "\u0418\u0441\u0442\u0435\u043a\u0430\u0435\u0442",
+        "expiring.summary.expired": "\u0418\u0441\u0442\u0451\u043a",
+        "expiring.summary.soon": "\u0421\u043a\u043e\u0440\u043e \u0438\u0441\u0442\u0435\u0447\u0451\u0442",
         "filters.clear": "\u0421\u0431\u0440\u043e\u0441\u0438\u0442\u044c \u0444\u0438\u043b\u044c\u0442\u0440\u044b",
         "filters.desc": "\u0421\u0443\u0437\u044c\u0442\u0435 \u0441\u043f\u0438\u0441\u043e\u043a \u043f\u043e \u043f\u0430\u043f\u043a\u0435 \u0438\u043b\u0438 \u043c\u0435\u0442\u043a\u0435. \u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435 \u0444\u0438\u043b\u044c\u0442\u0440\u044b \u0441\u043e\u0445\u0440\u0430\u043d\u044f\u044e\u0442\u0441\u044f \u0432 \u0430\u0434\u0440\u0435\u0441\u0435 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u044b.",
         "filters.folders": "\u041f\u0430\u043f\u043a\u0438",
@@ -5048,6 +5461,7 @@ WEB_CATALOGUES = {
         "nav.collapse": "\u0421\u0432\u0435\u0440\u043d\u0443\u0442\u044c \u0431\u043e\u043a\u043e\u0432\u0443\u044e \u043f\u0430\u043d\u0435\u043b\u044c",
         "nav.events": "\u0421\u043e\u0431\u044b\u0442\u0438\u044f \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438",
         "nav.expand": "\u0420\u0430\u0437\u0432\u0435\u0440\u043d\u0443\u0442\u044c \u0431\u043e\u043a\u043e\u0432\u0443\u044e \u043f\u0430\u043d\u0435\u043b\u044c",
+        "nav.expiring": "\u0418\u0441\u0442\u0435\u043a\u0430\u044e\u0449\u0438\u0435",
         "nav.generator": "\u0413\u0435\u043d\u0435\u0440\u0430\u0442\u043e\u0440",
         "nav.group.settings": "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438",
         "nav.group.tools": "\u0418\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u044b",
@@ -5063,6 +5477,7 @@ WEB_CATALOGUES = {
         "nav.security": "\u0411\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c",
         "nav.settings": "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438",
         "nav.transfer": "\u042d\u043a\u0441\u043f\u043e\u0440\u0442 / \u0418\u043c\u043f\u043e\u0440\u0442",
+        "nav.trash": "\u041a\u043e\u0440\u0437\u0438\u043d\u0430",
         "nav.unlock": "\u0411\u0438\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u0440\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430",
         "note.field.content": "\u0421\u043e\u0434\u0435\u0440\u0436\u0438\u043c\u043e\u0435",
         "note.field.title": "\u0417\u0430\u0433\u043e\u043b\u043e\u0432\u043e\u043a",
@@ -5097,6 +5512,7 @@ WEB_CATALOGUES = {
         "record.field.address": "\u0410\u0434\u0440\u0435\u0441",
         "record.field.brand": "\u041f\u043b\u0430\u0442\u0451\u0436\u043d\u0430\u044f \u0441\u0438\u0441\u0442\u0435\u043c\u0430",
         "record.field.cardholder": "\u0414\u0435\u0440\u0436\u0430\u0442\u0435\u043b\u044c \u043a\u0430\u0440\u0442\u044b",
+        "record.field.certificate": "\u0421\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442",
         "record.field.comment": "\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439",
         "record.field.cvv": "CVV",
         "record.field.database": "\u0411\u0430\u0437\u0430 \u0434\u0430\u043d\u043d\u044b\u0445",
@@ -5133,6 +5549,7 @@ WEB_CATALOGUES = {
         "record.field.username": "\u0418\u043c\u044f \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f",
         "record.field.version": "\u0412\u0435\u0440\u0441\u0438\u044f",
         "record.type.api-token": "\u0422\u043e\u043a\u0435\u043d API",
+        "record.type.certificate": "\u0421\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442",
         "record.type.credit-card": "\u0411\u0430\u043d\u043a\u043e\u0432\u0441\u043a\u0430\u044f \u043a\u0430\u0440\u0442\u0430",
         "record.type.db-credential": "\u0414\u043e\u0441\u0442\u0443\u043f \u043a \u0431\u0430\u0437\u0435 \u0434\u0430\u043d\u043d\u044b\u0445",
         "record.type.gpg-key": "\u041a\u043b\u044e\u0447 GPG",
@@ -5152,6 +5569,8 @@ WEB_CATALOGUES = {
         "search.label": "\u0418\u0441\u043a\u0430\u0442\u044c \u0432 \u044d\u0442\u043e\u043c \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435",
         "search.no_results": "\u041f\u043e \u0432\u0430\u0448\u0435\u043c\u0443 \u0437\u0430\u043f\u0440\u043e\u0441\u0443 \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e",
         "search.placeholder": "\u0418\u0441\u043a\u0430\u0442\u044c \u0432 \u044d\u0442\u043e\u043c \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435...",
+        "search.save": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u043f\u043e\u0438\u0441\u043a",
+        "search.saved": "\u0421\u043e\u0445\u0440\u0430\u043d\u0451\u043d\u043d\u044b\u0435 \u043f\u043e\u0438\u0441\u043a\u0438",
         "search.title": "\u041f\u043e\u0438\u0441\u043a",
         "section.authenticators": "\u0410\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440\u044b (TOTP)",
         "section.authenticators_desc": "\u0425\u0440\u0430\u043d\u0438\u0442\u0435 \u0441\u0435\u043a\u0440\u0435\u0442\u044b \u0434\u0432\u0443\u0445\u0444\u0430\u043a\u0442\u043e\u0440\u043d\u043e\u0439 \u0430\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u0438 \u0438 \u0441\u043c\u043e\u0442\u0440\u0438\u0442\u0435 \u0442\u0435\u043a\u0443\u0449\u0438\u0435 \u043a\u043e\u0434\u044b.",
@@ -5256,10 +5675,13 @@ WEB_CATALOGUES = {
         "table.algo": "\u0410\u043b\u0433\u043e\u0440\u0438\u0442\u043c",
         "table.every": "\u041a\u0430\u0436\u0434\u044b\u0435",
         "table.id": "ID",
+        "table.item": "\u042d\u043b\u0435\u043c\u0435\u043d\u0442",
         "table.label": "\u041c\u0435\u0442\u043a\u0430",
         "table.name": "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435",
         "table.service": "\u0421\u0435\u0440\u0432\u0438\u0441",
+        "table.status": "\u0421\u0442\u0430\u0442\u0443\u0441",
         "table.title": "\u0417\u0430\u0433\u043e\u043b\u043e\u0432\u043e\u043a",
+        "table.type": "\u0422\u0438\u043f",
         "table.username": "\u0418\u043c\u044f \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f",
         "tags.all": "\u0412\u0441\u0435",
         "tidy.apply": "\u041f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c \u043a \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u043c",
@@ -5282,6 +5704,13 @@ WEB_CATALOGUES = {
         "tidy.title": "\u041f\u0440\u0438\u0432\u0435\u0441\u0442\u0438 \u0438\u043c\u043f\u043e\u0440\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u0432 \u043f\u043e\u0440\u044f\u0434\u043e\u043a",
         "toast.copy_fail": "\u0421\u043a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c.",
         "toast.copy_success": "\u0421\u043a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u043d\u043e \u0432 \u0431\u0443\u0444\u0435\u0440 \u043e\u0431\u043c\u0435\u043d\u0430.",
+        "trash.delete_forever": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043d\u0430\u0432\u0441\u0435\u0433\u0434\u0430",
+        "trash.deleted": "\u0423\u0434\u0430\u043b\u0435\u043d\u043e",
+        "trash.empty": "\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c \u043a\u043e\u0440\u0437\u0438\u043d\u0443",
+        "trash.empty.d": "\u0423\u0434\u0430\u043b\u0451\u043d\u043d\u044b\u0435 \u043f\u0430\u0440\u043e\u043b\u0438 \u0438 \u0437\u0430\u043f\u0438\u0441\u0438 \u043e\u0441\u0442\u0430\u044e\u0442\u0441\u044f \u0437\u0434\u0435\u0441\u044c, \u043f\u043e\u043a\u0430 \u0432\u044b \u043d\u0435 \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0435 \u0438\u043b\u0438 \u043e\u043a\u043e\u043d\u0447\u0430\u0442\u0435\u043b\u044c\u043d\u043e \u043d\u0435 \u0443\u0434\u0430\u043b\u0438\u0442\u0435 \u0438\u0445.",
+        "trash.empty.t": "\u041a\u043e\u0440\u0437\u0438\u043d\u0430 \u043f\u0443\u0441\u0442\u0430",
+        "trash.restore": "\u0412\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c",
+        "trash.sub": "\u0423\u0434\u0430\u043b\u0451\u043d\u043d\u044b\u0435 \u044d\u043b\u0435\u043c\u0435\u043d\u0442\u044b \u0445\u0440\u0430\u043d\u044f\u0442\u0441\u044f \u0437\u0434\u0435\u0441\u044c, \u0447\u0442\u043e\u0431\u044b \u0443\u0434\u0430\u043b\u0435\u043d\u0438\u0435 \u043c\u043e\u0436\u043d\u043e \u0431\u044b\u043b\u043e \u043e\u0442\u043c\u0435\u043d\u0438\u0442\u044c.",
         "unlock.btn": "\u0420\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0431\u0438\u043e\u043c\u0435\u0442\u0440\u0438\u0435\u0439",
         "unlock.empty": "\u041f\u043e\u043a\u0430 \u043d\u0435 \u0437\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043e\u0432\u0430\u043d\u043e \u043d\u0438 \u043e\u0434\u043d\u043e\u0433\u043e \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0430",
         "unlock.empty_sub": "\u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u0443\u0439\u0442\u0435 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u043e \u043d\u0438\u0436\u0435 \u0438\u043b\u0438 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u0439\u0442\u0435 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u044c\u0441\u044f \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u0435\u043c",
@@ -5356,6 +5785,19 @@ WEB_CATALOGUES = {
         "btn.restore": "\u6062\u590d",
         "btn.show": "\u663e\u793a",
         "btn.view": "\u67e5\u770b",
+        "cert.algorithm": "\u7b7e\u540d",
+        "cert.derived.d": "\u4ece\u8bc1\u4e66\u8bfb\u53d6\u800c\u975e\u5728\u65c1\u624b\u52a8\u8f93\u5165\uff0c\u56e0\u6b64\u4e0d\u4f1a\u4e0e\u6240\u63cf\u8ff0\u7684\u8bc1\u4e66\u4e0d\u4e00\u81f4\u3002",
+        "cert.derived.t": "\u7531\u8bc1\u4e66\u63a8\u5bfc",
+        "cert.fingerprint": "SHA-256 \u6307\u7eb9",
+        "cert.issuer": "\u9881\u53d1\u8005",
+        "cert.key_algorithm": "\u516c\u94a5",
+        "cert.not_after": "\u5230\u671f",
+        "cert.not_before": "\u751f\u6548\u65e5\u671f",
+        "cert.sans": "\u5907\u7528\u540d\u79f0",
+        "cert.selfsigned": "\u6b64\u8bc1\u4e66\u4e3a\u81ea\u7b7e\u540d",
+        "cert.serial": "\u5e8f\u5217\u53f7",
+        "cert.subject": "\u4e3b\u9898",
+        "cert.unreadable": "SPM \u65e0\u6cd5\u8bfb\u53d6\u6b64\u8bc1\u4e66",
         "chip.online": "\u5728\u7ebf \u00b7 \u8bfb / \u5199",
         "confirm.delete_authenticator": "\u8981\u5220\u9664\u8fd9\u4e2a\u9a8c\u8bc1\u5668\u5417\uff1f",
         "confirm.delete_backup": "\u8981\u5220\u9664\u8fd9\u4e9b\u5907\u7528\u7801\u5417\uff1f",
@@ -5363,6 +5805,8 @@ WEB_CATALOGUES = {
         "confirm.delete_passphrase": "\u8981\u5220\u9664\u8fd9\u6761\u53e3\u4ee4\u77ed\u8bed\u5417\uff1f",
         "confirm.delete_record": "\u5220\u9664\u8fd9\u6761\u8bb0\u5f55\uff1f",
         "confirm.restore_snapshot": "\u8981\u6062\u590d\u8fd9\u4e2a\u5feb\u7167\u5417\uff1f\u5f53\u524d\u5bc6\u7801\u5e93\u4f1a\u5148\u88ab\u5f52\u6863\u3002",
+        "confirm.trash_delete": "\u6c38\u4e45\u5220\u9664\u6b64\u9879\u76ee\uff1f\u6b64\u64cd\u4f5c\u65e0\u6cd5\u64a4\u9500\u3002",
+        "confirm.trash_empty": "\u6c38\u4e45\u5220\u9664\u56de\u6536\u7ad9\u4e2d\u7684\u6240\u6709\u5185\u5bb9\uff1f\u6b64\u64cd\u4f5c\u65e0\u6cd5\u64a4\u9500\u3002",
         "empty.auth.d": "\u6dfb\u52a0\u4e00\u4e2a TOTP \u5bc6\u94a5\u5373\u53ef\u751f\u6210\u4e24\u6b65\u9a8c\u8bc1\u7801\u3002",
         "empty.auth.t": "\u6ca1\u6709\u9a8c\u8bc1\u5668",
         "empty.backups.d": "\u628a\u4e00\u6b21\u6027\u6062\u590d\u7801\u5b89\u5168\u5730\u4fdd\u5b58\u5728\u8fd9\u91cc\u3002",
@@ -5405,6 +5849,14 @@ WEB_CATALOGUES = {
         "events.kind": "\u4e8b\u4ef6",
         "events.outcome": "\u7ed3\u679c",
         "events.when": "\u65f6\u95f4\uff08UTC\uff09",
+        "expiring.col.days": "\u5929\u6570",
+        "expiring.col.expires": "\u5230\u671f",
+        "expiring.empty.d": "\u672a\u676530\u5929\u5185\u6ca1\u6709\u5e26\u5230\u671f\u65e5\u7684\u673a\u5bc6\u5c06\u5230\u671f\u3002",
+        "expiring.empty.t": "\u6ca1\u6709\u5373\u5c06\u5230\u671f\u7684\u9879\u76ee",
+        "expiring.status.expired": "\u5df2\u8fc7\u671f",
+        "expiring.status.soon": "\u5373\u5c06\u5230\u671f",
+        "expiring.summary.expired": "\u5df2\u8fc7\u671f",
+        "expiring.summary.soon": "\u5373\u5c06\u5230\u671f",
         "filters.clear": "\u6e05\u9664\u7b5b\u9009",
         "filters.desc": "\u6309\u6587\u4ef6\u5939\u6216\u6807\u7b7e\u7f29\u5c0f\u6b64\u5217\u8868\u3002\u751f\u6548\u7684\u7b5b\u9009\u6761\u4ef6\u4f1a\u4fdd\u7559\u5728\u9875\u9762\u5730\u5740\u4e2d\u3002",
         "filters.folders": "\u6587\u4ef6\u5939",
@@ -5520,6 +5972,7 @@ WEB_CATALOGUES = {
         "nav.collapse": "\u6536\u8d77\u4fa7\u8fb9\u680f",
         "nav.events": "\u5b89\u5168\u4e8b\u4ef6",
         "nav.expand": "\u5c55\u5f00\u4fa7\u8fb9\u680f",
+        "nav.expiring": "\u5373\u5c06\u5230\u671f",
         "nav.generator": "\u751f\u6210\u5668",
         "nav.group.settings": "\u8bbe\u7f6e",
         "nav.group.tools": "\u5de5\u5177",
@@ -5535,6 +5988,7 @@ WEB_CATALOGUES = {
         "nav.security": "\u5b89\u5168",
         "nav.settings": "\u8bbe\u7f6e",
         "nav.transfer": "\u5bfc\u51fa / \u5bfc\u5165",
+        "nav.trash": "\u56de\u6536\u7ad9",
         "nav.unlock": "\u751f\u7269\u8bc6\u522b\u89e3\u9501",
         "note.field.content": "\u5185\u5bb9",
         "note.field.title": "\u6807\u9898",
@@ -5569,6 +6023,7 @@ WEB_CATALOGUES = {
         "record.field.address": "\u5730\u5740",
         "record.field.brand": "\u5361\u7ec4\u7ec7",
         "record.field.cardholder": "\u6301\u5361\u4eba",
+        "record.field.certificate": "\u8bc1\u4e66",
         "record.field.comment": "\u6ce8\u91ca",
         "record.field.cvv": "\u5b89\u5168\u7801",
         "record.field.database": "\u6570\u636e\u5e93",
@@ -5605,6 +6060,7 @@ WEB_CATALOGUES = {
         "record.field.username": "\u7528\u6237\u540d",
         "record.field.version": "\u7248\u672c",
         "record.type.api-token": "API \u4ee4\u724c",
+        "record.type.certificate": "\u8bc1\u4e66",
         "record.type.credit-card": "\u94f6\u884c\u5361",
         "record.type.db-credential": "\u6570\u636e\u5e93\u51ed\u636e",
         "record.type.gpg-key": "GPG \u5bc6\u94a5",
@@ -5624,6 +6080,8 @@ WEB_CATALOGUES = {
         "search.label": "\u5728\u6b64\u5bc6\u7801\u5e93\u4e2d\u641c\u7d22",
         "search.no_results": "\u6ca1\u6709\u4e0e\u4f60\u7684\u641c\u7d22\u5339\u914d\u7684\u5185\u5bb9",
         "search.placeholder": "\u5728\u6b64\u5bc6\u7801\u5e93\u4e2d\u641c\u7d22\u2026\u2026",
+        "search.save": "\u4fdd\u5b58\u641c\u7d22",
+        "search.saved": "\u5df2\u4fdd\u5b58\u7684\u641c\u7d22",
         "search.title": "\u641c\u7d22",
         "section.authenticators": "\u9a8c\u8bc1\u5668\uff08TOTP\uff09",
         "section.authenticators_desc": "\u4fdd\u5b58\u4e24\u6b65\u9a8c\u8bc1\u5bc6\u94a5\u5e76\u67e5\u770b\u5b9e\u65f6\u9a8c\u8bc1\u7801\u3002",
@@ -5728,10 +6186,13 @@ WEB_CATALOGUES = {
         "table.algo": "\u7b97\u6cd5",
         "table.every": "\u6bcf",
         "table.id": "ID",
+        "table.item": "\u9879\u76ee",
         "table.label": "\u6807\u7b7e",
         "table.name": "\u540d\u79f0",
         "table.service": "\u670d\u52a1",
+        "table.status": "\u72b6\u6001",
         "table.title": "\u6807\u9898",
+        "table.type": "\u7c7b\u578b",
         "table.username": "\u7528\u6237\u540d",
         "tags.all": "\u5168\u90e8",
         "tidy.apply": "\u5e94\u7528\u4e8e\u6240\u9009\u6761\u76ee",
@@ -5754,6 +6215,13 @@ WEB_CATALOGUES = {
         "tidy.title": "\u6574\u7406\u5bfc\u5165\u7684\u6761\u76ee",
         "toast.copy_fail": "\u590d\u5236\u5931\u8d25\u3002",
         "toast.copy_success": "\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f\u3002",
+        "trash.delete_forever": "\u6c38\u4e45\u5220\u9664",
+        "trash.deleted": "\u5220\u9664\u65f6\u95f4",
+        "trash.empty": "\u6e05\u7a7a\u56de\u6536\u7ad9",
+        "trash.empty.d": "\u5df2\u5220\u9664\u7684\u5bc6\u7801\u548c\u8bb0\u5f55\u4f1a\u4fdd\u7559\u5728\u6b64\u5904\uff0c\u76f4\u5230\u60a8\u6062\u590d\u6216\u6c38\u4e45\u5220\u9664\u5b83\u4eec\u3002",
+        "trash.empty.t": "\u56de\u6536\u7ad9\u4e3a\u7a7a",
+        "trash.restore": "\u6062\u590d",
+        "trash.sub": "\u5df2\u5220\u9664\u7684\u9879\u76ee\u4fdd\u7559\u5728\u6b64\u5904\uff0c\u4ee5\u4fbf\u53ef\u4ee5\u64a4\u9500\u5220\u9664\u3002",
         "unlock.btn": "\u7528\u751f\u7269\u8bc6\u522b\u89e3\u9501",
         "unlock.empty": "\u5c1a\u672a\u6ce8\u518c\u4efb\u4f55\u8bbe\u5907",
         "unlock.empty_sub": "\u5728\u4e0b\u65b9\u6ce8\u518c\u4e00\u53f0\uff0c\u6216\u7ee7\u7eed\u4f7f\u7528\u4e3b\u5bc6\u7801",
@@ -7114,7 +7582,20 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .chip-btn:hover { border-color: var(--accent); }
 .chip-on { background: var(--accent); color: var(--bg); border-color: transparent; }
 .chip-warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.chip-danger { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
 .chip-hidden { background: var(--surface-2); color: var(--text-dim); border-style: dashed; }
+/* The favourite star (roadmap 22): an outline until pinned, then filled amber. */
+.fav-toggle svg { fill: none; }
+.icon-btn.fav-on { color: var(--warn); }
+.icon-btn.fav-on svg { fill: currentColor; }
+/* Saved searches / smart collections (roadmap 28). */
+.saved-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+.saved-label { font-size: 12px; color: var(--text-dim); margin-inline-end: 2px; }
+.saved-search { display: inline-flex; align-items: center; gap: 4px; }
+.saved-search a { text-decoration: none; color: inherit; }
+.chip-x { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; }
+.chip-x:hover { color: var(--danger); }
+.saved-save input[type="text"] { padding: 4px 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); border-radius: 0; font: inherit; font-size: 13px; }
 .tally { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--border); }
 .tally:hover, .tally:focus-visible { color: var(--accent); border-bottom-color: var(--accent); }
 /* A checkbox and its words as one target: the label is the hit area, so the
@@ -7698,6 +8179,10 @@ ICON_SPRITE = """
   <symbol id="i-licence" viewBox="0 0 24 24"><path d="M4.5 3.5h15v11h-15zM8 7.5h8M8 11h5"/><circle cx="16.5" cy="17.5" r="3"/><path d="M14.5 20l-.5 2.5 2.5-1.2 2.5 1.2-.5-2.5"/></symbol>
   <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 8.5c5.5-4.7 13.5-4.7 19 0M6 12.5c3.6-3 8.4-3 12 0M9.5 16.5c1.6-1.3 3.4-1.3 5 0"/><circle cx="12" cy="20" r="1"/></symbol>
   <symbol id="i-server" viewBox="0 0 24 24"><path d="M3.5 3.5h17v7h-17zM3.5 13.5h17v7h-17zM7 7h.01M7 17h.01M11 7h6M11 17h6"/></symbol>
+  <symbol id="i-certificate" viewBox="0 0 24 24"><path d="M4.5 3.5h15v12h-15zM7.5 7h9M7.5 10h6"/><circle cx="12" cy="17.5" r="3"/><path d="M10 19.6l-.6 2.9 2.6-1.3 2.6 1.3-.6-2.9"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 6.5h15M9 6.5V4.5h6v2M6 6.5l1 14h10l1-14M10 10v7M14 10v7"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6M10 20.5a2 2 0 0 0 4 0"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.7 6.2.6-4.7 4.1 1.4 6.1L12 16.9l-5.5 3.2 1.4-6.1L3.2 9.8l6.2-.6z"/></symbol>
   <symbol id="i-gpg" viewBox="0 0 24 24"><circle cx="8.5" cy="8.5" r="4"/><path d="M11.4 11.4L16 16M14 18l4-4M16 20l4-4"/></symbol>
   <symbol id="i-ssh" viewBox="0 0 24 24"><path d="M3.5 4.5h17v15h-17zM7 9.5l3 2.5-3 2.5M12.5 15h5"/></symbol>
   <symbol id="i-brand" viewBox="0 0 24 24"><path d="M4 6l5 6-5 6M12 18h8M12 6h8"/></symbol>
@@ -7803,10 +8288,12 @@ NAV_SECTIONS = [
     ]),
     ("nav.group.tools", [
         ("security",  "/security",  "shield", "nav.security",  "Security",        None),
+        ("expiring",  "/expiring",  "bell",   "nav.expiring",  "Expiring",        "__expiring__"),
         ("history",   "/history",   "history", "nav.history",   "History",         None),
         ("events",    "/events",    "shield", "nav.events",    "Security Events", None),
         ("generator", "/generator", "generator", "nav.generator", "Generator",       None),
         ("transfer",  "/transfer",  "transfer", "nav.transfer",  "Export / Import", None),
+        ("trash",     "/trash",     "trash",  "nav.trash",     "Trash",           "__trash__"),
     ]),
     ("nav.group.settings", [
         ("settings", "/settings", "gear", "nav.settings", "Settings", None),
@@ -8059,6 +8546,32 @@ def _esc(v):
     return html.escape(v if v is not None else "")
 
 
+def _favorite_toggle(kind, record_type, record_id, on, back):
+    """A star that pins or unpins a row (roadmap 22).
+
+    A same-origin form like the delete button beside it, so it needs no token
+    the list would have to thread through; the Origin check authorises it, and
+    the write only ever flips one flag. `back` returns the viewer to the list
+    they clicked from.
+    """
+    target = "0" if on else "1"
+    cls = "icon-btn fav-toggle" + (" fav-on" if on else "")
+    label = "Unpin from favourites" if on else "Pin to favourites"
+    return (
+        '<form method="post" action="/favorite" style="display:inline">'
+        '<input type="hidden" name="kind" value="%s">'
+        '<input type="hidden" name="type" value="%s">'
+        '<input type="hidden" name="id" value="%s">'
+        '<input type="hidden" name="on" value="%s">'
+        '<input type="hidden" name="back" value="%s">'
+        '<button class="%s" type="submit" aria-label="%s" aria-pressed="%s" '
+        'title="%s">%s</button></form>'
+        % (html.escape(kind, quote=True), html.escape(record_type, quote=True),
+           html.escape(str(record_id), quote=True), target,
+           html.escape(back, quote=True), cls, label,
+           "true" if on else "false", label, _icon("star", "icon icon-sm")))
+
+
 def _empty(icon, title_key, title, desc_key, desc, cta_html="", colspan=4):
     return (
         f'<tr class="empty-row"><td colspan="{colspan}">'
@@ -8199,10 +8712,14 @@ def build_rows_html(entries, filtered=False, reveal_hidden=False):
     rows = []
     now = time.time()
     limit = rotation_days()
+    # Favourites first (roadmap 22), stable within each group so the rest of the
+    # order is untouched.
+    entries = sorted(entries, key=lambda e: 0 if (len(e[1]) > 7
+                     and core.decode_attrs(e[1][7])[3]) else 1)
     for _, parts in entries:
         eid, name, user = _esc(parts[0]), _esc(parts[1]), _esc(parts[2])
         tags = entry_tags(parts)
-        folder, _, hidden = core.decode_attrs(parts[7] if len(parts) > 7 else "")
+        folder, _, hidden, favorite, _ = core.decode_attrs(parts[7] if len(parts) > 7 else "")
         # The username goes too. It is usually an email address, which names
         # the service as surely as the service name does.
         redacted = hidden and not reveal_hidden
@@ -8230,7 +8747,7 @@ def build_rows_html(entries, filtered=False, reveal_hidden=False):
             f'<td class="num">{eid}</td>'
             f'<td class="strong">{name} {aging}{chips}</td>'
             f'<td class="muted">{user or "&mdash;"}</td>'
-            f'<td class="actions">{_actions(f"/view?id={eid}", f"/edit?id={eid}", "/delete", eid, "confirm.delete_entry", "Delete this entry?")}</td>'
+            f'<td class="actions">{_favorite_toggle("password", "", eid, favorite, "/passwords")}{_actions(f"/view?id={eid}", f"/edit?id={eid}", "/delete", eid, "confirm.delete_entry", "Delete this entry?")}</td>'
             f'</tr>'
         )
     return "".join(rows)
@@ -8251,7 +8768,7 @@ def password_filter_state(entries, query):
     indexed = []
     for entry in entries:
         parts = entry[1]
-        folder, _, hidden = core.decode_attrs(parts[7] if len(parts) > 7 else "")
+        folder, _, hidden, _, _ = core.decode_attrs(parts[7] if len(parts) > 7 else "")
         if folder:
             folders.setdefault(folder.casefold(), folder)
         else:
@@ -8799,6 +9316,172 @@ def overview_page(counts, recent):
 </div>"""
 
 
+def saved_searches_bar(saved, term, csrf):
+    """Saved searches as re-runnable smart collections, plus a save control
+    (roadmap 28). Each chip re-runs its query; the query is not frozen, so a
+    saved search finds records added since it was saved."""
+    csrf_i = '<input type="hidden" name="csrf" value="%s">' % html.escape(csrf, quote=True)
+    chips = []
+    already = any(s["query"] == term for s in saved) if term else False
+    for s in saved:
+        q = urllib.parse.quote(s["query"])
+        chips.append(
+            '<span class="chip saved-search"><a href="/search?q=%s">%s</a>'
+            '<form class="inline" method="post" action="/search-delete">%s'
+            '<input type="hidden" name="name" value="%s">'
+            '<button type="submit" class="chip-x" aria-label="Delete saved search" '
+            'title="Delete">&times;</button></form></span>'
+            % (q, html.escape(s["name"]), csrf_i, html.escape(s["name"], quote=True)))
+    save_form = ""
+    if term and not already:
+        save_form = (
+            '<form class="inline saved-save" method="post" action="/search-save">%s'
+            '<input type="hidden" name="query" value="%s">'
+            '<input type="text" name="name" maxlength="80" '
+            'placeholder="Name this search" aria-label="Name this search" value="%s">'
+            '<button type="submit" class="btn btn-ghost btn-sm" data-i18n="search.save">Save search</button>'
+            '</form>' % (csrf_i, html.escape(term, quote=True), html.escape(term, quote=True)))
+    if not chips and not save_form:
+        return ""
+    label = ('<span class="saved-label" data-i18n="search.saved">Saved searches</span>'
+             if chips else "")
+    return ('<div class="saved-bar">%s%s%s</div>'
+            % (label, "".join(chips), save_form))
+
+
+def _expiry_type_cell(entry):
+    """The type label cell for one expiry or trash entry."""
+    if entry.get("kind") == "record" or entry.get("type") != "password":
+        rtype = entry["type"]
+        ico = core.RECORD_SCHEMAS.get(rtype, {}).get("icon", "record")
+        return ('<span class="nav-ico" aria-hidden="true">%s</span>'
+                '<span data-i18n="record.type.%s">%s</span>'
+                % (_icon(ico), rtype, html.escape(record_type_label(rtype))))
+    return ('<span class="nav-ico" aria-hidden="true">%s</span>'
+            '<span data-i18n="nav.passwords">Password</span>' % _icon("key"))
+
+
+def expiring_page(scan):
+    """Every dated secret that has expired or is inside the 30-day window
+    (roadmap 30/31). No network and no daemon -- read from the vault on view."""
+    summary = core.expiry_summary(scan)
+    if not scan:
+        content = """
+<div class="card"><div class="empty">
+  <div class="empty-ico" aria-hidden="true">%s</div>
+  <div class="empty-t" data-i18n="expiring.empty.t">Nothing is expiring</div>
+  <div class="empty-d" data-i18n="expiring.empty.d">No secret with an expiry date is due within the next 30 days.</div>
+</div></div>""" % _icon("bell", "icon icon-lg")
+    else:
+        rows = []
+        for e in scan:
+            if e["kind"] == "record":
+                href = "/records-view?type=%s&amp;id=%s" % (
+                    urllib.parse.quote(e["type"]), urllib.parse.quote(str(e["id"])))
+            else:
+                href = "/view?id=%s" % urllib.parse.quote(str(e["id"]))
+            chip = ('chip-danger' if e["status"] == "expired" else 'chip-warn')
+            stkey = ("expiring.status.expired" if e["status"] == "expired"
+                     else "expiring.status.soon")
+            sttext = "Expired" if e["status"] == "expired" else "Expiring"
+            rows.append(
+                '<tr data-row=""><td>%s</td>'
+                '<td class="strong"><a href="%s">%s</a></td>'
+                '<td class="muted">%s</td>'
+                '<td class="num">%d</td>'
+                '<td><span class="chip %s" data-i18n="%s">%s</span></td></tr>'
+                % (_expiry_type_cell(e), href, _esc(e["label"]) or "&mdash;",
+                   _esc(e["expires_on"]), e["days_left"], chip, stkey, sttext))
+        content = """
+<div class="card">
+  <div class="table-wrap"><table class="t">
+    <thead><tr>
+      <th scope="col" data-i18n="table.type">Type</th>
+      <th scope="col" data-i18n="table.item">Item</th>
+      <th scope="col" data-i18n="expiring.col.expires">Expires</th>
+      <th scope="col" data-i18n="expiring.col.days">Days</th>
+      <th scope="col" data-i18n="table.status">Status</th>
+    </tr></thead>
+    <tbody>%s</tbody></table></div>
+</div>""" % "".join(rows)
+    sub = ('<span data-i18n="expiring.summary.expired">Expired</span>: %d &middot; '
+           '<span data-i18n="expiring.summary.soon">Expiring soon</span>: %d'
+           % (summary["expired"], summary["expiring"]))
+    return """
+<div class="page-head">
+  <div>
+    <h1 class="page-title" data-i18n="nav.expiring">Expiring</h1>
+    <div class="page-sub">%s</div>
+  </div>
+</div>
+%s""" % (sub, content)
+
+
+def trash_page(items, csrf):
+    """Soft-deleted passwords and records, with restore and permanent delete
+    (roadmap 24). Deleting here is the only permanent delete in the Dashboard."""
+    if not items:
+        content = """
+<div class="card"><div class="empty">
+  <div class="empty-ico" aria-hidden="true">%s</div>
+  <div class="empty-t" data-i18n="trash.empty.t">The trash is empty</div>
+  <div class="empty-d" data-i18n="trash.empty.d">Deleted passwords and records rest here until you restore or permanently delete them.</div>
+</div></div>""" % _icon("trash", "icon icon-lg")
+        empty_btn = ""
+    else:
+        rows = []
+        for it in items:
+            hidden = ('<input type="hidden" name="csrf" value="%s">'
+                      '<input type="hidden" name="kind" value="%s">'
+                      '<input type="hidden" name="type" value="%s">'
+                      '<input type="hidden" name="id" value="%s">'
+                      % (html.escape(csrf, quote=True), html.escape(it["kind"], quote=True),
+                         html.escape(it["type"], quote=True), html.escape(str(it["id"]), quote=True)))
+            actions = (
+                '<div class="icon-row">'
+                '<form class="inline" method="post" action="/trash-restore">%s'
+                '<button type="submit" class="btn btn-ghost btn-sm" data-i18n="trash.restore">Restore</button></form>'
+                '<form class="inline" method="post" action="/trash-delete" '
+                'data-confirm-key="confirm.trash_delete" '
+                'data-confirm-text="Permanently delete this item? This cannot be undone.">%s'
+                '<button type="submit" class="btn btn-danger btn-sm" data-i18n="trash.delete_forever">Delete forever</button></form>'
+                '</div>' % (hidden, hidden))
+            rows.append(
+                '<tr data-row=""><td>%s</td>'
+                '<td class="strong">%s</td>'
+                '<td class="muted">%s</td>'
+                '<td class="actions">%s</td></tr>'
+                % (_expiry_type_cell(it), _esc(it["label"]) or "&mdash;",
+                   _esc((it.get("trashed_at") or "")[:10]), actions))
+        content = """
+<div class="card">
+  <div class="table-wrap"><table class="t">
+    <thead><tr>
+      <th scope="col" data-i18n="table.type">Type</th>
+      <th scope="col" data-i18n="table.item">Item</th>
+      <th scope="col" data-i18n="trash.deleted">Deleted</th>
+      <th scope="col"><span class="sr-only" data-i18n="table.actions">Actions</span></th>
+    </tr></thead>
+    <tbody>%s</tbody></table></div>
+</div>""" % "".join(rows)
+        empty_btn = (
+            '<form class="inline" method="post" action="/trash-empty" '
+            'data-confirm-key="confirm.trash_empty" '
+            'data-confirm-text="Permanently delete everything in the trash? This cannot be undone.">'
+            '<input type="hidden" name="csrf" value="%s">'
+            '<button type="submit" class="btn btn-danger" data-i18n="trash.empty">Empty trash</button></form>'
+            % html.escape(csrf, quote=True))
+    return """
+<div class="page-head">
+  <div>
+    <h1 class="page-title" data-i18n="nav.trash">Trash</h1>
+    <div class="page-sub" data-i18n="trash.sub">Deleted items are kept here so a delete can be undone.</div>
+  </div>
+  <div class="page-actions">%s</div>
+</div>
+%s""" % (empty_btn, content)
+
+
 # --------------------------------------------------------------------------
 # Forms
 # --------------------------------------------------------------------------
@@ -9178,7 +9861,7 @@ def _attrs_block(column):
     that printed them in clear while masking the password beside them would be
     protecting the wrong half.
     """
-    folder, fields, hidden = core.decode_attrs(column)
+    folder, fields, hidden, _favorite, _trashed = core.decode_attrs(column)
     if not folder and not fields and not hidden:
         return ""
     out = []
@@ -10998,8 +11681,12 @@ def build_records_page(plaintext, active_type="", counts=None):
     """The list. One table for every type, because a record is a record."""
     counts = counts or core.record_counts(plaintext)
     rows = []
-    for _index, parsed in core.iter_records(plaintext, active_type):
-        record_type, record_id, label, values, created, folder, _custom, hidden = parsed
+    parsed_rows = list(core.iter_records(plaintext, active_type))
+    # Favourites first (roadmap 22), then vault order within each group, so a
+    # pinned record rises to the top of its list without reordering the rest.
+    parsed_rows.sort(key=lambda ip: 0 if ip[1][8] else 1)
+    for _index, parsed in parsed_rows:
+        record_type, record_id, label, values, created, folder, _custom, hidden, favorite, _trashed = parsed
         shown = SEARCH_REDACTED if hidden else html.escape(label)
         href = "/records-view?type=%s&amp;id=%s" % (
             urllib.parse.quote(record_type), urllib.parse.quote(record_id))
@@ -11022,6 +11709,7 @@ def build_records_page(plaintext, active_type="", counts=None):
           <td>{"" if hidden else html.escape(summary[:60])}</td>
           <td>{html.escape(folder)}</td>
           <td style="text-align:end">
+            {_favorite_toggle("record", record_type, record_id, favorite, "/records")}
             <a class="icon-btn" href="{href}" aria-label="View">{_icon("view", "icon icon-sm")}</a>
             <a class="icon-btn" href="{edit}" aria-label="Edit">{_icon("edit", "icon icon-sm")}</a>
             <form method="post" action="/records-delete" style="display:inline"
@@ -11074,7 +11762,7 @@ def build_record_view(parsed, counts=None):
     of the defect this engine exists to prevent, and a secret is a worse thing
     to get wrong than a folder.
     """
-    record_type, record_id, label, values, created, folder, custom, hidden = parsed
+    record_type, record_id, label, values, created, folder, custom, hidden, favorite, _trashed = parsed
     blocks = []
     for name, kind, widget, _required in core.record_fields(record_type):
         value = values.get(name, "")
@@ -11137,6 +11825,7 @@ def build_record_view(parsed, counts=None):
     <div class="page-sub" data-i18n="record.type.{record_type}">{html.escape(record_type_label(record_type))}</div>
   </div>
   <div class="page-actions">
+    {_favorite_toggle("record", record_type, record_id, favorite, back)}
     <a class="btn btn-primary" href="{edit}" data-i18n="btn.edit">Edit</a>
     <a class="btn btn-ghost" href="{back}" data-i18n="form.back_list">Back to list</a>
   </div>
@@ -12109,7 +12798,7 @@ def parse_multipart(body_bytes: bytes, content_type: str):
 		out[name] = payload
 	return out
 
-def parse_entries(plaintext: str):
+def parse_entries(plaintext: str, include_trashed=False):
     """Password entries.
 
     A password row is identified the way the CLI identifies one: field 1 is a
@@ -12119,6 +12808,13 @@ def parse_entries(plaintext: str):
     sitting in the password column, and counted in the security score. Anything
     SPM adds later is excluded by default now instead of by remembering to add
     it here.
+
+    `include_trashed` is False by default (5.1.0): a soft-deleted password is
+    absent from every list, count, search and security score the way a deleted
+    one used to be, until it is restored or purged. The trash view, restore and
+    permanent-delete pass True because they are the callers that must still find
+    it -- and `lines` is always every line, so a rewrite still addresses the row
+    by index whether or not `entries` lists it.
     """
     lines = plaintext.splitlines()
     entries = []
@@ -12127,8 +12823,44 @@ def parse_entries(plaintext: str):
             continue
         parts = line.split("\t")
         if len(parts) >= 6 and parts[0].isdigit():
+            if not include_trashed and len(parts) > 7:
+                if core.decode_attrs(parts[7])[4]:   # trashed_at set
+                    continue
             entries.append((idx, parts))
     return lines, entries
+
+
+# ----- soft delete and favourites on a stored row ----------------------------
+# A password row keeps its attributes in column 7 and a typed record in column
+# 5. These three edit exactly that column through the core's attrs_edit, which
+# carries every other part of the column through untouched, so a trash or a pin
+# never drops a folder, a custom field or the hidden flag. `col` is the caller's
+# one piece of knowledge -- which row shape it holds -- and nothing else here
+# needs to know.
+
+def _row_attrs_edit(line, col, **changes):
+    parts = line.split("\t")
+    while len(parts) <= col:
+        parts.append("")
+    parts[col] = core.attrs_edit(parts[col], **changes) or "-"
+    return "\t".join(parts)
+
+
+def _row_set_trashed(line, col):
+    """Mark a row soft-deleted, stamped now (roadmap 24)."""
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return _row_attrs_edit(line, col, trashed_at=now)
+
+
+def _row_clear_trashed(line, col):
+    """Restore a soft-deleted row."""
+    return _row_attrs_edit(line, col, trashed_at="")
+
+
+def _row_set_favorite(line, col, on):
+    """Pin or unpin a row (roadmap 22)."""
+    return _row_attrs_edit(line, col, favorite=bool(on))
+
 
 def parse_notes(plaintext: str):
     """Secure notes with prefix NOTE."""
@@ -12423,7 +13155,7 @@ def search_vault(plaintext, term):
     # way it does on the security page, rather than making search the one
     # place a hidden name can be read.
     for _index, parsed in core.iter_records(plaintext):
-        record_type, rid, label, values, _created, folder, custom, hidden = parsed
+        record_type, rid, label, values, _created, folder, custom, hidden, _fav, _trash = parsed
         secrets_of = core.record_secret_fields(record_type)
         haystack = [rid, label, folder]
         haystack += [v for k, v in values.items() if k not in secrets_of]
@@ -12703,6 +13435,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "records": record_counts.get("", 0),
         }
         counts.update({k: v for k, v in record_counts.items() if k})
+        # Dated secrets only (no password rotation) so the badge counts what the
+        # Expiring page shows -- tokens, cards, identities, licences and certs
+        # with a real expiry date, expired or inside the 30-day window.
+        counts["__expiring__"] = len(core.expiry_scan(plaintext, horizon_days=30))
         return counts
 
     def _add_cors(self):
@@ -13592,6 +14328,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 title="Security", counts=self._counts(plaintext)))
             return
 
+        if path == "/expiring":
+            try:
+                plaintext = load_vault(master, self._session_rec)
+            except Exception:
+                return self._expire_session()
+            scan = core.expiry_scan(plaintext, horizon_days=30)
+            self._send_html(200, render_shell(
+                expiring_page(scan), "expiring", VERSION, VAULT_PATH,
+                title="Expiring", counts=self._counts(plaintext)))
+            return
+
+        if path == "/trash":
+            try:
+                plaintext = load_vault(master, self._session_rec)
+            except Exception:
+                return self._expire_session()
+            self._send_html(200, render_shell(
+                trash_page(core.trashed_items(plaintext), self._session_csrf()),
+                "trash", VERSION, VAULT_PATH,
+                title="Trash", counts=self._counts(plaintext)))
+            return
+
         if path == "/unlock/settings":
             if not WEBAUTHN_ENABLED:
                 self.send_error(404, "Not found")
@@ -13702,6 +14460,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 [("search.kind", "Type", ""), ("table.id", "ID", "num"),
                  ("table.label", "Label", ""), ("table.actions", "Actions", "act")],
                 build_search_rows_html(results))
+            bar = saved_searches_bar(core.saved_searches(plaintext), term,
+                                     self._session_csrf())
+            if bar:
+                content = bar + content
             self._send_html(200, render_shell(
                 content, "", VERSION, VAULT_PATH, title="Search",
                 counts=self._counts(plaintext), searchable=True))
@@ -13851,8 +14613,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Entry not found")
                 return
 
-            stored_folder, stored_fields, stored_hidden = core.decode_attrs(
-                found[7] if len(found) > 7 else "")
+            stored_folder, stored_fields, stored_hidden, _fav, _trash = \
+                core.decode_attrs(found[7] if len(found) > 7 else "")
             values = {
                 "name": found[1],
                 "user": found[2],
@@ -13929,7 +14691,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Record not found")
                 return
             _index, parsed = found
-            rtype, rid, label, values, _created, folder, custom, hidden = parsed
+            rtype, rid, label, values, _created, folder, custom, hidden, _fav, _trash = parsed
 
             if path == "/records-view":
                 self._send_html(200, build_record_view(parsed, counts))
@@ -14604,11 +15366,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             idx_to_update = None
             old_created = ""
+            old_attrs = ""
             for idx, parts in entries:
                 if parts[0] == entry_id:
                     idx_to_update = idx
                     if len(parts) >= 6:
                         old_created = parts[5]
+                    old_attrs = parts[7] if len(parts) > 7 else ""
                     break
 
             if idx_to_update is None:
@@ -14650,7 +15414,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _vf(notes),
                 old_created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 url,
-                core.encode_attrs(folder, custom, _hidden_from_form(data)),
+                # attrs_edit carries the favourite and trashed markers through an
+                # edit; re-encoding from the form alone would drop them.
+                core.attrs_edit(old_attrs, folder=folder, fields=custom,
+                                hidden=_hidden_from_form(data)),
             ])
             lines[idx_to_update] = new_line
             new_plain = "\n".join(lines) + "\n"
@@ -14668,20 +15435,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             plaintext = load_vault(master, self._session_rec)
-            lines, _ = parse_entries(plaintext)
+            # 5.1.0: a delete moves the entry to the trash (roadmap 24) rather
+            # than removing the row. Find the live entry by id and stamp it;
+            # permanent deletion is /trash-delete.
+            lines, entries = parse_entries(plaintext)
+            for idx, parts in entries:
+                if parts[0] == entry_id:
+                    lines[idx] = _row_set_trashed(lines[idx], 7)
+                    break
 
-            ids_to_remove = {entry_id}
-            new_lines = []
-            for line in lines:
-                if not line or line.startswith("#") or line.startswith("META_") or line.startswith("NOTE\t"):
-                    new_lines.append(line)
-                    continue
-                parts = line.split("\t")
-                if parts and parts[0] in ids_to_remove:
-                    continue
-                new_lines.append(line)
-
-            new_plain = "\n".join(new_lines) + "\n"
+            new_plain = "\n".join(lines) + "\n"
             save_vault(master, new_plain, self._session_rec)
 
             self.send_response(302)
@@ -14809,6 +15572,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             index = None
             created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            # A new record is neither pinned nor trashed; an edit keeps whatever
+            # the stored record had, since the form shows neither.
+            keep_favorite, keep_trashed = False, ""
             if record_id:
                 found = core.find_record(plaintext, record_type, record_id)
                 if not found:
@@ -14817,6 +15583,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # The created stamp belongs to the record, not to this edit.
                 index, existing = found
                 created = existing[4]
+                keep_favorite, keep_trashed = existing[8], existing[9]
             else:
                 record_id = core.record_next_id(plaintext, record_type)
 
@@ -14827,7 +15594,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 row = core.build_record_row(record_type, record_id, label,
                                             values, created, folder=folder,
-                                            fields=pairs, hidden=hidden)
+                                            fields=pairs, hidden=hidden,
+                                            favorite=keep_favorite,
+                                            trashed_at=keep_trashed)
             except Exception as problem:
                 _again(str(problem))
                 return
@@ -14861,10 +15630,102 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # By index, from the core's own walk of the rows. Rebuilding the
             # match here with a startswith and a split is how a delete comes to
             # remove the wrong row when a label happens to contain a tab.
-            del lines[index]
+            # 5.1.0: a delete moves the record to the trash (roadmap 24) rather
+            # than removing the row. Permanent deletion is /trash-delete.
+            lines[index] = _row_set_trashed(lines[index], 5)
             save_vault(master, "\n".join(lines) + "\n", self._session_rec)
             self.send_response(302)
             self.send_header("Location", "/records?type=" + urllib.parse.quote(record_type))
+            self.end_headers()
+            return
+
+        # ----- trash and favourites (roadmap 22, 24) ------------------------
+        if path in ("/trash-restore", "/trash-delete"):
+            kind = (data.get("kind") or [""])[0]
+            record_type = (data.get("type") or [""])[0]
+            record_id = (data.get("id") or [""])[0]
+            if kind not in ("record", "password") or not record_id:
+                self.send_error(400, "Missing target")
+                return
+            if kind == "record" and record_type not in core.RECORD_TYPES:
+                self.send_error(400, "Unknown record type")
+                return
+            plaintext = load_vault(master, self._session_rec)
+            if path == "/trash-restore":
+                new_plain, changed = core.set_trashed(
+                    plaintext, kind, record_type, record_id, False)
+            else:
+                # Permanent delete: drop exactly this trashed row by index.
+                new_plain, changed = plaintext, False
+                lines = plaintext.splitlines()
+                for i, line in enumerate(lines):
+                    parts = line.split("\t")
+                    if not core._row_trashed_at(parts):
+                        continue
+                    if kind == "record":
+                        p = core.parse_record_row(line)
+                        if p and p[0] == record_type and p[1] == str(record_id):
+                            del lines[i]; changed = True; break
+                    elif parts[0] == str(record_id):
+                        del lines[i]; changed = True; break
+                if changed:
+                    new_plain = "\n".join(lines) + ("\n" if lines else "")
+            if changed:
+                save_vault(master, new_plain, self._session_rec)
+            self.send_response(302)
+            self.send_header("Location", "/trash")
+            self.end_headers()
+            return
+
+        if path in ("/search-save", "/search-delete"):
+            name = (data.get("name") or [""])[0].strip()
+            plaintext = load_vault(master, self._session_rec)
+            back = "/search"
+            try:
+                if path == "/search-save":
+                    query = (data.get("query") or [""])[0].strip()
+                    new_plain = core.set_saved_search(plaintext, name, query)
+                    back = "/search?q=" + urllib.parse.quote(query)
+                else:
+                    new_plain = core.delete_saved_search(plaintext, name)
+                save_vault(master, new_plain, self._session_rec)
+            except core.VaultError:
+                pass
+            self.send_response(302)
+            self.send_header("Location", back)
+            self.end_headers()
+            return
+
+        if path == "/trash-empty":
+            plaintext = load_vault(master, self._session_rec)
+            new_plain, removed = core.purge_trash(plaintext, older_than_days=0)
+            if removed:
+                save_vault(master, new_plain, self._session_rec)
+            self.send_response(302)
+            self.send_header("Location", "/trash")
+            self.end_headers()
+            return
+
+        if path == "/favorite":
+            kind = (data.get("kind") or [""])[0]
+            record_type = (data.get("type") or [""])[0]
+            record_id = (data.get("id") or [""])[0]
+            on = (data.get("on") or ["1"])[0] != "0"
+            back = (data.get("back") or ["/"])[0]
+            if kind not in ("record", "password") or not record_id:
+                self.send_error(400, "Missing target")
+                return
+            if kind == "record" and record_type not in core.RECORD_TYPES:
+                self.send_error(400, "Unknown record type")
+                return
+            plaintext = load_vault(master, self._session_rec)
+            new_plain, changed = core.set_favorite(
+                plaintext, kind, record_type, record_id, on)
+            if changed:
+                save_vault(master, new_plain, self._session_rec)
+            self.send_response(302)
+            # Back to wherever the toggle was clicked; never an off-site URL.
+            self.send_header("Location", back if back.startswith("/") else "/")
             self.end_headers()
             return
 
