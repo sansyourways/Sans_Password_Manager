@@ -10,6 +10,28 @@ and cryptography in the smallest auditable component, and make the CLI, the SPM
 Dashboard, sync and the browser extension clients of that core rather than
 co-owners of it. That review is a design concept, not a formal security audit.
 
+## Shipped in 5.2.0 — sharing, custom types, per-record locks and relationships
+
+Five backlog items delivered together, with no vault format change (format 6,
+additive only).
+
+- **Public-key encrypted record sharing — shipped in 5.2.0 (item 6).** Each vault
+  has its own sharing keypair (private half kept inside the vault); a share
+  encrypts records to a recipient's public key as an offline file, using the
+  emergency-access hybrid (a random key seals the body, wrapped with RSA-OAEP).
+  No account, no server. CLI: `spm share pubkey|create|import`.
+- **Shared collections — shipped in 5.2.0 (item 7).** A named group of records
+  (`META_COLLECTIONS`) is the unit a share sends. CLI: `spm collection`.
+- **Per-record additional encryption — shipped in 5.2.0 (item 8).** A record's
+  secret fields can be sealed under an extra passphrase, so an unlocked vault
+  still cannot reveal them; the sealed blob lives in the record's attributes.
+  CLI: `spm record lock|unlock`.
+- **Custom record schemas — shipped in 5.2.0 (item 19).** User-defined types in
+  the vault (`META_CUSTOM_SCHEMAS`) that the merged schema engine treats exactly
+  like the built-ins across both surfaces. CLI: `spm schema`.
+- **Record relationships — shipped in 5.2.0 (item 25).** Links between records,
+  kept in each record's attributes and shown on both. CLI: `spm link`/`unlink`.
+
 ## Shipped in 5.1.0 — lifecycle, safety and a self-describing certificate
 
 Six backlog items delivered together because they share their machinery, with no
