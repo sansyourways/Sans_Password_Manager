@@ -2331,7 +2331,17 @@ pages = {
     "saved searches": web.saved_searches_bar(
         [{"name": "Tokens", "query": "type:api-token"}], "type:api-token",
         "csrf-token"),
+    # 5.2.0 pages: sharing (with a generated key present) and custom schemas.
+    "sharing": web.sharing_page(
+        web.core.ensure_sharing_keypair(
+            web.core.set_collection("1\tX\tu\tp\tn\tC\t\t\n", "Work",
+                                    [{"kind": "password", "type": "", "id": "1"}]))[0],
+        "csrf-token"),
+    "schemas": web.schemas_page(
+        web.core.add_custom_schema("", "crypto-wallet", "Crypto Wallet", "token",
+            [["wallet_name", "plain", "line", True]]), "csrf-token"),
 }
+web.core.register_custom_schemas("")   # reset the module registry after the page build
 for name, markup in pages.items():
     bad = unnamed(markup)
     if bad:
@@ -2417,6 +2427,44 @@ if 'action="/favorite"' not in star or 'aria-pressed="false"' not in star:
 star_on = web._favorite_toggle("record", "api-token", "1", True, "/records")
 if 'aria-pressed="true"' not in star_on or 'fav-on' not in star_on:
     sys.exit("the favourite toggle does not reflect the pinned state")
+
+# 5.2.0: the sidebar gains Sharing and Record Types entries.
+full_nav2 = web._nav_html("sharing", {})
+if 'href="/sharing"' not in full_nav2 or 'data-i18n="nav.sharing"' not in full_nav2:
+    sys.exit("the sidebar has no Sharing entry")
+if 'href="/schemas"' not in full_nav2 or 'data-i18n="nav.schemas"' not in full_nav2:
+    sys.exit("the sidebar has no Record Types entry")
+
+# Custom schemas: a defined type flows through the schema engine like a built-in.
+_sp = web.core.add_custom_schema("", "crypto-wallet", "Crypto Wallet", "token",
+        [["wallet_name", "plain", "line", True], ["seed", "secret", "multiline", False]])
+web.core.register_custom_schemas(_sp)
+if "crypto-wallet" not in web.core.RECORD_TYPES:
+    sys.exit("a custom record type did not register")
+if 'data-i18n="record.type.crypto-wallet"' not in web._nav_html("records", web.core.record_counts(_sp)):
+    sys.exit("a custom type does not appear in the records submenu")
+web.core.register_custom_schemas("")
+
+# Per-record lock: a sealed record's secret field shows as locked, and the view
+# offers unlock; an unsealed record with a secret offers to protect it.
+_locked_parsed = ("api-token", "1", "CI", {"service": "ci"}, "C", "", [], False, False, "")
+_sealed = {"salt": "AAAA", "blob": "BBBB"}
+_lv = web.build_record_view(_locked_parsed, {}, sealed=_sealed, links=[],
+                            plaintext="", csrf="t")
+if 'data-i18n="lock.field"' not in _lv or 'action="/record-reveal"' not in _lv:
+    sys.exit("a locked record does not show the locked state and unlock form")
+_uv = web.build_record_view(_locked_parsed, {}, sealed=None, links=[],
+                            plaintext="", csrf="t")
+if 'action="/record-lock"' not in _uv:
+    sys.exit("an unlocked record does not offer passphrase protection")
+# Relationships: a link renders in the related block with a remove control.
+_rv = web.build_record_view(_locked_parsed, {}, sealed=None,
+        links=[{"kind": "record", "type": "server", "id": "1"}],
+        plaintext="REC:server\t1\tBastion\t-\tC\t-\n", csrf="t")
+if 'data-i18n="links.h"' not in _rv or 'action="/link-remove"' not in _rv:
+    sys.exit("the related-records block is missing")
+if 'action="/link-add"' not in _rv:
+    sys.exit("the record view offers no way to add a link")
 
 # Bitwarden entries belong on the import form. They shipped on the export form
 # in 3.4.3, which made the feature unreachable from the picker: the tests

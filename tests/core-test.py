@@ -3179,6 +3179,96 @@ def t_saved_searches_crud():
     raises(core.VaultError, lambda: core.set_saved_search(plain, "n", ""))
 
 
+# ----- 5.2.0: custom schemas, per-record lock, relationships, sharing --------
+
+def t_custom_schema_add_use_remove():
+    try:
+        p = core.add_custom_schema("", "crypto-wallet", "Crypto Wallet", "token",
+            [["wallet_name", "plain", "line", True],
+             ["seed_phrase", "secret", "multiline", True]])
+        assert "crypto-wallet" in core.RECORD_TYPES
+        eq(core.record_schema("crypto-wallet")["label"], "Crypto Wallet")
+        eq(core.record_secret_fields("crypto-wallet"), frozenset({"seed_phrase"}))
+        row = core.build_record_row("crypto-wallet", "1", "Main",
+            {"wallet_name": "w", "seed_phrase": "a b c"}, "C")
+        p2 = p + row + "\n"
+        core.register_custom_schemas(p2)
+        eq([r[0] for _i, r in core.iter_records(p2)], ["crypto-wallet"])
+        raises(core.VaultError, lambda: core.remove_custom_schema(p2, "crypto-wallet"),
+               "removal was not guarded while a record exists")
+        p3 = core.remove_custom_schema(p, "crypto-wallet")
+        core.register_custom_schemas(p3)
+        assert "crypto-wallet" not in core.RECORD_TYPES
+        raises(core.VaultError, lambda: core.add_custom_schema("", "wifi", "X", "x",
+               [["a", "plain", "line", True]]), "a built-in type was shadowed")
+    finally:
+        core.register_custom_schemas("")   # reset module state for other tests
+
+
+def t_record_lock_unlock_fail_closed():
+    vals = {"service": "ci", "token": "supersecret", "username": "bot"}
+    blanked, sealed = core.record_lock(vals, ["token"], "pass-phrase")
+    eq(blanked["token"], "")
+    eq(blanked["service"], "ci")
+    eq(core.record_unlock(sealed, "pass-phrase"), {"token": "supersecret"})
+    raises(core.VaultError, lambda: core.record_unlock(sealed, "wrong"))
+    # A locked record's required secret field is exempt from the required check.
+    row = core.build_record_row("api-token", "1", "CI", blanked, "C", sealed=sealed)
+    parsed = core.parse_record_row(row)
+    assert parsed is not None and not parsed[3].get("token")
+    eq(core.attrs_sealed(row.split("\t")[5])["salt"], sealed["salt"])
+
+
+def t_relationship_links_survive_edit():
+    col = core.link_add("", "record", "server", "3")
+    col = core.link_add(col, "password", "", "5")
+    col = core.link_add(col, "record", "server", "3")   # idempotent
+    eq(len(core.attrs_links(col)), 2)
+    col = core.attrs_edit(col, favorite=True)            # unrelated edit
+    eq(len(core.attrs_links(col)), 2)
+    assert core.decode_attrs(col)[3] is True
+    col = core.link_remove(col, "record", "server", "3")
+    eq([l["id"] for l in core.attrs_links(col)], ["5"])
+
+
+def t_share_roundtrip_between_vaults():
+    a = (core.build_record_row("api-token", "1", "CI",
+                               {"service": "ci", "token": "secret-xyz"}, "C") + "\n"
+         + "1\tGitHub\tme\tpw\tnotes\tC\thttps://x\t\n")
+    b = "2\tExisting\tu\tp\tn\tC\t\t\n"
+    b, changed = core.ensure_sharing_keypair(b)
+    assert changed
+    b_pub = core.sharing_pubkey_pem(b)
+    members = [{"kind": "record", "type": "api-token", "id": "1"},
+               {"kind": "password", "type": "", "id": "1"}]
+    share = core.share_pack(core.collect_share_records(a, members), b_pub)
+    assert share.startswith("SPM-SHARE-v1")
+    b_priv = core._pem_from_meta(b, core.SHARING_PRIVKEY_TAG)
+    got = core.share_unpack(share, b_priv)
+    eq(sorted(r["kind"] for r in got), ["password", "record"])
+    eq([r for r in got if r["kind"] == "record"][0]["values"]["token"], "secret-xyz")
+    # Tampered blob and wrong key both fail closed.
+    raises(core.VaultError, lambda: core.share_unpack(
+        share[:-16] + "AAAAAAAAAAAAAAAA", b_priv))
+    other = core.ensure_sharing_keypair("9\tx\tu\tp\tn\tC\t\t\n")[0]
+    raises(core.VaultError, lambda: core.share_unpack(
+        share, core._pem_from_meta(other, core.SHARING_PRIVKEY_TAG)))
+    # Import lands under fresh ids.
+    b2, added = core.share_apply(b, got)
+    eq(added, 2)
+    assert any(r[0] == "api-token" for _i, r in core.iter_records(b2))
+
+
+def t_collections_crud():
+    p = core.set_collection("", "Work", [{"kind": "record", "type": "ssh-key", "id": "1"},
+                                         {"kind": "password", "type": "", "id": "2"}])
+    p = core.set_collection(p, "Personal", [])
+    eq([c["name"] for c in core.collections(p)], ["Work", "Personal"])
+    eq(len(core.collections(p)[0]["members"]), 2)
+    p = core.delete_collection(p, "Work")
+    eq([c["name"] for c in core.collections(p)], ["Personal"])
+
+
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):
         check(name[2:], fn)

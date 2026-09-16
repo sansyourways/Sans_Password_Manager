@@ -747,28 +747,35 @@ ATTRS_FOLDER_MAX = 128
 ATTRS_FIELD_NAME_MAX = 128
 ATTRS_FIELD_VALUE_MAX = 4096
 ATTRS_FIELD_MAX = 64
+ATTRS_LINK_MAX = 64
+
+# A distinct sentinel for attrs_edit: None is a meaningful value for `sealed`
+# (clear the per-record lock), so "unchanged" cannot also be None.
+_KEEP = object()
 
 
 def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
-                 trashed_at=""):
+                 trashed_at="", sealed=None, links=None):
     """The attributes column for a record, or "" when there is nothing to say.
 
     Empty is empty rather than an encoded empty object, so a record that uses
     none of this is byte-identical to how format 3 wrote it.
 
-    5.1.0 adds two keys inside the same JSON, both empty-when-unused so the
-    byte-identical property holds: `favorite` (a pinned record, roadmap 22) and
-    `trashed_at` (an ISO timestamp marking a soft-deleted record, roadmap 24).
-    These live in the attributes column for the same reason the folder does --
-    they belong to the record, and every path that already moves or exports a
-    record carries the column along.
+    5.1.0 added `favorite` and `trashed_at`; 5.2.0 adds `sealed` (a per-record
+    passphrase blob, roadmap 8) and `links` (relationships, roadmap 25). All live
+    in the same JSON for the same reason the folder does -- they belong to the
+    record, and every path that already moves a record carries the column along.
+    `sealed` and `links` are reached by accessor (attrs_sealed / attrs_links) and
+    threaded through attrs_edit, rather than widening the positional tuple again.
     """
     folder = (folder or "").strip()
     fields = [(str(n).strip(), str(v)) for n, v in (fields or []) if str(n).strip()]
     hidden = bool(hidden)
     favorite = bool(favorite)
     trashed_at = (trashed_at or "").strip()
-    if not folder and not fields and not hidden and not favorite and not trashed_at:
+    links = links or []
+    if (not folder and not fields and not hidden and not favorite
+            and not trashed_at and not sealed and not links):
         return ""
     if len(folder) > ATTRS_FOLDER_MAX:
         raise VaultError("folder name is longer than %d characters"
@@ -801,6 +808,10 @@ def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
         payload["favorite"] = True
     if trashed_at:
         payload["trashed_at"] = trashed_at
+    if sealed:
+        payload["sealed"] = sealed
+    if links:
+        payload["links"] = links
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     return base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
@@ -850,25 +861,159 @@ def decode_attrs(column):
             payload.get("favorite") is True, trashed_at.strip()[:40])
 
 
+def _attrs_payload(column):
+    """The raw attributes dict, or {}. For the keys not in the positional tuple
+    (sealed, links) so they survive an attrs_edit that never named them."""
+    column = (column or "").strip()
+    if not column:
+        return {}
+    try:
+        payload = json.loads(base64.b64decode(column, validate=True)
+                             .decode("utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def attrs_sealed(column):
+    """The per-record passphrase blob {salt, blob} (roadmap 8), or None."""
+    sealed = _attrs_payload(column).get("sealed")
+    if (isinstance(sealed, dict) and isinstance(sealed.get("salt"), str)
+            and isinstance(sealed.get("blob"), str)):
+        return {"salt": sealed["salt"], "blob": sealed["blob"]}
+    return None
+
+
+def attrs_links(column):
+    """The relationship links [{kind,type,id}] on a record (roadmap 25)."""
+    out = []
+    raw = _attrs_payload(column).get("links")
+    if isinstance(raw, list):
+        for item in raw[:ATTRS_LINK_MAX]:
+            if not isinstance(item, dict):
+                continue
+            kind = item.get("kind")
+            rid = item.get("id")
+            rtype = item.get("type", "")
+            if kind in ("record", "password") and isinstance(rid, str) and rid:
+                out.append({"kind": kind,
+                            "type": rtype if isinstance(rtype, str) else "",
+                            "id": rid})
+    return out
+
+
 def attrs_edit(column, folder=None, fields=None, hidden=None, favorite=None,
-               trashed_at=None):
+               trashed_at=None, sealed=_KEEP, links=None):
     """Return an attributes column with only the named parts changed.
 
     The point of the whole codec is that no path re-encodes a record without
     the parts it did not touch. A caller flipping one flag -- favourite on, or a
     trashed marker set or cleared -- passes only that argument; everything else
     is read from `column` and carried through. `None` means keep; a real value
-    (including "" or False) means replace.
+    (including "" or False) means replace. `sealed` uses a distinct sentinel
+    because None is a meaningful value for it (clear the lock).
     """
     cur_folder, cur_fields, cur_hidden, cur_favorite, cur_trashed = \
         decode_attrs(column)
+    cur_sealed = attrs_sealed(column)
+    cur_links = attrs_links(column)
     return encode_attrs(
         folder=cur_folder if folder is None else folder,
         fields=cur_fields if fields is None else fields,
         hidden=cur_hidden if hidden is None else hidden,
         favorite=cur_favorite if favorite is None else favorite,
         trashed_at=cur_trashed if trashed_at is None else trashed_at,
+        sealed=cur_sealed if sealed is _KEEP else sealed,
+        links=cur_links if links is None else links,
     )
+
+
+# ----- per-record passphrase (roadmap 8) -------------------------------------
+# A second lock on one record's secret fields, on top of the vault. The secret
+# values are sealed under a key derived from a passphrase the vault does not
+# hold, so an unlocked vault still cannot reveal them. Only the secret fields are
+# sealed -- a locked record still lists and shows its plain fields -- and the
+# sealed blob lives in the record's own attributes, so it moves and exports with
+# the record (as opaque ciphertext) like everything else there. Fails closed:
+# the wrong passphrase raises, and the plaintext of a locked field is never
+# written back into the payload.
+
+def record_lock(values, secret_field_names, passphrase):
+    """Seal the secret fields under `passphrase`. Returns (blanked_values, sealed).
+
+    `sealed` is {salt, blob} for the attributes column; `blanked_values` is the
+    values with the secret fields emptied, to store in the payload. The plain
+    fields are untouched."""
+    passphrase = passphrase or ""
+    if not passphrase.strip():
+        raise VaultError("a lock passphrase must not be empty")
+    secret_values = {name: values.get(name, "")
+                     for name in secret_field_names if values.get(name, "")}
+    if not secret_values:
+        raise VaultError("this record has no secret to lock")
+    salt = os.urandom(SEAL_SALT_BYTES)
+    key = derive_kek(passphrase, salt)
+    blob = seal(key, json.dumps(secret_values, ensure_ascii=False).encode("utf-8"))
+    sealed = {"salt": base64.b64encode(salt).decode("ascii"),
+              "blob": base64.b64encode(blob).decode("ascii")}
+    blanked = dict(values)
+    for name in secret_values:
+        blanked[name] = ""
+    return blanked, sealed
+
+
+def record_unlock(sealed, passphrase):
+    """The secret values a `sealed` blob holds, or a refusal.
+
+    Fails closed: a wrong passphrase fails the tag check in `unseal` and raises,
+    never returning partial or guessed plaintext."""
+    if not sealed or not isinstance(sealed, dict):
+        raise VaultError("this record is not locked")
+    try:
+        salt = base64.b64decode(sealed["salt"], validate=True)
+        blob = base64.b64decode(sealed["blob"], validate=True)
+    except Exception:
+        raise VaultError("the lock is malformed")
+    key = derive_kek(passphrase or "", salt)
+    try:
+        raw = unseal(key, blob)
+    except VaultError:
+        raise VaultError("wrong passphrase")
+    try:
+        out = json.loads(raw.decode("utf-8"))
+    except Exception:
+        raise VaultError("the lock decrypted to nothing readable")
+    return {str(k): str(v) for k, v in (out or {}).items()}
+
+
+# ----- record relationships (roadmap 25) -------------------------------------
+# A link is a pointer from one record to another, kept in the record's own
+# attributes so it travels with it. A link names the other record's kind
+# ("record" with its type, or "password"), and its id. Adding is idempotent and
+# offered both ways by the surfaces; the core keeps the storage honest.
+
+def _link_key(kind, record_type, record_id):
+    return (kind, record_type if kind == "record" else "", str(record_id))
+
+
+def link_add(column, kind, record_type, record_id):
+    """Return an attrs column with a link added (idempotent)."""
+    links = attrs_links(column)
+    key = _link_key(kind, record_type, record_id)
+    if any(_link_key(l["kind"], l["type"], l["id"]) == key for l in links):
+        return column or ""
+    if len(links) >= ATTRS_LINK_MAX:
+        raise VaultError("a record may carry at most %d links" % ATTRS_LINK_MAX)
+    links.append({"kind": key[0], "type": key[1], "id": key[2]})
+    return attrs_edit(column, links=links)
+
+
+def link_remove(column, kind, record_type, record_id):
+    """Return an attrs column with a link removed."""
+    key = _link_key(kind, record_type, record_id)
+    links = [l for l in attrs_links(column)
+             if _link_key(l["kind"], l["type"], l["id"]) != key]
+    return attrs_edit(column, links=links)
 
 
 # ----- record sanitising -----------------------------------------------------
@@ -1088,11 +1233,175 @@ RECORD_SCHEMAS = {
     },
 }
 
+# ----- custom record schemas (roadmap 19) ------------------------------------
+# A type is data, so a user can add one too. Custom schemas live in the vault
+# (META_CUSTOM_SCHEMAS) and are merged over the built-ins by register_custom_
+# schemas after a surface decrypts. record_schemas() is the merged view every
+# lookup goes through, and RECORD_TYPES is rebuilt from it -- so the CLI, the
+# Dashboard and the exporter treat a custom type exactly like a built-in one
+# without a line per type, which is the whole point of the schema engine. A
+# custom type may not shadow a built-in, and the built-in dict is never mutated.
+_CUSTOM_SCHEMAS = {}
+CUSTOM_SCHEMAS_TAG = "META_CUSTOM_SCHEMAS"
+CUSTOM_SCHEMA_MAX = 64
+CUSTOM_FIELD_MAX = 32
+CUSTOM_TYPE_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
+CUSTOM_FIELD_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+CUSTOM_WIDGETS = ("line", "multiline", "number", "date", "month")
+
+
+def record_schemas():
+    """The merged view of built-in and registered custom schemas.
+
+    Built-ins win: a custom schema can never shadow one, so a lookup here is the
+    same for everyone regardless of what a vault has added."""
+    if not _CUSTOM_SCHEMAS:
+        return RECORD_SCHEMAS
+    return {**_CUSTOM_SCHEMAS, **RECORD_SCHEMAS}
+
+
+def _rebuild_record_types():
+    global RECORD_TYPES
+    RECORD_TYPES = tuple(sorted(record_schemas()))
+
+
 # Ordered, because a dict's order is an implementation detail and this decides
 # the order of a nav menu, a `--type` help listing and an export's rows. Sorted
 # rather than hand-listed so a new schema cannot be added to the registry and
-# forgotten here.
+# forgotten here. Rebuilt by register_custom_schemas when a vault adds a type.
 RECORD_TYPES = tuple(sorted(RECORD_SCHEMAS))
+
+
+def _valid_custom_fields(raw):
+    """A validated tuple of (name, kind, widget, required) field specs, or raise."""
+    if not isinstance(raw, list) or not raw:
+        raise VaultError("a custom schema needs at least one field")
+    if len(raw) > CUSTOM_FIELD_MAX:
+        raise VaultError("a custom schema may have at most %d fields"
+                         % CUSTOM_FIELD_MAX)
+    fields, seen, has_required = [], set(), False
+    for item in raw:
+        item = list(item) if isinstance(item, (list, tuple)) else []
+        if len(item) < 2:
+            raise VaultError("each field is name, kind, [widget], [required]")
+        name = str(item[0])
+        kind = str(item[1])
+        widget = str(item[2]) if len(item) > 2 and item[2] else "line"
+        required = bool(item[3]) if len(item) > 3 else False
+        if not CUSTOM_FIELD_RE.match(name):
+            raise VaultError("field name %r must be lower-case letters, digits "
+                             "and underscores" % name)
+        if name in seen:
+            raise VaultError("duplicate field name %r" % name)
+        if kind not in (FIELD_PLAIN, FIELD_SECRET):
+            raise VaultError("field kind must be %r or %r" % (FIELD_PLAIN, FIELD_SECRET))
+        if widget not in CUSTOM_WIDGETS:
+            raise VaultError("field widget must be one of %s"
+                             % ", ".join(CUSTOM_WIDGETS))
+        seen.add(name)
+        has_required = has_required or required
+        fields.append((name, kind, widget, required))
+    if not has_required:
+        # At least one required field, so a record of the type is never empty --
+        # the same rule every built-in schema follows.
+        fields[0] = (fields[0][0], fields[0][1], fields[0][2], True)
+    return tuple(fields)
+
+
+def _valid_custom_schema(record_type, label, icon, fields):
+    """A validated {label, icon, fields} schema dict, or raise."""
+    record_type = str(record_type).strip().lower()
+    if not CUSTOM_TYPE_RE.match(record_type):
+        raise VaultError("a type name is lower-case letters, digits and hyphens")
+    if record_type in RECORD_SCHEMAS:
+        raise VaultError("%r is a built-in record type" % record_type)
+    label = " ".join(str(label or record_type).split())[:60]
+    icon = str(icon or "record").strip()[:32] or "record"
+    return record_type, {"label": label, "icon": icon, "custom": True,
+                         "fields": _valid_custom_fields(fields)}
+
+
+def register_custom_schemas(plaintext):
+    """Load META_CUSTOM_SCHEMAS into the merged registry. Never raises.
+
+    Tolerant like decode_attrs: an entry this build cannot read is skipped rather
+    than hiding the rest, and a built-in name in the row is ignored so a custom
+    type can never shadow one. Call after decrypting, before iterating records."""
+    global _CUSTOM_SCHEMAS
+    loaded = {}
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if parts[0] != CUSTOM_SCHEMAS_TAG or len(parts) < 2:
+            continue
+        try:
+            data = json.loads(base64.b64decode(parts[1], validate=True)
+                              .decode("utf-8"))
+        except Exception:
+            break
+        if isinstance(data, dict):
+            for rtype, spec in list(data.items())[:CUSTOM_SCHEMA_MAX]:
+                if not isinstance(spec, dict):
+                    continue
+                try:
+                    name, schema = _valid_custom_schema(
+                        rtype, spec.get("label"), spec.get("icon"),
+                        spec.get("fields"))
+                except VaultError:
+                    continue
+                loaded[name] = schema
+        break
+    _CUSTOM_SCHEMAS = loaded
+    _rebuild_record_types()
+    return _CUSTOM_SCHEMAS
+
+
+def custom_schemas(plaintext):
+    """The custom schemas a vault defines, as {type: spec}, for listing/editing."""
+    register_custom_schemas(plaintext)
+    return dict(_CUSTOM_SCHEMAS)
+
+
+def _write_custom_schemas(plaintext, schemas):
+    rows = [line for line in (plaintext or "").splitlines()
+            if line.split("\t")[0] != CUSTOM_SCHEMAS_TAG]
+    if schemas:
+        payload = {t: {"label": s["label"], "icon": s["icon"],
+                       "fields": [list(f) for f in s["fields"]]}
+                   for t, s in schemas.items()}
+        col = base64.b64encode(json.dumps(payload, separators=(",", ":"),
+                                          ensure_ascii=False).encode("utf-8")
+                               ).decode("ascii")
+        rows.append("%s\t%s\t-\t-\t-\t-" % (CUSTOM_SCHEMAS_TAG, col))
+    return "\n".join(rows) + "\n"
+
+
+def add_custom_schema(plaintext, record_type, label, icon, fields):
+    """Define or replace a custom record type. Returns the new plaintext."""
+    name, schema = _valid_custom_schema(record_type, label, icon, fields)
+    schemas = custom_schemas(plaintext)
+    if len(schemas) >= CUSTOM_SCHEMA_MAX and name not in schemas:
+        raise VaultError("this vault already holds the maximum of %d custom types"
+                         % CUSTOM_SCHEMA_MAX)
+    schemas[name] = schema
+    out = _write_custom_schemas(plaintext, schemas)
+    register_custom_schemas(out)
+    return out
+
+
+def remove_custom_schema(plaintext, record_type):
+    """Remove a custom type, refusing while records of it exist. Returns plaintext."""
+    record_type = str(record_type).strip().lower()
+    schemas = custom_schemas(plaintext)
+    if record_type not in schemas:
+        raise VaultError("no custom record type %r" % record_type)
+    if any(True for _i, _p in iter_records(plaintext, record_type,
+                                           include_trashed=True)):
+        raise VaultError("delete the %r records before removing the type"
+                         % record_type)
+    del schemas[record_type]
+    out = _write_custom_schemas(plaintext, schemas)
+    register_custom_schemas(out)
+    return out
 
 
 def record_tag(record_type):
@@ -1115,7 +1424,7 @@ def type_from_tag(tag):
 
 def record_schema(record_type):
     """The schema for a type, or VaultError naming what is available."""
-    schema = RECORD_SCHEMAS.get(record_type)
+    schema = record_schemas().get(record_type)
     if schema is None:
         raise VaultError("unknown record type %r; known types are %s"
                          % (record_type, ", ".join(RECORD_TYPES)))
@@ -1139,13 +1448,18 @@ def record_secret_fields(record_type):
                      if kind == FIELD_SECRET)
 
 
-def encode_record_payload(record_type, values):
+def encode_record_payload(record_type, values, allow_missing=frozenset()):
     """The payload column for a typed record.
 
     Validates against the schema rather than trusting the caller: an unknown
     field name is a typo that would otherwise be written, stored and never
     displayed, because every surface renders the schema's fields and not the
     payload's keys.
+
+    `allow_missing` exempts field names from the required check -- used when a
+    record is passphrase-locked (roadmap 8): its required secret fields are
+    blanked in the payload because their values live in the sealed blob, not
+    because the record is incomplete.
     """
     schema_fields = record_fields(record_type)
     known = {name for name, _k, _w, _r in schema_fields}
@@ -1156,7 +1470,7 @@ def encode_record_payload(record_type, values):
                          % (record_type, ", ".join(repr(u) for u in unknown)))
     for name, _kind, _widget, required in schema_fields:
         value = values.get(name, "")
-        if required and not value.strip():
+        if required and not value.strip() and name not in allow_missing:
             raise VaultError("record type %r requires a value for %r"
                              % (record_type, name))
         if len(value) > RECORD_VALUE_MAX:
@@ -1224,14 +1538,18 @@ def redact_record(record_type, values):
 
 def build_record_row(record_type, record_id, label, values, created,
                      folder="", fields=None, hidden=False, favorite=False,
-                     trashed_at=""):
+                     trashed_at="", sealed=None, links=None):
     """One tab-separated typed-record row, sanitised and schema-checked.
 
-    `favorite` and `trashed_at` are threaded through so an edit that rebuilds a
-    record's row from its form keeps the pin and the trashed marker it never
-    showed the form -- the same reason folder and custom fields are threaded.
+    `favorite`, `trashed_at`, `sealed` (the per-record passphrase blob) and
+    `links` (relationships) are all threaded through so an edit that rebuilds a
+    record's row from its form keeps what the form never showed -- the same
+    reason folder and custom fields are threaded.
     """
-    payload = encode_record_payload(record_type, values)
+    # A locked record's required secret fields are blanked in the payload (their
+    # values are in the sealed blob), so they are exempt from the required check.
+    allow_missing = record_secret_fields(record_type) if sealed else frozenset()
+    payload = encode_record_payload(record_type, values, allow_missing=allow_missing)
     # A custom field may not take a schema field's name. Both cross an export
     # in the same `fields` column and are told apart on the way back by
     # whether the name is in the schema -- so a wifi record carrying a custom
@@ -1244,7 +1562,8 @@ def build_record_row(record_type, record_id, label, values, created,
             "a custom field may not reuse the field name %s on a %s record"
             % (", ".join(repr(name) for name in shadowed), record_type))
     attrs = encode_attrs(folder=folder, fields=fields, hidden=hidden,
-                         favorite=favorite, trashed_at=trashed_at)
+                         favorite=favorite, trashed_at=trashed_at,
+                         sealed=sealed, links=links)
     return "\t".join((record_tag(record_type), str(record_id),
                       sanitize_field(label), payload, str(created),
                       attrs or "-"))
@@ -1263,7 +1582,7 @@ def parse_record_row(line):
     if len(parts) < 5:
         return None
     record_type = type_from_tag(parts[0])
-    if not record_type or record_type not in RECORD_SCHEMAS:
+    if not record_type or record_type not in record_schemas():
         return None
     values = decode_record_payload(record_type, parts[3])
     folder, custom, hidden, favorite, trashed_at = \
@@ -2141,7 +2460,7 @@ def record_derive_name(record_type):
     lookup like everything else, so the next deriver is still one dictionary
     entry and its translations.
     """
-    return RECORD_SCHEMAS.get(record_type, {}).get("derive", "")
+    return record_schemas().get(record_type, {}).get("derive", "")
 
 # ----- attributes across an export -------------------------------------------
 # A folder and its custom fields cross an export as their own readable columns
@@ -3332,6 +3651,291 @@ def delete_saved_search(plaintext, name):
     items = [i for i in saved_searches(plaintext)
              if i["name"].casefold() != name.casefold()]
     return _write_saved_searches(plaintext, items)
+
+
+# ----- public-key sharing and collections (roadmap 6 & 7) --------------------
+# Sharing is offline and account-free: a share is selected records (or a named
+# collection) encrypted to another SPM user's public key, as a file they import.
+# The crypto is the emergency-access kit's, generalised -- a random key seals the
+# body (seal/unseal), and that key is wrapped to the recipient's RSA public key
+# with OAEP. Each vault has its own sharing keypair; unlike the recovery keypair,
+# whose private half lives offline, the sharing private key stays inside the
+# encrypted vault so the owner can decrypt shares sent to them.
+
+SHARING_PRIVKEY_TAG = "META_SHARING_PRIVKEY"
+SHARING_PUBKEY_TAG = "META_SHARING_PUBKEY"
+COLLECTIONS_TAG = "META_COLLECTIONS"
+COLLECTION_MAX = 64
+SHARE_FILE_MAGIC = "SPM-SHARE-v1"
+SHARE_RECORD_MAX = 1000
+
+
+def _meta_value(plaintext, tag):
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if parts[0] == tag and len(parts) > 1 and parts[1].strip():
+            return parts[1].strip()
+    return ""
+
+
+def _pem_from_meta(plaintext, tag):
+    raw = _meta_value(plaintext, tag)
+    if not raw:
+        return b""
+    try:
+        return base64.b64decode(raw)
+    except Exception:
+        raise VaultError("stored sharing key is not valid base64")
+
+
+def sharing_pubkey_pem(plaintext):
+    """This vault's sharing public key PEM, or raise if not set up yet."""
+    pem = _pem_from_meta(plaintext, SHARING_PUBKEY_TAG)
+    if not pem:
+        raise VaultError("this vault has no sharing key yet")
+    return pem
+
+
+def ensure_sharing_keypair(plaintext):
+    """Generate the vault's sharing keypair if absent. Returns (plaintext, changed)."""
+    if _meta_value(plaintext, SHARING_PRIVKEY_TAG) and \
+            _meta_value(plaintext, SHARING_PUBKEY_TAG):
+        return plaintext, False
+    try:
+        priv = subprocess.run(
+            ["openssl", "genpkey", "-algorithm", "RSA",
+             "-pkeyopt", "rsa_keygen_bits:3072"],
+            capture_output=True, check=True, timeout=60).stdout
+        pub = subprocess.run(
+            ["openssl", "pkey", "-pubout"], input=priv,
+            capture_output=True, check=True, timeout=30).stdout
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise VaultError("could not generate a sharing key") from exc
+    rows = [line for line in (plaintext or "").splitlines()
+            if line.split("\t")[0] not in (SHARING_PRIVKEY_TAG, SHARING_PUBKEY_TAG)]
+    rows.append("%s\t%s\t-\t-\t-\t-" % (
+        SHARING_PRIVKEY_TAG, base64.b64encode(priv).decode("ascii")))
+    rows.append("%s\t%s\t-\t-\t-\t-" % (
+        SHARING_PUBKEY_TAG, base64.b64encode(pub).decode("ascii")))
+    return "\n".join(rows) + "\n", True
+
+
+def _pkey_encrypt(pub_pem, data):
+    """OAEP-encrypt small `data` to an RSA public key PEM."""
+    fd, pub_file = tempfile.mkstemp(prefix="spm.sharepub.")
+    try:
+        os.write(fd, pub_pem)
+        os.close(fd)
+        return subprocess.run(
+            ["openssl", "pkeyutl", "-encrypt", "-pubin", "-inkey", pub_file,
+             "-pkeyopt", "rsa_padding_mode:oaep", "-pkeyopt", "rsa_oaep_md:sha256"],
+            input=data, capture_output=True, check=True, timeout=30).stdout
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise VaultError("the recipient public key was not usable") from exc
+    finally:
+        os.unlink(pub_file)
+
+
+def _pkey_decrypt(priv_pem, data):
+    """OAEP-decrypt with an RSA private key PEM."""
+    fd, priv_file = tempfile.mkstemp(prefix="spm.sharepriv.")
+    try:
+        os.chmod(priv_file, 0o600)
+        os.write(fd, priv_pem)
+        os.close(fd)
+        return subprocess.run(
+            ["openssl", "pkeyutl", "-decrypt", "-inkey", priv_file,
+             "-pkeyopt", "rsa_padding_mode:oaep", "-pkeyopt", "rsa_oaep_md:sha256"],
+            input=data, capture_output=True, check=True, timeout=30).stdout
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise VaultError("this share was not encrypted to this vault") from exc
+    finally:
+        os.unlink(priv_file)
+
+
+def share_pack(records, recipient_pub_pem):
+    """A share file (text) holding `records` encrypted to `recipient_pub_pem`.
+
+    Hybrid: a random key seals the body; the key is wrapped to the recipient's
+    RSA public key with OAEP. The whole thing is one base64 line under a magic
+    header, so it is easy to hand over and unmistakable on import."""
+    if not records:
+        raise VaultError("a share must contain at least one record")
+    if len(records) > SHARE_RECORD_MAX:
+        raise VaultError("a share may hold at most %d records" % SHARE_RECORD_MAX)
+    key_text = base64.b64encode(os.urandom(32)).decode("ascii")
+    body = seal(key_text, json.dumps({"records": records}, ensure_ascii=False)
+                .encode("utf-8"))
+    wrapped = _pkey_encrypt(recipient_pub_pem, key_text.encode("utf-8"))
+    envelope = {"v": 1, "wrapped_key": base64.b64encode(wrapped).decode("ascii"),
+                "body": base64.b64encode(body).decode("ascii")}
+    blob = base64.b64encode(json.dumps(envelope).encode("utf-8")).decode("ascii")
+    return "%s\n%s\n" % (SHARE_FILE_MAGIC, "\n".join(
+        blob[i:i + 76] for i in range(0, len(blob), 76)))
+
+
+def share_unpack(share_text, my_priv_pem):
+    """The records from a share file, or a refusal.
+
+    Fails closed: a wrong key fails OAEP, a tampered body fails the seal tag."""
+    lines = [l for l in (share_text or "").splitlines() if l.strip()]
+    if not lines or lines[0].strip() != SHARE_FILE_MAGIC:
+        raise VaultError("this is not an SPM share file")
+    try:
+        envelope = json.loads(base64.b64decode("".join(lines[1:]), validate=True)
+                              .decode("utf-8"))
+        wrapped = base64.b64decode(envelope["wrapped_key"], validate=True)
+        body = base64.b64decode(envelope["body"], validate=True)
+    except Exception:
+        raise VaultError("this share file is malformed")
+    key_text = _pkey_decrypt(my_priv_pem, wrapped).decode("utf-8", "ignore")
+    payload = json.loads(unseal(key_text, body).decode("utf-8"))
+    records = payload.get("records") if isinstance(payload, dict) else None
+    if not isinstance(records, list):
+        raise VaultError("this share carried no records")
+    return records
+
+
+def collect_share_records(plaintext, members):
+    """Build the share payload for a list of {kind,type,id} members.
+
+    A record becomes {kind:'record', type, label, created, values}; a password
+    becomes {kind:'password', name, username, password, notes, url}. Trashed and
+    missing members are skipped. Sealed (passphrase-locked) record fields cross
+    as their sealed blob, never as plaintext the sender does not hold."""
+    out = []
+    for m in members:
+        kind = m.get("kind")
+        rid = str(m.get("id", ""))
+        if kind == "record":
+            found = find_record(plaintext, m.get("type", ""), rid)
+            if not found:
+                continue
+            _idx, parsed = found
+            if record_is_trashed(parsed):
+                continue
+            out.append({"kind": "record", "type": parsed[0], "label": parsed[2],
+                        "created": parsed[4], "values": parsed[3]})
+        elif kind == "password":
+            for line in plaintext.splitlines():
+                parts = line.split("\t")
+                if len(parts) >= 6 and parts[0] == rid and parts[0].isdigit():
+                    if len(parts) > 7 and decode_attrs(parts[7])[4]:
+                        break
+                    out.append({"kind": "password", "name": parts[1],
+                                "username": parts[2], "password": parts[3],
+                                "notes": parts[4] if len(parts) > 4 else "",
+                                "url": parts[6] if len(parts) > 6 else ""})
+                    break
+    return out
+
+
+def share_apply(plaintext, records):
+    """Add shared records to the vault under fresh ids. Returns (plaintext, count).
+
+    A record whose type this vault does not know (a custom type the sender had)
+    is skipped rather than guessed at."""
+    register_custom_schemas(plaintext)
+    lines = (plaintext or "").rstrip("\n").splitlines()
+    added = 0
+    max_pw = 0
+    for line in lines:
+        parts = line.split("\t")
+        if len(parts) >= 6 and parts[0].isdigit():
+            try:
+                max_pw = max(max_pw, int(parts[0]))
+            except ValueError:
+                pass
+    text = "\n".join(lines) + ("\n" if lines else "")
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("kind") == "record":
+            rtype = rec.get("type", "")
+            if rtype not in record_schemas():
+                continue
+            rid = record_next_id(text, rtype)
+            try:
+                row = build_record_row(rtype, rid, rec.get("label", "shared"),
+                                       rec.get("values", {}) or {},
+                                       rec.get("created", ""))
+            except VaultError:
+                continue
+            text += row + "\n"
+            added += 1
+        elif rec.get("kind") == "password":
+            max_pw += 1
+            row = "\t".join([
+                str(max_pw), sanitize_field(rec.get("name", "shared")),
+                sanitize_field(rec.get("username", "")),
+                sanitize_field(rec.get("password", "")),
+                sanitize_field(rec.get("notes", "")),
+                time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                rec.get("url", ""), ""])
+            text += row + "\n"
+            added += 1
+    return text, added
+
+
+def collections(plaintext):
+    """[{name, members:[{kind,type,id}]}] the vault has grouped, in order."""
+    raw = _meta_value(plaintext, COLLECTIONS_TAG)
+    if not raw:
+        return []
+    try:
+        data = json.loads(base64.b64decode(raw, validate=True).decode("utf-8"))
+    except Exception:
+        return []
+    out = []
+    if isinstance(data, list):
+        for item in data[:COLLECTION_MAX]:
+            if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+                continue
+            members = []
+            for m in item.get("members", []) if isinstance(item.get("members"), list) else []:
+                if isinstance(m, dict) and m.get("kind") in ("record", "password") \
+                        and isinstance(m.get("id"), str):
+                    members.append({"kind": m["kind"],
+                                    "type": m.get("type", "") if isinstance(m.get("type"), str) else "",
+                                    "id": m["id"]})
+            out.append({"name": item["name"].strip()[:80], "members": members})
+    return out
+
+
+def _write_collections(plaintext, items):
+    rows = [line for line in (plaintext or "").splitlines()
+            if line.split("\t")[0] != COLLECTIONS_TAG]
+    if items:
+        col = base64.b64encode(json.dumps(items, separators=(",", ":"),
+                                          ensure_ascii=False).encode("utf-8")
+                               ).decode("ascii")
+        rows.append("%s\t%s\t-\t-\t-\t-" % (COLLECTIONS_TAG, col))
+    return "\n".join(rows) + "\n"
+
+
+def set_collection(plaintext, name, members):
+    """Create or replace a collection by name. Returns plaintext."""
+    name = (name or "").strip()[:80]
+    if not name:
+        raise VaultError("a collection needs a name")
+    clean = []
+    for m in members or []:
+        if m.get("kind") in ("record", "password") and str(m.get("id", "")):
+            clean.append({"kind": m["kind"], "type": str(m.get("type", "")),
+                          "id": str(m["id"])})
+    items = [c for c in collections(plaintext) if c["name"].casefold() != name.casefold()]
+    if len(items) >= COLLECTION_MAX:
+        raise VaultError("this vault already holds the maximum of %d collections"
+                         % COLLECTION_MAX)
+    items.append({"name": name, "members": clean})
+    return _write_collections(plaintext, items)
+
+
+def delete_collection(plaintext, name):
+    """Remove a collection by name. Returns plaintext."""
+    name = (name or "").strip()
+    items = [c for c in collections(plaintext) if c["name"].casefold() != name.casefold()]
+    return _write_collections(plaintext, items)
 
 
 def looks_sensitive(label, url, hosts):
@@ -4902,7 +5506,7 @@ def record_from_export_row(row):
     may be a field a newer SPM does.
     """
     record_type = str(row.get("type", "") or "").strip()
-    if record_type not in RECORD_SCHEMAS:
+    if record_type not in record_schemas():
         return None
     _folder, pairs, _hidden, _fav, _trash = decode_attrs(attrs_from_export_row(row))
     known = {name for name, _k, _w, _r in record_fields(record_type)}
@@ -5345,8 +5949,8 @@ def main(argv):
             if op == "types":
                 for name in RECORD_TYPES:
                     sys.stdout.write("%s\t%s\t%s\n" % (
-                        name, RECORD_SCHEMAS[name]["label"],
-                        RECORD_SCHEMAS[name].get("icon", "")))
+                        name, record_schemas()[name]["label"],
+                        record_schemas()[name].get("icon", "")))
             elif op == "schema":
                 for field, kind, widget, required in record_fields(argv[3]):
                     sys.stdout.write("%s\t%s\t%s\t%s\n" % (
@@ -5793,6 +6397,140 @@ def main(argv):
                 sys.stdout.write(set_saved_search(plaintext, argv[3], argv[4]))
             else:
                 sys.stdout.write(delete_saved_search(plaintext, argv[3]))
+        elif command == "schemas-list":
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.write(json.dumps(
+                    {"schemas": custom_schemas(handle.read())}, indent=2) + "\n")
+        elif command == "schema-add":
+            # schema-add <plainfile> <type> <label> <icon> ; stdin: fields, one
+            # per line "name kind widget required". Writes the new plaintext.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            fields = []
+            for line in sys.stdin.read().splitlines():
+                bits = line.split()
+                if bits:
+                    fields.append([bits[0], bits[1] if len(bits) > 1 else "plain",
+                                   bits[2] if len(bits) > 2 else "line",
+                                   len(bits) > 3 and bits[3].lower() in ("true", "1", "yes", "required")])
+            sys.stdout.write(add_custom_schema(plaintext, argv[3], argv[4],
+                                               argv[5] if len(argv) > 5 else "record", fields))
+        elif command == "schema-remove":
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.write(remove_custom_schema(handle.read(), argv[3]))
+        elif command in ("link-add", "link-remove"):
+            # <cmd> <plainfile> <type> <id> <target-kind> <target-type> <target-id>
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            found = find_record(plaintext, argv[3], argv[4])
+            if not found:
+                sys.exit("no such record")
+            index, _p = found
+            lines = plaintext.splitlines()
+            col = lines[index].split("\t")
+            while len(col) <= 5:
+                col.append("")
+            fn = link_add if command == "link-add" else link_remove
+            col[5] = fn(col[5], argv[5], argv[6], argv[7]) or "-"
+            lines[index] = "\t".join(col)
+            sys.stdout.write("\n".join(lines) + "\n")
+        elif command in ("record-lock", "record-unlock"):
+            # record-lock <plainfile> <type> <id> ; stdin: passphrase.
+            # Writes the new plaintext; unlock removes the lock, restoring fields.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            passphrase = sys.stdin.readline().rstrip("\n")
+            found = find_record(plaintext, argv[3], argv[4])
+            if not found:
+                sys.exit("no such record")
+            index, parsed = found
+            lines = plaintext.splitlines()
+            col = lines[index].split("\t")
+            attrs_col = col[5] if len(col) > 5 else ""
+            if command == "record-lock":
+                blanked, sealed = record_lock(
+                    parsed[3], record_secret_fields(argv[3]), passphrase)
+                lines[index] = build_record_row(
+                    argv[3], argv[4], parsed[2], blanked, parsed[4],
+                    folder=parsed[5], fields=parsed[6], hidden=parsed[7],
+                    favorite=parsed[8], trashed_at=parsed[9], sealed=sealed,
+                    links=attrs_links(attrs_col))
+            else:
+                secret_vals = record_unlock(attrs_sealed(attrs_col), passphrase)
+                values = dict(parsed[3]); values.update(secret_vals)
+                lines[index] = build_record_row(
+                    argv[3], argv[4], parsed[2], values, parsed[4],
+                    folder=parsed[5], fields=parsed[6], hidden=parsed[7],
+                    favorite=parsed[8], trashed_at=parsed[9], sealed=None,
+                    links=attrs_links(attrs_col))
+            sys.stdout.write("\n".join(lines) + "\n")
+        elif command == "record-reveal":
+            # record-reveal <plainfile> <type> <id> ; stdin: passphrase.
+            # stdout: JSON of the unsealed secret fields. Never writes.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            passphrase = sys.stdin.readline().rstrip("\n")
+            found = find_record(plaintext, argv[3], argv[4])
+            if not found:
+                sys.exit("no such record")
+            index, _p = found
+            col = plaintext.splitlines()[index].split("\t")
+            sealed = attrs_sealed(col[5] if len(col) > 5 else "")
+            sys.stdout.write(json.dumps(record_unlock(sealed, passphrase)) + "\n")
+        elif command == "collections-list":
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.write(json.dumps(
+                    {"collections": collections(handle.read())}, indent=2) + "\n")
+        elif command in ("collection-set", "collection-delete"):
+            # collection-set <plainfile> <name> ; stdin: members, one per line
+            # "kind type id". collection-delete <plainfile> <name>.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            if command == "collection-set":
+                members = []
+                for line in sys.stdin.read().splitlines():
+                    bits = line.split()
+                    if len(bits) >= 3:
+                        members.append({"kind": bits[0], "type": bits[1], "id": bits[2]})
+                    elif len(bits) == 2:
+                        members.append({"kind": bits[0], "type": "", "id": bits[1]})
+                sys.stdout.write(set_collection(plaintext, argv[3], members))
+            else:
+                sys.stdout.write(delete_collection(plaintext, argv[3]))
+        elif command == "sharing-keygen":
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                out, _changed = ensure_sharing_keypair(handle.read())
+            sys.stdout.write(out)
+        elif command == "sharing-pubkey":
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.buffer.write(sharing_pubkey_pem(handle.read()))
+        elif command == "share-create":
+            # share-create <plainfile> <recipient-pub-file> <collection-name>
+            # stdout: the share file text.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            with open(argv[3], "rb") as handle:
+                recipient = handle.read()
+            members = next((c["members"] for c in collections(plaintext)
+                            if c["name"] == argv[4]), None)
+            if members is None:
+                sys.exit("no such collection")
+            sys.stdout.write(share_pack(
+                collect_share_records(plaintext, members), recipient))
+        elif command == "share-import":
+            # share-import <plainfile> <share-file> ; writes the new plaintext,
+            # count on stderr. Decrypts with this vault's sharing private key.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            with open(argv[3], "r", encoding="utf-8", errors="replace") as handle:
+                share_text = handle.read()
+            priv = _pem_from_meta(plaintext, SHARING_PRIVKEY_TAG)
+            if not priv:
+                sys.exit("this vault has no sharing key yet")
+            records = share_unpack(share_text, priv)
+            out, added = share_apply(plaintext, records)
+            sys.stdout.write(out)
+            sys.stderr.write("%d\n" % added)
         elif command == "events":
             # events <vault> [limit] ; stdout: one JSON document
             limit = int(argv[3]) if len(argv) > 3 and argv[3] else 0

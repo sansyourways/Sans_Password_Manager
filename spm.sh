@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.1.0"
+VERSION="5.2.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -737,6 +737,18 @@ ensure_master_password_loaded() {
 	if [ -z "${MASTER_PW:-}" ]; then
 		read_master_password_once
 	fi
+}
+
+prompt_hidden() {
+	# Read one line without echo, prompt on stderr, value on stdout. Used for a
+	# per-record passphrase, which is not the master password and must not be
+	# cached. stty failing on a pipe is not fatal -- the read still works.
+	local prompt="${1:-}" value=""
+	printf '%s' "$prompt" >&2
+	stty -echo 2>/dev/null || true
+	IFS= read -r value || value=""
+	stty echo 2>/dev/null || true
+	printf '%s' "$value"
 }
 
 re_verify_master_password() {
@@ -1546,28 +1558,35 @@ ATTRS_FOLDER_MAX = 128
 ATTRS_FIELD_NAME_MAX = 128
 ATTRS_FIELD_VALUE_MAX = 4096
 ATTRS_FIELD_MAX = 64
+ATTRS_LINK_MAX = 64
+
+# A distinct sentinel for attrs_edit: None is a meaningful value for `sealed`
+# (clear the per-record lock), so "unchanged" cannot also be None.
+_KEEP = object()
 
 
 def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
-                 trashed_at=""):
+                 trashed_at="", sealed=None, links=None):
     """The attributes column for a record, or "" when there is nothing to say.
 
     Empty is empty rather than an encoded empty object, so a record that uses
     none of this is byte-identical to how format 3 wrote it.
 
-    5.1.0 adds two keys inside the same JSON, both empty-when-unused so the
-    byte-identical property holds: `favorite` (a pinned record, roadmap 22) and
-    `trashed_at` (an ISO timestamp marking a soft-deleted record, roadmap 24).
-    These live in the attributes column for the same reason the folder does --
-    they belong to the record, and every path that already moves or exports a
-    record carries the column along.
+    5.1.0 added `favorite` and `trashed_at`; 5.2.0 adds `sealed` (a per-record
+    passphrase blob, roadmap 8) and `links` (relationships, roadmap 25). All live
+    in the same JSON for the same reason the folder does -- they belong to the
+    record, and every path that already moves a record carries the column along.
+    `sealed` and `links` are reached by accessor (attrs_sealed / attrs_links) and
+    threaded through attrs_edit, rather than widening the positional tuple again.
     """
     folder = (folder or "").strip()
     fields = [(str(n).strip(), str(v)) for n, v in (fields or []) if str(n).strip()]
     hidden = bool(hidden)
     favorite = bool(favorite)
     trashed_at = (trashed_at or "").strip()
-    if not folder and not fields and not hidden and not favorite and not trashed_at:
+    links = links or []
+    if (not folder and not fields and not hidden and not favorite
+            and not trashed_at and not sealed and not links):
         return ""
     if len(folder) > ATTRS_FOLDER_MAX:
         raise VaultError("folder name is longer than %d characters"
@@ -1600,6 +1619,10 @@ def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
         payload["favorite"] = True
     if trashed_at:
         payload["trashed_at"] = trashed_at
+    if sealed:
+        payload["sealed"] = sealed
+    if links:
+        payload["links"] = links
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     return base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
@@ -1649,25 +1672,159 @@ def decode_attrs(column):
             payload.get("favorite") is True, trashed_at.strip()[:40])
 
 
+def _attrs_payload(column):
+    """The raw attributes dict, or {}. For the keys not in the positional tuple
+    (sealed, links) so they survive an attrs_edit that never named them."""
+    column = (column or "").strip()
+    if not column:
+        return {}
+    try:
+        payload = json.loads(base64.b64decode(column, validate=True)
+                             .decode("utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def attrs_sealed(column):
+    """The per-record passphrase blob {salt, blob} (roadmap 8), or None."""
+    sealed = _attrs_payload(column).get("sealed")
+    if (isinstance(sealed, dict) and isinstance(sealed.get("salt"), str)
+            and isinstance(sealed.get("blob"), str)):
+        return {"salt": sealed["salt"], "blob": sealed["blob"]}
+    return None
+
+
+def attrs_links(column):
+    """The relationship links [{kind,type,id}] on a record (roadmap 25)."""
+    out = []
+    raw = _attrs_payload(column).get("links")
+    if isinstance(raw, list):
+        for item in raw[:ATTRS_LINK_MAX]:
+            if not isinstance(item, dict):
+                continue
+            kind = item.get("kind")
+            rid = item.get("id")
+            rtype = item.get("type", "")
+            if kind in ("record", "password") and isinstance(rid, str) and rid:
+                out.append({"kind": kind,
+                            "type": rtype if isinstance(rtype, str) else "",
+                            "id": rid})
+    return out
+
+
 def attrs_edit(column, folder=None, fields=None, hidden=None, favorite=None,
-               trashed_at=None):
+               trashed_at=None, sealed=_KEEP, links=None):
     """Return an attributes column with only the named parts changed.
 
     The point of the whole codec is that no path re-encodes a record without
     the parts it did not touch. A caller flipping one flag -- favourite on, or a
     trashed marker set or cleared -- passes only that argument; everything else
     is read from `column` and carried through. `None` means keep; a real value
-    (including "" or False) means replace.
+    (including "" or False) means replace. `sealed` uses a distinct sentinel
+    because None is a meaningful value for it (clear the lock).
     """
     cur_folder, cur_fields, cur_hidden, cur_favorite, cur_trashed = \
         decode_attrs(column)
+    cur_sealed = attrs_sealed(column)
+    cur_links = attrs_links(column)
     return encode_attrs(
         folder=cur_folder if folder is None else folder,
         fields=cur_fields if fields is None else fields,
         hidden=cur_hidden if hidden is None else hidden,
         favorite=cur_favorite if favorite is None else favorite,
         trashed_at=cur_trashed if trashed_at is None else trashed_at,
+        sealed=cur_sealed if sealed is _KEEP else sealed,
+        links=cur_links if links is None else links,
     )
+
+
+# ----- per-record passphrase (roadmap 8) -------------------------------------
+# A second lock on one record's secret fields, on top of the vault. The secret
+# values are sealed under a key derived from a passphrase the vault does not
+# hold, so an unlocked vault still cannot reveal them. Only the secret fields are
+# sealed -- a locked record still lists and shows its plain fields -- and the
+# sealed blob lives in the record's own attributes, so it moves and exports with
+# the record (as opaque ciphertext) like everything else there. Fails closed:
+# the wrong passphrase raises, and the plaintext of a locked field is never
+# written back into the payload.
+
+def record_lock(values, secret_field_names, passphrase):
+    """Seal the secret fields under `passphrase`. Returns (blanked_values, sealed).
+
+    `sealed` is {salt, blob} for the attributes column; `blanked_values` is the
+    values with the secret fields emptied, to store in the payload. The plain
+    fields are untouched."""
+    passphrase = passphrase or ""
+    if not passphrase.strip():
+        raise VaultError("a lock passphrase must not be empty")
+    secret_values = {name: values.get(name, "")
+                     for name in secret_field_names if values.get(name, "")}
+    if not secret_values:
+        raise VaultError("this record has no secret to lock")
+    salt = os.urandom(SEAL_SALT_BYTES)
+    key = derive_kek(passphrase, salt)
+    blob = seal(key, json.dumps(secret_values, ensure_ascii=False).encode("utf-8"))
+    sealed = {"salt": base64.b64encode(salt).decode("ascii"),
+              "blob": base64.b64encode(blob).decode("ascii")}
+    blanked = dict(values)
+    for name in secret_values:
+        blanked[name] = ""
+    return blanked, sealed
+
+
+def record_unlock(sealed, passphrase):
+    """The secret values a `sealed` blob holds, or a refusal.
+
+    Fails closed: a wrong passphrase fails the tag check in `unseal` and raises,
+    never returning partial or guessed plaintext."""
+    if not sealed or not isinstance(sealed, dict):
+        raise VaultError("this record is not locked")
+    try:
+        salt = base64.b64decode(sealed["salt"], validate=True)
+        blob = base64.b64decode(sealed["blob"], validate=True)
+    except Exception:
+        raise VaultError("the lock is malformed")
+    key = derive_kek(passphrase or "", salt)
+    try:
+        raw = unseal(key, blob)
+    except VaultError:
+        raise VaultError("wrong passphrase")
+    try:
+        out = json.loads(raw.decode("utf-8"))
+    except Exception:
+        raise VaultError("the lock decrypted to nothing readable")
+    return {str(k): str(v) for k, v in (out or {}).items()}
+
+
+# ----- record relationships (roadmap 25) -------------------------------------
+# A link is a pointer from one record to another, kept in the record's own
+# attributes so it travels with it. A link names the other record's kind
+# ("record" with its type, or "password"), and its id. Adding is idempotent and
+# offered both ways by the surfaces; the core keeps the storage honest.
+
+def _link_key(kind, record_type, record_id):
+    return (kind, record_type if kind == "record" else "", str(record_id))
+
+
+def link_add(column, kind, record_type, record_id):
+    """Return an attrs column with a link added (idempotent)."""
+    links = attrs_links(column)
+    key = _link_key(kind, record_type, record_id)
+    if any(_link_key(l["kind"], l["type"], l["id"]) == key for l in links):
+        return column or ""
+    if len(links) >= ATTRS_LINK_MAX:
+        raise VaultError("a record may carry at most %d links" % ATTRS_LINK_MAX)
+    links.append({"kind": key[0], "type": key[1], "id": key[2]})
+    return attrs_edit(column, links=links)
+
+
+def link_remove(column, kind, record_type, record_id):
+    """Return an attrs column with a link removed."""
+    key = _link_key(kind, record_type, record_id)
+    links = [l for l in attrs_links(column)
+             if _link_key(l["kind"], l["type"], l["id"]) != key]
+    return attrs_edit(column, links=links)
 
 
 # ----- record sanitising -----------------------------------------------------
@@ -1887,11 +2044,175 @@ RECORD_SCHEMAS = {
     },
 }
 
+# ----- custom record schemas (roadmap 19) ------------------------------------
+# A type is data, so a user can add one too. Custom schemas live in the vault
+# (META_CUSTOM_SCHEMAS) and are merged over the built-ins by register_custom_
+# schemas after a surface decrypts. record_schemas() is the merged view every
+# lookup goes through, and RECORD_TYPES is rebuilt from it -- so the CLI, the
+# Dashboard and the exporter treat a custom type exactly like a built-in one
+# without a line per type, which is the whole point of the schema engine. A
+# custom type may not shadow a built-in, and the built-in dict is never mutated.
+_CUSTOM_SCHEMAS = {}
+CUSTOM_SCHEMAS_TAG = "META_CUSTOM_SCHEMAS"
+CUSTOM_SCHEMA_MAX = 64
+CUSTOM_FIELD_MAX = 32
+CUSTOM_TYPE_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
+CUSTOM_FIELD_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+CUSTOM_WIDGETS = ("line", "multiline", "number", "date", "month")
+
+
+def record_schemas():
+    """The merged view of built-in and registered custom schemas.
+
+    Built-ins win: a custom schema can never shadow one, so a lookup here is the
+    same for everyone regardless of what a vault has added."""
+    if not _CUSTOM_SCHEMAS:
+        return RECORD_SCHEMAS
+    return {**_CUSTOM_SCHEMAS, **RECORD_SCHEMAS}
+
+
+def _rebuild_record_types():
+    global RECORD_TYPES
+    RECORD_TYPES = tuple(sorted(record_schemas()))
+
+
 # Ordered, because a dict's order is an implementation detail and this decides
 # the order of a nav menu, a `--type` help listing and an export's rows. Sorted
 # rather than hand-listed so a new schema cannot be added to the registry and
-# forgotten here.
+# forgotten here. Rebuilt by register_custom_schemas when a vault adds a type.
 RECORD_TYPES = tuple(sorted(RECORD_SCHEMAS))
+
+
+def _valid_custom_fields(raw):
+    """A validated tuple of (name, kind, widget, required) field specs, or raise."""
+    if not isinstance(raw, list) or not raw:
+        raise VaultError("a custom schema needs at least one field")
+    if len(raw) > CUSTOM_FIELD_MAX:
+        raise VaultError("a custom schema may have at most %d fields"
+                         % CUSTOM_FIELD_MAX)
+    fields, seen, has_required = [], set(), False
+    for item in raw:
+        item = list(item) if isinstance(item, (list, tuple)) else []
+        if len(item) < 2:
+            raise VaultError("each field is name, kind, [widget], [required]")
+        name = str(item[0])
+        kind = str(item[1])
+        widget = str(item[2]) if len(item) > 2 and item[2] else "line"
+        required = bool(item[3]) if len(item) > 3 else False
+        if not CUSTOM_FIELD_RE.match(name):
+            raise VaultError("field name %r must be lower-case letters, digits "
+                             "and underscores" % name)
+        if name in seen:
+            raise VaultError("duplicate field name %r" % name)
+        if kind not in (FIELD_PLAIN, FIELD_SECRET):
+            raise VaultError("field kind must be %r or %r" % (FIELD_PLAIN, FIELD_SECRET))
+        if widget not in CUSTOM_WIDGETS:
+            raise VaultError("field widget must be one of %s"
+                             % ", ".join(CUSTOM_WIDGETS))
+        seen.add(name)
+        has_required = has_required or required
+        fields.append((name, kind, widget, required))
+    if not has_required:
+        # At least one required field, so a record of the type is never empty --
+        # the same rule every built-in schema follows.
+        fields[0] = (fields[0][0], fields[0][1], fields[0][2], True)
+    return tuple(fields)
+
+
+def _valid_custom_schema(record_type, label, icon, fields):
+    """A validated {label, icon, fields} schema dict, or raise."""
+    record_type = str(record_type).strip().lower()
+    if not CUSTOM_TYPE_RE.match(record_type):
+        raise VaultError("a type name is lower-case letters, digits and hyphens")
+    if record_type in RECORD_SCHEMAS:
+        raise VaultError("%r is a built-in record type" % record_type)
+    label = " ".join(str(label or record_type).split())[:60]
+    icon = str(icon or "record").strip()[:32] or "record"
+    return record_type, {"label": label, "icon": icon, "custom": True,
+                         "fields": _valid_custom_fields(fields)}
+
+
+def register_custom_schemas(plaintext):
+    """Load META_CUSTOM_SCHEMAS into the merged registry. Never raises.
+
+    Tolerant like decode_attrs: an entry this build cannot read is skipped rather
+    than hiding the rest, and a built-in name in the row is ignored so a custom
+    type can never shadow one. Call after decrypting, before iterating records."""
+    global _CUSTOM_SCHEMAS
+    loaded = {}
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if parts[0] != CUSTOM_SCHEMAS_TAG or len(parts) < 2:
+            continue
+        try:
+            data = json.loads(base64.b64decode(parts[1], validate=True)
+                              .decode("utf-8"))
+        except Exception:
+            break
+        if isinstance(data, dict):
+            for rtype, spec in list(data.items())[:CUSTOM_SCHEMA_MAX]:
+                if not isinstance(spec, dict):
+                    continue
+                try:
+                    name, schema = _valid_custom_schema(
+                        rtype, spec.get("label"), spec.get("icon"),
+                        spec.get("fields"))
+                except VaultError:
+                    continue
+                loaded[name] = schema
+        break
+    _CUSTOM_SCHEMAS = loaded
+    _rebuild_record_types()
+    return _CUSTOM_SCHEMAS
+
+
+def custom_schemas(plaintext):
+    """The custom schemas a vault defines, as {type: spec}, for listing/editing."""
+    register_custom_schemas(plaintext)
+    return dict(_CUSTOM_SCHEMAS)
+
+
+def _write_custom_schemas(plaintext, schemas):
+    rows = [line for line in (plaintext or "").splitlines()
+            if line.split("\t")[0] != CUSTOM_SCHEMAS_TAG]
+    if schemas:
+        payload = {t: {"label": s["label"], "icon": s["icon"],
+                       "fields": [list(f) for f in s["fields"]]}
+                   for t, s in schemas.items()}
+        col = base64.b64encode(json.dumps(payload, separators=(",", ":"),
+                                          ensure_ascii=False).encode("utf-8")
+                               ).decode("ascii")
+        rows.append("%s\t%s\t-\t-\t-\t-" % (CUSTOM_SCHEMAS_TAG, col))
+    return "\n".join(rows) + "\n"
+
+
+def add_custom_schema(plaintext, record_type, label, icon, fields):
+    """Define or replace a custom record type. Returns the new plaintext."""
+    name, schema = _valid_custom_schema(record_type, label, icon, fields)
+    schemas = custom_schemas(plaintext)
+    if len(schemas) >= CUSTOM_SCHEMA_MAX and name not in schemas:
+        raise VaultError("this vault already holds the maximum of %d custom types"
+                         % CUSTOM_SCHEMA_MAX)
+    schemas[name] = schema
+    out = _write_custom_schemas(plaintext, schemas)
+    register_custom_schemas(out)
+    return out
+
+
+def remove_custom_schema(plaintext, record_type):
+    """Remove a custom type, refusing while records of it exist. Returns plaintext."""
+    record_type = str(record_type).strip().lower()
+    schemas = custom_schemas(plaintext)
+    if record_type not in schemas:
+        raise VaultError("no custom record type %r" % record_type)
+    if any(True for _i, _p in iter_records(plaintext, record_type,
+                                           include_trashed=True)):
+        raise VaultError("delete the %r records before removing the type"
+                         % record_type)
+    del schemas[record_type]
+    out = _write_custom_schemas(plaintext, schemas)
+    register_custom_schemas(out)
+    return out
 
 
 def record_tag(record_type):
@@ -1914,7 +2235,7 @@ def type_from_tag(tag):
 
 def record_schema(record_type):
     """The schema for a type, or VaultError naming what is available."""
-    schema = RECORD_SCHEMAS.get(record_type)
+    schema = record_schemas().get(record_type)
     if schema is None:
         raise VaultError("unknown record type %r; known types are %s"
                          % (record_type, ", ".join(RECORD_TYPES)))
@@ -1938,13 +2259,18 @@ def record_secret_fields(record_type):
                      if kind == FIELD_SECRET)
 
 
-def encode_record_payload(record_type, values):
+def encode_record_payload(record_type, values, allow_missing=frozenset()):
     """The payload column for a typed record.
 
     Validates against the schema rather than trusting the caller: an unknown
     field name is a typo that would otherwise be written, stored and never
     displayed, because every surface renders the schema's fields and not the
     payload's keys.
+
+    `allow_missing` exempts field names from the required check -- used when a
+    record is passphrase-locked (roadmap 8): its required secret fields are
+    blanked in the payload because their values live in the sealed blob, not
+    because the record is incomplete.
     """
     schema_fields = record_fields(record_type)
     known = {name for name, _k, _w, _r in schema_fields}
@@ -1955,7 +2281,7 @@ def encode_record_payload(record_type, values):
                          % (record_type, ", ".join(repr(u) for u in unknown)))
     for name, _kind, _widget, required in schema_fields:
         value = values.get(name, "")
-        if required and not value.strip():
+        if required and not value.strip() and name not in allow_missing:
             raise VaultError("record type %r requires a value for %r"
                              % (record_type, name))
         if len(value) > RECORD_VALUE_MAX:
@@ -2023,14 +2349,18 @@ def redact_record(record_type, values):
 
 def build_record_row(record_type, record_id, label, values, created,
                      folder="", fields=None, hidden=False, favorite=False,
-                     trashed_at=""):
+                     trashed_at="", sealed=None, links=None):
     """One tab-separated typed-record row, sanitised and schema-checked.
 
-    `favorite` and `trashed_at` are threaded through so an edit that rebuilds a
-    record's row from its form keeps the pin and the trashed marker it never
-    showed the form -- the same reason folder and custom fields are threaded.
+    `favorite`, `trashed_at`, `sealed` (the per-record passphrase blob) and
+    `links` (relationships) are all threaded through so an edit that rebuilds a
+    record's row from its form keeps what the form never showed -- the same
+    reason folder and custom fields are threaded.
     """
-    payload = encode_record_payload(record_type, values)
+    # A locked record's required secret fields are blanked in the payload (their
+    # values are in the sealed blob), so they are exempt from the required check.
+    allow_missing = record_secret_fields(record_type) if sealed else frozenset()
+    payload = encode_record_payload(record_type, values, allow_missing=allow_missing)
     # A custom field may not take a schema field's name. Both cross an export
     # in the same `fields` column and are told apart on the way back by
     # whether the name is in the schema -- so a wifi record carrying a custom
@@ -2043,7 +2373,8 @@ def build_record_row(record_type, record_id, label, values, created,
             "a custom field may not reuse the field name %s on a %s record"
             % (", ".join(repr(name) for name in shadowed), record_type))
     attrs = encode_attrs(folder=folder, fields=fields, hidden=hidden,
-                         favorite=favorite, trashed_at=trashed_at)
+                         favorite=favorite, trashed_at=trashed_at,
+                         sealed=sealed, links=links)
     return "\t".join((record_tag(record_type), str(record_id),
                       sanitize_field(label), payload, str(created),
                       attrs or "-"))
@@ -2062,7 +2393,7 @@ def parse_record_row(line):
     if len(parts) < 5:
         return None
     record_type = type_from_tag(parts[0])
-    if not record_type or record_type not in RECORD_SCHEMAS:
+    if not record_type or record_type not in record_schemas():
         return None
     values = decode_record_payload(record_type, parts[3])
     folder, custom, hidden, favorite, trashed_at = \
@@ -2940,7 +3271,7 @@ def record_derive_name(record_type):
     lookup like everything else, so the next deriver is still one dictionary
     entry and its translations.
     """
-    return RECORD_SCHEMAS.get(record_type, {}).get("derive", "")
+    return record_schemas().get(record_type, {}).get("derive", "")
 
 # ----- attributes across an export -------------------------------------------
 # A folder and its custom fields cross an export as their own readable columns
@@ -4131,6 +4462,291 @@ def delete_saved_search(plaintext, name):
     items = [i for i in saved_searches(plaintext)
              if i["name"].casefold() != name.casefold()]
     return _write_saved_searches(plaintext, items)
+
+
+# ----- public-key sharing and collections (roadmap 6 & 7) --------------------
+# Sharing is offline and account-free: a share is selected records (or a named
+# collection) encrypted to another SPM user's public key, as a file they import.
+# The crypto is the emergency-access kit's, generalised -- a random key seals the
+# body (seal/unseal), and that key is wrapped to the recipient's RSA public key
+# with OAEP. Each vault has its own sharing keypair; unlike the recovery keypair,
+# whose private half lives offline, the sharing private key stays inside the
+# encrypted vault so the owner can decrypt shares sent to them.
+
+SHARING_PRIVKEY_TAG = "META_SHARING_PRIVKEY"
+SHARING_PUBKEY_TAG = "META_SHARING_PUBKEY"
+COLLECTIONS_TAG = "META_COLLECTIONS"
+COLLECTION_MAX = 64
+SHARE_FILE_MAGIC = "SPM-SHARE-v1"
+SHARE_RECORD_MAX = 1000
+
+
+def _meta_value(plaintext, tag):
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if parts[0] == tag and len(parts) > 1 and parts[1].strip():
+            return parts[1].strip()
+    return ""
+
+
+def _pem_from_meta(plaintext, tag):
+    raw = _meta_value(plaintext, tag)
+    if not raw:
+        return b""
+    try:
+        return base64.b64decode(raw)
+    except Exception:
+        raise VaultError("stored sharing key is not valid base64")
+
+
+def sharing_pubkey_pem(plaintext):
+    """This vault's sharing public key PEM, or raise if not set up yet."""
+    pem = _pem_from_meta(plaintext, SHARING_PUBKEY_TAG)
+    if not pem:
+        raise VaultError("this vault has no sharing key yet")
+    return pem
+
+
+def ensure_sharing_keypair(plaintext):
+    """Generate the vault's sharing keypair if absent. Returns (plaintext, changed)."""
+    if _meta_value(plaintext, SHARING_PRIVKEY_TAG) and \
+            _meta_value(plaintext, SHARING_PUBKEY_TAG):
+        return plaintext, False
+    try:
+        priv = subprocess.run(
+            ["openssl", "genpkey", "-algorithm", "RSA",
+             "-pkeyopt", "rsa_keygen_bits:3072"],
+            capture_output=True, check=True, timeout=60).stdout
+        pub = subprocess.run(
+            ["openssl", "pkey", "-pubout"], input=priv,
+            capture_output=True, check=True, timeout=30).stdout
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise VaultError("could not generate a sharing key") from exc
+    rows = [line for line in (plaintext or "").splitlines()
+            if line.split("\t")[0] not in (SHARING_PRIVKEY_TAG, SHARING_PUBKEY_TAG)]
+    rows.append("%s\t%s\t-\t-\t-\t-" % (
+        SHARING_PRIVKEY_TAG, base64.b64encode(priv).decode("ascii")))
+    rows.append("%s\t%s\t-\t-\t-\t-" % (
+        SHARING_PUBKEY_TAG, base64.b64encode(pub).decode("ascii")))
+    return "\n".join(rows) + "\n", True
+
+
+def _pkey_encrypt(pub_pem, data):
+    """OAEP-encrypt small `data` to an RSA public key PEM."""
+    fd, pub_file = tempfile.mkstemp(prefix="spm.sharepub.")
+    try:
+        os.write(fd, pub_pem)
+        os.close(fd)
+        return subprocess.run(
+            ["openssl", "pkeyutl", "-encrypt", "-pubin", "-inkey", pub_file,
+             "-pkeyopt", "rsa_padding_mode:oaep", "-pkeyopt", "rsa_oaep_md:sha256"],
+            input=data, capture_output=True, check=True, timeout=30).stdout
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise VaultError("the recipient public key was not usable") from exc
+    finally:
+        os.unlink(pub_file)
+
+
+def _pkey_decrypt(priv_pem, data):
+    """OAEP-decrypt with an RSA private key PEM."""
+    fd, priv_file = tempfile.mkstemp(prefix="spm.sharepriv.")
+    try:
+        os.chmod(priv_file, 0o600)
+        os.write(fd, priv_pem)
+        os.close(fd)
+        return subprocess.run(
+            ["openssl", "pkeyutl", "-decrypt", "-inkey", priv_file,
+             "-pkeyopt", "rsa_padding_mode:oaep", "-pkeyopt", "rsa_oaep_md:sha256"],
+            input=data, capture_output=True, check=True, timeout=30).stdout
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise VaultError("this share was not encrypted to this vault") from exc
+    finally:
+        os.unlink(priv_file)
+
+
+def share_pack(records, recipient_pub_pem):
+    """A share file (text) holding `records` encrypted to `recipient_pub_pem`.
+
+    Hybrid: a random key seals the body; the key is wrapped to the recipient's
+    RSA public key with OAEP. The whole thing is one base64 line under a magic
+    header, so it is easy to hand over and unmistakable on import."""
+    if not records:
+        raise VaultError("a share must contain at least one record")
+    if len(records) > SHARE_RECORD_MAX:
+        raise VaultError("a share may hold at most %d records" % SHARE_RECORD_MAX)
+    key_text = base64.b64encode(os.urandom(32)).decode("ascii")
+    body = seal(key_text, json.dumps({"records": records}, ensure_ascii=False)
+                .encode("utf-8"))
+    wrapped = _pkey_encrypt(recipient_pub_pem, key_text.encode("utf-8"))
+    envelope = {"v": 1, "wrapped_key": base64.b64encode(wrapped).decode("ascii"),
+                "body": base64.b64encode(body).decode("ascii")}
+    blob = base64.b64encode(json.dumps(envelope).encode("utf-8")).decode("ascii")
+    return "%s\n%s\n" % (SHARE_FILE_MAGIC, "\n".join(
+        blob[i:i + 76] for i in range(0, len(blob), 76)))
+
+
+def share_unpack(share_text, my_priv_pem):
+    """The records from a share file, or a refusal.
+
+    Fails closed: a wrong key fails OAEP, a tampered body fails the seal tag."""
+    lines = [l for l in (share_text or "").splitlines() if l.strip()]
+    if not lines or lines[0].strip() != SHARE_FILE_MAGIC:
+        raise VaultError("this is not an SPM share file")
+    try:
+        envelope = json.loads(base64.b64decode("".join(lines[1:]), validate=True)
+                              .decode("utf-8"))
+        wrapped = base64.b64decode(envelope["wrapped_key"], validate=True)
+        body = base64.b64decode(envelope["body"], validate=True)
+    except Exception:
+        raise VaultError("this share file is malformed")
+    key_text = _pkey_decrypt(my_priv_pem, wrapped).decode("utf-8", "ignore")
+    payload = json.loads(unseal(key_text, body).decode("utf-8"))
+    records = payload.get("records") if isinstance(payload, dict) else None
+    if not isinstance(records, list):
+        raise VaultError("this share carried no records")
+    return records
+
+
+def collect_share_records(plaintext, members):
+    """Build the share payload for a list of {kind,type,id} members.
+
+    A record becomes {kind:'record', type, label, created, values}; a password
+    becomes {kind:'password', name, username, password, notes, url}. Trashed and
+    missing members are skipped. Sealed (passphrase-locked) record fields cross
+    as their sealed blob, never as plaintext the sender does not hold."""
+    out = []
+    for m in members:
+        kind = m.get("kind")
+        rid = str(m.get("id", ""))
+        if kind == "record":
+            found = find_record(plaintext, m.get("type", ""), rid)
+            if not found:
+                continue
+            _idx, parsed = found
+            if record_is_trashed(parsed):
+                continue
+            out.append({"kind": "record", "type": parsed[0], "label": parsed[2],
+                        "created": parsed[4], "values": parsed[3]})
+        elif kind == "password":
+            for line in plaintext.splitlines():
+                parts = line.split("\t")
+                if len(parts) >= 6 and parts[0] == rid and parts[0].isdigit():
+                    if len(parts) > 7 and decode_attrs(parts[7])[4]:
+                        break
+                    out.append({"kind": "password", "name": parts[1],
+                                "username": parts[2], "password": parts[3],
+                                "notes": parts[4] if len(parts) > 4 else "",
+                                "url": parts[6] if len(parts) > 6 else ""})
+                    break
+    return out
+
+
+def share_apply(plaintext, records):
+    """Add shared records to the vault under fresh ids. Returns (plaintext, count).
+
+    A record whose type this vault does not know (a custom type the sender had)
+    is skipped rather than guessed at."""
+    register_custom_schemas(plaintext)
+    lines = (plaintext or "").rstrip("\n").splitlines()
+    added = 0
+    max_pw = 0
+    for line in lines:
+        parts = line.split("\t")
+        if len(parts) >= 6 and parts[0].isdigit():
+            try:
+                max_pw = max(max_pw, int(parts[0]))
+            except ValueError:
+                pass
+    text = "\n".join(lines) + ("\n" if lines else "")
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("kind") == "record":
+            rtype = rec.get("type", "")
+            if rtype not in record_schemas():
+                continue
+            rid = record_next_id(text, rtype)
+            try:
+                row = build_record_row(rtype, rid, rec.get("label", "shared"),
+                                       rec.get("values", {}) or {},
+                                       rec.get("created", ""))
+            except VaultError:
+                continue
+            text += row + "\n"
+            added += 1
+        elif rec.get("kind") == "password":
+            max_pw += 1
+            row = "\t".join([
+                str(max_pw), sanitize_field(rec.get("name", "shared")),
+                sanitize_field(rec.get("username", "")),
+                sanitize_field(rec.get("password", "")),
+                sanitize_field(rec.get("notes", "")),
+                time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                rec.get("url", ""), ""])
+            text += row + "\n"
+            added += 1
+    return text, added
+
+
+def collections(plaintext):
+    """[{name, members:[{kind,type,id}]}] the vault has grouped, in order."""
+    raw = _meta_value(plaintext, COLLECTIONS_TAG)
+    if not raw:
+        return []
+    try:
+        data = json.loads(base64.b64decode(raw, validate=True).decode("utf-8"))
+    except Exception:
+        return []
+    out = []
+    if isinstance(data, list):
+        for item in data[:COLLECTION_MAX]:
+            if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+                continue
+            members = []
+            for m in item.get("members", []) if isinstance(item.get("members"), list) else []:
+                if isinstance(m, dict) and m.get("kind") in ("record", "password") \
+                        and isinstance(m.get("id"), str):
+                    members.append({"kind": m["kind"],
+                                    "type": m.get("type", "") if isinstance(m.get("type"), str) else "",
+                                    "id": m["id"]})
+            out.append({"name": item["name"].strip()[:80], "members": members})
+    return out
+
+
+def _write_collections(plaintext, items):
+    rows = [line for line in (plaintext or "").splitlines()
+            if line.split("\t")[0] != COLLECTIONS_TAG]
+    if items:
+        col = base64.b64encode(json.dumps(items, separators=(",", ":"),
+                                          ensure_ascii=False).encode("utf-8")
+                               ).decode("ascii")
+        rows.append("%s\t%s\t-\t-\t-\t-" % (COLLECTIONS_TAG, col))
+    return "\n".join(rows) + "\n"
+
+
+def set_collection(plaintext, name, members):
+    """Create or replace a collection by name. Returns plaintext."""
+    name = (name or "").strip()[:80]
+    if not name:
+        raise VaultError("a collection needs a name")
+    clean = []
+    for m in members or []:
+        if m.get("kind") in ("record", "password") and str(m.get("id", "")):
+            clean.append({"kind": m["kind"], "type": str(m.get("type", "")),
+                          "id": str(m["id"])})
+    items = [c for c in collections(plaintext) if c["name"].casefold() != name.casefold()]
+    if len(items) >= COLLECTION_MAX:
+        raise VaultError("this vault already holds the maximum of %d collections"
+                         % COLLECTION_MAX)
+    items.append({"name": name, "members": clean})
+    return _write_collections(plaintext, items)
+
+
+def delete_collection(plaintext, name):
+    """Remove a collection by name. Returns plaintext."""
+    name = (name or "").strip()
+    items = [c for c in collections(plaintext) if c["name"].casefold() != name.casefold()]
+    return _write_collections(plaintext, items)
 
 
 def looks_sensitive(label, url, hosts):
@@ -5701,7 +6317,7 @@ def record_from_export_row(row):
     may be a field a newer SPM does.
     """
     record_type = str(row.get("type", "") or "").strip()
-    if record_type not in RECORD_SCHEMAS:
+    if record_type not in record_schemas():
         return None
     _folder, pairs, _hidden, _fav, _trash = decode_attrs(attrs_from_export_row(row))
     known = {name for name, _k, _w, _r in record_fields(record_type)}
@@ -6144,8 +6760,8 @@ def main(argv):
             if op == "types":
                 for name in RECORD_TYPES:
                     sys.stdout.write("%s\t%s\t%s\n" % (
-                        name, RECORD_SCHEMAS[name]["label"],
-                        RECORD_SCHEMAS[name].get("icon", "")))
+                        name, record_schemas()[name]["label"],
+                        record_schemas()[name].get("icon", "")))
             elif op == "schema":
                 for field, kind, widget, required in record_fields(argv[3]):
                     sys.stdout.write("%s\t%s\t%s\t%s\n" % (
@@ -6592,6 +7208,140 @@ def main(argv):
                 sys.stdout.write(set_saved_search(plaintext, argv[3], argv[4]))
             else:
                 sys.stdout.write(delete_saved_search(plaintext, argv[3]))
+        elif command == "schemas-list":
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.write(json.dumps(
+                    {"schemas": custom_schemas(handle.read())}, indent=2) + "\n")
+        elif command == "schema-add":
+            # schema-add <plainfile> <type> <label> <icon> ; stdin: fields, one
+            # per line "name kind widget required". Writes the new plaintext.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            fields = []
+            for line in sys.stdin.read().splitlines():
+                bits = line.split()
+                if bits:
+                    fields.append([bits[0], bits[1] if len(bits) > 1 else "plain",
+                                   bits[2] if len(bits) > 2 else "line",
+                                   len(bits) > 3 and bits[3].lower() in ("true", "1", "yes", "required")])
+            sys.stdout.write(add_custom_schema(plaintext, argv[3], argv[4],
+                                               argv[5] if len(argv) > 5 else "record", fields))
+        elif command == "schema-remove":
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.write(remove_custom_schema(handle.read(), argv[3]))
+        elif command in ("link-add", "link-remove"):
+            # <cmd> <plainfile> <type> <id> <target-kind> <target-type> <target-id>
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            found = find_record(plaintext, argv[3], argv[4])
+            if not found:
+                sys.exit("no such record")
+            index, _p = found
+            lines = plaintext.splitlines()
+            col = lines[index].split("\t")
+            while len(col) <= 5:
+                col.append("")
+            fn = link_add if command == "link-add" else link_remove
+            col[5] = fn(col[5], argv[5], argv[6], argv[7]) or "-"
+            lines[index] = "\t".join(col)
+            sys.stdout.write("\n".join(lines) + "\n")
+        elif command in ("record-lock", "record-unlock"):
+            # record-lock <plainfile> <type> <id> ; stdin: passphrase.
+            # Writes the new plaintext; unlock removes the lock, restoring fields.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            passphrase = sys.stdin.readline().rstrip("\n")
+            found = find_record(plaintext, argv[3], argv[4])
+            if not found:
+                sys.exit("no such record")
+            index, parsed = found
+            lines = plaintext.splitlines()
+            col = lines[index].split("\t")
+            attrs_col = col[5] if len(col) > 5 else ""
+            if command == "record-lock":
+                blanked, sealed = record_lock(
+                    parsed[3], record_secret_fields(argv[3]), passphrase)
+                lines[index] = build_record_row(
+                    argv[3], argv[4], parsed[2], blanked, parsed[4],
+                    folder=parsed[5], fields=parsed[6], hidden=parsed[7],
+                    favorite=parsed[8], trashed_at=parsed[9], sealed=sealed,
+                    links=attrs_links(attrs_col))
+            else:
+                secret_vals = record_unlock(attrs_sealed(attrs_col), passphrase)
+                values = dict(parsed[3]); values.update(secret_vals)
+                lines[index] = build_record_row(
+                    argv[3], argv[4], parsed[2], values, parsed[4],
+                    folder=parsed[5], fields=parsed[6], hidden=parsed[7],
+                    favorite=parsed[8], trashed_at=parsed[9], sealed=None,
+                    links=attrs_links(attrs_col))
+            sys.stdout.write("\n".join(lines) + "\n")
+        elif command == "record-reveal":
+            # record-reveal <plainfile> <type> <id> ; stdin: passphrase.
+            # stdout: JSON of the unsealed secret fields. Never writes.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            passphrase = sys.stdin.readline().rstrip("\n")
+            found = find_record(plaintext, argv[3], argv[4])
+            if not found:
+                sys.exit("no such record")
+            index, _p = found
+            col = plaintext.splitlines()[index].split("\t")
+            sealed = attrs_sealed(col[5] if len(col) > 5 else "")
+            sys.stdout.write(json.dumps(record_unlock(sealed, passphrase)) + "\n")
+        elif command == "collections-list":
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.write(json.dumps(
+                    {"collections": collections(handle.read())}, indent=2) + "\n")
+        elif command in ("collection-set", "collection-delete"):
+            # collection-set <plainfile> <name> ; stdin: members, one per line
+            # "kind type id". collection-delete <plainfile> <name>.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            if command == "collection-set":
+                members = []
+                for line in sys.stdin.read().splitlines():
+                    bits = line.split()
+                    if len(bits) >= 3:
+                        members.append({"kind": bits[0], "type": bits[1], "id": bits[2]})
+                    elif len(bits) == 2:
+                        members.append({"kind": bits[0], "type": "", "id": bits[1]})
+                sys.stdout.write(set_collection(plaintext, argv[3], members))
+            else:
+                sys.stdout.write(delete_collection(plaintext, argv[3]))
+        elif command == "sharing-keygen":
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                out, _changed = ensure_sharing_keypair(handle.read())
+            sys.stdout.write(out)
+        elif command == "sharing-pubkey":
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.buffer.write(sharing_pubkey_pem(handle.read()))
+        elif command == "share-create":
+            # share-create <plainfile> <recipient-pub-file> <collection-name>
+            # stdout: the share file text.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            with open(argv[3], "rb") as handle:
+                recipient = handle.read()
+            members = next((c["members"] for c in collections(plaintext)
+                            if c["name"] == argv[4]), None)
+            if members is None:
+                sys.exit("no such collection")
+            sys.stdout.write(share_pack(
+                collect_share_records(plaintext, members), recipient))
+        elif command == "share-import":
+            # share-import <plainfile> <share-file> ; writes the new plaintext,
+            # count on stderr. Decrypts with this vault's sharing private key.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            with open(argv[3], "r", encoding="utf-8", errors="replace") as handle:
+                share_text = handle.read()
+            priv = _pem_from_meta(plaintext, SHARING_PRIVKEY_TAG)
+            if not priv:
+                sys.exit("this vault has no sharing key yet")
+            records = share_unpack(share_text, priv)
+            out, added = share_apply(plaintext, records)
+            sys.stdout.write(out)
+            sys.stderr.write("%d\n" % added)
         elif command == "events":
             # events <vault> [limit] ; stdout: one JSON document
             limit = int(argv[3]) if len(argv) > 3 and argv[3] else 0
@@ -8465,8 +9215,10 @@ cmd_record() {
 		view)     cmd_record_view "$@" ;;
 		delete)   cmd_record_delete "$@" ;;
 		favorite) cmd_favorite "$@" ;;
+		lock)     cmd_record_lock "$@" ;;
+		unlock)   cmd_record_lock --unlock "$@" ;;
 		*)
-			printf 'Usage: %s record <types|add|list|view|delete|favorite> [args]\n' "$0" >&2
+			printf 'Usage: %s record <types|add|list|view|delete|favorite|lock|unlock> [args]\n' "$0" >&2
 			exit 1
 			;;
 	esac
@@ -8606,6 +9358,138 @@ for i in s:
 			secure_wipe "$tmp"
 			printf 'Usage: %s searches <list|save|delete> [args]\n' "$0" >&2
 			exit 1 ;;
+	esac
+}
+
+# ----- custom record types (roadmap 19) --------------------------------------
+cmd_schema() {
+	local op="${1:-list}"; [ $# -gt 0 ] && shift
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp out; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	case "$op" in
+		list)
+			core schemas-list "$tmp" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)["schemas"]
+if not d: print("No custom record types."); sys.exit(0)
+for t, s in sorted(d.items()):
+    print("%-20s %-24s %s" % (t, s["label"], ", ".join(f[0] for f in s["fields"])))
+'
+			secure_wipe "$tmp" ;;
+		add)
+			# add <type> <label> [icon] ; fields on stdin, one per line:
+			# name kind widget required
+			local type="${1:-}" label="${2:-}" icon="${3:-record}"
+			[ -n "$type" ] && [ -n "$label" ] || { secure_wipe "$tmp"; die "Usage: $0 schema add <type> <label> [icon]  (fields on stdin)"; }
+			out="$(make_tmp)"
+			if core schema-add "$tmp" "$type" "$label" "$icon" >"$out"; then
+				mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+				printf 'Added record type %s.\n' "$type"
+			else secure_wipe "$out"; secure_wipe "$tmp"; die "Could not add the type."; fi ;;
+		remove)
+			local type="${1:-}"; [ -n "$type" ] || { secure_wipe "$tmp"; die "Usage: $0 schema remove <type>"; }
+			out="$(make_tmp)"
+			if core schema-remove "$tmp" "$type" >"$out" 2>/dev/null; then
+				mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+				printf 'Removed record type %s.\n' "$type"
+			else secure_wipe "$out"; secure_wipe "$tmp"; die "Could not remove the type (does it still have records?)."; fi ;;
+		*) secure_wipe "$tmp"; printf 'Usage: %s schema <list|add|remove> [args]\n' "$0" >&2; exit 1 ;;
+	esac
+}
+
+# ----- relationships (roadmap 25) --------------------------------------------
+cmd_link() {
+	local remove=""
+	[ "${1:-}" = "--remove" ] && { remove=1; shift; }
+	local rtype="${1:-}" rid="${2:-}" ttype="${3:-}" tid="${4:-}"
+	[ -n "$rtype" ] && [ -n "$rid" ] && [ -n "$ttype" ] && [ -n "$tid" ] \
+		|| die "Usage: $0 link [--remove] <type> <id> <target-type> <target-id>"
+	record_require_type "$rtype"; record_require_type "$ttype"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp out; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"; out="$(make_tmp)"
+	local cmd=link-add; [ -n "$remove" ] && cmd=link-remove
+	if core "$cmd" "$tmp" "$rtype" "$rid" record "$ttype" "$tid" >"$out" 2>/dev/null; then
+		mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+		[ -n "$remove" ] && printf 'Unlinked.\n' || printf 'Linked.\n'
+	else secure_wipe "$out"; secure_wipe "$tmp"; die "No such record."; fi
+}
+
+# ----- per-record passphrase (roadmap 8) -------------------------------------
+cmd_record_lock() {
+	local unlock=""; [ "${1:-}" = "--unlock" ] && { unlock=1; shift; }
+	local rtype="${1:-}" rid="${2:-}"
+	[ -n "$rtype" ] && [ -n "$rid" ] || die "Usage: $0 record lock|unlock <type> <id>"
+	record_require_type "$rtype"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local pass pass2
+	pass="$(prompt_hidden "Passphrase: ")"; printf '\n' >&2
+	[ -n "$pass" ] || die "Passphrase must not be empty."
+	if [ -z "$unlock" ]; then
+		pass2="$(prompt_hidden "Confirm passphrase: ")"; printf '\n' >&2
+		[ "$pass" = "$pass2" ] || die "Passphrases do not match."
+	fi
+	local tmp out; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"; out="$(make_tmp)"
+	local cmd=record-lock; [ -n "$unlock" ] && cmd=record-unlock
+	if printf '%s\n' "$pass" | core "$cmd" "$tmp" "$rtype" "$rid" >"$out" 2>/dev/null; then
+		mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+		[ -n "$unlock" ] && printf 'Lock removed.\n' || printf 'Record locked.\n'
+	else secure_wipe "$out"; secure_wipe "$tmp"; die "Could not $([ -n "$unlock" ] && echo unlock || echo lock) (wrong passphrase, or no secret to lock)."; fi
+}
+
+# ----- public-key sharing and collections (roadmap 6 & 7) --------------------
+cmd_share() {
+	local op="${1:-}"; [ $# -gt 0 ] && shift
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp out; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	case "$op" in
+		pubkey)
+			out="$(make_tmp)"
+			core sharing-keygen "$tmp" >"$out"
+			if ! cmp -s "$out" "$tmp"; then mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; else secure_wipe "$out"; fi
+			core sharing-pubkey "$tmp"; secure_wipe "$tmp" ;;
+		create)
+			local recipient="${1:-}" collection="${2:-}"
+			[ -f "$recipient" ] && [ -n "$collection" ] || { secure_wipe "$tmp"; die "Usage: $0 share create <recipient-pubkey.pem> <collection>"; }
+			core share-create "$tmp" "$recipient" "$collection" || { secure_wipe "$tmp"; die "Could not create the share (unknown collection or key)."; }
+			secure_wipe "$tmp" ;;
+		import)
+			local file="${1:-}"; [ -f "$file" ] || { secure_wipe "$tmp"; die "Usage: $0 share import <share-file>"; }
+			out="$(make_tmp)"; local added
+			if added="$(core share-import "$tmp" "$file" 2>&1 >"$out")"; then
+				mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+				printf 'Imported %s record(s).\n' "${added:-0}"
+			else secure_wipe "$out"; secure_wipe "$tmp"; die "Could not import this share: $added"; fi ;;
+		*) secure_wipe "$tmp"; printf 'Usage: %s share <pubkey|create|import> [args]\n' "$0" >&2; exit 1 ;;
+	esac
+}
+
+cmd_collection() {
+	local op="${1:-list}"; [ $# -gt 0 ] && shift
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp out; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	case "$op" in
+		list)
+			core collections-list "$tmp" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)["collections"]
+if not d: print("No collections."); sys.exit(0)
+for c in d:
+    print("%-24s %d member(s)" % (c["name"], len(c["members"])))
+'
+			secure_wipe "$tmp" ;;
+		create)
+			local name="${1:-}"; [ -n "$name" ] || { secure_wipe "$tmp"; die "Usage: $0 collection create <name>"; }
+			out="$(make_tmp)"
+			printf '' | core collection-set "$tmp" "$name" >"$out" || { secure_wipe "$out"; secure_wipe "$tmp"; die "Could not create the collection."; }
+			mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+			printf 'Created collection %s.\n' "$name" ;;
+		delete)
+			local name="${1:-}"; [ -n "$name" ] || { secure_wipe "$tmp"; die "Usage: $0 collection delete <name>"; }
+			out="$(make_tmp)"
+			core collection-delete "$tmp" "$name" >"$out"
+			mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+			printf 'Deleted collection %s.\n' "$name" ;;
+		*) secure_wipe "$tmp"; printf 'Usage: %s collection <list|create|delete> [args]\n' "$0" >&2; exit 1 ;;
 	esac
 }
 
@@ -14607,8 +15491,19 @@ WEB_CATALOGUES = {
         "import.upload_label": "Upload export file",
         "lang.unreviewed": "This translation has not been reviewed by a speaker. Where a warning matters, the English text is authoritative.",
         "link.back": "\u2190 Back",
+        "links.add": "Link",
+        "links.h": "Related records",
+        "links.none": "No related records.",
+        "lock.field": "Locked",
         "lock.in": "Locks in",
+        "lock.locked.d": "This record's secret fields are sealed under a passphrase, on top of the vault.",
+        "lock.locked.h": "Passphrase-locked",
         "lock.paused": "Lock paused",
+        "lock.protect": "Protect",
+        "lock.protect.d": "Seal this record's secret fields under an extra passphrase, so an unlocked vault still cannot show them.",
+        "lock.protect.h": "Protect with a passphrase",
+        "lock.remove": "Remove the lock",
+        "lock.unlock": "Unlock",
         "login.hardware": "Unlock with a security key",
         "login.master": "Master password",
         "login.note": "All decryption happens on this host. Nothing leaves it.",
@@ -14633,8 +15528,10 @@ WEB_CATALOGUES = {
         "nav.passphrases": "Passphrases",
         "nav.passwords": "Passwords",
         "nav.records": "Records",
+        "nav.schemas": "Record Types",
         "nav.security": "Security",
         "nav.settings": "Settings",
+        "nav.sharing": "Sharing",
         "nav.transfer": "Export / Import",
         "nav.trash": "Trash",
         "nav.unlock": "Biometric Unlock",
@@ -14722,6 +15619,17 @@ WEB_CATALOGUES = {
         "records.summary": "Detail",
         "register.failed": "Registration failed.",
         "register.waiting": "Waiting for the authenticator...",
+        "schemas.add": "Add record type",
+        "schemas.add.h": "Add a record type",
+        "schemas.f.fields": "Fields \u2014 one per line: name kind widget required",
+        "schemas.f.help": "kind is plain or secret; widget is line, multiline, number, date or month.",
+        "schemas.f.icon": "Icon (a built-in name, e.g. token)",
+        "schemas.f.label": "Label",
+        "schemas.f.type": "Type id (lower-case, e.g. crypto-wallet)",
+        "schemas.fields": "Fields",
+        "schemas.none": "No custom record types yet.",
+        "schemas.sub": "Define your own record types. They behave exactly like the built-in ones.",
+        "schemas.type": "Type id",
         "search.desc": "Look across every record type.",
         "search.folder": "Folder",
         "search.kind": "Type",
@@ -14822,6 +15730,22 @@ WEB_CATALOGUES = {
         "settings.unlock.desc": "Manage the devices that can resume an authenticated vault session.",
         "settings.unlock.manage": "Manage biometric unlock",
         "settings.unlock.title": "Biometric Unlock",
+        "sharing.collection": "Collection to share",
+        "sharing.collection.new": "Create",
+        "sharing.collections.desc": "A collection groups records so you can share them as a unit. Add records to a collection from each record's page.",
+        "sharing.collections.h": "Collections",
+        "sharing.create": "Create share file",
+        "sharing.create.h": "Create a share",
+        "sharing.generate": "Generate a sharing key",
+        "sharing.import": "Import records",
+        "sharing.import.h": "Import a share",
+        "sharing.members": "Members",
+        "sharing.mykey": "This vault's public key",
+        "sharing.mykey.desc": "Give this to someone so they can encrypt a share to you. It is safe to share.",
+        "sharing.no_collections": "Create a collection first, then share it.",
+        "sharing.no_collections_yet": "No collections yet.",
+        "sharing.recipient": "Recipient's public key",
+        "sharing.sub": "Share records with another SPM user as an encrypted file. No account, no server.",
         "ssh.bits": "Size",
         "ssh.derived.d": "Computed from the stored key rather than typed beside it, so it cannot disagree with the key it describes.",
         "ssh.derived.t": "Derived from the key",
@@ -15118,8 +16042,19 @@ WEB_CATALOGUES = {
         "import.upload_label": "\u0627\u0631\u0641\u0639 \u0645\u0644\u0641 \u0627\u0644\u062a\u0635\u062f\u064a\u0631",
         "lang.unreviewed": "\u0644\u0645 \u062a\u0631\u0627\u062c\u064e\u0639 \u0647\u0630\u0647 \u0627\u0644\u062a\u0631\u062c\u0645\u0629 \u0645\u0646 \u0645\u062a\u062d\u062f\u062b \u0628\u0627\u0644\u0639\u0631\u0628\u064a\u0629. \u0648\u062d\u064a\u062b\u0645\u0627 \u0643\u0627\u0646 \u0627\u0644\u062a\u062d\u0630\u064a\u0631 \u0645\u0647\u0645\u064b\u0627\u060c \u0641\u0627\u0644\u0646\u0635 \u0627\u0644\u0625\u0646\u062c\u0644\u064a\u0632\u064a \u0647\u0648 \u0627\u0644\u0645\u0631\u062c\u0639.",
         "link.back": "\u2190 \u0631\u062c\u0648\u0639",
+        "links.add": "\u0631\u0628\u0637",
+        "links.h": "\u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0630\u0627\u062a \u0627\u0644\u0635\u0644\u0629",
+        "links.none": "\u0644\u0627 \u062a\u0648\u062c\u062f \u0633\u062c\u0644\u0627\u062a \u0630\u0627\u062a \u0635\u0644\u0629.",
+        "lock.field": "\u0645\u0642\u0641\u0644",
         "lock.in": "\u064a\u064f\u0642\u0641\u0644 \u062e\u0644\u0627\u0644",
+        "lock.locked.d": "\u0627\u0644\u062d\u0642\u0648\u0644 \u0627\u0644\u0633\u0631\u064a\u0629 \u0644\u0647\u0630\u0627 \u0627\u0644\u0633\u062c\u0644 \u0645\u062e\u062a\u0648\u0645\u0629 \u0628\u0639\u0628\u0627\u0631\u0629 \u0645\u0631\u0648\u0631\u060c \u0641\u0648\u0642 \u0627\u0644\u062e\u0632\u0646\u0629.",
+        "lock.locked.h": "\u0645\u0642\u0641\u0644 \u0628\u0639\u0628\u0627\u0631\u0629 \u0645\u0631\u0648\u0631",
         "lock.paused": "\u0627\u0644\u0642\u0641\u0644 \u0645\u0648\u0642\u0648\u0641 \u0645\u0624\u0642\u062a\u064b\u0627",
+        "lock.protect": "\u062d\u0645\u0627\u064a\u0629",
+        "lock.protect.d": "\u0627\u062e\u062a\u0645 \u0627\u0644\u062d\u0642\u0648\u0644 \u0627\u0644\u0633\u0631\u064a\u0629 \u0628\u0639\u0628\u0627\u0631\u0629 \u0645\u0631\u0648\u0631 \u0625\u0636\u0627\u0641\u064a\u0629\u060c \u0628\u062d\u064a\u062b \u0644\u0627 \u062a\u064f\u0638\u0647\u0631\u0647\u0627 \u062d\u062a\u0649 \u062e\u0632\u0646\u0629 \u0645\u0641\u062a\u0648\u062d\u0629.",
+        "lock.protect.h": "\u0627\u0644\u062d\u0645\u0627\u064a\u0629 \u0628\u0639\u0628\u0627\u0631\u0629 \u0645\u0631\u0648\u0631",
+        "lock.remove": "\u0625\u0632\u0627\u0644\u0629 \u0627\u0644\u0642\u0641\u0644",
+        "lock.unlock": "\u0625\u0644\u063a\u0627\u0621 \u0627\u0644\u0642\u0641\u0644",
         "login.hardware": "\u0627\u0644\u0641\u062a\u062d \u0628\u0645\u0641\u062a\u0627\u062d \u0623\u0645\u0627\u0646",
         "login.master": "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629",
         "login.note": "\u064a\u062c\u0631\u064a \u0641\u0643 \u0627\u0644\u062a\u0634\u0641\u064a\u0631 \u0643\u0644\u0647 \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0645\u0636\u064a\u0641. \u0644\u0627 \u0634\u064a\u0621 \u064a\u063a\u0627\u062f\u0631\u0647.",
@@ -15144,8 +16079,10 @@ WEB_CATALOGUES = {
         "nav.passphrases": "\u0639\u0628\u0627\u0631\u0627\u062a \u0627\u0644\u0645\u0631\u0648\u0631",
         "nav.passwords": "\u0643\u0644\u0645\u0627\u062a \u0627\u0644\u0645\u0631\u0648\u0631",
         "nav.records": "\u0627\u0644\u0633\u062c\u0644\u0627\u062a",
+        "nav.schemas": "\u0623\u0646\u0648\u0627\u0639 \u0627\u0644\u0633\u062c\u0644\u0627\u062a",
         "nav.security": "\u0627\u0644\u0623\u0645\u0627\u0646",
         "nav.settings": "\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a",
+        "nav.sharing": "\u0627\u0644\u0645\u0634\u0627\u0631\u0643\u0629",
         "nav.transfer": "\u062a\u0635\u062f\u064a\u0631 / \u0627\u0633\u062a\u064a\u0631\u0627\u062f",
         "nav.trash": "\u0627\u0644\u0645\u0647\u0645\u0644\u0627\u062a",
         "nav.unlock": "\u0641\u062a\u062d \u0627\u0644\u0642\u0641\u0644 \u0628\u0627\u0644\u0628\u0635\u0645\u0629",
@@ -15233,6 +16170,17 @@ WEB_CATALOGUES = {
         "records.summary": "\u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644",
         "register.failed": "\u062a\u0639\u0630\u0651\u0631 \u0627\u0644\u062a\u0633\u062c\u064a\u0644.",
         "register.waiting": "\u0628\u0627\u0646\u062a\u0638\u0627\u0631 \u0623\u062f\u0627\u0629 \u0627\u0644\u0645\u0635\u0627\u062f\u0642\u0629...",
+        "schemas.add": "\u0625\u0636\u0627\u0641\u0629 \u0646\u0648\u0639 \u0627\u0644\u0633\u062c\u0644",
+        "schemas.add.h": "\u0625\u0636\u0627\u0641\u0629 \u0646\u0648\u0639 \u0633\u062c\u0644",
+        "schemas.f.fields": "\u0627\u0644\u062d\u0642\u0648\u0644 \u2014 \u0648\u0627\u062d\u062f \u0641\u064a \u0643\u0644 \u0633\u0637\u0631: name kind widget required",
+        "schemas.f.help": "kind \u0647\u0648 plain \u0623\u0648 secret\u061b \u0648widget \u0647\u0648 line \u0623\u0648 multiline \u0623\u0648 number \u0623\u0648 date \u0623\u0648 month.",
+        "schemas.f.icon": "\u0623\u064a\u0642\u0648\u0646\u0629 (\u0627\u0633\u0645 \u0645\u062f\u0645\u062c\u060c \u0645\u062b\u0644 token)",
+        "schemas.f.label": "\u0627\u0644\u062a\u0633\u0645\u064a\u0629",
+        "schemas.f.type": "\u0645\u0639\u0631\u0651\u0641 \u0627\u0644\u0646\u0648\u0639 (\u0623\u062d\u0631\u0641 \u0635\u063a\u064a\u0631\u0629\u060c \u0645\u062b\u0644 crypto-wallet)",
+        "schemas.fields": "\u0627\u0644\u062d\u0642\u0648\u0644",
+        "schemas.none": "\u0644\u0627 \u062a\u0648\u062c\u062f \u0623\u0646\u0648\u0627\u0639 \u0633\u062c\u0644\u0627\u062a \u0645\u062e\u0635\u0635\u0629 \u0628\u0639\u062f.",
+        "schemas.sub": "\u0639\u0631\u0651\u0641 \u0623\u0646\u0648\u0627\u0639 \u0633\u062c\u0644\u0627\u062a \u062e\u0627\u0635\u0629 \u0628\u0643. \u062a\u062a\u0635\u0631\u0641 \u062a\u0645\u0627\u0645\u064b\u0627 \u0645\u062b\u0644 \u0627\u0644\u0623\u0646\u0648\u0627\u0639 \u0627\u0644\u0645\u062f\u0645\u062c\u0629.",
+        "schemas.type": "\u0645\u0639\u0631\u0651\u0641 \u0627\u0644\u0646\u0648\u0639",
         "search.desc": "\u0627\u0628\u062d\u062b \u0641\u064a \u0643\u0644 \u0623\u0646\u0648\u0627\u0639 \u0627\u0644\u0633\u062c\u0644\u0627\u062a.",
         "search.folder": "\u0645\u062c\u0644\u062f",
         "search.kind": "\u0627\u0644\u0646\u0648\u0639",
@@ -15333,6 +16281,22 @@ WEB_CATALOGUES = {
         "settings.unlock.desc": "\u0623\u062f\u0631 \u0627\u0644\u0623\u062c\u0647\u0632\u0629 \u0627\u0644\u062a\u064a \u064a\u0645\u0643\u0646\u0647\u0627 \u0627\u0633\u062a\u0626\u0646\u0627\u0641 \u062c\u0644\u0633\u0629 \u062e\u0632\u0646\u0629 \u0645\u0648\u062b\u0651\u0642\u0629.",
         "settings.unlock.manage": "\u0625\u062f\u0627\u0631\u0629 \u0641\u062a\u062d \u0627\u0644\u0642\u0641\u0644 \u0628\u0627\u0644\u0628\u0635\u0645\u0629",
         "settings.unlock.title": "\u0641\u062a\u062d \u0627\u0644\u0642\u0641\u0644 \u0628\u0627\u0644\u0628\u0635\u0645\u0629",
+        "sharing.collection": "\u0627\u0644\u0645\u062c\u0645\u0648\u0639\u0629 \u0627\u0644\u0645\u0631\u0627\u062f \u0645\u0634\u0627\u0631\u0643\u062a\u0647\u0627",
+        "sharing.collection.new": "\u0625\u0646\u0634\u0627\u0621",
+        "sharing.collections.desc": "\u062a\u062c\u0645\u0651\u0639 \u0627\u0644\u0645\u062c\u0645\u0648\u0639\u0629 \u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0644\u0645\u0634\u0627\u0631\u0643\u062a\u0647\u0627 \u0643\u0648\u062d\u062f\u0629 \u0648\u0627\u062d\u062f\u0629. \u0623\u0636\u0650\u0641 \u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0625\u0644\u0649 \u0645\u062c\u0645\u0648\u0639\u0629 \u0645\u0646 \u0635\u0641\u062d\u0629 \u0643\u0644 \u0633\u062c\u0644.",
+        "sharing.collections.h": "\u0627\u0644\u0645\u062c\u0645\u0648\u0639\u0627\u062a",
+        "sharing.create": "\u0625\u0646\u0634\u0627\u0621 \u0645\u0644\u0641 \u0627\u0644\u0645\u0634\u0627\u0631\u0643\u0629",
+        "sharing.create.h": "\u0625\u0646\u0634\u0627\u0621 \u0645\u0634\u0627\u0631\u0643\u0629",
+        "sharing.generate": "\u0625\u0646\u0634\u0627\u0621 \u0645\u0641\u062a\u0627\u062d \u0645\u0634\u0627\u0631\u0643\u0629",
+        "sharing.import": "\u0627\u0633\u062a\u064a\u0631\u0627\u062f \u0627\u0644\u0633\u062c\u0644\u0627\u062a",
+        "sharing.import.h": "\u0627\u0633\u062a\u064a\u0631\u0627\u062f \u0645\u0634\u0627\u0631\u0643\u0629",
+        "sharing.members": "\u0627\u0644\u0639\u0646\u0627\u0635\u0631",
+        "sharing.mykey": "\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0639\u0627\u0645 \u0644\u0647\u0630\u0647 \u0627\u0644\u062e\u0632\u0646\u0629",
+        "sharing.mykey.desc": "\u0623\u0639\u0637\u0650 \u0647\u0630\u0627 \u0644\u0634\u062e\u0635 \u0644\u064a\u062a\u0645\u0643\u0646 \u0645\u0646 \u062a\u0634\u0641\u064a\u0631 \u0645\u0634\u0627\u0631\u0643\u0629 \u0645\u0648\u062c\u0647\u0629 \u0625\u0644\u064a\u0643. \u0645\u0646 \u0627\u0644\u0622\u0645\u0646 \u0645\u0634\u0627\u0631\u0643\u062a\u0647.",
+        "sharing.no_collections": "\u0623\u0646\u0634\u0626 \u0645\u062c\u0645\u0648\u0639\u0629 \u0623\u0648\u0644\u0627\u064b \u062b\u0645 \u0634\u0627\u0631\u0643\u0647\u0627.",
+        "sharing.no_collections_yet": "\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u062c\u0645\u0648\u0639\u0627\u062a \u0628\u0639\u062f.",
+        "sharing.recipient": "\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0639\u0627\u0645 \u0644\u0644\u0645\u0633\u062a\u0644\u0645",
+        "sharing.sub": "\u0634\u0627\u0631\u0643 \u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0645\u0639 \u0645\u0633\u062a\u062e\u062f\u0645 SPM \u0622\u062e\u0631 \u0643\u0645\u0644\u0641 \u0645\u0634\u0641\u0651\u0631. \u062f\u0648\u0646 \u062d\u0633\u0627\u0628 \u0648\u062f\u0648\u0646 \u062e\u0627\u062f\u0645.",
         "ssh.bits": "\u0627\u0644\u062d\u062c\u0645",
         "ssh.derived.d": "\u0645\u062d\u0633\u0648\u0628 \u0645\u0646 \u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0645\u062e\u0632\u064e\u0651\u0646 \u0628\u062f\u0644\u0627\u064b \u0645\u0646 \u0643\u062a\u0627\u0628\u062a\u0647 \u064a\u062f\u0648\u064a\u064b\u0627\u060c \u0644\u0630\u0627 \u0644\u0627 \u064a\u0645\u0643\u0646 \u0623\u0646 \u064a\u062e\u0627\u0644\u0641 \u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0630\u064a \u064a\u0635\u0641\u0647.",
         "ssh.derived.t": "\u0645\u0634\u062a\u0642 \u0645\u0646 \u0627\u0644\u0645\u0641\u062a\u0627\u062d",
@@ -15629,8 +16593,19 @@ WEB_CATALOGUES = {
         "import.upload_label": "Exportdatei hochladen",
         "lang.unreviewed": "Diese \u00dcbersetzung wurde nicht von einer sprechenden Person gepr\u00fcft. Wo eine Warnung z\u00e4hlt, ist der englische Text ma\u00dfgeblich.",
         "link.back": "\u2190 Zur\u00fcck",
+        "links.add": "Verkn\u00fcpfen",
+        "links.h": "Verwandte Datens\u00e4tze",
+        "links.none": "Keine verwandten Datens\u00e4tze.",
+        "lock.field": "Gesperrt",
         "lock.in": "Sperrt in",
+        "lock.locked.d": "Die geheimen Felder dieses Datensatzes sind zus\u00e4tzlich zum Tresor mit einer Passphrase versiegelt.",
+        "lock.locked.h": "Mit Passphrase gesperrt",
         "lock.paused": "Sperre pausiert",
+        "lock.protect": "Sch\u00fctzen",
+        "lock.protect.d": "Versiegeln Sie die geheimen Felder mit einer zus\u00e4tzlichen Passphrase, sodass sie auch bei ge\u00f6ffnetem Tresor verborgen bleiben.",
+        "lock.protect.h": "Mit einer Passphrase sch\u00fctzen",
+        "lock.remove": "Sperre entfernen",
+        "lock.unlock": "Entsperren",
         "login.hardware": "Mit Sicherheitsschl\u00fcssel entsperren",
         "login.master": "Hauptpasswort",
         "login.note": "Alles wird auf diesem Host entschl\u00fcsselt. Nichts verl\u00e4sst ihn.",
@@ -15655,8 +16630,10 @@ WEB_CATALOGUES = {
         "nav.passphrases": "Passphrasen",
         "nav.passwords": "Passw\u00f6rter",
         "nav.records": "Datens\u00e4tze",
+        "nav.schemas": "Datensatztypen",
         "nav.security": "Sicherheit",
         "nav.settings": "Einstellungen",
+        "nav.sharing": "Teilen",
         "nav.transfer": "Exportieren / Importieren",
         "nav.trash": "Papierkorb",
         "nav.unlock": "Biometrisches Entsperren",
@@ -15744,6 +16721,17 @@ WEB_CATALOGUES = {
         "records.summary": "Detail",
         "register.failed": "Registrierung fehlgeschlagen.",
         "register.waiting": "Warte auf den Authentifikator...",
+        "schemas.add": "Datensatztyp hinzuf\u00fcgen",
+        "schemas.add.h": "Datensatztyp hinzuf\u00fcgen",
+        "schemas.f.fields": "Felder \u2014 eins pro Zeile: name kind widget required",
+        "schemas.f.help": "kind ist plain oder secret; widget ist line, multiline, number, date oder month.",
+        "schemas.f.icon": "Symbol (ein eingebauter Name, z. B. token)",
+        "schemas.f.label": "Bezeichnung",
+        "schemas.f.type": "Typ-ID (Kleinbuchstaben, z. B. crypto-wallet)",
+        "schemas.fields": "Felder",
+        "schemas.none": "Noch keine eigenen Datensatztypen.",
+        "schemas.sub": "Definieren Sie eigene Datensatztypen. Sie verhalten sich genau wie die eingebauten.",
+        "schemas.type": "Typ-ID",
         "search.desc": "Durchsuche jede Eintragsart.",
         "search.folder": "Ordner",
         "search.kind": "Art",
@@ -15844,6 +16832,22 @@ WEB_CATALOGUES = {
         "settings.unlock.desc": "Verwalte die Ger\u00e4te, die eine authentifizierte Tresor-Sitzung fortsetzen d\u00fcrfen.",
         "settings.unlock.manage": "Biometrisches Entsperren verwalten",
         "settings.unlock.title": "Biometrisches Entsperren",
+        "sharing.collection": "Zu teilende Sammlung",
+        "sharing.collection.new": "Erstellen",
+        "sharing.collections.desc": "Eine Sammlung fasst Datens\u00e4tze zusammen, um sie gemeinsam zu teilen. F\u00fcgen Sie Datens\u00e4tze auf ihrer jeweiligen Seite hinzu.",
+        "sharing.collections.h": "Sammlungen",
+        "sharing.create": "Freigabedatei erstellen",
+        "sharing.create.h": "Freigabe erstellen",
+        "sharing.generate": "Freigabeschl\u00fcssel erzeugen",
+        "sharing.import": "Datens\u00e4tze importieren",
+        "sharing.import.h": "Freigabe importieren",
+        "sharing.members": "Mitglieder",
+        "sharing.mykey": "\u00d6ffentlicher Schl\u00fcssel dieses Tresors",
+        "sharing.mykey.desc": "Geben Sie dies weiter, damit man eine Freigabe an Sie verschl\u00fcsseln kann. Es ist unbedenklich.",
+        "sharing.no_collections": "Erstellen Sie zuerst eine Sammlung und teilen Sie sie dann.",
+        "sharing.no_collections_yet": "Noch keine Sammlungen.",
+        "sharing.recipient": "\u00d6ffentlicher Schl\u00fcssel des Empf\u00e4ngers",
+        "sharing.sub": "Teilen Sie Datens\u00e4tze als verschl\u00fcsselte Datei mit einem anderen SPM-Nutzer. Kein Konto, kein Server.",
         "ssh.bits": "Gr\u00f6\u00dfe",
         "ssh.derived.d": "Aus dem gespeicherten Schl\u00fcssel berechnet statt daneben eingetragen und kann ihm daher nicht widersprechen.",
         "ssh.derived.t": "Aus dem Schl\u00fcssel abgeleitet",
@@ -16140,8 +17144,19 @@ WEB_CATALOGUES = {
         "import.upload_label": "Subir archivo exportado",
         "lang.unreviewed": "Esta traducci\u00f3n no ha sido revisada por un hablante. Cuando una advertencia sea importante, el texto en ingl\u00e9s es el que prevalece.",
         "link.back": "\u2190 Volver",
+        "links.add": "Vincular",
+        "links.h": "Registros relacionados",
+        "links.none": "No hay registros relacionados.",
+        "lock.field": "Bloqueado",
         "lock.in": "Se bloquea en",
+        "lock.locked.d": "Los campos secretos de este registro est\u00e1n sellados con una frase de contrase\u00f1a, adem\u00e1s de la caja.",
+        "lock.locked.h": "Bloqueado con frase de contrase\u00f1a",
         "lock.paused": "Bloqueo en pausa",
+        "lock.protect": "Proteger",
+        "lock.protect.d": "Sella los campos secretos con una frase de contrase\u00f1a adicional, para que ni una caja abierta pueda mostrarlos.",
+        "lock.protect.h": "Proteger con una frase de contrase\u00f1a",
+        "lock.remove": "Quitar el bloqueo",
+        "lock.unlock": "Desbloquear",
         "login.hardware": "Desbloquear con una llave de seguridad",
         "login.master": "Contrase\u00f1a maestra",
         "login.note": "Todo el descifrado ocurre en este host. Nada sale de \u00e9l.",
@@ -16166,8 +17181,10 @@ WEB_CATALOGUES = {
         "nav.passphrases": "Frases de contrase\u00f1a",
         "nav.passwords": "Contrase\u00f1as",
         "nav.records": "Registros",
+        "nav.schemas": "Tipos de registro",
         "nav.security": "Seguridad",
         "nav.settings": "Ajustes",
+        "nav.sharing": "Compartir",
         "nav.transfer": "Exportar / Importar",
         "nav.trash": "Papelera",
         "nav.unlock": "Desbloqueo biom\u00e9trico",
@@ -16255,6 +17272,17 @@ WEB_CATALOGUES = {
         "records.summary": "Detalle",
         "register.failed": "El registro ha fallado.",
         "register.waiting": "Esperando al autenticador...",
+        "schemas.add": "A\u00f1adir tipo de registro",
+        "schemas.add.h": "A\u00f1adir un tipo de registro",
+        "schemas.f.fields": "Campos \u2014 uno por l\u00ednea: name kind widget required",
+        "schemas.f.help": "kind es plain o secret; widget es line, multiline, number, date o month.",
+        "schemas.f.icon": "Icono (un nombre integrado, p. ej. token)",
+        "schemas.f.label": "Etiqueta",
+        "schemas.f.type": "Id de tipo (min\u00fasculas, p. ej. crypto-wallet)",
+        "schemas.fields": "Campos",
+        "schemas.none": "A\u00fan no hay tipos de registro personalizados.",
+        "schemas.sub": "Define tus propios tipos de registro. Se comportan igual que los integrados.",
+        "schemas.type": "Id de tipo",
         "search.desc": "Busca en todos los tipos de registro.",
         "search.folder": "Carpeta",
         "search.kind": "Tipo",
@@ -16355,6 +17383,22 @@ WEB_CATALOGUES = {
         "settings.unlock.desc": "Gestiona los dispositivos que pueden reanudar una sesi\u00f3n autenticada de la caja fuerte.",
         "settings.unlock.manage": "Gestionar el desbloqueo biom\u00e9trico",
         "settings.unlock.title": "Desbloqueo biom\u00e9trico",
+        "sharing.collection": "Colecci\u00f3n para compartir",
+        "sharing.collection.new": "Crear",
+        "sharing.collections.desc": "Una colecci\u00f3n agrupa registros para compartirlos como una unidad. A\u00f1ade registros a una colecci\u00f3n desde la p\u00e1gina de cada uno.",
+        "sharing.collections.h": "Colecciones",
+        "sharing.create": "Crear archivo de env\u00edo",
+        "sharing.create.h": "Crear un env\u00edo",
+        "sharing.generate": "Generar clave de uso compartido",
+        "sharing.import": "Importar registros",
+        "sharing.import.h": "Importar un env\u00edo",
+        "sharing.members": "Miembros",
+        "sharing.mykey": "Clave p\u00fablica de esta caja",
+        "sharing.mykey.desc": "D\u00e1selo a alguien para que pueda cifrar un env\u00edo para ti. Es seguro compartirla.",
+        "sharing.no_collections": "Crea primero una colecci\u00f3n y luego comp\u00e1rtela.",
+        "sharing.no_collections_yet": "A\u00fan no hay colecciones.",
+        "sharing.recipient": "Clave p\u00fablica del destinatario",
+        "sharing.sub": "Comparte registros con otro usuario de SPM como archivo cifrado. Sin cuenta, sin servidor.",
         "ssh.bits": "Tama\u00f1o",
         "ssh.derived.d": "Calculado a partir de la clave guardada en lugar de escribirse aparte, por lo que no puede contradecirla.",
         "ssh.derived.t": "Derivado de la clave",
@@ -16651,8 +17695,19 @@ WEB_CATALOGUES = {
         "import.upload_label": "Envoyer le fichier export\u00e9",
         "lang.unreviewed": "Cette traduction n'a pas \u00e9t\u00e9 relue par un locuteur. Lorsqu'un avertissement compte, c'est le texte anglais qui fait foi.",
         "link.back": "\u2190 Retour",
+        "links.add": "Lier",
+        "links.h": "Enregistrements li\u00e9s",
+        "links.none": "Aucun enregistrement li\u00e9.",
+        "lock.field": "Verrouill\u00e9",
         "lock.in": "Verrouillage dans",
+        "lock.locked.d": "Les champs secrets de cet enregistrement sont scell\u00e9s par une phrase secr\u00e8te, en plus du coffre.",
+        "lock.locked.h": "Verrouill\u00e9 par phrase secr\u00e8te",
         "lock.paused": "Verrouillage en pause",
+        "lock.protect": "Prot\u00e9ger",
+        "lock.protect.d": "Scellez les champs secrets avec une phrase secr\u00e8te suppl\u00e9mentaire, pour qu'un coffre d\u00e9verrouill\u00e9 ne puisse pas les montrer.",
+        "lock.protect.h": "Prot\u00e9ger par une phrase secr\u00e8te",
+        "lock.remove": "Retirer le verrou",
+        "lock.unlock": "D\u00e9verrouiller",
         "login.hardware": "D\u00e9verrouiller avec une cl\u00e9 de s\u00e9curit\u00e9",
         "login.master": "Mot de passe ma\u00eetre",
         "login.note": "Tout le d\u00e9chiffrement a lieu sur cet h\u00f4te. Rien n'en sort.",
@@ -16677,8 +17732,10 @@ WEB_CATALOGUES = {
         "nav.passphrases": "Phrases secr\u00e8tes",
         "nav.passwords": "Mots de passe",
         "nav.records": "Fiches",
+        "nav.schemas": "Types d'enregistrement",
         "nav.security": "S\u00e9curit\u00e9",
         "nav.settings": "Param\u00e8tres",
+        "nav.sharing": "Partage",
         "nav.transfer": "Exporter / Importer",
         "nav.trash": "Corbeille",
         "nav.unlock": "D\u00e9verrouillage biom\u00e9trique",
@@ -16766,6 +17823,17 @@ WEB_CATALOGUES = {
         "records.summary": "D\u00e9tail",
         "register.failed": "L'enregistrement a \u00e9chou\u00e9.",
         "register.waiting": "En attente de l'authentificateur...",
+        "schemas.add": "Ajouter le type",
+        "schemas.add.h": "Ajouter un type d'enregistrement",
+        "schemas.f.fields": "Champs \u2014 un par ligne : name kind widget required",
+        "schemas.f.help": "kind vaut plain ou secret ; widget vaut line, multiline, number, date ou month.",
+        "schemas.f.icon": "Ic\u00f4ne (un nom int\u00e9gr\u00e9, p. ex. token)",
+        "schemas.f.label": "Libell\u00e9",
+        "schemas.f.type": "Id de type (minuscules, p. ex. crypto-wallet)",
+        "schemas.fields": "Champs",
+        "schemas.none": "Aucun type d'enregistrement personnalis\u00e9 pour l'instant.",
+        "schemas.sub": "D\u00e9finissez vos propres types d'enregistrement. Ils se comportent comme les types int\u00e9gr\u00e9s.",
+        "schemas.type": "Id de type",
         "search.desc": "Cherchez dans tous les types de fiches.",
         "search.folder": "Dossier",
         "search.kind": "Type",
@@ -16866,6 +17934,22 @@ WEB_CATALOGUES = {
         "settings.unlock.desc": "G\u00e9rez les appareils autoris\u00e9s \u00e0 reprendre une session authentifi\u00e9e du coffre.",
         "settings.unlock.manage": "G\u00e9rer le d\u00e9verrouillage biom\u00e9trique",
         "settings.unlock.title": "D\u00e9verrouillage biom\u00e9trique",
+        "sharing.collection": "Collection \u00e0 partager",
+        "sharing.collection.new": "Cr\u00e9er",
+        "sharing.collections.desc": "Une collection regroupe des enregistrements pour les partager d'un bloc. Ajoutez-en depuis la page de chaque enregistrement.",
+        "sharing.collections.h": "Collections",
+        "sharing.create": "Cr\u00e9er le fichier de partage",
+        "sharing.create.h": "Cr\u00e9er un partage",
+        "sharing.generate": "G\u00e9n\u00e9rer une cl\u00e9 de partage",
+        "sharing.import": "Importer les enregistrements",
+        "sharing.import.h": "Importer un partage",
+        "sharing.members": "Membres",
+        "sharing.mykey": "Cl\u00e9 publique de ce coffre",
+        "sharing.mykey.desc": "Donnez-la \u00e0 quelqu'un pour qu'il chiffre un partage \u00e0 votre intention. Elle peut \u00eatre partag\u00e9e sans risque.",
+        "sharing.no_collections": "Cr\u00e9ez d'abord une collection, puis partagez-la.",
+        "sharing.no_collections_yet": "Aucune collection pour l'instant.",
+        "sharing.recipient": "Cl\u00e9 publique du destinataire",
+        "sharing.sub": "Partagez des enregistrements avec un autre utilisateur SPM sous forme de fichier chiffr\u00e9. Sans compte, sans serveur.",
         "ssh.bits": "Taille",
         "ssh.derived.d": "Calcul\u00e9 \u00e0 partir de la cl\u00e9 stock\u00e9e plut\u00f4t que saisi \u00e0 c\u00f4t\u00e9, il ne peut donc pas la contredire.",
         "ssh.derived.t": "D\u00e9riv\u00e9 de la cl\u00e9",
@@ -17162,8 +18246,19 @@ WEB_CATALOGUES = {
         "import.upload_label": "\u0928\u093f\u0930\u094d\u092f\u093e\u0924 \u092b\u093c\u093e\u0907\u0932 \u0905\u092a\u0932\u094b\u0921 \u0915\u0930\u0947\u0902",
         "lang.unreviewed": "\u0907\u0938 \u0905\u0928\u0941\u0935\u093e\u0926 \u0915\u0940 \u091c\u093e\u0901\u091a \u0915\u093f\u0938\u0940 \u092d\u093e\u0937\u093e-\u092d\u093e\u0937\u0940 \u0928\u0947 \u0928\u0939\u0940\u0902 \u0915\u0940 \u0939\u0948\u0964 \u091c\u0939\u093e\u0901 \u091a\u0947\u0924\u093e\u0935\u0928\u0940 \u0905\u0939\u092e \u0939\u094b, \u0935\u0939\u093e\u0901 \u0905\u0902\u0917\u094d\u0930\u0947\u091c\u093c\u0940 \u092a\u093e\u0920 \u0939\u0940 \u092e\u093e\u0928\u094d\u092f \u0939\u0948\u0964",
         "link.back": "\u2190 \u0935\u093e\u092a\u0938",
+        "links.add": "\u0932\u093f\u0902\u0915",
+        "links.h": "\u0938\u0902\u092c\u0902\u0927\u093f\u0924 \u0930\u093f\u0915\u0949\u0930\u094d\u0921",
+        "links.none": "\u0915\u094b\u0908 \u0938\u0902\u092c\u0902\u0927\u093f\u0924 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0928\u0939\u0940\u0902\u0964",
+        "lock.field": "\u0932\u0949\u0915",
         "lock.in": "\u0932\u0949\u0915 \u0939\u094b\u0928\u0947 \u092e\u0947\u0902",
+        "lock.locked.d": "\u0907\u0938 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0915\u0947 \u0917\u0941\u092a\u094d\u0924 \u092b\u093c\u0940\u0932\u094d\u0921 \u0935\u0949\u0932\u094d\u091f \u0915\u0947 \u0905\u0924\u093f\u0930\u093f\u0915\u094d\u0924 \u090f\u0915 \u092a\u093e\u0938\u092b\u093c\u094d\u0930\u0947\u091c\u093c \u0938\u0947 \u0938\u0940\u0932 \u0939\u0948\u0902\u0964",
+        "lock.locked.h": "\u092a\u093e\u0938\u092b\u093c\u094d\u0930\u0947\u091c\u093c \u0938\u0947 \u0932\u0949\u0915",
         "lock.paused": "\u0932\u0949\u0915 \u0930\u094b\u0915\u093e \u0917\u092f\u093e",
+        "lock.protect": "\u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0915\u0930\u0947\u0902",
+        "lock.protect.d": "\u0907\u0938 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0915\u0947 \u0917\u0941\u092a\u094d\u0924 \u092b\u093c\u0940\u0932\u094d\u0921 \u0915\u094b \u090f\u0915 \u0905\u0924\u093f\u0930\u093f\u0915\u094d\u0924 \u092a\u093e\u0938\u092b\u093c\u094d\u0930\u0947\u091c\u093c \u0938\u0947 \u0938\u0940\u0932 \u0915\u0930\u0947\u0902, \u0924\u093e\u0915\u093f \u0905\u0928\u0932\u0949\u0915 \u0935\u0949\u0932\u094d\u091f \u092d\u0940 \u0909\u0928\u094d\u0939\u0947\u0902 \u0928 \u0926\u093f\u0916\u093e \u0938\u0915\u0947\u0964",
+        "lock.protect.h": "\u092a\u093e\u0938\u092b\u093c\u094d\u0930\u0947\u091c\u093c \u0938\u0947 \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0915\u0930\u0947\u0902",
+        "lock.remove": "\u0932\u0949\u0915 \u0939\u091f\u093e\u090f\u0901",
+        "lock.unlock": "\u0905\u0928\u0932\u0949\u0915",
         "login.hardware": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u0905\u0928\u0932\u0949\u0915 \u0915\u0930\u0947\u0902",
         "login.master": "\u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921",
         "login.note": "\u0938\u093e\u0930\u093e \u0921\u093f\u0915\u094d\u0930\u093f\u092a\u094d\u0936\u0928 \u0907\u0938\u0940 \u0939\u094b\u0938\u094d\u091f \u092a\u0930 \u0939\u094b\u0924\u093e \u0939\u0948\u0964 \u0915\u0941\u091b \u092d\u0940 \u092c\u093e\u0939\u0930 \u0928\u0939\u0940\u0902 \u091c\u093e\u0924\u093e\u0964",
@@ -17188,8 +18283,10 @@ WEB_CATALOGUES = {
         "nav.passphrases": "\u092a\u093e\u0938\u092b\u093c\u094d\u0930\u0947\u091c\u093c",
         "nav.passwords": "\u092a\u093e\u0938\u0935\u0930\u094d\u0921",
         "nav.records": "\u0930\u093f\u0915\u0949\u0930\u094d\u0921",
+        "nav.schemas": "\u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u092a\u094d\u0930\u0915\u093e\u0930",
         "nav.security": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e",
         "nav.settings": "\u0938\u0947\u091f\u093f\u0902\u0917",
+        "nav.sharing": "\u0938\u093e\u091d\u093e\u0915\u0930\u0923",
         "nav.transfer": "\u0928\u093f\u0930\u094d\u092f\u093e\u0924 / \u0906\u092f\u093e\u0924",
         "nav.trash": "\u0915\u091a\u0930\u093e",
         "nav.unlock": "\u092c\u093e\u092f\u094b\u092e\u0947\u091f\u094d\u0930\u093f\u0915 \u0905\u0928\u0932\u0949\u0915",
@@ -17277,6 +18374,17 @@ WEB_CATALOGUES = {
         "records.summary": "\u0935\u093f\u0935\u0930\u0923",
         "register.failed": "\u092a\u0902\u091c\u0940\u0915\u0930\u0923 \u0928\u0939\u0940\u0902 \u0939\u094b \u0938\u0915\u093e\u0964",
         "register.waiting": "\u092a\u094d\u0930\u092e\u093e\u0923\u0915 \u0915\u0940 \u092a\u094d\u0930\u0924\u0940\u0915\u094d\u0937\u093e \u0939\u0948...",
+        "schemas.add": "\u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u092a\u094d\u0930\u0915\u093e\u0930 \u091c\u094b\u0921\u093c\u0947\u0902",
+        "schemas.add.h": "\u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u092a\u094d\u0930\u0915\u093e\u0930 \u091c\u094b\u0921\u093c\u0947\u0902",
+        "schemas.f.fields": "\u092b\u093c\u0940\u0932\u094d\u0921 \u2014 \u092a\u094d\u0930\u0924\u093f \u092a\u0902\u0915\u094d\u0924\u093f \u090f\u0915: name kind widget required",
+        "schemas.f.help": "kind \u0939\u0948 plain \u092f\u093e secret; widget \u0939\u0948 line, multiline, number, date \u092f\u093e month\u0964",
+        "schemas.f.icon": "\u0906\u0907\u0915\u0928 (\u090f\u0915 \u0905\u0902\u0924\u0930\u094d\u0928\u093f\u0930\u094d\u092e\u093f\u0924 \u0928\u093e\u092e, \u0909\u0926\u093e. token)",
+        "schemas.f.label": "\u0932\u0947\u092c\u0932",
+        "schemas.f.type": "\u092a\u094d\u0930\u0915\u093e\u0930 id (\u0932\u094b\u0905\u0930-\u0915\u0947\u0938, \u0909\u0926\u093e. crypto-wallet)",
+        "schemas.fields": "\u092b\u093c\u0940\u0932\u094d\u0921",
+        "schemas.none": "\u0905\u092d\u0940 \u0915\u094b\u0908 \u0915\u0938\u094d\u091f\u092e \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u092a\u094d\u0930\u0915\u093e\u0930 \u0928\u0939\u0940\u0902\u0964",
+        "schemas.sub": "\u0905\u092a\u0928\u0947 \u0938\u094d\u0935\u092f\u0902 \u0915\u0947 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u092a\u094d\u0930\u0915\u093e\u0930 \u092a\u0930\u093f\u092d\u093e\u0937\u093f\u0924 \u0915\u0930\u0947\u0902\u0964 \u092f\u0947 \u0905\u0902\u0924\u0930\u094d\u0928\u093f\u0930\u094d\u092e\u093f\u0924 \u092a\u094d\u0930\u0915\u093e\u0930\u094b\u0902 \u0915\u0940 \u0924\u0930\u0939 \u0939\u0940 \u0915\u093e\u092e \u0915\u0930\u0924\u0947 \u0939\u0948\u0902\u0964",
+        "schemas.type": "\u092a\u094d\u0930\u0915\u093e\u0930 id",
         "search.desc": "\u0939\u0930 \u0924\u0930\u0939 \u0915\u0940 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u092e\u0947\u0902 \u0916\u094b\u091c\u0947\u0902\u0964",
         "search.folder": "\u092b\u093c\u094b\u0932\u094d\u0921\u0930",
         "search.kind": "\u092a\u094d\u0930\u0915\u093e\u0930",
@@ -17377,6 +18485,22 @@ WEB_CATALOGUES = {
         "settings.unlock.desc": "\u0909\u0928 \u0921\u093f\u0935\u093e\u0907\u0938\u094b\u0902 \u0915\u094b \u092a\u094d\u0930\u092c\u0902\u0927\u093f\u0924 \u0915\u0930\u0947\u0902 \u091c\u094b \u092a\u094d\u0930\u092e\u093e\u0923\u093f\u0924 \u0924\u093f\u091c\u094b\u0930\u0940 \u0938\u0924\u094d\u0930 \u0915\u094b \u0926\u094b\u092c\u093e\u0930\u093e \u0936\u0941\u0930\u0942 \u0915\u0930 \u0938\u0915\u0924\u0947 \u0939\u0948\u0902\u0964",
         "settings.unlock.manage": "\u092c\u093e\u092f\u094b\u092e\u0947\u091f\u094d\u0930\u093f\u0915 \u0905\u0928\u0932\u0949\u0915 \u092a\u094d\u0930\u092c\u0902\u0927\u093f\u0924 \u0915\u0930\u0947\u0902",
         "settings.unlock.title": "\u092c\u093e\u092f\u094b\u092e\u0947\u091f\u094d\u0930\u093f\u0915 \u0905\u0928\u0932\u0949\u0915",
+        "sharing.collection": "\u0938\u093e\u091d\u093e \u0915\u0930\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u0938\u0902\u0917\u094d\u0930\u0939",
+        "sharing.collection.new": "\u092c\u0928\u093e\u090f\u0901",
+        "sharing.collections.desc": "\u0938\u0902\u0917\u094d\u0930\u0939 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0915\u094b \u0938\u092e\u0942\u0939\u093f\u0924 \u0915\u0930\u0924\u093e \u0939\u0948 \u0924\u093e\u0915\u093f \u0906\u092a \u0909\u0928\u094d\u0939\u0947\u0902 \u090f\u0915 \u0907\u0915\u093e\u0908 \u0915\u0947 \u0930\u0942\u092a \u092e\u0947\u0902 \u0938\u093e\u091d\u093e \u0915\u0930 \u0938\u0915\u0947\u0902\u0964 \u092a\u094d\u0930\u0924\u094d\u092f\u0947\u0915 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0915\u0947 \u092a\u0943\u0937\u094d\u0920 \u0938\u0947 \u0938\u0902\u0917\u094d\u0930\u0939 \u092e\u0947\u0902 \u091c\u094b\u0921\u093c\u0947\u0902\u0964",
+        "sharing.collections.h": "\u0938\u0902\u0917\u094d\u0930\u0939",
+        "sharing.create": "\u0938\u093e\u091d\u093e \u092b\u093c\u093e\u0907\u0932 \u092c\u0928\u093e\u090f\u0901",
+        "sharing.create.h": "\u0938\u093e\u091d\u093e \u092c\u0928\u093e\u090f\u0901",
+        "sharing.generate": "\u0938\u093e\u091d\u093e\u0915\u0930\u0923 \u0915\u0941\u0902\u091c\u0940 \u092c\u0928\u093e\u090f\u0901",
+        "sharing.import": "\u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0906\u092f\u093e\u0924 \u0915\u0930\u0947\u0902",
+        "sharing.import.h": "\u0938\u093e\u091d\u093e \u0906\u092f\u093e\u0924 \u0915\u0930\u0947\u0902",
+        "sharing.members": "\u0938\u0926\u0938\u094d\u092f",
+        "sharing.mykey": "\u0907\u0938 \u0935\u0949\u0932\u094d\u091f \u0915\u0940 \u0938\u093e\u0930\u094d\u0935\u091c\u0928\u093f\u0915 \u0915\u0941\u0902\u091c\u0940",
+        "sharing.mykey.desc": "\u0907\u0938\u0947 \u0915\u093f\u0938\u0940 \u0915\u094b \u0926\u0947\u0902 \u0924\u093e\u0915\u093f \u0935\u0947 \u0906\u092a\u0915\u0947 \u0932\u093f\u090f \u0938\u093e\u091d\u093e \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f \u0915\u0930 \u0938\u0915\u0947\u0902\u0964 \u0907\u0938\u0947 \u0938\u093e\u091d\u093e \u0915\u0930\u0928\u093e \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0939\u0948\u0964",
+        "sharing.no_collections": "\u092a\u0939\u0932\u0947 \u090f\u0915 \u0938\u0902\u0917\u094d\u0930\u0939 \u092c\u0928\u093e\u090f\u0901, \u092b\u093f\u0930 \u0909\u0938\u0947 \u0938\u093e\u091d\u093e \u0915\u0930\u0947\u0902\u0964",
+        "sharing.no_collections_yet": "\u0905\u092d\u0940 \u0915\u094b\u0908 \u0938\u0902\u0917\u094d\u0930\u0939 \u0928\u0939\u0940\u0902\u0964",
+        "sharing.recipient": "\u092a\u094d\u0930\u093e\u092a\u094d\u0924\u0915\u0930\u094d\u0924\u093e \u0915\u0940 \u0938\u093e\u0930\u094d\u0935\u091c\u0928\u093f\u0915 \u0915\u0941\u0902\u091c\u0940",
+        "sharing.sub": "\u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0915\u094b \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u092b\u093c\u093e\u0907\u0932 \u0915\u0947 \u0930\u0942\u092a \u092e\u0947\u0902 \u0915\u093f\u0938\u0940 \u0905\u0928\u094d\u092f SPM \u0909\u092a\u092f\u094b\u0917\u0915\u0930\u094d\u0924\u093e \u0915\u0947 \u0938\u093e\u0925 \u0938\u093e\u091d\u093e \u0915\u0930\u0947\u0902\u0964 \u0915\u094b\u0908 \u0916\u093e\u0924\u093e \u0928\u0939\u0940\u0902, \u0915\u094b\u0908 \u0938\u0930\u094d\u0935\u0930 \u0928\u0939\u0940\u0902\u0964",
         "ssh.bits": "\u0906\u0915\u093e\u0930",
         "ssh.derived.d": "\u0938\u0902\u0917\u094d\u0930\u0939\u0940\u0924 \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u0917\u0923\u0928\u093e \u0915\u093f\u092f\u093e \u0917\u092f\u093e, \u0905\u0932\u0917 \u0938\u0947 \u091f\u093e\u0907\u092a \u0928\u0939\u0940\u0902 \u0915\u093f\u092f\u093e \u0917\u092f\u093e, \u0907\u0938\u0932\u093f\u090f \u092f\u0939 \u0909\u0938 \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u092d\u093f\u0928\u094d\u0928 \u0928\u0939\u0940\u0902 \u0939\u094b \u0938\u0915\u0924\u093e\u0964",
         "ssh.derived.t": "\u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u0935\u094d\u092f\u0941\u0924\u094d\u092a\u0928\u094d\u0928",
@@ -17673,8 +18797,19 @@ WEB_CATALOGUES = {
         "import.upload_label": "Unggah berkas ekspor",
         "lang.unreviewed": "Terjemahan ini belum ditinjau oleh penutur aslinya. Jika sebuah peringatan penting, teks bahasa Inggris yang berlaku.",
         "link.back": "\u2190 Kembali",
+        "links.add": "Tautkan",
+        "links.h": "Catatan terkait",
+        "links.none": "Tidak ada catatan terkait.",
+        "lock.field": "Terkunci",
         "lock.in": "Terkunci dalam",
+        "lock.locked.d": "Ruas rahasia catatan ini disegel dengan frasa sandi, di atas brankas.",
+        "lock.locked.h": "Terkunci frasa sandi",
         "lock.paused": "Kunci dijeda",
+        "lock.protect": "Lindungi",
+        "lock.protect.d": "Segel ruas rahasia catatan ini dengan frasa sandi tambahan, sehingga brankas yang terbuka pun tak dapat menampilkannya.",
+        "lock.protect.h": "Lindungi dengan frasa sandi",
+        "lock.remove": "Hapus kunci",
+        "lock.unlock": "Buka kunci",
         "login.hardware": "Buka dengan kunci keamanan",
         "login.master": "Kata sandi utama",
         "login.note": "Semua dekripsi terjadi di host ini. Tidak ada yang keluar.",
@@ -17699,8 +18834,10 @@ WEB_CATALOGUES = {
         "nav.passphrases": "Frasa Sandi",
         "nav.passwords": "Kata Sandi",
         "nav.records": "Record",
+        "nav.schemas": "Tipe Catatan",
         "nav.security": "Keamanan",
         "nav.settings": "Pengaturan",
+        "nav.sharing": "Berbagi",
         "nav.transfer": "Ekspor / Impor",
         "nav.trash": "Sampah",
         "nav.unlock": "Buka Biometrik",
@@ -17788,6 +18925,17 @@ WEB_CATALOGUES = {
         "records.summary": "Rincian",
         "register.failed": "Pendaftaran gagal.",
         "register.waiting": "Menunggu autentikator...",
+        "schemas.add": "Tambah tipe catatan",
+        "schemas.add.h": "Tambah tipe catatan",
+        "schemas.f.fields": "Ruas \u2014 satu per baris: name kind widget required",
+        "schemas.f.help": "kind adalah plain atau secret; widget adalah line, multiline, number, date, atau month.",
+        "schemas.f.icon": "Ikon (nama bawaan, mis. token)",
+        "schemas.f.label": "Label",
+        "schemas.f.type": "ID tipe (huruf kecil, mis. crypto-wallet)",
+        "schemas.fields": "Ruas",
+        "schemas.none": "Belum ada tipe catatan khusus.",
+        "schemas.sub": "Tentukan tipe catatan Anda sendiri. Perilakunya persis seperti tipe bawaan.",
+        "schemas.type": "ID tipe",
         "search.desc": "Cari di semua jenis record.",
         "search.folder": "Folder",
         "search.kind": "Jenis",
@@ -17888,6 +19036,22 @@ WEB_CATALOGUES = {
         "settings.unlock.desc": "Kelola perangkat yang dapat melanjutkan sesi brankas terautentikasi.",
         "settings.unlock.manage": "Kelola buka biometrik",
         "settings.unlock.title": "Buka Biometrik",
+        "sharing.collection": "Koleksi untuk dibagikan",
+        "sharing.collection.new": "Buat",
+        "sharing.collections.desc": "Koleksi mengelompokkan catatan agar dapat dibagikan sebagai satu unit. Tambahkan catatan ke koleksi dari halaman tiap catatan.",
+        "sharing.collections.h": "Koleksi",
+        "sharing.create": "Buat berkas berbagi",
+        "sharing.create.h": "Buat berbagi",
+        "sharing.generate": "Buat kunci berbagi",
+        "sharing.import": "Impor catatan",
+        "sharing.import.h": "Impor berbagi",
+        "sharing.members": "Anggota",
+        "sharing.mykey": "Kunci publik brankas ini",
+        "sharing.mykey.desc": "Berikan ini kepada seseorang agar mereka dapat mengenkripsi berbagi untuk Anda. Aman dibagikan.",
+        "sharing.no_collections": "Buat koleksi dahulu, lalu bagikan.",
+        "sharing.no_collections_yet": "Belum ada koleksi.",
+        "sharing.recipient": "Kunci publik penerima",
+        "sharing.sub": "Bagikan catatan ke pengguna SPM lain sebagai berkas terenkripsi. Tanpa akun, tanpa server.",
         "ssh.bits": "Ukuran",
         "ssh.derived.d": "Dihitung dari kunci yang tersimpan, bukan diketik, jadi tidak mungkin berbeda dengan kunci yang dijelaskannya.",
         "ssh.derived.t": "Diturunkan dari kunci",
@@ -18184,8 +19348,19 @@ WEB_CATALOGUES = {
         "import.upload_label": "\u30a8\u30af\u30b9\u30dd\u30fc\u30c8\u30d5\u30a1\u30a4\u30eb\u3092\u30a2\u30c3\u30d7\u30ed\u30fc\u30c9",
         "lang.unreviewed": "\u3053\u306e\u7ffb\u8a33\u306f\u8a71\u8005\u306b\u3088\u308b\u78ba\u8a8d\u3092\u53d7\u3051\u3066\u3044\u307e\u305b\u3093\u3002\u8b66\u544a\u304c\u91cd\u8981\u306a\u5834\u5408\u306f\u3001\u82f1\u8a9e\u306e\u672c\u6587\u304c\u6b63\u3068\u306a\u308a\u307e\u3059\u3002",
         "link.back": "\u2190 \u623b\u308b",
+        "links.add": "\u30ea\u30f3\u30af",
+        "links.h": "\u95a2\u9023\u30ec\u30b3\u30fc\u30c9",
+        "links.none": "\u95a2\u9023\u30ec\u30b3\u30fc\u30c9\u306f\u3042\u308a\u307e\u305b\u3093\u3002",
+        "lock.field": "\u30ed\u30c3\u30af\u4e2d",
         "lock.in": "\u30ed\u30c3\u30af\u307e\u3067",
+        "lock.locked.d": "\u3053\u306e\u30ec\u30b3\u30fc\u30c9\u306e\u79d8\u5bc6\u30d5\u30a3\u30fc\u30eb\u30c9\u306f\u3001\u4fdd\u7ba1\u5eab\u306b\u52a0\u3048\u3066\u30d1\u30b9\u30d5\u30ec\u30fc\u30ba\u3067\u5c01\u5370\u3055\u308c\u3066\u3044\u307e\u3059\u3002",
+        "lock.locked.h": "\u30d1\u30b9\u30d5\u30ec\u30fc\u30ba\u3067\u30ed\u30c3\u30af",
         "lock.paused": "\u30ed\u30c3\u30af\u4e00\u6642\u505c\u6b62\u4e2d",
+        "lock.protect": "\u4fdd\u8b77",
+        "lock.protect.d": "\u3053\u306e\u30ec\u30b3\u30fc\u30c9\u306e\u79d8\u5bc6\u30d5\u30a3\u30fc\u30eb\u30c9\u3092\u8ffd\u52a0\u306e\u30d1\u30b9\u30d5\u30ec\u30fc\u30ba\u3067\u5c01\u5370\u3057\u307e\u3059\u3002\u4fdd\u7ba1\u5eab\u304c\u958b\u3044\u3066\u3044\u3066\u3082\u8868\u793a\u3067\u304d\u306a\u304f\u306a\u308a\u307e\u3059\u3002",
+        "lock.protect.h": "\u30d1\u30b9\u30d5\u30ec\u30fc\u30ba\u3067\u4fdd\u8b77",
+        "lock.remove": "\u30ed\u30c3\u30af\u3092\u89e3\u9664",
+        "lock.unlock": "\u30ed\u30c3\u30af\u89e3\u9664",
         "login.hardware": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30ad\u30fc\u3067\u30ed\u30c3\u30af\u89e3\u9664",
         "login.master": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
         "login.note": "\u5fa9\u53f7\u306f\u3059\u3079\u3066\u3053\u306e\u30db\u30b9\u30c8\u4e0a\u3067\u884c\u308f\u308c\u307e\u3059\u3002\u5916\u90e8\u306b\u306f\u4f55\u3082\u51fa\u307e\u305b\u3093\u3002",
@@ -18210,8 +19385,10 @@ WEB_CATALOGUES = {
         "nav.passphrases": "\u30d1\u30b9\u30d5\u30ec\u30fc\u30ba",
         "nav.passwords": "\u30d1\u30b9\u30ef\u30fc\u30c9",
         "nav.records": "\u30ec\u30b3\u30fc\u30c9",
+        "nav.schemas": "\u30ec\u30b3\u30fc\u30c9\u7a2e\u5225",
         "nav.security": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3",
         "nav.settings": "\u8a2d\u5b9a",
+        "nav.sharing": "\u5171\u6709",
         "nav.transfer": "\u30a8\u30af\u30b9\u30dd\u30fc\u30c8 / \u30a4\u30f3\u30dd\u30fc\u30c8",
         "nav.trash": "\u30b4\u30df\u7bb1",
         "nav.unlock": "\u751f\u4f53\u8a8d\u8a3c\u30ed\u30c3\u30af\u89e3\u9664",
@@ -18299,6 +19476,17 @@ WEB_CATALOGUES = {
         "records.summary": "\u8a73\u7d30",
         "register.failed": "\u767b\u9332\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002",
         "register.waiting": "\u8a8d\u8a3c\u5668\u3092\u5f85\u3063\u3066\u3044\u307e\u3059...",
+        "schemas.add": "\u30ec\u30b3\u30fc\u30c9\u7a2e\u5225\u3092\u8ffd\u52a0",
+        "schemas.add.h": "\u30ec\u30b3\u30fc\u30c9\u7a2e\u5225\u3092\u8ffd\u52a0",
+        "schemas.f.fields": "\u30d5\u30a3\u30fc\u30eb\u30c9 \u2014 1 \u884c\u306b 1 \u3064: name kind widget required",
+        "schemas.f.help": "kind \u306f plain \u307e\u305f\u306f secret\u3001widget \u306f line, multiline, number, date, month \u306e\u3044\u305a\u308c\u304b\u3067\u3059\u3002",
+        "schemas.f.icon": "\u30a2\u30a4\u30b3\u30f3\uff08\u7d44\u307f\u8fbc\u307f\u540d\u3001\u4f8b: token\uff09",
+        "schemas.f.label": "\u30e9\u30d9\u30eb",
+        "schemas.f.type": "\u7a2e\u5225 ID\uff08\u5c0f\u6587\u5b57\u3001\u4f8b: crypto-wallet\uff09",
+        "schemas.fields": "\u30d5\u30a3\u30fc\u30eb\u30c9",
+        "schemas.none": "\u30ab\u30b9\u30bf\u30e0\u306e\u30ec\u30b3\u30fc\u30c9\u7a2e\u5225\u306f\u307e\u3060\u3042\u308a\u307e\u305b\u3093\u3002",
+        "schemas.sub": "\u72ec\u81ea\u306e\u30ec\u30b3\u30fc\u30c9\u7a2e\u5225\u3092\u5b9a\u7fa9\u3067\u304d\u307e\u3059\u3002\u7d44\u307f\u8fbc\u307f\u306e\u7a2e\u5225\u3068\u307e\u3063\u305f\u304f\u540c\u3058\u3088\u3046\u306b\u52d5\u4f5c\u3057\u307e\u3059\u3002",
+        "schemas.type": "\u7a2e\u5225 ID",
         "search.desc": "\u3059\u3079\u3066\u306e\u7a2e\u985e\u306e\u30ec\u30b3\u30fc\u30c9\u3092\u691c\u7d22\u3057\u307e\u3059\u3002",
         "search.folder": "\u30d5\u30a9\u30eb\u30c0",
         "search.kind": "\u7a2e\u985e",
@@ -18399,6 +19587,22 @@ WEB_CATALOGUES = {
         "settings.unlock.desc": "\u8a8d\u8a3c\u6e08\u307f\u306e\u4fdd\u7ba1\u5eab\u30bb\u30c3\u30b7\u30e7\u30f3\u3092\u518d\u958b\u3067\u304d\u308b\u30c7\u30d0\u30a4\u30b9\u3092\u7ba1\u7406\u3057\u307e\u3059\u3002",
         "settings.unlock.manage": "\u751f\u4f53\u8a8d\u8a3c\u30ed\u30c3\u30af\u89e3\u9664\u3092\u7ba1\u7406",
         "settings.unlock.title": "\u751f\u4f53\u8a8d\u8a3c\u30ed\u30c3\u30af\u89e3\u9664",
+        "sharing.collection": "\u5171\u6709\u3059\u308b\u30b3\u30ec\u30af\u30b7\u30e7\u30f3",
+        "sharing.collection.new": "\u4f5c\u6210",
+        "sharing.collections.desc": "\u30b3\u30ec\u30af\u30b7\u30e7\u30f3\u306f\u30ec\u30b3\u30fc\u30c9\u3092\u307e\u3068\u3081\u3001\u5358\u4f4d\u3068\u3057\u3066\u5171\u6709\u3067\u304d\u307e\u3059\u3002\u5404\u30ec\u30b3\u30fc\u30c9\u306e\u30da\u30fc\u30b8\u304b\u3089\u30b3\u30ec\u30af\u30b7\u30e7\u30f3\u306b\u8ffd\u52a0\u3057\u307e\u3059\u3002",
+        "sharing.collections.h": "\u30b3\u30ec\u30af\u30b7\u30e7\u30f3",
+        "sharing.create": "\u5171\u6709\u30d5\u30a1\u30a4\u30eb\u3092\u4f5c\u6210",
+        "sharing.create.h": "\u5171\u6709\u3092\u4f5c\u6210",
+        "sharing.generate": "\u5171\u6709\u9375\u3092\u751f\u6210",
+        "sharing.import": "\u30ec\u30b3\u30fc\u30c9\u3092\u53d6\u308a\u8fbc\u3080",
+        "sharing.import.h": "\u5171\u6709\u3092\u53d6\u308a\u8fbc\u3080",
+        "sharing.members": "\u30e1\u30f3\u30d0\u30fc",
+        "sharing.mykey": "\u3053\u306e\u4fdd\u7ba1\u5eab\u306e\u516c\u958b\u9375",
+        "sharing.mykey.desc": "\u3053\u308c\u3092\u76f8\u624b\u306b\u6e21\u3059\u3068\u3001\u3042\u306a\u305f\u5b9b\u3066\u306e\u5171\u6709\u3092\u6697\u53f7\u5316\u3067\u304d\u307e\u3059\u3002\u516c\u958b\u3057\u3066\u3082\u5b89\u5168\u3067\u3059\u3002",
+        "sharing.no_collections": "\u5148\u306b\u30b3\u30ec\u30af\u30b7\u30e7\u30f3\u3092\u4f5c\u6210\u3057\u3066\u304b\u3089\u5171\u6709\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
+        "sharing.no_collections_yet": "\u30b3\u30ec\u30af\u30b7\u30e7\u30f3\u306f\u307e\u3060\u3042\u308a\u307e\u305b\u3093\u3002",
+        "sharing.recipient": "\u53d7\u4fe1\u8005\u306e\u516c\u958b\u9375",
+        "sharing.sub": "\u30ec\u30b3\u30fc\u30c9\u3092\u6697\u53f7\u5316\u30d5\u30a1\u30a4\u30eb\u3068\u3057\u3066\u5225\u306e SPM \u5229\u7528\u8005\u306b\u5171\u6709\u3057\u307e\u3059\u3002\u30a2\u30ab\u30a6\u30f3\u30c8\u3082\u30b5\u30fc\u30d0\u30fc\u3082\u4e0d\u8981\u3067\u3059\u3002",
         "ssh.bits": "\u9375\u9577",
         "ssh.derived.d": "\u4fdd\u5b58\u3055\u308c\u305f\u9375\u304b\u3089\u8a08\u7b97\u3055\u308c\u308b\u305f\u3081\u3001\u305d\u306e\u9375\u3068\u98df\u3044\u9055\u3046\u3053\u3068\u306f\u3042\u308a\u307e\u305b\u3093\u3002",
         "ssh.derived.t": "\u9375\u304b\u3089\u5c0e\u51fa",
@@ -18695,8 +19899,19 @@ WEB_CATALOGUES = {
         "import.upload_label": "\ub0b4\ubcf4\ub0b8 \ud30c\uc77c \uc5c5\ub85c\ub4dc",
         "lang.unreviewed": "\uc774 \ubc88\uc5ed\uc740 \uc0ac\uc6a9\uc790\uc758 \uac80\uc218\ub97c \uac70\uce58\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4. \uacbd\uace0\uac00 \uc911\uc694\ud55c \ub300\ubaa9\uc5d0\uc11c\ub294 \uc601\uc5b4 \uc6d0\ubb38\uc774 \uae30\uc900\uc785\ub2c8\ub2e4.",
         "link.back": "\u2190 \ub4a4\ub85c",
+        "links.add": "\uc5f0\uacb0",
+        "links.h": "\uad00\ub828 \ub808\ucf54\ub4dc",
+        "links.none": "\uad00\ub828 \ub808\ucf54\ub4dc\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "lock.field": "\uc7a0\uae40",
         "lock.in": "\uc7a0\uae40\uae4c\uc9c0",
+        "lock.locked.d": "\uc774 \ub808\ucf54\ub4dc\uc758 \ube44\ubc00 \ud544\ub4dc\ub294 \ubcf4\uad00\uc18c\uc5d0 \ub354\ud574 \uc554\ud638\ubb38\uc73c\ub85c \ubd09\uc778\ub418\uc5b4 \uc788\uc2b5\ub2c8\ub2e4.",
+        "lock.locked.h": "\uc554\ud638\ubb38\uc73c\ub85c \uc7a0\uae40",
         "lock.paused": "\uc7a0\uae08 \uc77c\uc2dc \uc911\uc9c0",
+        "lock.protect": "\ubcf4\ud638",
+        "lock.protect.d": "\uc774 \ub808\ucf54\ub4dc\uc758 \ube44\ubc00 \ud544\ub4dc\ub97c \ucd94\uac00 \uc554\ud638\ubb38\uc73c\ub85c \ubd09\uc778\ud558\uc5ec, \ubcf4\uad00\uc18c\uac00 \uc5f4\ub824 \uc788\uc5b4\ub3c4 \ud45c\uc2dc\ub418\uc9c0 \uc54a\uac8c \ud569\ub2c8\ub2e4.",
+        "lock.protect.h": "\uc554\ud638\ubb38\uc73c\ub85c \ubcf4\ud638",
+        "lock.remove": "\uc7a0\uae08 \uc81c\uac70",
+        "lock.unlock": "\uc7a0\uae08 \ud574\uc81c",
         "login.hardware": "\ubcf4\uc548 \ud0a4\ub85c \uc7a0\uae08 \ud574\uc81c",
         "login.master": "\ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638",
         "login.note": "\ubaa8\ub4e0 \ubcf5\ud638\ud654\ub294 \uc774 \ud638\uc2a4\ud2b8\uc5d0\uc11c \uc774\ub8e8\uc5b4\uc9d1\ub2c8\ub2e4. \ubc16\uc73c\ub85c \ub098\uac00\ub294 \uac83\uc740 \uc5c6\uc2b5\ub2c8\ub2e4.",
@@ -18721,8 +19936,10 @@ WEB_CATALOGUES = {
         "nav.passphrases": "\ud328\uc2a4\ud504\ub808\uc774\uc988",
         "nav.passwords": "\ube44\ubc00\ubc88\ud638",
         "nav.records": "\ub808\ucf54\ub4dc",
+        "nav.schemas": "\ub808\ucf54\ub4dc \uc720\ud615",
         "nav.security": "\ubcf4\uc548",
         "nav.settings": "\uc124\uc815",
+        "nav.sharing": "\uacf5\uc720",
         "nav.transfer": "\ub0b4\ubcf4\ub0b4\uae30 / \uac00\uc838\uc624\uae30",
         "nav.trash": "\ud734\uc9c0\ud1b5",
         "nav.unlock": "\uc0dd\uccb4 \uc778\uc2dd \uc7a0\uae08 \ud574\uc81c",
@@ -18810,6 +20027,17 @@ WEB_CATALOGUES = {
         "records.summary": "\uc138\ubd80 \uc815\ubcf4",
         "register.failed": "\ub4f1\ub85d\uc5d0 \uc2e4\ud328\ud588\uc2b5\ub2c8\ub2e4.",
         "register.waiting": "\uc778\uc99d\uae30\ub97c \uae30\ub2e4\ub9ac\ub294 \uc911...",
+        "schemas.add": "\ub808\ucf54\ub4dc \uc720\ud615 \ucd94\uac00",
+        "schemas.add.h": "\ub808\ucf54\ub4dc \uc720\ud615 \ucd94\uac00",
+        "schemas.f.fields": "\ud544\ub4dc \u2014 \ud55c \uc904\uc5d0 \ud558\ub098: name kind widget required",
+        "schemas.f.help": "kind\uc740 plain \ub610\ub294 secret\uc774\uba70, widget\uc740 line, multiline, number, date, month \uc911 \ud558\ub098\uc785\ub2c8\ub2e4.",
+        "schemas.f.icon": "\uc544\uc774\ucf58 (\uae30\ubcf8 \uc81c\uacf5 \uc774\ub984, \uc608: token)",
+        "schemas.f.label": "\ub808\uc774\ube14",
+        "schemas.f.type": "\uc720\ud615 id (\uc18c\ubb38\uc790, \uc608: crypto-wallet)",
+        "schemas.fields": "\ud544\ub4dc",
+        "schemas.none": "\uc544\uc9c1 \uc0ac\uc6a9\uc790 \uc9c0\uc815 \ub808\ucf54\ub4dc \uc720\ud615\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "schemas.sub": "\uc9c1\uc811 \ub808\ucf54\ub4dc \uc720\ud615\uc744 \uc815\uc758\ud558\uc138\uc694. \uae30\ubcf8 \uc81c\uacf5 \uc720\ud615\uacfc \ub611\uac19\uc774 \ub3d9\uc791\ud569\ub2c8\ub2e4.",
+        "schemas.type": "\uc720\ud615 id",
         "search.desc": "\ubaa8\ub4e0 \ud56d\ubaa9 \uc720\ud615\uc5d0\uc11c \ucc3e\uc2b5\ub2c8\ub2e4.",
         "search.folder": "\ud3f4\ub354",
         "search.kind": "\uc720\ud615",
@@ -18910,6 +20138,22 @@ WEB_CATALOGUES = {
         "settings.unlock.desc": "\uc778\uc99d\ub41c \uae08\uace0 \uc138\uc158\uc744 \uc774\uc5b4\ubc1b\uc744 \uc218 \uc788\ub294 \uae30\uae30\ub97c \uad00\ub9ac\ud569\ub2c8\ub2e4.",
         "settings.unlock.manage": "\uc0dd\uccb4 \uc778\uc2dd \uc7a0\uae08 \ud574\uc81c \uad00\ub9ac",
         "settings.unlock.title": "\uc0dd\uccb4 \uc778\uc2dd \uc7a0\uae08 \ud574\uc81c",
+        "sharing.collection": "\uacf5\uc720\ud560 \uceec\ub809\uc158",
+        "sharing.collection.new": "\ub9cc\ub4e4\uae30",
+        "sharing.collections.desc": "\uceec\ub809\uc158\uc740 \ub808\ucf54\ub4dc\ub97c \ubb36\uc5b4 \ud558\ub098\uc758 \ub2e8\uc704\ub85c \uacf5\uc720\ud558\uac8c \ud569\ub2c8\ub2e4. \uac01 \ub808\ucf54\ub4dc \ud398\uc774\uc9c0\uc5d0\uc11c \uceec\ub809\uc158\uc5d0 \ucd94\uac00\ud558\uc138\uc694.",
+        "sharing.collections.h": "\uceec\ub809\uc158",
+        "sharing.create": "\uacf5\uc720 \ud30c\uc77c \ub9cc\ub4e4\uae30",
+        "sharing.create.h": "\uacf5\uc720 \ub9cc\ub4e4\uae30",
+        "sharing.generate": "\uacf5\uc720 \ud0a4 \uc0dd\uc131",
+        "sharing.import": "\ub808\ucf54\ub4dc \uac00\uc838\uc624\uae30",
+        "sharing.import.h": "\uacf5\uc720 \uac00\uc838\uc624\uae30",
+        "sharing.members": "\uad6c\uc131\uc6d0",
+        "sharing.mykey": "\uc774 \ubcf4\uad00\uc18c\uc758 \uacf5\uac1c \ud0a4",
+        "sharing.mykey.desc": "\uc774\uac83\uc744 \uc0c1\ub300\uc5d0\uac8c \uc8fc\uba74 \ub2f9\uc2e0\uc5d0\uac8c \ubcf4\ub0bc \uacf5\uc720\ub97c \uc554\ud638\ud654\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4. \uacf5\uc720\ud574\ub3c4 \uc548\uc804\ud569\ub2c8\ub2e4.",
+        "sharing.no_collections": "\uba3c\uc800 \uceec\ub809\uc158\uc744 \ub9cc\ub4e0 \ub2e4\uc74c \uacf5\uc720\ud558\uc138\uc694.",
+        "sharing.no_collections_yet": "\uc544\uc9c1 \uceec\ub809\uc158\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "sharing.recipient": "\uc218\uc2e0\uc790\uc758 \uacf5\uac1c \ud0a4",
+        "sharing.sub": "\ub808\ucf54\ub4dc\ub97c \uc554\ud638\ud654\ub41c \ud30c\uc77c\ub85c \ub2e4\ub978 SPM \uc0ac\uc6a9\uc790\uc640 \uacf5\uc720\ud569\ub2c8\ub2e4. \uacc4\uc815\ub3c4 \uc11c\ubc84\ub3c4 \ud544\uc694 \uc5c6\uc2b5\ub2c8\ub2e4.",
         "ssh.bits": "\ud06c\uae30",
         "ssh.derived.d": "\uc800\uc7a5\ub41c \ud0a4\uc5d0\uc11c \uacc4\uc0b0\ub418\ubbc0\ub85c \uc124\uba85\ud558\ub294 \ud0a4\uc640 \uc5b4\uae0b\ub0a0 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.",
         "ssh.derived.t": "\ud0a4\uc5d0\uc11c \ub3c4\ucd9c\ub428",
@@ -19206,8 +20450,19 @@ WEB_CATALOGUES = {
         "import.upload_label": "Enviar arquivo exportado",
         "lang.unreviewed": "Esta tradu\u00e7\u00e3o n\u00e3o foi revisada por um falante. Onde um aviso importa, o texto em ingl\u00eas \u00e9 o que vale.",
         "link.back": "\u2190 Voltar",
+        "links.add": "Vincular",
+        "links.h": "Registros relacionados",
+        "links.none": "Nenhum registro relacionado.",
+        "lock.field": "Bloqueado",
         "lock.in": "Bloqueia em",
+        "lock.locked.d": "Os campos secretos deste registro est\u00e3o selados com uma frase secreta, al\u00e9m do cofre.",
+        "lock.locked.h": "Bloqueado por frase secreta",
         "lock.paused": "Bloqueio pausado",
+        "lock.protect": "Proteger",
+        "lock.protect.d": "Sele os campos secretos com uma frase secreta extra, para que nem um cofre aberto os mostre.",
+        "lock.protect.h": "Proteger com uma frase secreta",
+        "lock.remove": "Remover o bloqueio",
+        "lock.unlock": "Desbloquear",
         "login.hardware": "Desbloquear com uma chave de seguran\u00e7a",
         "login.master": "Senha mestra",
         "login.note": "Toda a descriptografia acontece neste host. Nada sai dele.",
@@ -19232,8 +20487,10 @@ WEB_CATALOGUES = {
         "nav.passphrases": "Frases secretas",
         "nav.passwords": "Senhas",
         "nav.records": "Registros",
+        "nav.schemas": "Tipos de registro",
         "nav.security": "Seguran\u00e7a",
         "nav.settings": "Configura\u00e7\u00f5es",
+        "nav.sharing": "Compartilhamento",
         "nav.transfer": "Exportar / Importar",
         "nav.trash": "Lixeira",
         "nav.unlock": "Desbloqueio biom\u00e9trico",
@@ -19321,6 +20578,17 @@ WEB_CATALOGUES = {
         "records.summary": "Detalhe",
         "register.failed": "O registro falhou.",
         "register.waiting": "Aguardando o autenticador...",
+        "schemas.add": "Adicionar tipo de registro",
+        "schemas.add.h": "Adicionar um tipo de registro",
+        "schemas.f.fields": "Campos \u2014 um por linha: name kind widget required",
+        "schemas.f.help": "kind \u00e9 plain ou secret; widget \u00e9 line, multiline, number, date ou month.",
+        "schemas.f.icon": "\u00cdcone (um nome integrado, ex.: token)",
+        "schemas.f.label": "R\u00f3tulo",
+        "schemas.f.type": "Id de tipo (min\u00fasculas, ex.: crypto-wallet)",
+        "schemas.fields": "Campos",
+        "schemas.none": "Nenhum tipo de registro personalizado ainda.",
+        "schemas.sub": "Defina seus pr\u00f3prios tipos de registro. Comportam-se exatamente como os integrados.",
+        "schemas.type": "Id de tipo",
         "search.desc": "Procure em todos os tipos de registro.",
         "search.folder": "Pasta",
         "search.kind": "Tipo",
@@ -19421,6 +20689,22 @@ WEB_CATALOGUES = {
         "settings.unlock.desc": "Gerencie os dispositivos que podem retomar uma sess\u00e3o autenticada do cofre.",
         "settings.unlock.manage": "Gerenciar o desbloqueio biom\u00e9trico",
         "settings.unlock.title": "Desbloqueio biom\u00e9trico",
+        "sharing.collection": "Cole\u00e7\u00e3o para compartilhar",
+        "sharing.collection.new": "Criar",
+        "sharing.collections.desc": "Uma cole\u00e7\u00e3o agrupa registros para compartilh\u00e1-los como uma unidade. Adicione registros a uma cole\u00e7\u00e3o na p\u00e1gina de cada um.",
+        "sharing.collections.h": "Cole\u00e7\u00f5es",
+        "sharing.create": "Criar arquivo de compartilhamento",
+        "sharing.create.h": "Criar um compartilhamento",
+        "sharing.generate": "Gerar chave de compartilhamento",
+        "sharing.import": "Importar registros",
+        "sharing.import.h": "Importar um compartilhamento",
+        "sharing.members": "Membros",
+        "sharing.mykey": "Chave p\u00fablica deste cofre",
+        "sharing.mykey.desc": "D\u00ea isto a algu\u00e9m para que possa criptografar um compartilhamento para voc\u00ea. \u00c9 seguro compartilh\u00e1-la.",
+        "sharing.no_collections": "Crie uma cole\u00e7\u00e3o primeiro e depois compartilhe.",
+        "sharing.no_collections_yet": "Nenhuma cole\u00e7\u00e3o ainda.",
+        "sharing.recipient": "Chave p\u00fablica do destinat\u00e1rio",
+        "sharing.sub": "Compartilhe registros com outro usu\u00e1rio do SPM como um arquivo criptografado. Sem conta, sem servidor.",
         "ssh.bits": "Tamanho",
         "ssh.derived.d": "Calculado a partir da chave armazenada em vez de digitado ao lado, portanto n\u00e3o pode divergir dela.",
         "ssh.derived.t": "Derivado da chave",
@@ -19717,8 +21001,19 @@ WEB_CATALOGUES = {
         "import.upload_label": "\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u0444\u0430\u0439\u043b \u044d\u043a\u0441\u043f\u043e\u0440\u0442\u0430",
         "lang.unreviewed": "\u042d\u0442\u043e\u0442 \u043f\u0435\u0440\u0435\u0432\u043e\u0434 \u043d\u0435 \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u043b\u0441\u044f \u043d\u043e\u0441\u0438\u0442\u0435\u043b\u0435\u043c \u044f\u0437\u044b\u043a\u0430. \u0422\u0430\u043c, \u0433\u0434\u0435 \u0432\u0430\u0436\u043d\u043e \u043f\u0440\u0435\u0434\u0443\u043f\u0440\u0435\u0436\u0434\u0435\u043d\u0438\u0435, \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u044f\u044e\u0449\u0438\u043c \u044f\u0432\u043b\u044f\u0435\u0442\u0441\u044f \u0430\u043d\u0433\u043b\u0438\u0439\u0441\u043a\u0438\u0439 \u0442\u0435\u043a\u0441\u0442.",
         "link.back": "\u2190 \u041d\u0430\u0437\u0430\u0434",
+        "links.add": "\u0421\u0432\u044f\u0437\u0430\u0442\u044c",
+        "links.h": "\u0421\u0432\u044f\u0437\u0430\u043d\u043d\u044b\u0435 \u0437\u0430\u043f\u0438\u0441\u0438",
+        "links.none": "\u041d\u0435\u0442 \u0441\u0432\u044f\u0437\u0430\u043d\u043d\u044b\u0445 \u0437\u0430\u043f\u0438\u0441\u0435\u0439.",
+        "lock.field": "\u0417\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u043e",
         "lock.in": "\u0411\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430 \u0447\u0435\u0440\u0435\u0437",
+        "lock.locked.d": "\u0421\u0435\u043a\u0440\u0435\u0442\u043d\u044b\u0435 \u043f\u043e\u043b\u044f \u044d\u0442\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u0438 \u0437\u0430\u043f\u0435\u0447\u0430\u0442\u0430\u043d\u044b \u043f\u0430\u0440\u043e\u043b\u044c\u043d\u043e\u0439 \u0444\u0440\u0430\u0437\u043e\u0439, \u043f\u043e\u0432\u0435\u0440\u0445 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0430.",
+        "lock.locked.h": "\u0417\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u043e \u043f\u0430\u0440\u043e\u043b\u044c\u043d\u043e\u0439 \u0444\u0440\u0430\u0437\u043e\u0439",
         "lock.paused": "\u0411\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430 \u043f\u0440\u0438\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430",
+        "lock.protect": "\u0417\u0430\u0449\u0438\u0442\u0438\u0442\u044c",
+        "lock.protect.d": "\u0417\u0430\u043f\u0435\u0447\u0430\u0442\u0430\u0439\u0442\u0435 \u0441\u0435\u043a\u0440\u0435\u0442\u043d\u044b\u0435 \u043f\u043e\u043b\u044f \u0434\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u043e\u0439 \u043f\u0430\u0440\u043e\u043b\u044c\u043d\u043e\u0439 \u0444\u0440\u0430\u0437\u043e\u0439, \u0447\u0442\u043e\u0431\u044b \u0434\u0430\u0436\u0435 \u0440\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0435 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u0438\u0445 \u043d\u0435 \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u043b\u043e.",
+        "lock.protect.h": "\u0417\u0430\u0449\u0438\u0442\u0438\u0442\u044c \u043f\u0430\u0440\u043e\u043b\u044c\u043d\u043e\u0439 \u0444\u0440\u0430\u0437\u043e\u0439",
+        "lock.remove": "\u0421\u043d\u044f\u0442\u044c \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0443",
+        "lock.unlock": "\u0420\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u0442\u044c",
         "login.hardware": "\u0420\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043a\u043b\u044e\u0447\u043e\u043c \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438",
         "login.master": "\u041c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044c",
         "login.note": "\u0412\u0441\u044f \u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043e\u0432\u043a\u0430 \u043f\u0440\u043e\u0438\u0441\u0445\u043e\u0434\u0438\u0442 \u043d\u0430 \u044d\u0442\u043e\u043c \u0445\u043e\u0441\u0442\u0435. \u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043f\u043e\u043a\u0438\u0434\u0430\u0435\u0442 \u0435\u0433\u043e.",
@@ -19743,8 +21038,10 @@ WEB_CATALOGUES = {
         "nav.passphrases": "\u041f\u0430\u0440\u043e\u043b\u044c\u043d\u044b\u0435 \u0444\u0440\u0430\u0437\u044b",
         "nav.passwords": "\u041f\u0430\u0440\u043e\u043b\u0438",
         "nav.records": "\u0417\u0430\u043f\u0438\u0441\u0438",
+        "nav.schemas": "\u0422\u0438\u043f\u044b \u0437\u0430\u043f\u0438\u0441\u0435\u0439",
         "nav.security": "\u0411\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c",
         "nav.settings": "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438",
+        "nav.sharing": "\u041e\u0431\u0449\u0438\u0439 \u0434\u043e\u0441\u0442\u0443\u043f",
         "nav.transfer": "\u042d\u043a\u0441\u043f\u043e\u0440\u0442 / \u0418\u043c\u043f\u043e\u0440\u0442",
         "nav.trash": "\u041a\u043e\u0440\u0437\u0438\u043d\u0430",
         "nav.unlock": "\u0411\u0438\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u0440\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430",
@@ -19832,6 +21129,17 @@ WEB_CATALOGUES = {
         "records.summary": "\u0414\u0435\u0442\u0430\u043b\u0438",
         "register.failed": "\u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c.",
         "register.waiting": "\u041e\u0436\u0438\u0434\u0430\u043d\u0438\u0435 \u0430\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440\u0430...",
+        "schemas.add": "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0442\u0438\u043f \u0437\u0430\u043f\u0438\u0441\u0438",
+        "schemas.add.h": "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0442\u0438\u043f \u0437\u0430\u043f\u0438\u0441\u0438",
+        "schemas.f.fields": "\u041f\u043e\u043b\u044f \u2014 \u043f\u043e \u043e\u0434\u043d\u043e\u043c\u0443 \u0432 \u0441\u0442\u0440\u043e\u043a\u0435: name kind widget required",
+        "schemas.f.help": "kind \u2014 plain \u0438\u043b\u0438 secret; widget \u2014 line, multiline, number, date \u0438\u043b\u0438 month.",
+        "schemas.f.icon": "\u0417\u043d\u0430\u0447\u043e\u043a (\u0432\u0441\u0442\u0440\u043e\u0435\u043d\u043d\u043e\u0435 \u0438\u043c\u044f, \u043d\u0430\u043f\u0440. token)",
+        "schemas.f.label": "\u041c\u0435\u0442\u043a\u0430",
+        "schemas.f.type": "\u0418\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u0442\u0438\u043f\u0430 (\u0441\u0442\u0440\u043e\u0447\u043d\u044b\u043c\u0438, \u043d\u0430\u043f\u0440. crypto-wallet)",
+        "schemas.fields": "\u041f\u043e\u043b\u044f",
+        "schemas.none": "\u041f\u043e\u043a\u0430 \u043d\u0435\u0442 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c\u0441\u043a\u0438\u0445 \u0442\u0438\u043f\u043e\u0432 \u0437\u0430\u043f\u0438\u0441\u0435\u0439.",
+        "schemas.sub": "\u041e\u043f\u0440\u0435\u0434\u0435\u043b\u044f\u0439\u0442\u0435 \u0441\u0432\u043e\u0438 \u0442\u0438\u043f\u044b \u0437\u0430\u043f\u0438\u0441\u0435\u0439. \u041e\u043d\u0438 \u0432\u0435\u0434\u0443\u0442 \u0441\u0435\u0431\u044f \u0442\u0430\u043a \u0436\u0435, \u043a\u0430\u043a \u0432\u0441\u0442\u0440\u043e\u0435\u043d\u043d\u044b\u0435.",
+        "schemas.type": "\u0418\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u0442\u0438\u043f\u0430",
         "search.desc": "\u0418\u0449\u0438\u0442\u0435 \u043f\u043e \u0432\u0441\u0435\u043c \u0442\u0438\u043f\u0430\u043c \u0437\u0430\u043f\u0438\u0441\u0435\u0439.",
         "search.folder": "\u041f\u0430\u043f\u043a\u0430",
         "search.kind": "\u0422\u0438\u043f",
@@ -19932,6 +21240,22 @@ WEB_CATALOGUES = {
         "settings.unlock.desc": "\u0423\u043f\u0440\u0430\u0432\u043b\u044f\u0439\u0442\u0435 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0430\u043c\u0438, \u043a\u043e\u0442\u043e\u0440\u044b\u043c \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043d\u043e \u0432\u043e\u0437\u043e\u0431\u043d\u043e\u0432\u043b\u044f\u0442\u044c \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043d\u043d\u044b\u0439 \u0441\u0435\u0430\u043d\u0441 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0430.",
         "settings.unlock.manage": "\u0423\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u0431\u0438\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u043e\u0439 \u0440\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u043e\u0439",
         "settings.unlock.title": "\u0411\u0438\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u0440\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430",
+        "sharing.collection": "\u041a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u044f \u0434\u043b\u044f \u043e\u0431\u0449\u0435\u0433\u043e \u0434\u043e\u0441\u0442\u0443\u043f\u0430",
+        "sharing.collection.new": "\u0421\u043e\u0437\u0434\u0430\u0442\u044c",
+        "sharing.collections.desc": "\u041a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u044f \u0433\u0440\u0443\u043f\u043f\u0438\u0440\u0443\u0435\u0442 \u0437\u0430\u043f\u0438\u0441\u0438, \u0447\u0442\u043e\u0431\u044b \u0434\u0435\u043b\u0438\u0442\u044c\u0441\u044f \u0438\u043c\u0438 \u043a\u0430\u043a \u0435\u0434\u0438\u043d\u044b\u043c \u0446\u0435\u043b\u044b\u043c. \u0414\u043e\u0431\u0430\u0432\u043b\u044f\u0439\u0442\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u0432 \u043a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u044e \u0441\u043e \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u044b \u043a\u0430\u0436\u0434\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u0438.",
+        "sharing.collections.h": "\u041a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u0438",
+        "sharing.create": "\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u0444\u0430\u0439\u043b \u043e\u0431\u0449\u0435\u0433\u043e \u0434\u043e\u0441\u0442\u0443\u043f\u0430",
+        "sharing.create.h": "\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u043e\u0431\u0449\u0438\u0439 \u0434\u043e\u0441\u0442\u0443\u043f",
+        "sharing.generate": "\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u043a\u043b\u044e\u0447 \u0434\u043b\u044f \u043e\u0431\u0449\u0435\u0433\u043e \u0434\u043e\u0441\u0442\u0443\u043f\u0430",
+        "sharing.import": "\u0418\u043c\u043f\u043e\u0440\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u0438",
+        "sharing.import.h": "\u0418\u043c\u043f\u043e\u0440\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043e\u0431\u0449\u0438\u0439 \u0434\u043e\u0441\u0442\u0443\u043f",
+        "sharing.members": "\u0423\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u0438",
+        "sharing.mykey": "\u041e\u0442\u043a\u0440\u044b\u0442\u044b\u0439 \u043a\u043b\u044e\u0447 \u044d\u0442\u043e\u0433\u043e \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0430",
+        "sharing.mykey.desc": "\u041f\u0435\u0440\u0435\u0434\u0430\u0439\u0442\u0435 \u044d\u0442\u043e \u0442\u043e\u043c\u0443, \u043a\u0442\u043e \u0437\u0430\u0448\u0438\u0444\u0440\u0443\u0435\u0442 \u0434\u043b\u044f \u0432\u0430\u0441 \u0434\u043e\u0441\u0442\u0443\u043f. \u0415\u0451 \u043c\u043e\u0436\u043d\u043e \u0441\u043f\u043e\u043a\u043e\u0439\u043d\u043e \u043f\u0435\u0440\u0435\u0434\u0430\u0432\u0430\u0442\u044c.",
+        "sharing.no_collections": "\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0441\u043e\u0437\u0434\u0430\u0439\u0442\u0435 \u043a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u044e, \u0437\u0430\u0442\u0435\u043c \u043f\u043e\u0434\u0435\u043b\u0438\u0442\u0435\u0441\u044c \u0435\u044e.",
+        "sharing.no_collections_yet": "\u041f\u043e\u043a\u0430 \u043d\u0435\u0442 \u043a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u0439.",
+        "sharing.recipient": "\u041e\u0442\u043a\u0440\u044b\u0442\u044b\u0439 \u043a\u043b\u044e\u0447 \u043f\u043e\u043b\u0443\u0447\u0430\u0442\u0435\u043b\u044f",
+        "sharing.sub": "\u0414\u0435\u043b\u0438\u0442\u0435\u0441\u044c \u0437\u0430\u043f\u0438\u0441\u044f\u043c\u0438 \u0441 \u0434\u0440\u0443\u0433\u0438\u043c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c SPM \u0432 \u0432\u0438\u0434\u0435 \u0437\u0430\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0433\u043e \u0444\u0430\u0439\u043b\u0430. \u0411\u0435\u0437 \u0430\u043a\u043a\u0430\u0443\u043d\u0442\u0430 \u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.",
         "ssh.bits": "\u0420\u0430\u0437\u043c\u0435\u0440",
         "ssh.derived.d": "\u0412\u044b\u0447\u0438\u0441\u043b\u044f\u0435\u0442\u0441\u044f \u0438\u0437 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d\u043d\u043e\u0433\u043e \u043a\u043b\u044e\u0447\u0430, \u0430 \u043d\u0435 \u0432\u0432\u043e\u0434\u0438\u0442\u0441\u044f \u0440\u044f\u0434\u043e\u043c, \u0438 \u043f\u043e\u0442\u043e\u043c\u0443 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0441 \u043d\u0438\u043c \u0440\u0430\u0441\u0445\u043e\u0434\u0438\u0442\u044c\u0441\u044f.",
         "ssh.derived.t": "\u0412\u044b\u0447\u0438\u0441\u043b\u0435\u043d\u043e \u0438\u0437 \u043a\u043b\u044e\u0447\u0430",
@@ -20228,8 +21552,19 @@ WEB_CATALOGUES = {
         "import.upload_label": "\u4e0a\u4f20\u5bfc\u51fa\u6587\u4ef6",
         "lang.unreviewed": "\u6b64\u7ffb\u8bd1\u5c1a\u672a\u7ecf\u6bcd\u8bed\u8005\u6821\u5bf9\u3002\u5f53\u67d0\u6761\u8b66\u544a\u4e8b\u5173\u91cd\u5927\u65f6\uff0c\u4ee5\u82f1\u6587\u539f\u6587\u4e3a\u51c6\u3002",
         "link.back": "\u2190 \u8fd4\u56de",
+        "links.add": "\u5173\u8054",
+        "links.h": "\u76f8\u5173\u8bb0\u5f55",
+        "links.none": "\u6ca1\u6709\u76f8\u5173\u8bb0\u5f55\u3002",
+        "lock.field": "\u5df2\u9501\u5b9a",
         "lock.in": "\u9501\u5b9a\u5012\u8ba1\u65f6",
+        "lock.locked.d": "\u6b64\u8bb0\u5f55\u7684\u673a\u5bc6\u5b57\u6bb5\u5728\u4fdd\u7ba1\u5e93\u4e4b\u5916\uff0c\u8fd8\u7528\u4e00\u4e2a\u53e3\u4ee4\u5c01\u5b58\u3002",
+        "lock.locked.h": "\u5df2\u7528\u53e3\u4ee4\u9501\u5b9a",
         "lock.paused": "\u9501\u5b9a\u5df2\u6682\u505c",
+        "lock.protect": "\u4fdd\u62a4",
+        "lock.protect.d": "\u7528\u989d\u5916\u7684\u53e3\u4ee4\u5c01\u5b58\u8be5\u8bb0\u5f55\u7684\u673a\u5bc6\u5b57\u6bb5\uff0c\u5373\u4f7f\u4fdd\u7ba1\u5e93\u5df2\u89e3\u9501\u4e5f\u65e0\u6cd5\u663e\u793a\u5b83\u4eec\u3002",
+        "lock.protect.h": "\u7528\u53e3\u4ee4\u4fdd\u62a4",
+        "lock.remove": "\u79fb\u9664\u9501\u5b9a",
+        "lock.unlock": "\u89e3\u9501",
         "login.hardware": "\u4f7f\u7528\u5b89\u5168\u5bc6\u94a5\u89e3\u9501",
         "login.master": "\u4e3b\u5bc6\u7801",
         "login.note": "\u6240\u6709\u89e3\u5bc6\u90fd\u5728\u672c\u673a\u5b8c\u6210\uff0c\u6ca1\u6709\u4efb\u4f55\u5185\u5bb9\u79bb\u5f00\u8fd9\u53f0\u4e3b\u673a\u3002",
@@ -20254,8 +21589,10 @@ WEB_CATALOGUES = {
         "nav.passphrases": "\u53e3\u4ee4\u77ed\u8bed",
         "nav.passwords": "\u5bc6\u7801",
         "nav.records": "\u8bb0\u5f55",
+        "nav.schemas": "\u8bb0\u5f55\u7c7b\u578b",
         "nav.security": "\u5b89\u5168",
         "nav.settings": "\u8bbe\u7f6e",
+        "nav.sharing": "\u5171\u4eab",
         "nav.transfer": "\u5bfc\u51fa / \u5bfc\u5165",
         "nav.trash": "\u56de\u6536\u7ad9",
         "nav.unlock": "\u751f\u7269\u8bc6\u522b\u89e3\u9501",
@@ -20343,6 +21680,17 @@ WEB_CATALOGUES = {
         "records.summary": "\u8be6\u60c5",
         "register.failed": "\u6ce8\u518c\u5931\u8d25\u3002",
         "register.waiting": "\u6b63\u5728\u7b49\u5f85\u9a8c\u8bc1\u5668\u2026\u2026",
+        "schemas.add": "\u6dfb\u52a0\u8bb0\u5f55\u7c7b\u578b",
+        "schemas.add.h": "\u6dfb\u52a0\u8bb0\u5f55\u7c7b\u578b",
+        "schemas.f.fields": "\u5b57\u6bb5 \u2014 \u6bcf\u884c\u4e00\u4e2a\uff1aname kind widget required",
+        "schemas.f.help": "kind \u4e3a plain \u6216 secret\uff1bwidget \u4e3a line\u3001multiline\u3001number\u3001date \u6216 month\u3002",
+        "schemas.f.icon": "\u56fe\u6807\uff08\u5185\u7f6e\u540d\u79f0\uff0c\u4f8b\u5982 token\uff09",
+        "schemas.f.label": "\u6807\u7b7e",
+        "schemas.f.type": "\u7c7b\u578b id\uff08\u5c0f\u5199\uff0c\u4f8b\u5982 crypto-wallet\uff09",
+        "schemas.fields": "\u5b57\u6bb5",
+        "schemas.none": "\u6682\u65e0\u81ea\u5b9a\u4e49\u8bb0\u5f55\u7c7b\u578b\u3002",
+        "schemas.sub": "\u5b9a\u4e49\u4f60\u81ea\u5df1\u7684\u8bb0\u5f55\u7c7b\u578b\u3002\u5b83\u4eec\u7684\u884c\u4e3a\u4e0e\u5185\u7f6e\u7c7b\u578b\u5b8c\u5168\u76f8\u540c\u3002",
+        "schemas.type": "\u7c7b\u578b id",
         "search.desc": "\u5728\u6240\u6709\u8bb0\u5f55\u7c7b\u578b\u4e2d\u67e5\u627e\u3002",
         "search.folder": "\u6587\u4ef6\u5939",
         "search.kind": "\u7c7b\u578b",
@@ -20443,6 +21791,22 @@ WEB_CATALOGUES = {
         "settings.unlock.desc": "\u7ba1\u7406\u53ef\u4ee5\u6062\u590d\u5df2\u8ba4\u8bc1\u5bc6\u7801\u5e93\u4f1a\u8bdd\u7684\u8bbe\u5907\u3002",
         "settings.unlock.manage": "\u7ba1\u7406\u751f\u7269\u8bc6\u522b\u89e3\u9501",
         "settings.unlock.title": "\u751f\u7269\u8bc6\u522b\u89e3\u9501",
+        "sharing.collection": "\u8981\u5171\u4eab\u7684\u5408\u96c6",
+        "sharing.collection.new": "\u521b\u5efa",
+        "sharing.collections.desc": "\u5408\u96c6\u5c06\u8bb0\u5f55\u5206\u7ec4\uff0c\u4fbf\u4e8e\u4f5c\u4e3a\u6574\u4f53\u5171\u4eab\u3002\u53ef\u5728\u6bcf\u6761\u8bb0\u5f55\u7684\u9875\u9762\u5c06\u5176\u52a0\u5165\u5408\u96c6\u3002",
+        "sharing.collections.h": "\u5408\u96c6",
+        "sharing.create": "\u521b\u5efa\u5171\u4eab\u6587\u4ef6",
+        "sharing.create.h": "\u521b\u5efa\u5171\u4eab",
+        "sharing.generate": "\u751f\u6210\u5171\u4eab\u5bc6\u94a5",
+        "sharing.import": "\u5bfc\u5165\u8bb0\u5f55",
+        "sharing.import.h": "\u5bfc\u5165\u5171\u4eab",
+        "sharing.members": "\u6210\u5458",
+        "sharing.mykey": "\u6b64\u4fdd\u7ba1\u5e93\u7684\u516c\u94a5",
+        "sharing.mykey.desc": "\u628a\u5b83\u4ea4\u7ed9\u5bf9\u65b9\uff0c\u5bf9\u65b9\u5c31\u80fd\u52a0\u5bc6\u53d1\u7ed9\u4f60\u7684\u5171\u4eab\u3002\u516c\u5f00\u5206\u4eab\u5b83\u662f\u5b89\u5168\u7684\u3002",
+        "sharing.no_collections": "\u8bf7\u5148\u521b\u5efa\u4e00\u4e2a\u5408\u96c6\uff0c\u7136\u540e\u518d\u5171\u4eab\u3002",
+        "sharing.no_collections_yet": "\u6682\u65e0\u5408\u96c6\u3002",
+        "sharing.recipient": "\u6536\u4ef6\u4eba\u7684\u516c\u94a5",
+        "sharing.sub": "\u4ee5\u52a0\u5bc6\u6587\u4ef6\u7684\u5f62\u5f0f\u4e0e\u53e6\u4e00\u4f4d SPM \u7528\u6237\u5171\u4eab\u8bb0\u5f55\u3002\u65e0\u9700\u8d26\u6237\uff0c\u65e0\u9700\u670d\u52a1\u5668\u3002",
         "ssh.bits": "\u957f\u5ea6",
         "ssh.derived.d": "\u7531\u5b58\u50a8\u7684\u5bc6\u94a5\u8ba1\u7b97\u5f97\u51fa\uff0c\u800c\u975e\u624b\u5de5\u586b\u5199\uff0c\u56e0\u6b64\u4e0d\u4f1a\u4e0e\u5b83\u6240\u63cf\u8ff0\u7684\u5bc6\u94a5\u4e0d\u7b26\u3002",
         "ssh.derived.t": "\u7531\u5bc6\u94a5\u63a8\u5bfc",
@@ -21865,6 +23229,10 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .chip-x { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; }
 .chip-x:hover { color: var(--danger); }
 .saved-save input[type="text"] { padding: 4px 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); border-radius: 0; font: inherit; font-size: 13px; }
+/* Relationships (roadmap 25). */
+.link-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.link-list li { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+.link-list a { color: var(--accent); text-decoration: none; }
 .tally { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--border); }
 .tally:hover, .tally:focus-visible { color: var(--accent); border-bottom-color: var(--accent); }
 /* A checkbox and its words as one target: the label is the hit area, so the
@@ -22452,6 +23820,9 @@ ICON_SPRITE = """
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 6.5h15M9 6.5V4.5h6v2M6 6.5l1 14h10l1-14M10 10v7M14 10v7"/></symbol>
   <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6M10 20.5a2 2 0 0 0 4 0"/></symbol>
   <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.7 6.2.6-4.7 4.1 1.4 6.1L12 16.9l-5.5 3.2 1.4-6.1L3.2 9.8l6.2-.6z"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="5.5" r="2.5"/><circle cx="18" cy="18.5" r="2.5"/><path d="M8.2 10.8l7.6-4M8.2 13.2l7.6 4"/></symbol>
+  <symbol id="i-schema" viewBox="0 0 24 24"><path d="M4.5 4.5h15v4h-15zM4.5 14.5h15v5h-15zM9 8.5v6M15 8.5v6"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M9.5 14.5l5-5M8 10l-2.5 2.5a3.5 3.5 0 0 0 5 5L13 15M16 14l2.5-2.5a3.5 3.5 0 0 0-5-5L11 9"/></symbol>
   <symbol id="i-gpg" viewBox="0 0 24 24"><circle cx="8.5" cy="8.5" r="4"/><path d="M11.4 11.4L16 16M14 18l4-4M16 20l4-4"/></symbol>
   <symbol id="i-ssh" viewBox="0 0 24 24"><path d="M3.5 4.5h17v15h-17zM7 9.5l3 2.5-3 2.5M12.5 15h5"/></symbol>
   <symbol id="i-brand" viewBox="0 0 24 24"><path d="M4 6l5 6-5 6M12 18h8M12 6h8"/></symbol>
@@ -22562,9 +23933,11 @@ NAV_SECTIONS = [
         ("events",    "/events",    "shield", "nav.events",    "Security Events", None),
         ("generator", "/generator", "generator", "nav.generator", "Generator",       None),
         ("transfer",  "/transfer",  "transfer", "nav.transfer",  "Export / Import", None),
+        ("sharing",   "/sharing",   "share",  "nav.sharing",   "Sharing",         None),
         ("trash",     "/trash",     "trash",  "nav.trash",     "Trash",           "__trash__"),
     ]),
     ("nav.group.settings", [
+        ("schemas",  "/schemas",  "schema", "nav.schemas",  "Record Types", None),
         ("settings", "/settings", "gear", "nav.settings", "Settings", None),
     ]),
 ]
@@ -22604,7 +23977,7 @@ def _records_nav(active, active_sub, counts, badge, ico, i18n, fallback):
         % (all_cls, _icon("record"))]
     for record_type in core.RECORD_TYPES:
         n = counts.get(record_type, 0)
-        icon = core.RECORD_SCHEMAS[record_type].get("icon", "record")
+        icon = core.record_schemas()[record_type].get("icon", "record")
         label = record_type_label(record_type)
         cls = "nav-item nav-subitem" + (
             " active" if record_type == active_sub else "")
@@ -23622,7 +24995,7 @@ def _expiry_type_cell(entry):
     """The type label cell for one expiry or trash entry."""
     if entry.get("kind") == "record" or entry.get("type") != "password":
         rtype = entry["type"]
-        ico = core.RECORD_SCHEMAS.get(rtype, {}).get("icon", "record")
+        ico = core.record_schemas().get(rtype, {}).get("icon", "record")
         return ('<span class="nav-ico" aria-hidden="true">%s</span>'
                 '<span data-i18n="record.type.%s">%s</span>'
                 % (_icon(ico), rtype, html.escape(record_type_label(rtype))))
@@ -23749,6 +25122,135 @@ def trash_page(items, csrf):
   <div class="page-actions">%s</div>
 </div>
 %s""" % (empty_btn, content)
+
+
+def sharing_page(plaintext, csrf, flash=""):
+    """Public-key sharing and collections (roadmap 6 & 7).
+
+    Export this vault's public key, encrypt a collection to a recipient's key as
+    a downloadable share file, and import a share sent to this vault."""
+    ci = '<input type="hidden" name="csrf" value="%s">' % html.escape(csrf, quote=True)
+    try:
+        pub = core.sharing_pubkey_pem(plaintext).decode("ascii")
+        pub_block = (
+            '<textarea class="mono" rows="7" readonly aria-label="This vault\'s public key" '
+            'style="width:100%%;font-size:12px">%s</textarea>' % html.escape(pub))
+    except core.VaultError:
+        pub_block = (
+            '<form method="post" action="/sharing/keygen">%s'
+            '<button type="submit" class="btn btn-primary" data-i18n="sharing.generate">'
+            'Generate a sharing key</button></form>' % ci)
+
+    cols = core.collections(plaintext)
+    if cols:
+        options = "".join(
+            '<option value="%s">%s (%d)</option>'
+            % (html.escape(c["name"], quote=True), html.escape(c["name"]), len(c["members"]))
+            for c in cols)
+        create = """
+<form method="post" action="/share-create">%s
+  <label data-i18n="sharing.recipient">Recipient's public key</label>
+  <textarea class="mono" name="recipient" rows="6" required aria-label="Recipient's public key" style="width:100%%;font-size:12px"
+    placeholder="-----BEGIN PUBLIC KEY-----"></textarea>
+  <label data-i18n="sharing.collection">Collection to share</label>
+  <select name="collection" required aria-label="Collection to share">%s</select>
+  <div style="margin-top:10px"><button type="submit" class="btn btn-primary" data-i18n="sharing.create">Create share file</button></div>
+</form>""" % (ci, options)
+    else:
+        create = ('<p class="muted" data-i18n="sharing.no_collections">'
+                  'Create a collection first, then share it.</p>')
+
+    col_rows = "".join(
+        '<tr data-row=""><td class="strong">%s</td><td class="muted">%d</td>'
+        '<td class="actions"><form class="inline" method="post" action="/collection-delete" '
+        'data-confirm-key="confirm.collection_delete" data-confirm-text="Delete this collection?">%s'
+        '<input type="hidden" name="name" value="%s">'
+        '<button type="submit" class="btn btn-ghost btn-sm" data-i18n="btn.delete">Delete</button></form></td></tr>'
+        % (html.escape(c["name"]), len(c["members"]), ci, html.escape(c["name"], quote=True))
+        for c in cols) or ('<tr><td colspan="3" class="muted" data-i18n="sharing.no_collections_yet">No collections yet.</td></tr>')
+
+    return """
+%s
+<div class="page-head"><div>
+  <h1 class="page-title" data-i18n="nav.sharing">Sharing</h1>
+  <div class="page-sub" data-i18n="sharing.sub">Share records with another SPM user as an encrypted file. No account, no server.</div>
+</div></div>
+<div class="card"><div class="card-body">
+  <h2 data-i18n="sharing.mykey">This vault's public key</h2>
+  <p class="muted" data-i18n="sharing.mykey.desc">Give this to someone so they can encrypt a share to you. It is safe to share.</p>
+  %s
+</div></div>
+<div class="card" style="margin-top:var(--sp-4)"><div class="card-body">
+  <h2 data-i18n="sharing.create.h">Create a share</h2>
+  %s
+</div></div>
+<div class="card" style="margin-top:var(--sp-4)"><div class="card-body">
+  <h2 data-i18n="sharing.import.h">Import a share</h2>
+  <form method="post" action="/share-import">%s
+    <textarea class="mono" name="share" rows="6" required aria-label="Share file contents" style="width:100%%;font-size:12px"
+      placeholder="SPM-SHARE-v1"></textarea>
+    <div style="margin-top:10px"><button type="submit" class="btn btn-primary" data-i18n="sharing.import">Import records</button></div>
+  </form>
+</div></div>
+<div class="card" style="margin-top:var(--sp-4)"><div class="card-body">
+  <h2 data-i18n="sharing.collections.h">Collections</h2>
+  <p class="muted" data-i18n="sharing.collections.desc">A collection groups records so you can share them as a unit. Add records to a collection from each record's page.</p>
+  <form method="post" action="/collection-create" class="inline" style="margin:8px 0">%s
+    <input type="text" name="name" maxlength="80" required placeholder="New collection name" aria-label="New collection name">
+    <button type="submit" class="btn btn-ghost btn-sm" data-i18n="sharing.collection.new">Create</button></form>
+  <div class="table-wrap"><table class="t"><thead><tr>
+    <th data-i18n="table.name">Name</th><th data-i18n="sharing.members">Members</th>
+    <th><span class="sr-only" data-i18n="table.actions">Actions</span></th></tr></thead>
+    <tbody>%s</tbody></table></div>
+</div></div>""" % (flash, pub_block, create, ci, ci, col_rows)
+
+
+def schemas_page(plaintext, csrf, flash=""):
+    """Custom record type management (roadmap 19)."""
+    ci = '<input type="hidden" name="csrf" value="%s">' % html.escape(csrf, quote=True)
+    custom = core.custom_schemas(plaintext)
+    rows = []
+    for rtype, spec in sorted(custom.items()):
+        fields = ", ".join("%s%s" % (f[0], "*" if f[3] else "") for f in spec["fields"])
+        rows.append(
+            '<tr data-row=""><td class="strong">%s</td><td class="muted">%s</td>'
+            '<td class="muted">%s</td>'
+            '<td class="actions"><form class="inline" method="post" action="/schema-remove" '
+            'data-confirm-key="confirm.schema_remove" data-confirm-text="Remove this record type?">%s'
+            '<input type="hidden" name="type" value="%s">'
+            '<button type="submit" class="btn btn-ghost btn-sm" data-i18n="btn.delete">Delete</button></form></td></tr>'
+            % (html.escape(spec["label"]), html.escape(rtype), html.escape(fields),
+               ci, html.escape(rtype, quote=True)))
+    body = "".join(rows) or ('<tr><td colspan="4" class="muted" data-i18n="schemas.none">No custom record types yet.</td></tr>')
+    return """
+%s
+<div class="page-head"><div>
+  <h1 class="page-title" data-i18n="nav.schemas">Record Types</h1>
+  <div class="page-sub" data-i18n="schemas.sub">Define your own record types. They behave exactly like the built-in ones.</div>
+</div></div>
+<div class="card"><div class="card-body">
+  <div class="table-wrap"><table class="t"><thead><tr>
+    <th data-i18n="table.label">Label</th><th data-i18n="schemas.type">Type id</th>
+    <th data-i18n="schemas.fields">Fields</th>
+    <th><span class="sr-only" data-i18n="table.actions">Actions</span></th></tr></thead>
+    <tbody>%s</tbody></table></div>
+</div></div>
+<div class="card" style="margin-top:var(--sp-4)"><div class="card-body">
+  <h2 data-i18n="schemas.add.h">Add a record type</h2>
+  <form method="post" action="/schema-add">%s
+    <label data-i18n="schemas.f.type">Type id (lower-case, e.g. crypto-wallet)</label>
+    <input type="text" name="type" maxlength="32" required pattern="[a-z][a-z0-9-]{1,31}" aria-label="Type id">
+    <label data-i18n="schemas.f.label">Label</label>
+    <input type="text" name="label" maxlength="60" required aria-label="Label">
+    <label data-i18n="schemas.f.icon">Icon (a built-in name, e.g. token)</label>
+    <input type="text" name="icon" maxlength="32" value="record" aria-label="Icon">
+    <label data-i18n="schemas.f.fields">Fields — one per line: name kind widget required</label>
+    <textarea class="mono" name="fields" rows="5" required aria-label="Fields" style="width:100%%;font-size:12px"
+      placeholder="label_name plain line true&#10;secret_value secret multiline false"></textarea>
+    <p class="muted" data-i18n="schemas.f.help">kind is plain or secret; widget is line, multiline, number, date or month.</p>
+    <div style="margin-top:10px"><button type="submit" class="btn btn-primary" data-i18n="schemas.add">Add record type</button></div>
+  </form>
+</div></div>""" % (flash, body, ci)
 
 
 # --------------------------------------------------------------------------
@@ -26023,22 +27525,43 @@ function spmT(key, fallback) {
 """
 
 
-def build_record_view(parsed, counts=None):
+def build_record_view(parsed, counts=None, sealed=None, links=None,
+                      plaintext="", revealed=None, csrf=""):
     """One record, secrets masked until asked for.
 
     Redaction comes from the core rather than from a list here: a surface that
     decides for itself which of its fields are sensitive is exactly the shape
     of the defect this engine exists to prevent, and a secret is a worse thing
     to get wrong than a folder.
+
+    When the record is passphrase-locked (5.2.0), its secret fields are not in
+    `values` at all -- they are sealed in the attributes -- so a locked field is
+    shown as locked until the viewer supplies the passphrase, at which point
+    `revealed` carries the unsealed values for this one render (never stored).
     """
     record_type, record_id, label, values, created, folder, custom, hidden, favorite, _trashed = parsed
+    revealed = revealed or {}
+    ci = '<input type="hidden" name="csrf" value="%s">' % html.escape(csrf, quote=True)
     blocks = []
     for name, kind, widget, _required in core.record_fields(record_type):
+        label_key = _record_i18n(name)
+        pretty = name.replace("_", " ").capitalize()
+        if kind == core.FIELD_SECRET and sealed:
+            # Locked: the value is not in the payload. Show its unsealed value if
+            # the viewer just unlocked, otherwise a locked marker.
+            if name in revealed:
+                blocks.append(_secret_block(revealed[name], label_key, pretty,
+                                            "rec-%s" % name))
+            else:
+                blocks.append(
+                    '<div class="field"><label data-i18n="%s">%s</label>'
+                    '<div class="ro"><span class="chip chip-hidden">'
+                    '<span data-i18n="lock.field">Locked</span></span></div></div>'
+                    % (label_key, pretty))
+            continue
         value = values.get(name, "")
         if not value:
             continue
-        label_key = _record_i18n(name)
-        pretty = name.replace("_", " ").capitalize()
         if kind == core.FIELD_SECRET:
             blocks.append(_secret_block(value, label_key, pretty,
                                         "rec-%s" % name))
@@ -26085,6 +27608,63 @@ def build_record_view(parsed, counts=None):
             'describes.</p></div>%s</div>' % (derive, derive, rows))
 
     back = "/records?type=" + urllib.parse.quote(record_type)
+    self_ref = "/records-view?type=%s&amp;id=%s" % (
+        urllib.parse.quote(record_type), urllib.parse.quote(record_id))
+    hidden_addr = ('<input type="hidden" name="type" value="%s">'
+                   '<input type="hidden" name="id" value="%s">'
+                   % (html.escape(record_type, quote=True),
+                      html.escape(record_id, quote=True)))
+    # Per-record passphrase (roadmap 8): a locked record offers unlock (reveal)
+    # and remove-lock; an unlocked one offers to protect its secret fields.
+    if sealed:
+        lock_block = """
+<div class="card" style="max-width:640px;margin-top:var(--sp-4)"><div class="card-body">
+  <h2 data-i18n="lock.locked.h">Passphrase-locked</h2>
+  <p class="muted" data-i18n="lock.locked.d">This record's secret fields are sealed under a passphrase, on top of the vault.</p>
+  <form method="post" action="/record-reveal">%s%s
+    <input type="password" name="passphrase" required placeholder="Passphrase" aria-label="Passphrase">
+    <button type="submit" class="btn btn-primary" data-i18n="lock.unlock">Unlock</button></form>
+  <form method="post" action="/record-lock-remove" style="margin-top:8px">%s%s
+    <input type="password" name="passphrase" required placeholder="Passphrase" aria-label="Passphrase to remove the lock">
+    <button type="submit" class="btn btn-ghost btn-sm" data-i18n="lock.remove">Remove the lock</button></form>
+</div></div>""" % (ci, hidden_addr, ci, hidden_addr)
+    elif core.record_secret_fields(record_type):
+        lock_block = """
+<div class="card" style="max-width:640px;margin-top:var(--sp-4)"><div class="card-body">
+  <h2 data-i18n="lock.protect.h">Protect with a passphrase</h2>
+  <p class="muted" data-i18n="lock.protect.d">Seal this record's secret fields under an extra passphrase, so an unlocked vault still cannot show them.</p>
+  <form method="post" action="/record-lock">%s%s
+    <input type="password" name="passphrase" required placeholder="New passphrase" aria-label="New passphrase">
+    <button type="submit" class="btn btn-ghost" data-i18n="lock.protect">Protect</button></form>
+</div></div>""" % (ci, hidden_addr)
+    else:
+        lock_block = ""
+
+    # Relationships (roadmap 25): resolved links, with add and remove.
+    link_rows = []
+    for l in links or []:
+        lbl, href = _resolve_link(plaintext, l)
+        link_rows.append(
+            '<li><a href="%s">%s</a>'
+            '<form class="inline" method="post" action="/link-remove">%s%s'
+            '<input type="hidden" name="l_kind" value="%s"><input type="hidden" name="l_type" value="%s">'
+            '<input type="hidden" name="l_id" value="%s">'
+            '<button type="submit" class="chip-x" aria-label="Remove link" title="Remove">&times;</button>'
+            '</form></li>'
+            % (href, html.escape(lbl), ci, hidden_addr,
+               html.escape(l["kind"], quote=True), html.escape(l["type"], quote=True),
+               html.escape(l["id"], quote=True)))
+    add_link = _link_target_select(plaintext, record_type, record_id)
+    links_block = """
+<div class="card" style="max-width:640px;margin-top:var(--sp-4)"><div class="card-body">
+  <h2 data-i18n="links.h">Related records</h2>
+  <ul class="link-list">%s</ul>
+  <form method="post" action="/link-add" class="inline" style="margin-top:8px">%s%s
+    %s
+    <button type="submit" class="btn btn-ghost btn-sm" data-i18n="links.add">Link</button></form>
+</div></div>""" % ("".join(link_rows) or '<li class="muted" data-i18n="links.none">No related records.</li>',
+                   ci, hidden_addr, add_link)
+
     edit = "/records-edit?type=%s&amp;id=%s" % (urllib.parse.quote(record_type),
                                             urllib.parse.quote(record_id))
     content = f"""
@@ -26100,9 +27680,48 @@ def build_record_view(parsed, counts=None):
   </div>
 </div>
 <div class="card" style="max-width:640px"><div class="card-body">{"".join(blocks)}</div></div>
+{lock_block}
+{links_block}
 {REVEAL_SCRIPT}"""
     return render_shell(content, "records", VERSION, VAULT_PATH,
                         title=label, counts=counts or {}, active_sub=record_type)
+
+
+def _resolve_link(plaintext, link):
+    """(label, href) for a link target, tolerant of a target since deleted."""
+    kind, rtype, rid = link["kind"], link.get("type", ""), link["id"]
+    if kind == "record":
+        found = core.find_record(plaintext or "", rtype, rid)
+        if found:
+            return found[1][2], "/records-view?type=%s&amp;id=%s" % (
+                urllib.parse.quote(rtype), urllib.parse.quote(rid))
+        return "%s %s (missing)" % (rtype, rid), "#"
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 6 and parts[0] == rid and parts[0].isdigit():
+            return parts[1], "/view?id=%s" % urllib.parse.quote(rid)
+    return "password %s (missing)" % rid, "#"
+
+
+def _link_target_select(plaintext, self_type, self_id):
+    """A <select> of records and passwords to link to, excluding this record."""
+    opts = []
+    for _idx, p in core.iter_records(plaintext or ""):
+        if p[0] == self_type and p[1] == self_id:
+            continue
+        opts.append('<option value="record:%s:%s">%s — %s</option>'
+                    % (html.escape(p[0], quote=True), html.escape(p[1], quote=True),
+                       html.escape(record_type_label(p[0])), html.escape(p[2])))
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 6 and parts[0].isdigit():
+            if len(parts) > 7 and core.decode_attrs(parts[7])[4]:
+                continue
+            opts.append('<option value="password::%s">%s — %s</option>'
+                        % (html.escape(parts[0], quote=True),
+                           "Password", html.escape(parts[1])))
+    return ('<select name="target" required aria-label="Record to link">%s</select>'
+            % ("".join(opts) or '<option value="">No other records</option>'))
 
 
 def posted_record_values(record_type, data):
@@ -26238,6 +27857,7 @@ def load_vault(master: str, session=None) -> str:
                 plaintext = core.read_vault_with_key(VAULT_PATH, cached)
                 if plaintext is not None:
                     _LAST_READ.plaintext = plaintext
+                    core.register_custom_schemas(plaintext)
                     return plaintext
             except Exception:
                 pass
@@ -26259,9 +27879,11 @@ def load_vault(master: str, session=None) -> str:
         plaintext, key = core.read_vault(VAULT_PATH, master)
         session["vault_key"] = key or ""
         _LAST_READ.plaintext = plaintext
+        core.register_custom_schemas(plaintext)
         return plaintext
     plaintext = decrypt_vault(master)
     _LAST_READ.plaintext = plaintext
+    core.register_custom_schemas(plaintext)
     return plaintext
 
 
@@ -28619,6 +30241,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 title="Trash", counts=self._counts(plaintext)))
             return
 
+        if path == "/sharing":
+            try:
+                plaintext = load_vault(master, self._session_rec)
+            except Exception:
+                return self._expire_session()
+            flash = ""
+            msg = (urllib.parse.parse_qs(parsed.query).get("msg") or [""])[0]
+            if msg == "imported":
+                n = (urllib.parse.parse_qs(parsed.query).get("n") or ["0"])[0]
+                flash = ('<div class="flash">%s record(s) imported.</div>'
+                         % html.escape(n))
+            elif msg == "keys":
+                flash = '<div class="flash">Sharing key generated.</div>'
+            self._send_html(200, render_shell(
+                sharing_page(plaintext, self._session_csrf(), flash),
+                "sharing", VERSION, VAULT_PATH,
+                title="Sharing", counts=self._counts(plaintext)))
+            return
+
+        if path == "/schemas":
+            try:
+                plaintext = load_vault(master, self._session_rec)
+            except Exception:
+                return self._expire_session()
+            self._send_html(200, render_shell(
+                schemas_page(plaintext, self._session_csrf()),
+                "schemas", VERSION, VAULT_PATH,
+                title="Record Types", counts=self._counts(plaintext)))
+            return
+
         if path == "/unlock/settings":
             if not WEBAUTHN_ENABLED:
                 self.send_error(404, "Not found")
@@ -28961,9 +30613,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             _index, parsed = found
             rtype, rid, label, values, _created, folder, custom, hidden, _fav, _trash = parsed
+            _col = plaintext.splitlines()[_index].split("\t")
+            _attrs_col = _col[5] if len(_col) > 5 else ""
 
             if path == "/records-view":
-                self._send_html(200, build_record_view(parsed, counts))
+                self._send_html(200, build_record_view(
+                    parsed, counts, sealed=core.attrs_sealed(_attrs_col),
+                    links=core.attrs_links(_attrs_col), plaintext=plaintext,
+                    csrf=self._session_csrf()))
                 return
 
             self._send_html(200, build_record_form(
@@ -29844,6 +31501,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # A new record is neither pinned nor trashed; an edit keeps whatever
             # the stored record had, since the form shows neither.
             keep_favorite, keep_trashed = False, ""
+            keep_sealed, keep_links = None, None
+            keep_values = {}
             if record_id:
                 found = core.find_record(plaintext, record_type, record_id)
                 if not found:
@@ -29853,6 +31512,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 index, existing = found
                 created = existing[4]
                 keep_favorite, keep_trashed = existing[8], existing[9]
+                # A locked record's sealed fields and its links never reach the
+                # form, so they are read from the stored row and carried through.
+                lines0 = plaintext.splitlines()
+                col = lines0[index].split("\t")[5] if len(lines0[index].split("\t")) > 5 else ""
+                keep_sealed = core.attrs_sealed(col)
+                keep_links = core.attrs_links(col)
+                if keep_sealed:
+                    # The secret fields are sealed and were shown as locked, so
+                    # the form has no value for them; keep the stored (blanked)
+                    # ones rather than letting the edit wipe the seal's subjects.
+                    keep_values = existing[3]
+                    for sname in core.record_secret_fields(record_type):
+                        values[sname] = keep_values.get(sname, "")
             else:
                 record_id = core.record_next_id(plaintext, record_type)
 
@@ -29865,7 +31537,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                             values, created, folder=folder,
                                             fields=pairs, hidden=hidden,
                                             favorite=keep_favorite,
-                                            trashed_at=keep_trashed)
+                                            trashed_at=keep_trashed,
+                                            sealed=keep_sealed, links=keep_links)
             except Exception as problem:
                 _again(str(problem))
                 return
@@ -29972,6 +31645,271 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 save_vault(master, new_plain, self._session_rec)
             self.send_response(302)
             self.send_header("Location", "/trash")
+            self.end_headers()
+            return
+
+        # ----- sharing, collections and custom schemas (roadmap 6, 7, 19) ----
+        if path == "/sharing/keygen":
+            plaintext = load_vault(master, self._session_rec)
+            new_plain, changed = core.ensure_sharing_keypair(plaintext)
+            if changed:
+                save_vault(master, new_plain, self._session_rec)
+            self.send_response(302)
+            self.send_header("Location", "/sharing?msg=keys")
+            self.end_headers()
+            return
+
+        if path == "/share-create":
+            recipient = (data.get("recipient") or [""])[0].strip()
+            name = (data.get("collection") or [""])[0]
+            plaintext = load_vault(master, self._session_rec)
+            members = next((c["members"] for c in core.collections(plaintext)
+                            if c["name"] == name), None)
+            if members is None:
+                self.send_error(400, "Unknown collection")
+                return
+            try:
+                records = core.collect_share_records(plaintext, members)
+                share = core.share_pack(records, recipient.encode("utf-8"))
+            except core.VaultError as exc:
+                self._send_html(200, render_shell(
+                    sharing_page(plaintext, self._session_csrf(),
+                                 "<div class='flash error'>%s</div>" % html.escape(str(exc))),
+                    "sharing", VERSION, VAULT_PATH, title="Sharing",
+                    counts=self._counts(plaintext)))
+                return
+            body = share.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition",
+                             'attachment; filename="spm-share-%s.spm"'
+                             % time.strftime("%Y%m%d_%H%M%S"))
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if path == "/share-import":
+            share_text = (data.get("share") or [""])[0]
+            plaintext = load_vault(master, self._session_rec)
+            try:
+                priv = core._pem_from_meta(plaintext, core.SHARING_PRIVKEY_TAG)
+                if not priv:
+                    raise core.VaultError("generate a sharing key first")
+                records = core.share_unpack(share_text, priv)
+                new_plain, added = core.share_apply(plaintext, records)
+            except core.VaultError as exc:
+                self._send_html(200, render_shell(
+                    sharing_page(plaintext, self._session_csrf(),
+                                 "<div class='flash error'>%s</div>" % html.escape(str(exc))),
+                    "sharing", VERSION, VAULT_PATH, title="Sharing",
+                    counts=self._counts(plaintext)))
+                return
+            if added:
+                save_vault(master, new_plain, self._session_rec)
+            self.send_response(302)
+            self.send_header("Location", "/sharing?msg=imported&n=%d" % added)
+            self.end_headers()
+            return
+
+        if path in ("/collection-create", "/collection-delete"):
+            name = (data.get("name") or [""])[0].strip()
+            plaintext = load_vault(master, self._session_rec)
+            try:
+                if path == "/collection-create":
+                    new_plain = core.set_collection(plaintext, name, [])
+                else:
+                    new_plain = core.delete_collection(plaintext, name)
+                save_vault(master, new_plain, self._session_rec)
+            except core.VaultError:
+                pass
+            self.send_response(302)
+            self.send_header("Location", "/sharing")
+            self.end_headers()
+            return
+
+        if path in ("/collection-member",):
+            # Add or remove one record's membership in a collection, from a
+            # record's own page. on=1 adds, on=0 removes.
+            name = (data.get("collection") or [""])[0].strip()
+            kind = (data.get("kind") or [""])[0]
+            rtype = (data.get("type") or [""])[0]
+            rid = (data.get("id") or [""])[0]
+            on = (data.get("on") or ["1"])[0] != "0"
+            back = (data.get("back") or ["/"])[0]
+            plaintext = load_vault(master, self._session_rec)
+            cols = core.collections(plaintext)
+            target = next((c for c in cols if c["name"] == name), None)
+            if target is not None and kind in ("record", "password") and rid:
+                key = (kind, rtype if kind == "record" else "", rid)
+                members = [m for m in target["members"]
+                           if (m["kind"], m["type"], m["id"]) != key]
+                if on:
+                    members.append({"kind": kind,
+                                    "type": rtype if kind == "record" else "",
+                                    "id": rid})
+                new_plain = core.set_collection(plaintext, name, members)
+                save_vault(master, new_plain, self._session_rec)
+            self.send_response(302)
+            self.send_header("Location", back if back.startswith("/") else "/")
+            self.end_headers()
+            return
+
+        if path == "/schema-add":
+            rtype = (data.get("type") or [""])[0].strip()
+            label = (data.get("label") or [""])[0].strip()
+            icon = (data.get("icon") or ["record"])[0].strip()
+            raw = (data.get("fields") or [""])[0]
+            fields = []
+            for line in raw.splitlines():
+                bits = line.split()
+                if not bits:
+                    continue
+                fields.append([bits[0],
+                               bits[1] if len(bits) > 1 else "plain",
+                               bits[2] if len(bits) > 2 else "line",
+                               len(bits) > 3 and bits[3].lower() in ("true", "1", "yes", "required")])
+            plaintext = load_vault(master, self._session_rec)
+            try:
+                new_plain = core.add_custom_schema(plaintext, rtype, label, icon, fields)
+                save_vault(master, new_plain, self._session_rec)
+            except core.VaultError as exc:
+                self._send_html(200, render_shell(
+                    schemas_page(plaintext, self._session_csrf(),
+                                 "<div class='flash error'>%s</div>" % html.escape(str(exc))),
+                    "schemas", VERSION, VAULT_PATH, title="Record Types",
+                    counts=self._counts(plaintext)))
+                return
+            self.send_response(302)
+            self.send_header("Location", "/schemas")
+            self.end_headers()
+            return
+
+        if path == "/schema-remove":
+            rtype = (data.get("type") or [""])[0].strip()
+            plaintext = load_vault(master, self._session_rec)
+            try:
+                new_plain = core.remove_custom_schema(plaintext, rtype)
+                save_vault(master, new_plain, self._session_rec)
+            except core.VaultError as exc:
+                self._send_html(200, render_shell(
+                    schemas_page(plaintext, self._session_csrf(),
+                                 "<div class='flash error'>%s</div>" % html.escape(str(exc))),
+                    "schemas", VERSION, VAULT_PATH, title="Record Types",
+                    counts=self._counts(plaintext)))
+                return
+            self.send_response(302)
+            self.send_header("Location", "/schemas")
+            self.end_headers()
+            return
+
+        # ----- per-record passphrase and relationships (roadmap 8, 25) -------
+        if path in ("/record-lock", "/record-lock-remove", "/record-reveal",
+                    "/link-add", "/link-remove"):
+            rtype = (data.get("type") or [""])[0]
+            rid = (data.get("id") or [""])[0]
+            passphrase = (data.get("passphrase") or [""])[0]
+            plaintext = load_vault(master, self._session_rec)
+            if rtype not in core.RECORD_TYPES or not rid:
+                self.send_error(400, "Missing type or id")
+                return
+            found = core.find_record(plaintext, rtype, rid)
+            if not found:
+                self.send_error(404, "Record not found")
+                return
+            index, parsed = found
+            lines = plaintext.splitlines()
+            col = lines[index].split("\t")
+            attrs_col = col[5] if len(col) > 5 else ""
+            back = "/records-view?type=%s&id=%s" % (
+                urllib.parse.quote(rtype), urllib.parse.quote(rid))
+
+            def _rebuild(values, sealed_val, links_val):
+                return core.build_record_row(
+                    rtype, rid, parsed[2], values, parsed[4], folder=parsed[5],
+                    fields=parsed[6], hidden=parsed[7], favorite=parsed[8],
+                    trashed_at=parsed[9], sealed=sealed_val, links=links_val)
+
+            def _view_flash(msg):
+                self._send_html(200, build_record_view(
+                    parsed, self._counts(plaintext),
+                    sealed=core.attrs_sealed(attrs_col),
+                    links=core.attrs_links(attrs_col), plaintext=plaintext,
+                    csrf=self._session_csrf()))
+
+            if path == "/record-reveal":
+                try:
+                    secret_vals = core.record_unlock(core.attrs_sealed(attrs_col),
+                                                     passphrase)
+                except core.VaultError:
+                    self.send_response(302)
+                    self.send_header("Location", back + "&msg=badpass")
+                    self.end_headers()
+                    return
+                self._send_html(200, build_record_view(
+                    parsed, self._counts(plaintext),
+                    sealed=core.attrs_sealed(attrs_col),
+                    links=core.attrs_links(attrs_col), plaintext=plaintext,
+                    revealed=secret_vals, csrf=self._session_csrf()))
+                return
+
+            if path == "/record-lock":
+                try:
+                    blanked, sealed = core.record_lock(
+                        parsed[3], core.record_secret_fields(rtype), passphrase)
+                except core.VaultError:
+                    self.send_response(302)
+                    self.send_header("Location", back)
+                    self.end_headers()
+                    return
+                lines[index] = _rebuild(blanked, sealed, core.attrs_links(attrs_col))
+            elif path == "/record-lock-remove":
+                try:
+                    secret_vals = core.record_unlock(core.attrs_sealed(attrs_col),
+                                                     passphrase)
+                except core.VaultError:
+                    self.send_response(302)
+                    self.send_header("Location", back + "&msg=badpass")
+                    self.end_headers()
+                    return
+                values = dict(parsed[3])
+                values.update(secret_vals)
+                lines[index] = _rebuild(values, None, core.attrs_links(attrs_col))
+            elif path == "/link-add":
+                target = (data.get("target") or [""])[0]
+                bits = target.split(":", 2)
+                if len(bits) == 3 and bits[0] in ("record", "password") and bits[2]:
+                    new_col = core.link_add(attrs_col, bits[0], bits[1], bits[2])
+                    col2 = lines[index].split("\t")
+                    while len(col2) <= 5:
+                        col2.append("")
+                    col2[5] = new_col or "-"
+                    lines[index] = "\t".join(col2)
+                    # Symmetric: add the reverse link on the target when it is a
+                    # record we can address.
+                    if bits[0] == "record":
+                        tf = core.find_record("\n".join(lines), bits[1], bits[2])
+                        if tf:
+                            tidx, _tp = tf
+                            tcol = lines[tidx].split("\t")
+                            while len(tcol) <= 5:
+                                tcol.append("")
+                            tcol[5] = core.link_add(tcol[5] if len(tcol) > 5 else "",
+                                                    "record", rtype, rid) or "-"
+                            lines[tidx] = "\t".join(tcol)
+            elif path == "/link-remove":
+                new_col = core.link_remove(
+                    attrs_col, (data.get("l_kind") or [""])[0],
+                    (data.get("l_type") or [""])[0], (data.get("l_id") or [""])[0])
+                col2 = lines[index].split("\t")
+                while len(col2) <= 5:
+                    col2.append("")
+                col2[5] = new_col or "-"
+                lines[index] = "\t".join(col2)
+
+            save_vault(master, "\n".join(lines) + "\n", self._session_rec)
+            self.send_response(302)
+            self.send_header("Location", back)
             self.end_headers()
             return
 
@@ -31512,6 +33450,11 @@ main() {
 		trash)            cmd_trash "$@" ;;
 		expiring)         cmd_expiring "$@" ;;
 		searches)         cmd_searches "$@" ;;
+		schema)           cmd_schema "$@" ;;
+		link)             cmd_link "$@" ;;
+		unlink)           cmd_link --remove "$@" ;;
+		share)            cmd_share "$@" ;;
+		collection)       cmd_collection "$@" ;;
 		ssh)              cmd_ssh "$@" ;;
 		gpg)              cmd_gpg "$@" ;;
 		notes-add)        cmd_notes_add "$@" ;;

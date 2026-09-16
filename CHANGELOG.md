@@ -7,6 +7,42 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-09-16
+
+Five more roadmap items, in two clusters -- sharing and the data model -- plus a
+per-record protection layer. No vault format change (format 6, additive only): a
+5.1.x build still opens a 5.2.0 vault, and the new rows and attributes keys are
+ignored by anything that does not know them.
+
+### Added
+- **Public-key encrypted record sharing (roadmap 6) and shared collections
+  (roadmap 7).** Each vault gets its own sharing keypair; its public key is
+  exportable, and its private key stays inside the encrypted vault. A share
+  encrypts selected records -- grouped as a named **collection** -- to a
+  recipient's public key as an offline file they import. Hybrid encryption
+  reusing the emergency-access pattern: a random key seals the body, wrapped to
+  the recipient with RSA-OAEP; a wrong key or a tampered file fails closed. No
+  account, no server, no network. CLI: `spm share pubkey|create|import`,
+  `spm collection list|create|delete`.
+- **Per-record additional encryption (roadmap 8).** A chosen record's secret
+  fields can be sealed under an extra **passphrase**, so even an unlocked vault
+  cannot reveal them without it. The sealed blob lives in the record's own
+  attributes; the plain fields still show. CLI: `spm record lock|unlock`.
+- **Custom record schemas (roadmap 19).** Define your own record types in the
+  vault (`META_CUSTOM_SCHEMAS`); they flow through the CLI and Dashboard exactly
+  like the built-in ones -- add, list, view, edit, export -- because the schema
+  engine now merges built-in and custom types. A custom type cannot shadow a
+  built-in, and one cannot be removed while records of it exist. CLI:
+  `spm schema list|add|remove`; Dashboard: a Record Types page.
+- **Record relationships (roadmap 25).** Link records to each other; the links
+  show on each record and are added both ways. Stored in the record's own
+  attributes. CLI: `spm link` / `spm unlink`.
+
+### Notes
+- Sealed fields and links are per-vault and do not cross an export as plaintext.
+  A trashed record is still excluded from a share. The sharing private key never
+  leaves the vault.
+
 ## [5.1.0] - 2026-09-14
 
 Six roadmap items, shipped together because they share their machinery. No vault

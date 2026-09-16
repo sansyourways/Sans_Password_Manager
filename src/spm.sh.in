@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.1.0"
+VERSION="5.2.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -737,6 +737,18 @@ ensure_master_password_loaded() {
 	if [ -z "${MASTER_PW:-}" ]; then
 		read_master_password_once
 	fi
+}
+
+prompt_hidden() {
+	# Read one line without echo, prompt on stderr, value on stdout. Used for a
+	# per-record passphrase, which is not the master password and must not be
+	# cached. stty failing on a pipe is not fatal -- the read still works.
+	local prompt="${1:-}" value=""
+	printf '%s' "$prompt" >&2
+	stty -echo 2>/dev/null || true
+	IFS= read -r value || value=""
+	stty echo 2>/dev/null || true
+	printf '%s' "$value"
 }
 
 re_verify_master_password() {
@@ -2542,8 +2554,10 @@ cmd_record() {
 		view)     cmd_record_view "$@" ;;
 		delete)   cmd_record_delete "$@" ;;
 		favorite) cmd_favorite "$@" ;;
+		lock)     cmd_record_lock "$@" ;;
+		unlock)   cmd_record_lock --unlock "$@" ;;
 		*)
-			printf 'Usage: %s record <types|add|list|view|delete|favorite> [args]\n' "$0" >&2
+			printf 'Usage: %s record <types|add|list|view|delete|favorite|lock|unlock> [args]\n' "$0" >&2
 			exit 1
 			;;
 	esac
@@ -2683,6 +2697,138 @@ for i in s:
 			secure_wipe "$tmp"
 			printf 'Usage: %s searches <list|save|delete> [args]\n' "$0" >&2
 			exit 1 ;;
+	esac
+}
+
+# ----- custom record types (roadmap 19) --------------------------------------
+cmd_schema() {
+	local op="${1:-list}"; [ $# -gt 0 ] && shift
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp out; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	case "$op" in
+		list)
+			core schemas-list "$tmp" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)["schemas"]
+if not d: print("No custom record types."); sys.exit(0)
+for t, s in sorted(d.items()):
+    print("%-20s %-24s %s" % (t, s["label"], ", ".join(f[0] for f in s["fields"])))
+'
+			secure_wipe "$tmp" ;;
+		add)
+			# add <type> <label> [icon] ; fields on stdin, one per line:
+			# name kind widget required
+			local type="${1:-}" label="${2:-}" icon="${3:-record}"
+			[ -n "$type" ] && [ -n "$label" ] || { secure_wipe "$tmp"; die "Usage: $0 schema add <type> <label> [icon]  (fields on stdin)"; }
+			out="$(make_tmp)"
+			if core schema-add "$tmp" "$type" "$label" "$icon" >"$out"; then
+				mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+				printf 'Added record type %s.\n' "$type"
+			else secure_wipe "$out"; secure_wipe "$tmp"; die "Could not add the type."; fi ;;
+		remove)
+			local type="${1:-}"; [ -n "$type" ] || { secure_wipe "$tmp"; die "Usage: $0 schema remove <type>"; }
+			out="$(make_tmp)"
+			if core schema-remove "$tmp" "$type" >"$out" 2>/dev/null; then
+				mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+				printf 'Removed record type %s.\n' "$type"
+			else secure_wipe "$out"; secure_wipe "$tmp"; die "Could not remove the type (does it still have records?)."; fi ;;
+		*) secure_wipe "$tmp"; printf 'Usage: %s schema <list|add|remove> [args]\n' "$0" >&2; exit 1 ;;
+	esac
+}
+
+# ----- relationships (roadmap 25) --------------------------------------------
+cmd_link() {
+	local remove=""
+	[ "${1:-}" = "--remove" ] && { remove=1; shift; }
+	local rtype="${1:-}" rid="${2:-}" ttype="${3:-}" tid="${4:-}"
+	[ -n "$rtype" ] && [ -n "$rid" ] && [ -n "$ttype" ] && [ -n "$tid" ] \
+		|| die "Usage: $0 link [--remove] <type> <id> <target-type> <target-id>"
+	record_require_type "$rtype"; record_require_type "$ttype"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp out; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"; out="$(make_tmp)"
+	local cmd=link-add; [ -n "$remove" ] && cmd=link-remove
+	if core "$cmd" "$tmp" "$rtype" "$rid" record "$ttype" "$tid" >"$out" 2>/dev/null; then
+		mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+		[ -n "$remove" ] && printf 'Unlinked.\n' || printf 'Linked.\n'
+	else secure_wipe "$out"; secure_wipe "$tmp"; die "No such record."; fi
+}
+
+# ----- per-record passphrase (roadmap 8) -------------------------------------
+cmd_record_lock() {
+	local unlock=""; [ "${1:-}" = "--unlock" ] && { unlock=1; shift; }
+	local rtype="${1:-}" rid="${2:-}"
+	[ -n "$rtype" ] && [ -n "$rid" ] || die "Usage: $0 record lock|unlock <type> <id>"
+	record_require_type "$rtype"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local pass pass2
+	pass="$(prompt_hidden "Passphrase: ")"; printf '\n' >&2
+	[ -n "$pass" ] || die "Passphrase must not be empty."
+	if [ -z "$unlock" ]; then
+		pass2="$(prompt_hidden "Confirm passphrase: ")"; printf '\n' >&2
+		[ "$pass" = "$pass2" ] || die "Passphrases do not match."
+	fi
+	local tmp out; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"; out="$(make_tmp)"
+	local cmd=record-lock; [ -n "$unlock" ] && cmd=record-unlock
+	if printf '%s\n' "$pass" | core "$cmd" "$tmp" "$rtype" "$rid" >"$out" 2>/dev/null; then
+		mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+		[ -n "$unlock" ] && printf 'Lock removed.\n' || printf 'Record locked.\n'
+	else secure_wipe "$out"; secure_wipe "$tmp"; die "Could not $([ -n "$unlock" ] && echo unlock || echo lock) (wrong passphrase, or no secret to lock)."; fi
+}
+
+# ----- public-key sharing and collections (roadmap 6 & 7) --------------------
+cmd_share() {
+	local op="${1:-}"; [ $# -gt 0 ] && shift
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp out; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	case "$op" in
+		pubkey)
+			out="$(make_tmp)"
+			core sharing-keygen "$tmp" >"$out"
+			if ! cmp -s "$out" "$tmp"; then mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; else secure_wipe "$out"; fi
+			core sharing-pubkey "$tmp"; secure_wipe "$tmp" ;;
+		create)
+			local recipient="${1:-}" collection="${2:-}"
+			[ -f "$recipient" ] && [ -n "$collection" ] || { secure_wipe "$tmp"; die "Usage: $0 share create <recipient-pubkey.pem> <collection>"; }
+			core share-create "$tmp" "$recipient" "$collection" || { secure_wipe "$tmp"; die "Could not create the share (unknown collection or key)."; }
+			secure_wipe "$tmp" ;;
+		import)
+			local file="${1:-}"; [ -f "$file" ] || { secure_wipe "$tmp"; die "Usage: $0 share import <share-file>"; }
+			out="$(make_tmp)"; local added
+			if added="$(core share-import "$tmp" "$file" 2>&1 >"$out")"; then
+				mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+				printf 'Imported %s record(s).\n' "${added:-0}"
+			else secure_wipe "$out"; secure_wipe "$tmp"; die "Could not import this share: $added"; fi ;;
+		*) secure_wipe "$tmp"; printf 'Usage: %s share <pubkey|create|import> [args]\n' "$0" >&2; exit 1 ;;
+	esac
+}
+
+cmd_collection() {
+	local op="${1:-list}"; [ $# -gt 0 ] && shift
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp out; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	case "$op" in
+		list)
+			core collections-list "$tmp" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)["collections"]
+if not d: print("No collections."); sys.exit(0)
+for c in d:
+    print("%-24s %d member(s)" % (c["name"], len(c["members"])))
+'
+			secure_wipe "$tmp" ;;
+		create)
+			local name="${1:-}"; [ -n "$name" ] || { secure_wipe "$tmp"; die "Usage: $0 collection create <name>"; }
+			out="$(make_tmp)"
+			printf '' | core collection-set "$tmp" "$name" >"$out" || { secure_wipe "$out"; secure_wipe "$tmp"; die "Could not create the collection."; }
+			mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+			printf 'Created collection %s.\n' "$name" ;;
+		delete)
+			local name="${1:-}"; [ -n "$name" ] || { secure_wipe "$tmp"; die "Usage: $0 collection delete <name>"; }
+			out="$(make_tmp)"
+			core collection-delete "$tmp" "$name" >"$out"
+			mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+			printf 'Deleted collection %s.\n' "$name" ;;
+		*) secure_wipe "$tmp"; printf 'Usage: %s collection <list|create|delete> [args]\n' "$0" >&2; exit 1 ;;
 	esac
 }
 
@@ -9215,6 +9361,11 @@ main() {
 		trash)            cmd_trash "$@" ;;
 		expiring)         cmd_expiring "$@" ;;
 		searches)         cmd_searches "$@" ;;
+		schema)           cmd_schema "$@" ;;
+		link)             cmd_link "$@" ;;
+		unlink)           cmd_link --remove "$@" ;;
+		share)            cmd_share "$@" ;;
+		collection)       cmd_collection "$@" ;;
 		ssh)              cmd_ssh "$@" ;;
 		gpg)              cmd_gpg "$@" ;;
 		notes-add)        cmd_notes_add "$@" ;;
