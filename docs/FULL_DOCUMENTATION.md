@@ -92,7 +92,7 @@ attacker with root access.
 
 ## Product tour
 
-Every web capture below was taken from the 5.1.0 release candidate in Chromium
+Every web capture below was taken from the 5.2.0 release candidate in Chromium
 at 1440x900, against a disposable vault holding only synthetic documentation
 data. No personal vault, browser profile, real credential, or production
 hostname appears in these images. The locked-screen captures use Chromium
@@ -255,6 +255,24 @@ the private key.
 | --- |
 | ![SPM certificate record with the certificate shown in full and the private key masked, and a Derived-from-the-certificate panel listing subject, issuer, validity, alternative names, algorithms and the SHA-256 fingerprint](docs/screenshots/web-v2.13.0/45-record-certificate.png) |
 
+### Sharing, custom types and per-record locks
+
+New in 5.2.0. Records can be **shared** with another SPM user as an encrypted
+file: each vault has its own sharing keypair, you group records into a
+**collection**, and you encrypt that collection to the recipient's public key.
+No account and no server. You can also **define your own record types** — they
+behave exactly like the built-in ones — **link** records to one another, and seal
+a record's secret fields under an extra **passphrase** so an unlocked vault still
+cannot reveal them.
+
+| Sharing — export a key, create or import a share | Record Types — define your own |
+| --- | --- |
+| ![SPM Sharing page showing this vault's exported public key, a create-a-share form, an import form and a list of collections](docs/screenshots/web-v2.13.0/46-sharing.png) | ![SPM Record Types page listing a user-defined Crypto Wallet type with its fields, and a form to add a new type](docs/screenshots/web-v2.13.0/47-schemas.png) |
+
+| A record that is passphrase-locked and linked to another |
+| --- |
+| ![SPM record view with its secret token field shown as Locked, a passphrase-lock panel offering unlock and remove, and a Related-records block linking to another record](docs/screenshots/web-v2.13.0/48-record-protected.png) |
+
 <details>
 <summary><strong>Complete web interface gallery</strong></summary>
 
@@ -413,7 +431,7 @@ bash install.sh
 Install a specific release or a user-writable prefix:
 
 ```bash
-bash install.sh --version 5.1.0
+bash install.sh --version 5.2.0
 bash install.sh --prefix "$HOME/.local"
 ```
 
@@ -448,7 +466,7 @@ A release at or after 3.9.0 that *fails* the check aborts the install.
 To check by hand, at any time:
 
 ```bash
-gh attestation verify Sans_Password_Manager_v5.1.0.zip \
+gh attestation verify Sans_Password_Manager_v5.2.0.zip \
   --repo sansyourways/Sans_Password_Manager
 ```
 
@@ -464,9 +482,9 @@ commit rebuilt anywhere gives the same bytes, so the published checksum is
 something you can independently arrive at:
 
 ```bash
-git checkout v5.1.0
+git checkout v5.2.0
 ./release-archive.sh
-sha256sum -c Sans_Password_Manager_v5.1.0.zip.sha256
+sha256sum -c Sans_Password_Manager_v5.2.0.zip.sha256
 ```
 
 Outside a git checkout, set `SOURCE_DATE_EPOCH` to the commit's timestamp.
@@ -479,7 +497,7 @@ Every release since 3.12.0 carries two packages besides the archive.
 script:
 
 ```bash
-version=5.1.0
+version=5.2.0
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb"
 curl -fsSLO "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v$version/spm_${version}_all.deb.sha256"
 sha256sum -c "spm_${version}_all.deb.sha256"
@@ -496,7 +514,7 @@ version and help commands.
 **Homebrew** — a formula is attached to each release as `spm.rb`:
 
 ```bash
-brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v5.1.0/spm.rb"
+brew install --formula   "https://github.com/sansyourways/Sans_Password_Manager/releases/download/v5.2.0/spm.rb"
 ```
 
 The formula pins the sha256 of that one archive, which is why it is generated
@@ -518,7 +536,7 @@ installer says so and adds it to your shell profile for you, so a new terminal
 can run `spm` from any directory:
 
 ```text
-Installed SPM 5.1.0 at /home/you/.local/bin/spm
+Installed SPM 5.2.0 at /home/you/.local/bin/spm
 PATH        : added /home/you/.local/bin to /home/you/.bashrc
                 run "exec /bin/bash" or open a new terminal to pick it up
 ```
