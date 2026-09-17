@@ -714,7 +714,7 @@ EVENT_RETENTION_DEFAULT = 500
 # attempts into one would be the log lying about the thing it is for.
 EVENT_COALESCE_DEFAULT = 60
 EVENT_KINDS = ("unlock", "write", "rewrap", "recover", "restore", "archive",
-               "hardware", "secret-key")
+               "hardware", "secret-key", "sync-serve")
 EVENT_OUTCOMES = ("ok", "fail")
 # Details are key=value with both sides constrained, rather than free text.
 # Free text is how a label ends up in a log one day: someone adds a helpful
@@ -5888,6 +5888,515 @@ def _record_values_in():
     return values
 
 
+# ----- QR encoder -----------------------------------------------------------
+#
+# A pure-Python QR encoder (byte mode, error-correction level M, versions 1-10)
+# so a device-pairing string can be shown as a scannable code on the terminal
+# and in the dashboard with no third-party dependency, matching SPM's rule of
+# leaning only on the standard library and system tools. The same boolean matrix
+# feeds the terminal (Unicode half-blocks) and the web (an SVG). Level M and up
+# to version 10 comfortably hold a `spm-sync://host:port/channel?token=...`
+# pairing string.
+
+# (total data codewords, ec codewords per block, [(num blocks, data cw per block)])
+_QR_M = {
+    1:  (16,  10, [(1, 16)]),
+    2:  (28,  16, [(1, 28)]),
+    3:  (44,  26, [(1, 44)]),
+    4:  (64,  18, [(2, 32)]),
+    5:  (86,  24, [(2, 43)]),
+    6:  (108, 16, [(4, 27)]),
+    7:  (124, 18, [(4, 31)]),
+    8:  (154, 22, [(2, 38), (2, 39)]),
+    9:  (182, 22, [(3, 36), (2, 37)]),
+    10: (216, 26, [(4, 43), (1, 44)]),
+}
+# Alignment-pattern centre coordinates per version (empty for v1).
+_QR_ALIGN = {
+    1: [], 2: [6, 18], 3: [6, 22], 4: [6, 26], 5: [6, 30], 6: [6, 34],
+    7: [6, 22, 38], 8: [6, 24, 42], 9: [6, 26, 46], 10: [6, 28, 50],
+}
+
+
+def _qr_gf_tables():
+    # GF(256) exp/log tables (primitive polynomial 0x11d) for Reed-Solomon.
+    exp = [0] * 512
+    log = [0] * 256
+    x = 1
+    for i in range(255):
+        exp[i] = x
+        log[x] = i
+        x <<= 1
+        if x & 0x100:
+            x ^= 0x11d
+    for i in range(255, 512):
+        exp[i] = exp[i - 255]
+    return exp, log
+
+
+_QR_GF_EXP, _QR_GF_LOG = _qr_gf_tables()
+
+
+def _qr_gf_mul(a, b):
+    if a == 0 or b == 0:
+        return 0
+    return _QR_GF_EXP[_QR_GF_LOG[a] + _QR_GF_LOG[b]]
+
+
+def _qr_rs_generator(n):
+    g = [1]
+    for i in range(n):
+        g2 = [0] * (len(g) + 1)
+        for j, c in enumerate(g):
+            g2[j] ^= c
+            g2[j + 1] ^= _qr_gf_mul(c, _QR_GF_EXP[i])
+        g = g2
+    return g
+
+
+def _qr_rs_ec(data, n):
+    # The generator is monic of degree n (n+1 coefficients); the remainder is
+    # computed against its n non-leading coefficients.
+    gen = _qr_rs_generator(n)[1:]
+    rem = [0] * n
+    for d in data:
+        factor = d ^ rem[0]
+        rem = rem[1:] + [0]
+        for i in range(n):
+            rem[i] ^= _qr_gf_mul(gen[i], factor)
+    return rem
+
+
+def _qr_penalty(g, size):
+    total = 0
+    # rule 1: runs of five or more same-colour modules in a line
+    for line in list(g) + [[g[r][c] for r in range(size)] for c in range(size)]:
+        run = 1
+        for i in range(1, size):
+            if line[i] == line[i - 1]:
+                run += 1
+            else:
+                if run >= 5:
+                    total += 3 + (run - 5)
+                run = 1
+        if run >= 5:
+            total += 3 + (run - 5)
+    # rule 2: 2x2 blocks of one colour
+    for r in range(size - 1):
+        for c in range(size - 1):
+            if g[r][c] == g[r][c + 1] == g[r + 1][c] == g[r + 1][c + 1]:
+                total += 3
+    # rule 3: finder-like 1:1:3:1:1 patterns
+    pat1 = [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0]
+    pat2 = [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1]
+    for r in range(size):
+        for c in range(size - 10):
+            seg = [g[r][c + k] for k in range(11)]
+            if seg == pat1 or seg == pat2:
+                total += 40
+    for c in range(size):
+        for r in range(size - 10):
+            seg = [g[r + k][c] for k in range(11)]
+            if seg == pat1 or seg == pat2:
+                total += 40
+    # rule 4: overall dark proportion
+    dark = sum(sum(1 for v in row if v) for row in g)
+    ratio = dark * 100 // (size * size)
+    total += abs(ratio - 50) // 5 * 10
+    return total
+
+
+def qr_encode(text):
+    """A boolean matrix (list of bool rows) encoding `text` as a QR symbol,
+    byte mode, error-correction level M. Raises ValueError if the text will not
+    fit in a version-10 symbol."""
+    data = text.encode("utf-8")
+    version = None
+    for v in range(1, 11):
+        total_data, _ecpb, _blocks = _QR_M[v]
+        count_bits = 8 if v <= 9 else 16
+        if 4 + count_bits + len(data) * 8 <= total_data * 8:
+            version = v
+            break
+    if version is None:
+        raise ValueError("data too long for a version-10 QR code")
+    total_data, ec_per_block, blocks = _QR_M[version]
+    count_bits = 8 if version <= 9 else 16
+
+    # ----- data bitstream -----
+    bits = []
+
+    def put(value, length):
+        for i in range(length - 1, -1, -1):
+            bits.append((value >> i) & 1)
+
+    put(0b0100, 4)                 # byte mode
+    put(len(data), count_bits)
+    for b in data:
+        put(b, 8)
+    cap = total_data * 8
+    put(0, min(4, cap - len(bits)))            # terminator
+    while len(bits) % 8:                        # pad up to a whole codeword
+        bits.append(0)
+    codewords = [int("".join(str(b) for b in bits[i:i + 8]), 2)
+                 for i in range(0, len(bits), 8)]
+    pad = [0xEC, 0x11]
+    i = 0
+    while len(codewords) < total_data:
+        codewords.append(pad[i % 2])
+        i += 1
+
+    # ----- split into blocks, add error correction, interleave -----
+    data_blocks, ec_blocks = [], []
+    pos = 0
+    for (num, dcount) in blocks:
+        for _ in range(num):
+            blk = codewords[pos:pos + dcount]
+            pos += dcount
+            data_blocks.append(blk)
+            ec_blocks.append(_qr_rs_ec(blk, ec_per_block))
+    final = []
+    maxd = max(len(b) for b in data_blocks)
+    for c in range(maxd):
+        for b in data_blocks:
+            if c < len(b):
+                final.append(b[c])
+    for c in range(ec_per_block):
+        for b in ec_blocks:
+            final.append(b[c])
+    bitstream = []
+    for cw in final:
+        for i in range(7, -1, -1):
+            bitstream.append((cw >> i) & 1)
+
+    # ----- function patterns -----
+    size = 17 + version * 4
+    m = [[None] * size for _ in range(size)]
+    reserved = [[False] * size for _ in range(size)]
+
+    def place_finder(r, c):
+        for dr in range(-1, 8):
+            for dc in range(-1, 8):
+                rr, cc = r + dr, c + dc
+                if 0 <= rr < size and 0 <= cc < size:
+                    on = (0 <= dr <= 6 and 0 <= dc <= 6 and
+                          (dr in (0, 6) or dc in (0, 6) or
+                           (2 <= dr <= 4 and 2 <= dc <= 4)))
+                    m[rr][cc] = 1 if on else 0
+                    reserved[rr][cc] = True
+
+    place_finder(0, 0)
+    place_finder(0, size - 7)
+    place_finder(size - 7, 0)
+
+    # timing patterns
+    for i in range(size):
+        if m[6][i] is None:
+            m[6][i] = 1 if i % 2 == 0 else 0
+            reserved[6][i] = True
+        if m[i][6] is None:
+            m[i][6] = 1 if i % 2 == 0 else 0
+            reserved[i][6] = True
+
+    # alignment patterns: every centre-coordinate combination except the three
+    # that coincide with the finder patterns (a placed one may cross a timing line)
+    centres = _QR_ALIGN[version]
+    if centres:
+        lo, hi = centres[0], centres[-1]
+        skip = {(lo, lo), (lo, hi), (hi, lo)}
+        for r in centres:
+            for c in centres:
+                if (r, c) in skip:
+                    continue
+                for dr in range(-2, 3):
+                    for dc in range(-2, 3):
+                        on = dr in (-2, 2) or dc in (-2, 2) or (dr == 0 and dc == 0)
+                        m[r + dr][c + dc] = 1 if on else 0
+                        reserved[r + dr][c + dc] = True
+
+    # dark module, then reserve the format and version information areas
+    m[size - 8][8] = 1
+    reserved[size - 8][8] = True
+    for i in range(9):
+        for (r, c) in ((8, i), (i, 8)):
+            if 0 <= r < size and 0 <= c < size:
+                reserved[r][c] = True
+    for i in range(8):
+        reserved[8][size - 1 - i] = True
+        reserved[size - 1 - i][8] = True
+    if version >= 7:
+        for i in range(6):
+            for j in range(3):
+                reserved[i][size - 11 + j] = True
+                reserved[size - 11 + j][i] = True
+
+    # place data, zig-zagging up and down in double columns, skipping column 6
+    di = 0
+    right = size - 1
+    while right > 0:
+        if right == 6:
+            right = 5
+        for vert in range(size):
+            for j in range(2):
+                x = right - j
+                upward = ((right + 1) & 2) == 0
+                y = (size - 1 - vert) if upward else vert
+                if not reserved[y][x] and di < len(bitstream):
+                    m[y][x] = bitstream[di]
+                    di += 1
+        right -= 2
+
+    # ----- masking and format/version information -----
+    def mask_fn(k):
+        return (
+            lambda r, c: (r + c) % 2 == 0,
+            lambda r, c: r % 2 == 0,
+            lambda r, c: c % 3 == 0,
+            lambda r, c: (r + c) % 3 == 0,
+            lambda r, c: (r // 2 + c // 3) % 2 == 0,
+            lambda r, c: (r * c) % 2 + (r * c) % 3 == 0,
+            lambda r, c: ((r * c) % 2 + (r * c) % 3) % 2 == 0,
+            lambda r, c: ((r + c) % 2 + (r * c) % 3) % 2 == 0,
+        )[k]
+
+    def fmt_bits(mask):
+        data_ = (0b00 << 3) | mask         # level M is 0b00
+        rem = data_
+        for _ in range(10):
+            rem <<= 1
+            if rem & (1 << 10):
+                rem ^= 0b10100110111
+        return ((data_ << 10) | rem) ^ 0b101010000010010
+
+    def ver_bits(v):
+        rem = v
+        for _ in range(12):
+            rem <<= 1
+            if rem & (1 << 12):
+                rem ^= 0b1111100100101
+        return (v << 12) | rem
+
+    def apply_and_score(mask):
+        g = [row[:] for row in m]
+        for r in range(size):
+            for c in range(size):
+                if not reserved[r][c] and g[r][c] is not None and mask_fn(mask)(r, c):
+                    g[r][c] ^= 1
+        fb = fmt_bits(mask)
+
+        def gb(i):
+            return (fb >> i) & 1
+
+        for i in range(6):
+            g[i][8] = gb(i)
+        g[7][8] = gb(6)
+        g[8][8] = gb(7)
+        g[8][7] = gb(8)
+        for i in range(9, 15):
+            g[8][14 - i] = gb(i)
+        for i in range(8):
+            g[8][size - 1 - i] = gb(i)
+        for i in range(8, 15):
+            g[size - 15 + i][8] = gb(i)
+        g[size - 8][8] = 1
+        if version >= 7:
+            vb = ver_bits(version)
+            for i in range(18):
+                bit = (vb >> i) & 1
+                g[i // 3][size - 11 + i % 3] = bit
+                g[size - 11 + i % 3][i // 3] = bit
+        return g, _qr_penalty(g, size)
+
+    best = None
+    for mask in range(8):
+        g, score = apply_and_score(mask)
+        if best is None or score < best[1]:
+            best = (g, score)
+    return [[bool(v) for v in row] for row in best[0]]
+
+
+def qr_matrix_unicode(matrix, quiet=2):
+    """Render a QR matrix with Unicode half-blocks, two module rows per line."""
+    n = len(matrix)
+    grid = [[False] * (n + quiet * 2) for _ in range(n + quiet * 2)]
+    for r in range(n):
+        for c in range(n):
+            grid[r + quiet][c + quiet] = matrix[r][c]
+    out = []
+    for r in range(0, len(grid), 2):
+        line = []
+        for c in range(len(grid[0])):
+            top = grid[r][c]
+            bot = grid[r + 1][c] if r + 1 < len(grid) else False
+            line.append("█" if top and bot else "▀" if top
+                        else "▄" if bot else " ")
+        out.append("".join(line))
+    return "\n".join(out)
+
+
+def qr_svg(matrix, quiet=4, module=8):
+    """A crisp black-on-white SVG string for `matrix` (a list of bool rows)."""
+    n = len(matrix)
+    side = (n + quiet * 2) * module
+    rects = []
+    for r in range(n):
+        c = 0
+        while c < n:
+            if matrix[r][c]:
+                start = c
+                while c < n and matrix[r][c]:
+                    c += 1
+                rects.append('<rect x="%d" y="%d" width="%d" height="%d"/>' % (
+                    (start + quiet) * module, (r + quiet) * module,
+                    (c - start) * module, module))
+            else:
+                c += 1
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" '
+        'viewBox="0 0 %d %d" shape-rendering="crispEdges" role="img" '
+        'aria-label="QR code">'
+        '<rect width="%d" height="%d" fill="#fff"/>'
+        '<g fill="#000">%s</g></svg>'
+    ) % (side, side, side, side, side, side, "".join(rects))
+
+
+def qr_to_pbm(matrix, scale=4, quiet=4):
+    """A P1 PBM (1 = black) rendering, for verifying with an external decoder."""
+    n = len(matrix)
+    side = (n + quiet * 2) * scale
+    rows = []
+    for r in range(n + quiet * 2):
+        line = []
+        for c in range(n + quiet * 2):
+            on = (quiet <= r < n + quiet and quiet <= c < n + quiet
+                  and matrix[r - quiet][c - quiet])
+            line.extend(["1" if on else "0"] * scale)
+        for _ in range(scale):
+            rows.append(" ".join(line))
+    return "P1\n%d %d\n%s\n" % (side, side, "\n".join(rows))
+
+
+# ----- LAN sync listener ----------------------------------------------------
+#
+# `sync serve` turns a device into a peer for the existing sync machinery over
+# the local network: the encrypted vault file, and nothing else, is offered on a
+# chosen interface, gated by a strong pairing token. The unit moved on the wire
+# is the same sealed container the `dir`/`rsync`/`rclone` transports already
+# move, so this never sees plaintext -- the token authenticates the peer and
+# stops an unauthenticated pull, and every replace is validated as a container
+# and recorded as a security event.
+
+SYNC_MAX_BODY = 64 * 1024 * 1024  # a sealed vault is small; refuse anything huge
+
+
+def sync_serve(vault_path, bind, port, token, channel="default",
+               once=False, idle_timeout=0.0):
+    """Serve the encrypted vault over HTTP on (bind, port), gated by `token`.
+
+    GET returns the sealed container; PUT validates the body is a container and
+    atomically replaces the vault. Single-threaded, so a PUT can never race
+    another request. Returns when `once` has completed a transfer or the idle
+    timeout elapses.
+    """
+    import http.server
+
+    token_bytes = token.encode("utf-8")
+    channel_path = "/spm-%s.gpg" % channel
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def _authed(self):
+            got = self.headers.get("Authorization", "")
+            prefix = "Bearer "
+            if not got.startswith(prefix):
+                return False
+            return hmac.compare_digest(
+                got[len(prefix):].encode("utf-8"), token_bytes)
+
+        def _reply(self, code, body=b"", ctype="text/plain"):
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+
+        def _deny(self):
+            record_event("sync-serve", "fail", "", vault_path)
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", "Bearer")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _wrong_channel(self):
+            self._reply(404, b"no such channel\n")
+
+        def do_GET(self):
+            if not self._authed():
+                return self._deny()
+            if self.path != channel_path:
+                return self._wrong_channel()
+            try:
+                with open(vault_path, "rb") as handle:
+                    body = handle.read()
+            except OSError:
+                return self._reply(404, b"vault not found\n")
+            self._reply(200, body, "application/octet-stream")
+            record_event("sync-serve", "ok", "", vault_path)
+            self.server.spm_transferred = True
+
+        def do_PUT(self):
+            if not self._authed():
+                return self._deny()
+            if self.path != channel_path:
+                return self._wrong_channel()
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            if length <= 0 or length > SYNC_MAX_BODY:
+                return self._reply(413, b"unacceptable body length\n")
+            body = self.rfile.read(length)
+            if not is_container(body):
+                record_event("sync-serve", "fail", "reason=corrupt", vault_path)
+                return self._reply(422, b"not an SPM vault container\n")
+            dest_dir = os.path.dirname(os.path.abspath(vault_path)) or "."
+            tmp_fd, tmp_path = tempfile.mkstemp(prefix=".spm-sync.", dir=dest_dir)
+            try:
+                os.write(tmp_fd, body)
+                os.close(tmp_fd)
+                tmp_fd = -1
+                install_vault_file(tmp_path, vault_path)
+            finally:
+                if tmp_fd != -1:
+                    os.close(tmp_fd)
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            record_event("sync-serve", "ok", "reason=vault-replaced", vault_path)
+            self._reply(204)
+            self.server.spm_transferred = True
+
+        def log_message(self, *args):
+            return
+
+    server = http.server.HTTPServer((bind, port), Handler)
+    server.spm_transferred = False
+    server.timeout = 1.0
+    addr = server.server_address
+    sys.stderr.write("serving channel %s on %s:%d\n"
+                     % (channel, addr[0], addr[1]))
+    sys.stderr.flush()
+    deadline = time.time() + idle_timeout if idle_timeout else None
+    try:
+        while True:
+            if deadline is not None and time.time() >= deadline:
+                break
+            server.handle_request()
+            if once and server.spm_transferred:
+                break
+    finally:
+        server.server_close()
+    return 0
+
+
 def main(argv):
     if len(argv) < 2:
         sys.stderr.write("usage: spm_core.py <command> [args]\n")
@@ -6634,6 +7143,32 @@ def main(argv):
                     sys.stdout.write(json.dumps(
                         {"ok": False, "error": "record not found"}) + "\n")
                     return 1
+        elif command == "sync-serve":
+            # sync-serve <vault> <bind> <port> <token> [channel] [--once]
+            #                                                     [--idle SECONDS]
+            opts = argv[7:] if len(argv) > 7 else []
+            channel = "default"
+            if len(argv) > 6 and argv[6] and not argv[6].startswith("--"):
+                channel = argv[6]
+            elif len(argv) > 6 and argv[6].startswith("--"):
+                opts = argv[6:]
+            idle = 0.0
+            if "--idle" in opts:
+                idle = float(opts[opts.index("--idle") + 1])
+            return sync_serve(argv[2], argv[3], int(argv[4]), argv[5],
+                              channel=channel, once="--once" in opts,
+                              idle_timeout=idle)
+        elif command == "qr":
+            # qr <text> [--svg|--pbm] ; stdout: a scannable QR rendering.
+            # Default is Unicode half-blocks for a terminal; --svg for the web.
+            matrix = qr_encode(argv[2])
+            fmt = argv[3] if len(argv) > 3 else ""
+            if fmt == "--svg":
+                sys.stdout.write(qr_svg(matrix) + "\n")
+            elif fmt == "--pbm":
+                sys.stdout.write(qr_to_pbm(matrix))
+            else:
+                sys.stdout.write(qr_matrix_unicode(matrix) + "\n")
         elif command == "self-test":
             return 0
         else:

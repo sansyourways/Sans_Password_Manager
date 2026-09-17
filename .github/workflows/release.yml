@@ -54,7 +54,8 @@ jobs:
             browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh \
             browser-extension-universal/native_host.py tests/native_host_protocol.py \
             release-archive.sh packaging/termux/build-deb.sh \
-            packaging/homebrew/generate.sh
+            packaging/homebrew/generate.sh packaging/aur/generate.sh \
+            packaging/scoop/generate.sh packaging/nix/generate.sh
           # The tagged spm.sh must be what src/ produces. A tag whose shipped
           # script does not match its own sources is unauditable, and this is
           # the last point at which that can still be caught.
@@ -65,6 +66,8 @@ jobs:
             browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh
           shellcheck -x -S warning spm.sh install.sh build.sh release-archive.sh \
             packaging/termux/build-deb.sh packaging/homebrew/generate.sh \
+            packaging/aur/generate.sh packaging/scoop/generate.sh \
+            packaging/nix/generate.sh \
             tests/regression.sh tests/dco-check.sh \
             browser-extension-universal/build.sh browser-extension-universal/install-host.sh \
             browser-extension-universal/setup.sh browser-extension-universal/extension-id.sh
@@ -102,13 +105,23 @@ jobs:
           # Attached to the release rather than published to a package index:
           # see docs/releases and README for what publishing would additionally
           # require. These are installable today without waiting for that.
+          archive_sha="$(sha256sum "Sans_Password_Manager_v${version}.zip" | cut -d" " -f1)"
           ./packaging/termux/build-deb.sh "$version" .
-          ./packaging/homebrew/generate.sh "$version" \
-            "$(sha256sum "Sans_Password_Manager_v${version}.zip" | cut -d" " -f1)" \
-            > spm.rb
+          ./packaging/homebrew/generate.sh "$version" "$archive_sha" > spm.rb
+          ./packaging/aur/generate.sh   "$version" "$archive_sha" > PKGBUILD
+          ./packaging/scoop/generate.sh "$version" "$archive_sha" > spm.json
+          ./packaging/nix/generate.sh   "$version" "$archive_sha" > default.nix
           sha256sum "spm_${version}_all.deb" > "spm_${version}_all.deb.sha256"
+          # Each generated manifest must name the release and pin the one
+          # archive's checksum, or it would install something other than what
+          # this workflow just built.
           grep -q "^class Spm < Formula$" spm.rb
           grep -q "$version" spm.rb
+          grep -q "^pkgver=$version$" PKGBUILD
+          grep -q "$archive_sha" PKGBUILD
+          python3 -c "import json,sys; d=json.load(open('spm.json')); assert d['version']=='$version'; assert d['hash']=='$archive_sha'"
+          grep -q "version = \"$version\"" default.nix
+          grep -q "$archive_sha" default.nix
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v4
@@ -132,12 +145,14 @@ jobs:
           notes="docs/releases/${version}.md"
           if test -f "$notes"; then
             gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" \
-              "spm_${version}_all.deb" "spm_${version}_all.deb.sha256" spm.rb \
+              "spm_${version}_all.deb" "spm_${version}_all.deb.sha256" \
+              spm.rb PKGBUILD spm.json default.nix \
               --verify-tag --title "Sans Password Manager $version" \
               --notes-file "$notes"
           else
             gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" \
-              "spm_${version}_all.deb" "spm_${version}_all.deb.sha256" spm.rb \
+              "spm_${version}_all.deb" "spm_${version}_all.deb.sha256" \
+              spm.rb PKGBUILD spm.json default.nix \
               --verify-tag --title "Sans Password Manager $version" \
               --generate-notes
           fi

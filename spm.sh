@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.2.0"
+VERSION="5.3.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -1525,7 +1525,7 @@ EVENT_RETENTION_DEFAULT = 500
 # attempts into one would be the log lying about the thing it is for.
 EVENT_COALESCE_DEFAULT = 60
 EVENT_KINDS = ("unlock", "write", "rewrap", "recover", "restore", "archive",
-               "hardware", "secret-key")
+               "hardware", "secret-key", "sync-serve")
 EVENT_OUTCOMES = ("ok", "fail")
 # Details are key=value with both sides constrained, rather than free text.
 # Free text is how a label ends up in a log one day: someone adds a helpful
@@ -6699,6 +6699,515 @@ def _record_values_in():
     return values
 
 
+# ----- QR encoder -----------------------------------------------------------
+#
+# A pure-Python QR encoder (byte mode, error-correction level M, versions 1-10)
+# so a device-pairing string can be shown as a scannable code on the terminal
+# and in the dashboard with no third-party dependency, matching SPM's rule of
+# leaning only on the standard library and system tools. The same boolean matrix
+# feeds the terminal (Unicode half-blocks) and the web (an SVG). Level M and up
+# to version 10 comfortably hold a `spm-sync://host:port/channel?token=...`
+# pairing string.
+
+# (total data codewords, ec codewords per block, [(num blocks, data cw per block)])
+_QR_M = {
+    1:  (16,  10, [(1, 16)]),
+    2:  (28,  16, [(1, 28)]),
+    3:  (44,  26, [(1, 44)]),
+    4:  (64,  18, [(2, 32)]),
+    5:  (86,  24, [(2, 43)]),
+    6:  (108, 16, [(4, 27)]),
+    7:  (124, 18, [(4, 31)]),
+    8:  (154, 22, [(2, 38), (2, 39)]),
+    9:  (182, 22, [(3, 36), (2, 37)]),
+    10: (216, 26, [(4, 43), (1, 44)]),
+}
+# Alignment-pattern centre coordinates per version (empty for v1).
+_QR_ALIGN = {
+    1: [], 2: [6, 18], 3: [6, 22], 4: [6, 26], 5: [6, 30], 6: [6, 34],
+    7: [6, 22, 38], 8: [6, 24, 42], 9: [6, 26, 46], 10: [6, 28, 50],
+}
+
+
+def _qr_gf_tables():
+    # GF(256) exp/log tables (primitive polynomial 0x11d) for Reed-Solomon.
+    exp = [0] * 512
+    log = [0] * 256
+    x = 1
+    for i in range(255):
+        exp[i] = x
+        log[x] = i
+        x <<= 1
+        if x & 0x100:
+            x ^= 0x11d
+    for i in range(255, 512):
+        exp[i] = exp[i - 255]
+    return exp, log
+
+
+_QR_GF_EXP, _QR_GF_LOG = _qr_gf_tables()
+
+
+def _qr_gf_mul(a, b):
+    if a == 0 or b == 0:
+        return 0
+    return _QR_GF_EXP[_QR_GF_LOG[a] + _QR_GF_LOG[b]]
+
+
+def _qr_rs_generator(n):
+    g = [1]
+    for i in range(n):
+        g2 = [0] * (len(g) + 1)
+        for j, c in enumerate(g):
+            g2[j] ^= c
+            g2[j + 1] ^= _qr_gf_mul(c, _QR_GF_EXP[i])
+        g = g2
+    return g
+
+
+def _qr_rs_ec(data, n):
+    # The generator is monic of degree n (n+1 coefficients); the remainder is
+    # computed against its n non-leading coefficients.
+    gen = _qr_rs_generator(n)[1:]
+    rem = [0] * n
+    for d in data:
+        factor = d ^ rem[0]
+        rem = rem[1:] + [0]
+        for i in range(n):
+            rem[i] ^= _qr_gf_mul(gen[i], factor)
+    return rem
+
+
+def _qr_penalty(g, size):
+    total = 0
+    # rule 1: runs of five or more same-colour modules in a line
+    for line in list(g) + [[g[r][c] for r in range(size)] for c in range(size)]:
+        run = 1
+        for i in range(1, size):
+            if line[i] == line[i - 1]:
+                run += 1
+            else:
+                if run >= 5:
+                    total += 3 + (run - 5)
+                run = 1
+        if run >= 5:
+            total += 3 + (run - 5)
+    # rule 2: 2x2 blocks of one colour
+    for r in range(size - 1):
+        for c in range(size - 1):
+            if g[r][c] == g[r][c + 1] == g[r + 1][c] == g[r + 1][c + 1]:
+                total += 3
+    # rule 3: finder-like 1:1:3:1:1 patterns
+    pat1 = [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0]
+    pat2 = [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1]
+    for r in range(size):
+        for c in range(size - 10):
+            seg = [g[r][c + k] for k in range(11)]
+            if seg == pat1 or seg == pat2:
+                total += 40
+    for c in range(size):
+        for r in range(size - 10):
+            seg = [g[r + k][c] for k in range(11)]
+            if seg == pat1 or seg == pat2:
+                total += 40
+    # rule 4: overall dark proportion
+    dark = sum(sum(1 for v in row if v) for row in g)
+    ratio = dark * 100 // (size * size)
+    total += abs(ratio - 50) // 5 * 10
+    return total
+
+
+def qr_encode(text):
+    """A boolean matrix (list of bool rows) encoding `text` as a QR symbol,
+    byte mode, error-correction level M. Raises ValueError if the text will not
+    fit in a version-10 symbol."""
+    data = text.encode("utf-8")
+    version = None
+    for v in range(1, 11):
+        total_data, _ecpb, _blocks = _QR_M[v]
+        count_bits = 8 if v <= 9 else 16
+        if 4 + count_bits + len(data) * 8 <= total_data * 8:
+            version = v
+            break
+    if version is None:
+        raise ValueError("data too long for a version-10 QR code")
+    total_data, ec_per_block, blocks = _QR_M[version]
+    count_bits = 8 if version <= 9 else 16
+
+    # ----- data bitstream -----
+    bits = []
+
+    def put(value, length):
+        for i in range(length - 1, -1, -1):
+            bits.append((value >> i) & 1)
+
+    put(0b0100, 4)                 # byte mode
+    put(len(data), count_bits)
+    for b in data:
+        put(b, 8)
+    cap = total_data * 8
+    put(0, min(4, cap - len(bits)))            # terminator
+    while len(bits) % 8:                        # pad up to a whole codeword
+        bits.append(0)
+    codewords = [int("".join(str(b) for b in bits[i:i + 8]), 2)
+                 for i in range(0, len(bits), 8)]
+    pad = [0xEC, 0x11]
+    i = 0
+    while len(codewords) < total_data:
+        codewords.append(pad[i % 2])
+        i += 1
+
+    # ----- split into blocks, add error correction, interleave -----
+    data_blocks, ec_blocks = [], []
+    pos = 0
+    for (num, dcount) in blocks:
+        for _ in range(num):
+            blk = codewords[pos:pos + dcount]
+            pos += dcount
+            data_blocks.append(blk)
+            ec_blocks.append(_qr_rs_ec(blk, ec_per_block))
+    final = []
+    maxd = max(len(b) for b in data_blocks)
+    for c in range(maxd):
+        for b in data_blocks:
+            if c < len(b):
+                final.append(b[c])
+    for c in range(ec_per_block):
+        for b in ec_blocks:
+            final.append(b[c])
+    bitstream = []
+    for cw in final:
+        for i in range(7, -1, -1):
+            bitstream.append((cw >> i) & 1)
+
+    # ----- function patterns -----
+    size = 17 + version * 4
+    m = [[None] * size for _ in range(size)]
+    reserved = [[False] * size for _ in range(size)]
+
+    def place_finder(r, c):
+        for dr in range(-1, 8):
+            for dc in range(-1, 8):
+                rr, cc = r + dr, c + dc
+                if 0 <= rr < size and 0 <= cc < size:
+                    on = (0 <= dr <= 6 and 0 <= dc <= 6 and
+                          (dr in (0, 6) or dc in (0, 6) or
+                           (2 <= dr <= 4 and 2 <= dc <= 4)))
+                    m[rr][cc] = 1 if on else 0
+                    reserved[rr][cc] = True
+
+    place_finder(0, 0)
+    place_finder(0, size - 7)
+    place_finder(size - 7, 0)
+
+    # timing patterns
+    for i in range(size):
+        if m[6][i] is None:
+            m[6][i] = 1 if i % 2 == 0 else 0
+            reserved[6][i] = True
+        if m[i][6] is None:
+            m[i][6] = 1 if i % 2 == 0 else 0
+            reserved[i][6] = True
+
+    # alignment patterns: every centre-coordinate combination except the three
+    # that coincide with the finder patterns (a placed one may cross a timing line)
+    centres = _QR_ALIGN[version]
+    if centres:
+        lo, hi = centres[0], centres[-1]
+        skip = {(lo, lo), (lo, hi), (hi, lo)}
+        for r in centres:
+            for c in centres:
+                if (r, c) in skip:
+                    continue
+                for dr in range(-2, 3):
+                    for dc in range(-2, 3):
+                        on = dr in (-2, 2) or dc in (-2, 2) or (dr == 0 and dc == 0)
+                        m[r + dr][c + dc] = 1 if on else 0
+                        reserved[r + dr][c + dc] = True
+
+    # dark module, then reserve the format and version information areas
+    m[size - 8][8] = 1
+    reserved[size - 8][8] = True
+    for i in range(9):
+        for (r, c) in ((8, i), (i, 8)):
+            if 0 <= r < size and 0 <= c < size:
+                reserved[r][c] = True
+    for i in range(8):
+        reserved[8][size - 1 - i] = True
+        reserved[size - 1 - i][8] = True
+    if version >= 7:
+        for i in range(6):
+            for j in range(3):
+                reserved[i][size - 11 + j] = True
+                reserved[size - 11 + j][i] = True
+
+    # place data, zig-zagging up and down in double columns, skipping column 6
+    di = 0
+    right = size - 1
+    while right > 0:
+        if right == 6:
+            right = 5
+        for vert in range(size):
+            for j in range(2):
+                x = right - j
+                upward = ((right + 1) & 2) == 0
+                y = (size - 1 - vert) if upward else vert
+                if not reserved[y][x] and di < len(bitstream):
+                    m[y][x] = bitstream[di]
+                    di += 1
+        right -= 2
+
+    # ----- masking and format/version information -----
+    def mask_fn(k):
+        return (
+            lambda r, c: (r + c) % 2 == 0,
+            lambda r, c: r % 2 == 0,
+            lambda r, c: c % 3 == 0,
+            lambda r, c: (r + c) % 3 == 0,
+            lambda r, c: (r // 2 + c // 3) % 2 == 0,
+            lambda r, c: (r * c) % 2 + (r * c) % 3 == 0,
+            lambda r, c: ((r * c) % 2 + (r * c) % 3) % 2 == 0,
+            lambda r, c: ((r + c) % 2 + (r * c) % 3) % 2 == 0,
+        )[k]
+
+    def fmt_bits(mask):
+        data_ = (0b00 << 3) | mask         # level M is 0b00
+        rem = data_
+        for _ in range(10):
+            rem <<= 1
+            if rem & (1 << 10):
+                rem ^= 0b10100110111
+        return ((data_ << 10) | rem) ^ 0b101010000010010
+
+    def ver_bits(v):
+        rem = v
+        for _ in range(12):
+            rem <<= 1
+            if rem & (1 << 12):
+                rem ^= 0b1111100100101
+        return (v << 12) | rem
+
+    def apply_and_score(mask):
+        g = [row[:] for row in m]
+        for r in range(size):
+            for c in range(size):
+                if not reserved[r][c] and g[r][c] is not None and mask_fn(mask)(r, c):
+                    g[r][c] ^= 1
+        fb = fmt_bits(mask)
+
+        def gb(i):
+            return (fb >> i) & 1
+
+        for i in range(6):
+            g[i][8] = gb(i)
+        g[7][8] = gb(6)
+        g[8][8] = gb(7)
+        g[8][7] = gb(8)
+        for i in range(9, 15):
+            g[8][14 - i] = gb(i)
+        for i in range(8):
+            g[8][size - 1 - i] = gb(i)
+        for i in range(8, 15):
+            g[size - 15 + i][8] = gb(i)
+        g[size - 8][8] = 1
+        if version >= 7:
+            vb = ver_bits(version)
+            for i in range(18):
+                bit = (vb >> i) & 1
+                g[i // 3][size - 11 + i % 3] = bit
+                g[size - 11 + i % 3][i // 3] = bit
+        return g, _qr_penalty(g, size)
+
+    best = None
+    for mask in range(8):
+        g, score = apply_and_score(mask)
+        if best is None or score < best[1]:
+            best = (g, score)
+    return [[bool(v) for v in row] for row in best[0]]
+
+
+def qr_matrix_unicode(matrix, quiet=2):
+    """Render a QR matrix with Unicode half-blocks, two module rows per line."""
+    n = len(matrix)
+    grid = [[False] * (n + quiet * 2) for _ in range(n + quiet * 2)]
+    for r in range(n):
+        for c in range(n):
+            grid[r + quiet][c + quiet] = matrix[r][c]
+    out = []
+    for r in range(0, len(grid), 2):
+        line = []
+        for c in range(len(grid[0])):
+            top = grid[r][c]
+            bot = grid[r + 1][c] if r + 1 < len(grid) else False
+            line.append("█" if top and bot else "▀" if top
+                        else "▄" if bot else " ")
+        out.append("".join(line))
+    return "\n".join(out)
+
+
+def qr_svg(matrix, quiet=4, module=8):
+    """A crisp black-on-white SVG string for `matrix` (a list of bool rows)."""
+    n = len(matrix)
+    side = (n + quiet * 2) * module
+    rects = []
+    for r in range(n):
+        c = 0
+        while c < n:
+            if matrix[r][c]:
+                start = c
+                while c < n and matrix[r][c]:
+                    c += 1
+                rects.append('<rect x="%d" y="%d" width="%d" height="%d"/>' % (
+                    (start + quiet) * module, (r + quiet) * module,
+                    (c - start) * module, module))
+            else:
+                c += 1
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" '
+        'viewBox="0 0 %d %d" shape-rendering="crispEdges" role="img" '
+        'aria-label="QR code">'
+        '<rect width="%d" height="%d" fill="#fff"/>'
+        '<g fill="#000">%s</g></svg>'
+    ) % (side, side, side, side, side, side, "".join(rects))
+
+
+def qr_to_pbm(matrix, scale=4, quiet=4):
+    """A P1 PBM (1 = black) rendering, for verifying with an external decoder."""
+    n = len(matrix)
+    side = (n + quiet * 2) * scale
+    rows = []
+    for r in range(n + quiet * 2):
+        line = []
+        for c in range(n + quiet * 2):
+            on = (quiet <= r < n + quiet and quiet <= c < n + quiet
+                  and matrix[r - quiet][c - quiet])
+            line.extend(["1" if on else "0"] * scale)
+        for _ in range(scale):
+            rows.append(" ".join(line))
+    return "P1\n%d %d\n%s\n" % (side, side, "\n".join(rows))
+
+
+# ----- LAN sync listener ----------------------------------------------------
+#
+# `sync serve` turns a device into a peer for the existing sync machinery over
+# the local network: the encrypted vault file, and nothing else, is offered on a
+# chosen interface, gated by a strong pairing token. The unit moved on the wire
+# is the same sealed container the `dir`/`rsync`/`rclone` transports already
+# move, so this never sees plaintext -- the token authenticates the peer and
+# stops an unauthenticated pull, and every replace is validated as a container
+# and recorded as a security event.
+
+SYNC_MAX_BODY = 64 * 1024 * 1024  # a sealed vault is small; refuse anything huge
+
+
+def sync_serve(vault_path, bind, port, token, channel="default",
+               once=False, idle_timeout=0.0):
+    """Serve the encrypted vault over HTTP on (bind, port), gated by `token`.
+
+    GET returns the sealed container; PUT validates the body is a container and
+    atomically replaces the vault. Single-threaded, so a PUT can never race
+    another request. Returns when `once` has completed a transfer or the idle
+    timeout elapses.
+    """
+    import http.server
+
+    token_bytes = token.encode("utf-8")
+    channel_path = "/spm-%s.gpg" % channel
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def _authed(self):
+            got = self.headers.get("Authorization", "")
+            prefix = "Bearer "
+            if not got.startswith(prefix):
+                return False
+            return hmac.compare_digest(
+                got[len(prefix):].encode("utf-8"), token_bytes)
+
+        def _reply(self, code, body=b"", ctype="text/plain"):
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+
+        def _deny(self):
+            record_event("sync-serve", "fail", "", vault_path)
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", "Bearer")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _wrong_channel(self):
+            self._reply(404, b"no such channel\n")
+
+        def do_GET(self):
+            if not self._authed():
+                return self._deny()
+            if self.path != channel_path:
+                return self._wrong_channel()
+            try:
+                with open(vault_path, "rb") as handle:
+                    body = handle.read()
+            except OSError:
+                return self._reply(404, b"vault not found\n")
+            self._reply(200, body, "application/octet-stream")
+            record_event("sync-serve", "ok", "", vault_path)
+            self.server.spm_transferred = True
+
+        def do_PUT(self):
+            if not self._authed():
+                return self._deny()
+            if self.path != channel_path:
+                return self._wrong_channel()
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            if length <= 0 or length > SYNC_MAX_BODY:
+                return self._reply(413, b"unacceptable body length\n")
+            body = self.rfile.read(length)
+            if not is_container(body):
+                record_event("sync-serve", "fail", "reason=corrupt", vault_path)
+                return self._reply(422, b"not an SPM vault container\n")
+            dest_dir = os.path.dirname(os.path.abspath(vault_path)) or "."
+            tmp_fd, tmp_path = tempfile.mkstemp(prefix=".spm-sync.", dir=dest_dir)
+            try:
+                os.write(tmp_fd, body)
+                os.close(tmp_fd)
+                tmp_fd = -1
+                install_vault_file(tmp_path, vault_path)
+            finally:
+                if tmp_fd != -1:
+                    os.close(tmp_fd)
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            record_event("sync-serve", "ok", "reason=vault-replaced", vault_path)
+            self._reply(204)
+            self.server.spm_transferred = True
+
+        def log_message(self, *args):
+            return
+
+    server = http.server.HTTPServer((bind, port), Handler)
+    server.spm_transferred = False
+    server.timeout = 1.0
+    addr = server.server_address
+    sys.stderr.write("serving channel %s on %s:%d\n"
+                     % (channel, addr[0], addr[1]))
+    sys.stderr.flush()
+    deadline = time.time() + idle_timeout if idle_timeout else None
+    try:
+        while True:
+            if deadline is not None and time.time() >= deadline:
+                break
+            server.handle_request()
+            if once and server.spm_transferred:
+                break
+    finally:
+        server.server_close()
+    return 0
+
+
 def main(argv):
     if len(argv) < 2:
         sys.stderr.write("usage: spm_core.py <command> [args]\n")
@@ -7445,6 +7954,32 @@ def main(argv):
                     sys.stdout.write(json.dumps(
                         {"ok": False, "error": "record not found"}) + "\n")
                     return 1
+        elif command == "sync-serve":
+            # sync-serve <vault> <bind> <port> <token> [channel] [--once]
+            #                                                     [--idle SECONDS]
+            opts = argv[7:] if len(argv) > 7 else []
+            channel = "default"
+            if len(argv) > 6 and argv[6] and not argv[6].startswith("--"):
+                channel = argv[6]
+            elif len(argv) > 6 and argv[6].startswith("--"):
+                opts = argv[6:]
+            idle = 0.0
+            if "--idle" in opts:
+                idle = float(opts[opts.index("--idle") + 1])
+            return sync_serve(argv[2], argv[3], int(argv[4]), argv[5],
+                              channel=channel, once="--once" in opts,
+                              idle_timeout=idle)
+        elif command == "qr":
+            # qr <text> [--svg|--pbm] ; stdout: a scannable QR rendering.
+            # Default is Unicode half-blocks for a terminal; --svg for the web.
+            matrix = qr_encode(argv[2])
+            fmt = argv[3] if len(argv) > 3 else ""
+            if fmt == "--svg":
+                sys.stdout.write(qr_svg(matrix) + "\n")
+            elif fmt == "--pbm":
+                sys.stdout.write(qr_to_pbm(matrix))
+            else:
+                sys.stdout.write(qr_matrix_unicode(matrix) + "\n")
         elif command == "self-test":
             return 0
         else:
@@ -13327,7 +13862,49 @@ sync_rsync() {
 
 
 sync_transport_names() {
-	printf 'dir rsync rclone'
+	printf 'dir rsync rclone p2p'
+}
+
+# The pairing token for the `p2p` transport. Set by cmd_sync from --token, the
+# SPM_SYNC_P2P_TOKEN environment variable, or a scanned pairing string, and read
+# by the fetch/publish branches as the Bearer credential. Never printed.
+SYNC_P2P_TOKEN=""
+
+# Best-effort LAN address for a pairing string: the source address the kernel
+# would use to reach off-box, falling back to the first configured address and
+# finally to loopback.
+sync_lan_address() {
+	local addr=""
+	if command -v ip >/dev/null 2>&1; then
+		addr="$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.][0-9.]*\).*/\1/p' | head -n1)"
+	fi
+	if [ -z "$addr" ] && command -v hostname >/dev/null 2>&1; then
+		addr="$(hostname -I 2>/dev/null | awk '{print $1}')"
+	fi
+	[ -n "$addr" ] || addr="127.0.0.1"
+	printf '%s' "$addr"
+}
+
+# Parse a `spm-sync://host:port/channel?token=...` pairing string, echoing
+# "host:port<TAB>channel<TAB>token". Any field may be empty if absent.
+sync_p2p_parse() {
+	local url="$1" rest hostport after channel token
+	rest="${url#spm-sync://}"
+	hostport="${rest%%/*}"
+	after=""
+	case "$rest" in
+		*/*) after="${rest#*/}" ;;
+	esac
+	channel="${after%%\?*}"
+	token=""
+	case "$after" in
+		*\?*)
+			token="${after#*\?}"
+			# take only the token= parameter, whichever position it holds
+			token="$(printf '%s' "$token" | tr '&' '\n' | sed -n 's/^token=//p' | head -n1)"
+			;;
+	esac
+	printf '%s\t%s\t%s' "$hostport" "$channel" "$token"
 }
 
 sync_known_transport() {
@@ -13367,6 +13944,16 @@ sync_transport_probe() {
 			rclone lsf "$target" >/dev/null 2>&1 \
 				|| die "Cannot reach rclone target '$target'. Is the remote configured?"
 			;;
+		p2p)
+			require_cmd curl
+			printf '%s' "$target" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9.-]*:[0-9]{1,5}$' \
+				|| die "A p2p target looks like host:port."
+			# Any HTTP answer proves the peer is up; the listener replies 401 to
+			# an unauthenticated probe, which is reachable, not a failure.
+			curl -sS -o /dev/null --max-time "${SPM_SYNC_P2P_TIMEOUT:-10}" \
+				"http://$target/" >/dev/null 2>&1 \
+				|| die "Cannot reach p2p peer '$target'."
+			;;
 		*) die "Unknown sync transport: $transport" ;;
 	esac
 }
@@ -13389,6 +13976,20 @@ sync_transport_fetch() {
 			rclone lsf "$remote" >/dev/null 2>&1 || return 1
 			rclone copyto "$remote" "$dest" >/dev/null 2>&1 \
 				|| die "Cannot read the remote vault."
+			;;
+		p2p)
+			require_cmd curl
+			local code
+			code="$(curl -sS -o "$dest" -w '%{http_code}' \
+				--max-time "${SPM_SYNC_P2P_TIMEOUT:-30}" \
+				-H "Authorization: Bearer $SYNC_P2P_TOKEN" "$remote" 2>/dev/null)" \
+				|| die "Cannot reach the p2p peer."
+			case "$code" in
+				200) ;;
+				404) return 1 ;;
+				401|403) die "The p2p peer rejected the pairing token." ;;
+				*) die "The p2p peer returned HTTP $code." ;;
+			esac
 			;;
 		*) die "Unknown sync transport: $transport" ;;
 	esac
@@ -13428,6 +14029,22 @@ sync_transport_publish() {
 			rclone copyto "$src" "$remote" >/dev/null 2>&1 \
 				|| die "Cannot write to the rclone target."
 			;;
+		p2p)
+			require_cmd curl
+			local code
+			code="$(curl -sS -o /dev/null -w '%{http_code}' \
+				--max-time "${SPM_SYNC_P2P_TIMEOUT:-30}" \
+				-X PUT --data-binary @"$src" \
+				-H "Content-Type: application/octet-stream" \
+				-H "Authorization: Bearer $SYNC_P2P_TOKEN" "$remote" 2>/dev/null)" \
+				|| die "Cannot reach the p2p peer."
+			case "$code" in
+				200|204) ;;
+				401|403) die "The p2p peer rejected the pairing token." ;;
+				422) die "The p2p peer rejected the upload as not an SPM vault." ;;
+				*) die "The p2p peer returned HTTP $code on push." ;;
+			esac
+			;;
 		*) die "Unknown sync transport: $transport" ;;
 	esac
 }
@@ -13440,7 +14057,14 @@ sync_paths() {
 	# name are not, and must not share a base digest.
 	target_id="$(printf '%s\t%s\t%s' "$transport" "$target" "$channel" | sha256sum | awk '{print substr($1,1,16)}')"
 	mkdir -p "$SPM_CONFIG_DIR"; chmod 700 "$SPM_CONFIG_DIR" 2>/dev/null || true
-	SYNC_REMOTE="$target/spm-$channel.gpg"; SYNC_STATE="$SPM_CONFIG_DIR/sync-$target_id.base-sha256"
+	# p2p reaches an HTTP listener, not a filesystem path; the channel is a URL
+	# path segment there, matching the listener's /spm-<channel>.gpg route.
+	if [ "$transport" = "p2p" ]; then
+		SYNC_REMOTE="http://$target/spm-$channel.gpg"
+	else
+		SYNC_REMOTE="$target/spm-$channel.gpg"
+	fi
+	SYNC_STATE="$SPM_CONFIG_DIR/sync-$target_id.base-sha256"
 }
 
 write_sync_state() {
@@ -13451,13 +14075,46 @@ write_sync_state() {
 }
 
 sync_usage() {
-	printf 'Usage: %s sync status|push|pull <target> [channel] [--transport %s]\n' \
+	printf 'Usage: %s sync status|push|pull <target> [channel] [--transport %s] [--token TOKEN]\n' \
 		"$0" "$(sync_transport_names | tr ' ' '|')"
+	printf '       %s sync serve [--bind ADDR] [--port PORT] [--channel NAME] [--token TOKEN] [--once]\n' "$0"
+	printf '\nFor the p2p transport a target may be host:port or a scanned\n'
+	printf 'spm-sync://host:port/channel?token=... pairing string.\n'
+}
+
+# `sync serve`: turn this device into a LAN sync peer. Generates a pairing token
+# (unless one is supplied), prints the pairing string and its QR, then runs the
+# listener from the core. The encrypted vault is what travels; the token gates it.
+sync_serve_action() {
+	local channel="$1" bind="$2" port="$3" token="$4" once="$5" idle="$6"
+	local pairing extra="" lanhost
+	[ -n "$bind" ] || bind="0.0.0.0"
+	[ -n "$port" ] || port="8788"
+	[ -n "$channel" ] || channel="default"
+	printf '%s' "$channel" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' \
+		|| die "Invalid sync channel."
+	printf '%s' "$port" | grep -Eq '^[0-9]{1,5}$' || die "Invalid port."
+	[ -f "$VAULT_FILE" ] || die "No vault to serve."
+	if [ -z "$token" ]; then
+		require_cmd openssl
+		token="$(openssl rand -hex 24)" || die "Cannot generate a pairing token."
+	fi
+	lanhost="$(sync_lan_address)"
+	pairing="spm-sync://$lanhost:$port/$channel?token=$token"
+	printf 'Pairing string (scan the QR or paste it on the other device):\n\n  %s\n\n' "$pairing"
+	core qr "$pairing" || true
+	printf '\nThe encrypted vault is offered on %s:%s for channel "%s".\n' "$bind" "$port" "$channel"
+	printf 'The pairing token above is required; press Ctrl-C to stop.\n\n'
+	[ "$once" = "1" ] && extra="--once"
+	# shellcheck disable=SC2086
+	core sync-serve "$VAULT_FILE" "$bind" "$port" "$token" "$channel" $extra \
+		${idle:+--idle "$idle"}
 }
 
 cmd_sync() {
 	local action="" target="" channel="default" transport="dir"
 	local positional=0 local_sha remote_sha base_sha tmp fetched rc
+	local bind="" port="" token_opt="" once=0 idle="" channel_set=0
 
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
@@ -13465,13 +14122,34 @@ cmd_sync() {
 				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --transport."; }
 				transport="$2"; shift 2 ;;
 			--transport=*) transport="${1#--transport=}"; shift ;;
+			--token)
+				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --token."; }
+				token_opt="$2"; shift 2 ;;
+			--token=*) token_opt="${1#--token=}"; shift ;;
+			--bind)
+				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --bind."; }
+				bind="$2"; shift 2 ;;
+			--bind=*) bind="${1#--bind=}"; shift ;;
+			--port)
+				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --port."; }
+				port="$2"; shift 2 ;;
+			--port=*) port="${1#--port=}"; shift ;;
+			--channel)
+				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --channel."; }
+				channel="$2"; channel_set=1; shift 2 ;;
+			--channel=*) channel="${1#--channel=}"; channel_set=1; shift ;;
+			--once) once=1; shift ;;
+			--idle)
+				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --idle."; }
+				idle="$2"; shift 2 ;;
+			--idle=*) idle="${1#--idle=}"; shift ;;
 			-h|--help) sync_usage; return ;;
 			-*) sync_usage >&2; die "Unknown option: $1" ;;
 			*)
 				case "$positional" in
 					0) action="$1" ;;
 					1) target="$1" ;;
-					2) channel="$1" ;;
+					2) channel="$1"; channel_set=1 ;;
 					*) sync_usage >&2; die "Unexpected argument: $1" ;;
 				esac
 				positional=$((positional + 1)); shift ;;
@@ -13479,6 +14157,14 @@ cmd_sync() {
 	done
 
 	[ -n "$action" ] || { sync_usage >&2; return 1; }
+
+	# `serve` needs no target or transport: it runs the listener on this device.
+	if [ "$action" = "serve" ]; then
+		[ -z "$target" ] || { sync_usage >&2; die "sync serve takes no target."; }
+		sync_serve_action "$channel" "$bind" "$port" "$token_opt" "$once" "$idle"
+		return
+	fi
+
 	sync_known_transport "$transport" \
 		|| { sync_usage >&2; die "Unknown sync transport: $transport"; }
 	case "$action" in
@@ -13492,6 +14178,33 @@ cmd_sync() {
 	if [ "$transport" = "dir" ]; then
 		mkdir -p "$target" || die "Cannot create sync target."
 		target="$(canon_path "$target")"
+	fi
+
+	# p2p reaches an HTTP listener. The target may be a bare host:port or a
+	# scanned spm-sync://host:port/channel?token=... pairing string; the token
+	# comes from --token, that string, or SPM_SYNC_P2P_TOKEN, in that order.
+	if [ "$transport" = "p2p" ]; then
+		local parsed p_hostport p_channel p_token
+		case "$target" in
+			spm-sync://*)
+				parsed="$(sync_p2p_parse "$target")"
+				p_hostport="$(printf '%s' "$parsed" | cut -f1)"
+				p_channel="$(printf '%s' "$parsed" | cut -f2)"
+				p_token="$(printf '%s' "$parsed" | cut -f3)"
+				target="$p_hostport"
+				[ -n "$p_channel" ] && [ "$channel_set" -eq 0 ] && channel="$p_channel"
+				;;
+			*) p_token="" ;;
+		esac
+		if [ -n "$token_opt" ]; then
+			SYNC_P2P_TOKEN="$token_opt"
+		elif [ -n "$p_token" ]; then
+			SYNC_P2P_TOKEN="$p_token"
+		elif [ -n "${SPM_SYNC_P2P_TOKEN:-}" ]; then
+			SYNC_P2P_TOKEN="$SPM_SYNC_P2P_TOKEN"
+		else
+			die "A p2p pairing token is required (--token, a pairing string, or SPM_SYNC_P2P_TOKEN)."
+		fi
 	fi
 	# Before any decision. An unreachable target must fail here; further down it
 	# would be indistinguishable from a remote that is merely empty, which is
@@ -15532,6 +16245,7 @@ WEB_CATALOGUES = {
         "nav.security": "Security",
         "nav.settings": "Settings",
         "nav.sharing": "Sharing",
+        "nav.sync": "Sync",
         "nav.transfer": "Export / Import",
         "nav.trash": "Trash",
         "nav.unlock": "Biometric Unlock",
@@ -15754,6 +16468,19 @@ WEB_CATALOGUES = {
         "ssh.sealed": "The private half is passphrase-protected",
         "ssh.type": "Type",
         "ssh.unreadable": "SPM cannot derive anything from this key",
+        "sync.allow_put": "Accept an incoming vault from the paired device",
+        "sync.desc": "Pair another device on your network to sync this vault. The encrypted vault travels; the pairing token gates it.",
+        "sync.expires": "Expires in",
+        "sync.incoming": "Incoming pushes",
+        "sync.note": "These sync routes answer only on the interface this dashboard is bound to. A dashboard bound to 127.0.0.1 pairs only with the same computer; bind it to a LAN address to pair with other devices on your network.",
+        "sync.note.h": "On this server",
+        "sync.pair.h": "Pair a device",
+        "sync.seconds": "seconds",
+        "sync.start": "Start pairing",
+        "sync.stop": "Stop pairing",
+        "sync.string": "Pairing string",
+        "sync.sub": "Pair a device over the local network and sync this vault, offline and server-less.",
+        "sync.window": "This pairing code is valid for a few minutes. Scan it on the other device, or paste the string below.",
         "table.actions": "Actions",
         "table.algo": "Algo",
         "table.every": "Every",
@@ -16083,6 +16810,7 @@ WEB_CATALOGUES = {
         "nav.security": "\u0627\u0644\u0623\u0645\u0627\u0646",
         "nav.settings": "\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a",
         "nav.sharing": "\u0627\u0644\u0645\u0634\u0627\u0631\u0643\u0629",
+        "nav.sync": "\u0627\u0644\u0645\u0632\u0627\u0645\u0646\u0629",
         "nav.transfer": "\u062a\u0635\u062f\u064a\u0631 / \u0627\u0633\u062a\u064a\u0631\u0627\u062f",
         "nav.trash": "\u0627\u0644\u0645\u0647\u0645\u0644\u0627\u062a",
         "nav.unlock": "\u0641\u062a\u062d \u0627\u0644\u0642\u0641\u0644 \u0628\u0627\u0644\u0628\u0635\u0645\u0629",
@@ -16305,6 +17033,19 @@ WEB_CATALOGUES = {
         "ssh.sealed": "\u0627\u0644\u062c\u0632\u0621 \u0627\u0644\u062e\u0627\u0635 \u0645\u062d\u0645\u064a \u0628\u0639\u0628\u0627\u0631\u0629 \u0645\u0631\u0648\u0631",
         "ssh.type": "\u0627\u0644\u0646\u0648\u0639",
         "ssh.unreadable": "\u0644\u0627 \u064a\u0633\u062a\u0637\u064a\u0639 SPM \u0627\u0634\u062a\u0642\u0627\u0642 \u0623\u064a \u0634\u064a\u0621 \u0645\u0646 \u0647\u0630\u0627 \u0627\u0644\u0645\u0641\u062a\u0627\u062d",
+        "sync.allow_put": "\u0642\u0628\u0648\u0644 \u062e\u0632\u0646\u0629 \u0648\u0627\u0631\u062f\u0629 \u0645\u0646 \u0627\u0644\u062c\u0647\u0627\u0632 \u0627\u0644\u0645\u0642\u062a\u0631\u0646",
+        "sync.desc": "\u0627\u0642\u0631\u0646 \u062c\u0647\u0627\u0632\u064b\u0627 \u0622\u062e\u0631 \u0639\u0644\u0649 \u0634\u0628\u0643\u062a\u0643 \u0644\u0645\u0632\u0627\u0645\u0646\u0629 \u0647\u0630\u0647 \u0627\u0644\u062e\u0632\u0646\u0629. \u062a\u064f\u0646\u0642\u0644 \u0627\u0644\u062e\u0632\u0646\u0629 \u0627\u0644\u0645\u0634\u0641\u0651\u0631\u0629\u061b \u0648\u064a\u062d\u0645\u064a\u0647\u0627 \u0631\u0645\u0632 \u0627\u0644\u0627\u0642\u062a\u0631\u0627\u0646.",
+        "sync.expires": "\u064a\u0646\u062a\u0647\u064a \u062e\u0644\u0627\u0644",
+        "sync.incoming": "\u0627\u0644\u062f\u0641\u0639\u0627\u062a \u0627\u0644\u0648\u0627\u0631\u062f\u0629",
+        "sync.note": "\u0644\u0627 \u062a\u0633\u062a\u062c\u064a\u0628 \u0645\u0633\u0627\u0631\u0627\u062a \u0627\u0644\u0645\u0632\u0627\u0645\u0646\u0629 \u0647\u0630\u0647 \u0625\u0644\u0627 \u0639\u0644\u0649 \u0627\u0644\u0648\u0627\u062c\u0647\u0629 \u0627\u0644\u062a\u064a \u062a\u0631\u062a\u0628\u0637 \u0628\u0647\u0627 \u0647\u0630\u0647 \u0627\u0644\u0644\u0648\u062d\u0629. \u0627\u0644\u0644\u0648\u062d\u0629 \u0627\u0644\u0645\u0631\u062a\u0628\u0637\u0629 \u0628\u0640 127.0.0.1 \u062a\u0642\u062a\u0631\u0646 \u0628\u0627\u0644\u062d\u0627\u0633\u0648\u0628 \u0646\u0641\u0633\u0647 \u0641\u0642\u0637\u061b \u0627\u0631\u0628\u0637\u0647\u0627 \u0628\u0639\u0646\u0648\u0627\u0646 \u0639\u0644\u0649 \u0627\u0644\u0634\u0628\u0643\u0629 \u0627\u0644\u0645\u062d\u0644\u064a\u0629 \u0644\u0627\u0642\u062a\u0631\u0627\u0646 \u0623\u062c\u0647\u0632\u0629 \u0623\u062e\u0631\u0649.",
+        "sync.note.h": "\u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u062e\u0627\u062f\u0645",
+        "sync.pair.h": "\u0627\u0642\u062a\u0631\u0627\u0646 \u062c\u0647\u0627\u0632",
+        "sync.seconds": "\u062b\u0627\u0646\u064a\u0629",
+        "sync.start": "\u0628\u062f\u0621 \u0627\u0644\u0627\u0642\u062a\u0631\u0627\u0646",
+        "sync.stop": "\u0625\u064a\u0642\u0627\u0641 \u0627\u0644\u0627\u0642\u062a\u0631\u0627\u0646",
+        "sync.string": "\u0633\u0644\u0633\u0644\u0629 \u0627\u0644\u0627\u0642\u062a\u0631\u0627\u0646",
+        "sync.sub": "\u0627\u0642\u0631\u0646 \u062c\u0647\u0627\u0632\u064b\u0627 \u0639\u0644\u0649 \u0627\u0644\u0634\u0628\u0643\u0629 \u0627\u0644\u0645\u062d\u0644\u064a\u0629 \u0648\u0632\u0627\u0645\u0646 \u0647\u0630\u0647 \u0627\u0644\u062e\u0632\u0646\u0629\u060c \u062f\u0648\u0646 \u0627\u062a\u0635\u0627\u0644 \u0648\u062f\u0648\u0646 \u062e\u0627\u062f\u0645.",
+        "sync.window": "\u0631\u0645\u0632 \u0627\u0644\u0627\u0642\u062a\u0631\u0627\u0646 \u0647\u0630\u0627 \u0635\u0627\u0644\u062d \u0644\u0628\u0636\u0639 \u062f\u0642\u0627\u0626\u0642. \u0627\u0645\u0633\u062d\u0647 \u0636\u0648\u0626\u064a\u064b\u0627 \u0639\u0644\u0649 \u0627\u0644\u062c\u0647\u0627\u0632 \u0627\u0644\u0622\u062e\u0631\u060c \u0623\u0648 \u0627\u0644\u0635\u0642 \u0627\u0644\u0633\u0644\u0633\u0644\u0629 \u0623\u062f\u0646\u0627\u0647.",
         "table.actions": "\u0625\u062c\u0631\u0627\u0621\u0627\u062a",
         "table.algo": "\u0627\u0644\u062e\u0648\u0627\u0631\u0632\u0645\u064a\u0629",
         "table.every": "\u0643\u0644",
@@ -16634,6 +17375,7 @@ WEB_CATALOGUES = {
         "nav.security": "Sicherheit",
         "nav.settings": "Einstellungen",
         "nav.sharing": "Teilen",
+        "nav.sync": "Synchronisierung",
         "nav.transfer": "Exportieren / Importieren",
         "nav.trash": "Papierkorb",
         "nav.unlock": "Biometrisches Entsperren",
@@ -16856,6 +17598,19 @@ WEB_CATALOGUES = {
         "ssh.sealed": "Der private Teil ist mit einer Passphrase gesch\u00fctzt",
         "ssh.type": "Typ",
         "ssh.unreadable": "SPM kann aus diesem Schl\u00fcssel nichts ableiten",
+        "sync.allow_put": "Einen eingehenden Tresor vom gekoppelten Ger\u00e4t annehmen",
+        "sync.desc": "Koppeln Sie ein anderes Ger\u00e4t in Ihrem Netzwerk, um diesen Tresor zu synchronisieren. Der verschl\u00fcsselte Tresor wird \u00fcbertragen; das Kopplungstoken sch\u00fctzt ihn.",
+        "sync.expires": "L\u00e4uft ab in",
+        "sync.incoming": "Eingehende \u00dcbertragungen",
+        "sync.note": "Diese Sync-Routen antworten nur auf der Schnittstelle, an die dieses Dashboard gebunden ist. Ein an 127.0.0.1 gebundenes Dashboard koppelt nur mit demselben Computer; binden Sie es an eine LAN-Adresse, um andere Ger\u00e4te zu koppeln.",
+        "sync.note.h": "Auf diesem Server",
+        "sync.pair.h": "Ger\u00e4t koppeln",
+        "sync.seconds": "Sekunden",
+        "sync.start": "Kopplung starten",
+        "sync.stop": "Kopplung beenden",
+        "sync.string": "Kopplungszeichenfolge",
+        "sync.sub": "Koppeln Sie ein Ger\u00e4t im lokalen Netzwerk und synchronisieren Sie diesen Tresor \u2013 offline und ohne Server.",
+        "sync.window": "Dieser Kopplungscode ist einige Minuten g\u00fcltig. Scannen Sie ihn auf dem anderen Ger\u00e4t oder f\u00fcgen Sie die Zeichenfolge unten ein.",
         "table.actions": "Aktionen",
         "table.algo": "Algo",
         "table.every": "Alle",
@@ -17185,6 +17940,7 @@ WEB_CATALOGUES = {
         "nav.security": "Seguridad",
         "nav.settings": "Ajustes",
         "nav.sharing": "Compartir",
+        "nav.sync": "Sincronizaci\u00f3n",
         "nav.transfer": "Exportar / Importar",
         "nav.trash": "Papelera",
         "nav.unlock": "Desbloqueo biom\u00e9trico",
@@ -17407,6 +18163,19 @@ WEB_CATALOGUES = {
         "ssh.sealed": "La mitad privada est\u00e1 protegida con una frase de contrase\u00f1a",
         "ssh.type": "Tipo",
         "ssh.unreadable": "SPM no puede derivar nada de esta clave",
+        "sync.allow_put": "Aceptar una b\u00f3veda entrante del dispositivo emparejado",
+        "sync.desc": "Empareja otro dispositivo de tu red para sincronizar esta b\u00f3veda. Viaja la b\u00f3veda cifrada; el token de emparejamiento la protege.",
+        "sync.expires": "Caduca en",
+        "sync.incoming": "Env\u00edos entrantes",
+        "sync.note": "Estas rutas de sincronizaci\u00f3n solo responden en la interfaz a la que est\u00e1 enlazado este panel. Un panel enlazado a 127.0.0.1 solo se empareja con el mismo equipo; enl\u00e1zalo a una direcci\u00f3n de red local para emparejar con otros dispositivos.",
+        "sync.note.h": "En este servidor",
+        "sync.pair.h": "Emparejar un dispositivo",
+        "sync.seconds": "segundos",
+        "sync.start": "Iniciar emparejamiento",
+        "sync.stop": "Detener emparejamiento",
+        "sync.string": "Cadena de emparejamiento",
+        "sync.sub": "Empareja un dispositivo en la red local y sincroniza esta b\u00f3veda, sin conexi\u00f3n y sin servidor.",
+        "sync.window": "Este c\u00f3digo de emparejamiento es v\u00e1lido durante unos minutos. Escan\u00e9alo en el otro dispositivo o pega la cadena de abajo.",
         "table.actions": "Acciones",
         "table.algo": "Algoritmo",
         "table.every": "Cada",
@@ -17736,6 +18505,7 @@ WEB_CATALOGUES = {
         "nav.security": "S\u00e9curit\u00e9",
         "nav.settings": "Param\u00e8tres",
         "nav.sharing": "Partage",
+        "nav.sync": "Synchronisation",
         "nav.transfer": "Exporter / Importer",
         "nav.trash": "Corbeille",
         "nav.unlock": "D\u00e9verrouillage biom\u00e9trique",
@@ -17958,6 +18728,19 @@ WEB_CATALOGUES = {
         "ssh.sealed": "La partie priv\u00e9e est prot\u00e9g\u00e9e par une phrase secr\u00e8te",
         "ssh.type": "Type",
         "ssh.unreadable": "SPM ne peut rien d\u00e9river de cette cl\u00e9",
+        "sync.allow_put": "Accepter un coffre entrant depuis l'appareil associ\u00e9",
+        "sync.desc": "Associez un autre appareil de votre r\u00e9seau pour synchroniser ce coffre. Le coffre chiffr\u00e9 circule ; le jeton d'association le prot\u00e8ge.",
+        "sync.expires": "Expire dans",
+        "sync.incoming": "Envois entrants",
+        "sync.note": "Ces routes de synchronisation ne r\u00e9pondent que sur l'interface \u00e0 laquelle ce tableau de bord est li\u00e9. Un tableau de bord li\u00e9 \u00e0 127.0.0.1 ne s'associe qu'avec le m\u00eame ordinateur ; liez-le \u00e0 une adresse du r\u00e9seau local pour associer d'autres appareils.",
+        "sync.note.h": "Sur ce serveur",
+        "sync.pair.h": "Associer un appareil",
+        "sync.seconds": "secondes",
+        "sync.start": "D\u00e9marrer l'association",
+        "sync.stop": "Arr\u00eater l'association",
+        "sync.string": "Cha\u00eene d'association",
+        "sync.sub": "Associez un appareil sur le r\u00e9seau local et synchronisez ce coffre, hors ligne et sans serveur.",
+        "sync.window": "Ce code d'association est valable quelques minutes. Scannez-le sur l'autre appareil ou collez la cha\u00eene ci-dessous.",
         "table.actions": "Actions",
         "table.algo": "Algo",
         "table.every": "Toutes les",
@@ -18287,6 +19070,7 @@ WEB_CATALOGUES = {
         "nav.security": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e",
         "nav.settings": "\u0938\u0947\u091f\u093f\u0902\u0917",
         "nav.sharing": "\u0938\u093e\u091d\u093e\u0915\u0930\u0923",
+        "nav.sync": "\u0938\u093f\u0902\u0915",
         "nav.transfer": "\u0928\u093f\u0930\u094d\u092f\u093e\u0924 / \u0906\u092f\u093e\u0924",
         "nav.trash": "\u0915\u091a\u0930\u093e",
         "nav.unlock": "\u092c\u093e\u092f\u094b\u092e\u0947\u091f\u094d\u0930\u093f\u0915 \u0905\u0928\u0932\u0949\u0915",
@@ -18509,6 +19293,19 @@ WEB_CATALOGUES = {
         "ssh.sealed": "\u0928\u093f\u091c\u0940 \u092d\u093e\u0917 \u092a\u093e\u0938\u092b\u093c\u094d\u0930\u0947\u091c\u093c \u0938\u0947 \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0939\u0948",
         "ssh.type": "\u092a\u094d\u0930\u0915\u093e\u0930",
         "ssh.unreadable": "SPM \u0907\u0938 \u0915\u0941\u0902\u091c\u0940 \u0938\u0947 \u0915\u0941\u091b \u092d\u0940 \u0935\u094d\u092f\u0941\u0924\u094d\u092a\u0928\u094d\u0928 \u0928\u0939\u0940\u0902 \u0915\u0930 \u0938\u0915\u0924\u093e",
+        "sync.allow_put": "\u091c\u094b\u0921\u093c\u0947 \u0917\u090f \u0921\u093f\u0935\u093e\u0907\u0938 \u0938\u0947 \u0906\u0928\u0947 \u0935\u093e\u0932\u093e \u0935\u0949\u0932\u094d\u091f \u0938\u094d\u0935\u0940\u0915\u093e\u0930 \u0915\u0930\u0947\u0902",
+        "sync.desc": "\u0907\u0938 \u0935\u0949\u0932\u094d\u091f \u0915\u094b \u0938\u093f\u0902\u0915 \u0915\u0930\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u0905\u092a\u0928\u0947 \u0928\u0947\u091f\u0935\u0930\u094d\u0915 \u0915\u093e \u0926\u0942\u0938\u0930\u093e \u0921\u093f\u0935\u093e\u0907\u0938 \u091c\u094b\u0921\u093c\u0947\u0902\u0964 \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u0935\u0949\u0932\u094d\u091f \u092d\u0947\u091c\u093e \u091c\u093e\u0924\u093e \u0939\u0948; \u092a\u0947\u092f\u0930\u093f\u0902\u0917 \u091f\u094b\u0915\u0928 \u0907\u0938\u0947 \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0930\u0916\u0924\u093e \u0939\u0948\u0964",
+        "sync.expires": "\u0938\u092e\u093e\u092a\u094d\u0924\u093f \u092e\u0947\u0902",
+        "sync.incoming": "\u0906\u0928\u0947 \u0935\u093e\u0932\u0947 \u092a\u0941\u0936",
+        "sync.note": "\u092f\u0947 \u0938\u093f\u0902\u0915 \u0930\u0942\u091f \u0915\u0947\u0935\u0932 \u0909\u0938 \u0907\u0902\u091f\u0930\u092b\u093c\u0947\u0938 \u092a\u0930 \u0909\u0924\u094d\u0924\u0930 \u0926\u0947\u0924\u0947 \u0939\u0948\u0902 \u091c\u093f\u0938\u0938\u0947 \u092f\u0939 \u0921\u0948\u0936\u092c\u094b\u0930\u094d\u0921 \u092c\u093e\u0909\u0902\u0921 \u0939\u0948\u0964 127.0.0.1 \u0938\u0947 \u092c\u093e\u0909\u0902\u0921 \u0921\u0948\u0936\u092c\u094b\u0930\u094d\u0921 \u0915\u0947\u0935\u0932 \u0909\u0938\u0940 \u0915\u0902\u092a\u094d\u092f\u0942\u091f\u0930 \u0938\u0947 \u091c\u0941\u0921\u093c\u0924\u093e \u0939\u0948; \u0905\u0928\u094d\u092f \u0921\u093f\u0935\u093e\u0907\u0938 \u0938\u0947 \u091c\u094b\u0921\u093c\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u0907\u0938\u0947 \u0915\u093f\u0938\u0940 LAN \u092a\u0924\u0947 \u0938\u0947 \u092c\u093e\u0909\u0902\u0921 \u0915\u0930\u0947\u0902\u0964",
+        "sync.note.h": "\u0907\u0938 \u0938\u0930\u094d\u0935\u0930 \u092a\u0930",
+        "sync.pair.h": "\u0921\u093f\u0935\u093e\u0907\u0938 \u091c\u094b\u0921\u093c\u0947\u0902",
+        "sync.seconds": "\u0938\u0947\u0915\u0902\u0921",
+        "sync.start": "\u092a\u0947\u092f\u0930\u093f\u0902\u0917 \u0936\u0941\u0930\u0942 \u0915\u0930\u0947\u0902",
+        "sync.stop": "\u092a\u0947\u092f\u0930\u093f\u0902\u0917 \u0930\u094b\u0915\u0947\u0902",
+        "sync.string": "\u092a\u0947\u092f\u0930\u093f\u0902\u0917 \u0938\u094d\u091f\u094d\u0930\u093f\u0902\u0917",
+        "sync.sub": "\u0938\u094d\u0925\u093e\u0928\u0940\u092f \u0928\u0947\u091f\u0935\u0930\u094d\u0915 \u092a\u0930 \u0915\u093f\u0938\u0940 \u0921\u093f\u0935\u093e\u0907\u0938 \u0915\u094b \u091c\u094b\u0921\u093c\u0947\u0902 \u0914\u0930 \u0907\u0938 \u0935\u0949\u0932\u094d\u091f \u0915\u094b \u0938\u093f\u0902\u0915 \u0915\u0930\u0947\u0902, \u0911\u092b\u093c\u0932\u093e\u0907\u0928 \u0914\u0930 \u092c\u093f\u0928\u093e \u0938\u0930\u094d\u0935\u0930 \u0915\u0947\u0964",
+        "sync.window": "\u092f\u0939 \u092a\u0947\u092f\u0930\u093f\u0902\u0917 \u0915\u094b\u0921 \u0915\u0941\u091b \u092e\u093f\u0928\u091f\u094b\u0902 \u0915\u0947 \u0932\u093f\u090f \u092e\u093e\u0928\u094d\u092f \u0939\u0948\u0964 \u0907\u0938\u0947 \u0926\u0942\u0938\u0930\u0947 \u0921\u093f\u0935\u093e\u0907\u0938 \u092a\u0930 \u0938\u094d\u0915\u0948\u0928 \u0915\u0930\u0947\u0902, \u092f\u093e \u0928\u0940\u091a\u0947 \u0926\u0940 \u0917\u0908 \u0938\u094d\u091f\u094d\u0930\u093f\u0902\u0917 \u092a\u0947\u0938\u094d\u091f \u0915\u0930\u0947\u0902\u0964",
         "table.actions": "\u0915\u094d\u0930\u093f\u092f\u093e\u090f\u0901",
         "table.algo": "\u090f\u0932\u094d\u0917\u094b",
         "table.every": "\u0939\u0930",
@@ -18838,6 +19635,7 @@ WEB_CATALOGUES = {
         "nav.security": "Keamanan",
         "nav.settings": "Pengaturan",
         "nav.sharing": "Berbagi",
+        "nav.sync": "Sinkronisasi",
         "nav.transfer": "Ekspor / Impor",
         "nav.trash": "Sampah",
         "nav.unlock": "Buka Biometrik",
@@ -19060,6 +19858,19 @@ WEB_CATALOGUES = {
         "ssh.sealed": "Bagian privat dilindungi frasa sandi",
         "ssh.type": "Jenis",
         "ssh.unreadable": "SPM tidak dapat menurunkan apa pun dari kunci ini",
+        "sync.allow_put": "Terima brankas masuk dari perangkat yang dipasangkan",
+        "sync.desc": "Pasangkan perangkat lain di jaringan Anda untuk menyinkronkan brankas ini. Brankas terenkripsi yang dikirim; token pemasangan menjaganya.",
+        "sync.expires": "Kedaluwarsa dalam",
+        "sync.incoming": "Kiriman masuk",
+        "sync.note": "Rute sinkronisasi ini hanya menjawab pada antarmuka tempat dasbor ini terikat. Dasbor yang terikat ke 127.0.0.1 hanya dipasangkan dengan komputer yang sama; ikat ke alamat jaringan lokal untuk memasangkan perangkat lain.",
+        "sync.note.h": "Di server ini",
+        "sync.pair.h": "Pasangkan perangkat",
+        "sync.seconds": "detik",
+        "sync.start": "Mulai pemasangan",
+        "sync.stop": "Hentikan pemasangan",
+        "sync.string": "String pemasangan",
+        "sync.sub": "Pasangkan perangkat di jaringan lokal dan sinkronkan brankas ini, luring dan tanpa server.",
+        "sync.window": "Kode pemasangan ini berlaku beberapa menit. Pindai di perangkat lain, atau tempel string di bawah.",
         "table.actions": "Aksi",
         "table.algo": "Algo",
         "table.every": "Interval",
@@ -19389,6 +20200,7 @@ WEB_CATALOGUES = {
         "nav.security": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3",
         "nav.settings": "\u8a2d\u5b9a",
         "nav.sharing": "\u5171\u6709",
+        "nav.sync": "\u540c\u671f",
         "nav.transfer": "\u30a8\u30af\u30b9\u30dd\u30fc\u30c8 / \u30a4\u30f3\u30dd\u30fc\u30c8",
         "nav.trash": "\u30b4\u30df\u7bb1",
         "nav.unlock": "\u751f\u4f53\u8a8d\u8a3c\u30ed\u30c3\u30af\u89e3\u9664",
@@ -19611,6 +20423,19 @@ WEB_CATALOGUES = {
         "ssh.sealed": "\u79d8\u5bc6\u9375\u306f\u30d1\u30b9\u30d5\u30ec\u30fc\u30ba\u3067\u4fdd\u8b77\u3055\u308c\u3066\u3044\u307e\u3059",
         "ssh.type": "\u7a2e\u985e",
         "ssh.unreadable": "SPM \u306f\u3053\u306e\u9375\u304b\u3089\u4f55\u3082\u5c0e\u51fa\u3067\u304d\u307e\u305b\u3093",
+        "sync.allow_put": "\u30da\u30a2\u30ea\u30f3\u30b0\u3057\u305f\u30c7\u30d0\u30a4\u30b9\u304b\u3089\u306e\u53d7\u4fe1\u30dc\u30fc\u30eb\u30c8\u3092\u53d7\u3051\u5165\u308c\u308b",
+        "sync.desc": "\u30cd\u30c3\u30c8\u30ef\u30fc\u30af\u4e0a\u306e\u5225\u306e\u30c7\u30d0\u30a4\u30b9\u3092\u30da\u30a2\u30ea\u30f3\u30b0\u3057\u3066\u3001\u3053\u306e\u30dc\u30fc\u30eb\u30c8\u3092\u540c\u671f\u3057\u307e\u3059\u3002\u6697\u53f7\u5316\u3055\u308c\u305f\u30dc\u30fc\u30eb\u30c8\u304c\u8ee2\u9001\u3055\u308c\u3001\u30da\u30a2\u30ea\u30f3\u30b0\u30c8\u30fc\u30af\u30f3\u304c\u305d\u308c\u3092\u4fdd\u8b77\u3057\u307e\u3059\u3002",
+        "sync.expires": "\u6709\u52b9\u671f\u9650",
+        "sync.incoming": "\u53d7\u4fe1\u30d7\u30c3\u30b7\u30e5",
+        "sync.note": "\u3053\u308c\u3089\u306e\u540c\u671f\u30eb\u30fc\u30c8\u306f\u3001\u3053\u306e\u30c0\u30c3\u30b7\u30e5\u30dc\u30fc\u30c9\u304c\u30d0\u30a4\u30f3\u30c9\u3055\u308c\u3066\u3044\u308b\u30a4\u30f3\u30bf\u30fc\u30d5\u30a7\u30a4\u30b9\u3067\u306e\u307f\u5fdc\u7b54\u3057\u307e\u3059\u3002127.0.0.1 \u306b\u30d0\u30a4\u30f3\u30c9\u3055\u308c\u305f\u30c0\u30c3\u30b7\u30e5\u30dc\u30fc\u30c9\u306f\u540c\u3058\u30b3\u30f3\u30d4\u30e5\u30fc\u30bf\u30fc\u3068\u306e\u307f\u30da\u30a2\u30ea\u30f3\u30b0\u3057\u307e\u3059\u3002\u4ed6\u306e\u30c7\u30d0\u30a4\u30b9\u3068\u30da\u30a2\u30ea\u30f3\u30b0\u3059\u308b\u306b\u306f LAN \u30a2\u30c9\u30ec\u30b9\u306b\u30d0\u30a4\u30f3\u30c9\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
+        "sync.note.h": "\u3053\u306e\u30b5\u30fc\u30d0\u30fc\u306b\u3064\u3044\u3066",
+        "sync.pair.h": "\u30c7\u30d0\u30a4\u30b9\u3092\u30da\u30a2\u30ea\u30f3\u30b0",
+        "sync.seconds": "\u79d2",
+        "sync.start": "\u30da\u30a2\u30ea\u30f3\u30b0\u3092\u958b\u59cb",
+        "sync.stop": "\u30da\u30a2\u30ea\u30f3\u30b0\u3092\u505c\u6b62",
+        "sync.string": "\u30da\u30a2\u30ea\u30f3\u30b0\u6587\u5b57\u5217",
+        "sync.sub": "\u30ed\u30fc\u30ab\u30eb\u30cd\u30c3\u30c8\u30ef\u30fc\u30af\u3067\u30c7\u30d0\u30a4\u30b9\u3092\u30da\u30a2\u30ea\u30f3\u30b0\u3057\u3001\u3053\u306e\u30dc\u30fc\u30eb\u30c8\u3092\u540c\u671f\u3057\u307e\u3059\u3002\u30aa\u30d5\u30e9\u30a4\u30f3\u3067\u30b5\u30fc\u30d0\u30fc\u4e0d\u8981\u3067\u3059\u3002",
+        "sync.window": "\u3053\u306e\u30da\u30a2\u30ea\u30f3\u30b0\u30b3\u30fc\u30c9\u306f\u6570\u5206\u9593\u6709\u52b9\u3067\u3059\u3002\u5225\u306e\u30c7\u30d0\u30a4\u30b9\u3067\u30b9\u30ad\u30e3\u30f3\u3059\u308b\u304b\u3001\u4e0b\u306e\u6587\u5b57\u5217\u3092\u8cbc\u308a\u4ed8\u3051\u3066\u304f\u3060\u3055\u3044\u3002",
         "table.actions": "\u64cd\u4f5c",
         "table.algo": "\u65b9\u5f0f",
         "table.every": "\u5468\u671f",
@@ -19940,6 +20765,7 @@ WEB_CATALOGUES = {
         "nav.security": "\ubcf4\uc548",
         "nav.settings": "\uc124\uc815",
         "nav.sharing": "\uacf5\uc720",
+        "nav.sync": "\ub3d9\uae30\ud654",
         "nav.transfer": "\ub0b4\ubcf4\ub0b4\uae30 / \uac00\uc838\uc624\uae30",
         "nav.trash": "\ud734\uc9c0\ud1b5",
         "nav.unlock": "\uc0dd\uccb4 \uc778\uc2dd \uc7a0\uae08 \ud574\uc81c",
@@ -20162,6 +20988,19 @@ WEB_CATALOGUES = {
         "ssh.sealed": "\uac1c\uc778 \ud0a4\uac00 \uc554\ud638 \ubb38\uad6c\ub85c \ubcf4\ud638\ub418\uc5b4 \uc788\uc2b5\ub2c8\ub2e4",
         "ssh.type": "\uc885\ub958",
         "ssh.unreadable": "SPM\uc740 \uc774 \ud0a4\uc5d0\uc11c \uc544\ubb34\uac83\ub3c4 \ub3c4\ucd9c\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4",
+        "sync.allow_put": "\ud398\uc5b4\ub9c1\ub41c \uae30\uae30\uc5d0\uc11c \ub4e4\uc5b4\uc624\ub294 \ubcf4\uad00\ud568 \uc218\ub77d",
+        "sync.desc": "\ub124\ud2b8\uc6cc\ud06c\uc758 \ub2e4\ub978 \uae30\uae30\ub97c \ud398\uc5b4\ub9c1\ud558\uc5ec \uc774 \ubcf4\uad00\ud568\uc744 \ub3d9\uae30\ud654\ud569\ub2c8\ub2e4. \uc554\ud638\ud654\ub41c \ubcf4\uad00\ud568\uc774 \uc804\uc1a1\ub418\uba70 \ud398\uc5b4\ub9c1 \ud1a0\ud070\uc774 \uc774\ub97c \ubcf4\ud638\ud569\ub2c8\ub2e4.",
+        "sync.expires": "\ub9cc\ub8cc\uae4c\uc9c0",
+        "sync.incoming": "\uc218\uc2e0 \ud478\uc2dc",
+        "sync.note": "\uc774 \ub3d9\uae30\ud654 \uacbd\ub85c\ub294 \uc774 \ub300\uc2dc\ubcf4\ub4dc\uac00 \ubc14\uc778\ub529\ub41c \uc778\ud130\ud398\uc774\uc2a4\uc5d0\uc11c\ub9cc \uc751\ub2f5\ud569\ub2c8\ub2e4. 127.0.0.1\uc5d0 \ubc14\uc778\ub529\ub41c \ub300\uc2dc\ubcf4\ub4dc\ub294 \ub3d9\uc77c\ud55c \ucef4\ud4e8\ud130\uc640\ub9cc \ud398\uc5b4\ub9c1\ub429\ub2c8\ub2e4. \ub2e4\ub978 \uae30\uae30\uc640 \ud398\uc5b4\ub9c1\ud558\ub824\uba74 LAN \uc8fc\uc18c\uc5d0 \ubc14\uc778\ub529\ud558\uc138\uc694.",
+        "sync.note.h": "\uc774 \uc11c\ubc84\uc5d0\uc11c",
+        "sync.pair.h": "\uae30\uae30 \ud398\uc5b4\ub9c1",
+        "sync.seconds": "\ucd08",
+        "sync.start": "\ud398\uc5b4\ub9c1 \uc2dc\uc791",
+        "sync.stop": "\ud398\uc5b4\ub9c1 \uc911\uc9c0",
+        "sync.string": "\ud398\uc5b4\ub9c1 \ubb38\uc790\uc5f4",
+        "sync.sub": "\ub85c\uceec \ub124\ud2b8\uc6cc\ud06c\uc5d0\uc11c \uae30\uae30\ub97c \ud398\uc5b4\ub9c1\ud558\uace0 \uc774 \ubcf4\uad00\ud568\uc744 \ub3d9\uae30\ud654\ud569\ub2c8\ub2e4. \uc624\ud504\ub77c\uc778\uc774\uba70 \uc11c\ubc84\uac00 \ud544\uc694 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "sync.window": "\uc774 \ud398\uc5b4\ub9c1 \ucf54\ub4dc\ub294 \uba87 \ubd84 \ub3d9\uc548 \uc720\ud6a8\ud569\ub2c8\ub2e4. \ub2e4\ub978 \uae30\uae30\uc5d0\uc11c \uc2a4\uce94\ud558\uac70\ub098 \uc544\ub798 \ubb38\uc790\uc5f4\uc744 \ubd99\uc5ec\ub123\uc73c\uc138\uc694.",
         "table.actions": "\uc791\uc5c5",
         "table.algo": "\uc54c\uace0\ub9ac\uc998",
         "table.every": "\uc8fc\uae30",
@@ -20491,6 +21330,7 @@ WEB_CATALOGUES = {
         "nav.security": "Seguran\u00e7a",
         "nav.settings": "Configura\u00e7\u00f5es",
         "nav.sharing": "Compartilhamento",
+        "nav.sync": "Sincroniza\u00e7\u00e3o",
         "nav.transfer": "Exportar / Importar",
         "nav.trash": "Lixeira",
         "nav.unlock": "Desbloqueio biom\u00e9trico",
@@ -20713,6 +21553,19 @@ WEB_CATALOGUES = {
         "ssh.sealed": "A metade privada est\u00e1 protegida por frase secreta",
         "ssh.type": "Tipo",
         "ssh.unreadable": "O SPM n\u00e3o consegue derivar nada desta chave",
+        "sync.allow_put": "Aceitar um cofre recebido do dispositivo emparelhado",
+        "sync.desc": "Emparelhe outro dispositivo da sua rede para sincronizar este cofre. O cofre criptografado \u00e9 transferido; o token de emparelhamento o protege.",
+        "sync.expires": "Expira em",
+        "sync.incoming": "Envios recebidos",
+        "sync.note": "Estas rotas de sincroniza\u00e7\u00e3o respondem apenas na interface \u00e0 qual este painel est\u00e1 vinculado. Um painel vinculado a 127.0.0.1 emparelha apenas com o mesmo computador; vincule-o a um endere\u00e7o da rede local para emparelhar com outros dispositivos.",
+        "sync.note.h": "Neste servidor",
+        "sync.pair.h": "Emparelhar um dispositivo",
+        "sync.seconds": "segundos",
+        "sync.start": "Iniciar emparelhamento",
+        "sync.stop": "Parar emparelhamento",
+        "sync.string": "Sequ\u00eancia de emparelhamento",
+        "sync.sub": "Emparelhe um dispositivo na rede local e sincronize este cofre, offline e sem servidor.",
+        "sync.window": "Este c\u00f3digo de emparelhamento \u00e9 v\u00e1lido por alguns minutos. Escaneie-o no outro dispositivo ou cole a sequ\u00eancia abaixo.",
         "table.actions": "A\u00e7\u00f5es",
         "table.algo": "Algoritmo",
         "table.every": "A cada",
@@ -21042,6 +21895,7 @@ WEB_CATALOGUES = {
         "nav.security": "\u0411\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c",
         "nav.settings": "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438",
         "nav.sharing": "\u041e\u0431\u0449\u0438\u0439 \u0434\u043e\u0441\u0442\u0443\u043f",
+        "nav.sync": "\u0421\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0430\u0446\u0438\u044f",
         "nav.transfer": "\u042d\u043a\u0441\u043f\u043e\u0440\u0442 / \u0418\u043c\u043f\u043e\u0440\u0442",
         "nav.trash": "\u041a\u043e\u0440\u0437\u0438\u043d\u0430",
         "nav.unlock": "\u0411\u0438\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u0440\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430",
@@ -21264,6 +22118,19 @@ WEB_CATALOGUES = {
         "ssh.sealed": "\u0417\u0430\u043a\u0440\u044b\u0442\u0430\u044f \u0447\u0430\u0441\u0442\u044c \u0437\u0430\u0449\u0438\u0449\u0435\u043d\u0430 \u043f\u0430\u0440\u043e\u043b\u044c\u043d\u043e\u0439 \u0444\u0440\u0430\u0437\u043e\u0439",
         "ssh.type": "\u0422\u0438\u043f",
         "ssh.unreadable": "SPM \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u043d\u0438\u0447\u0435\u0433\u043e \u0432\u044b\u0447\u0438\u0441\u043b\u0438\u0442\u044c \u0438\u0437 \u044d\u0442\u043e\u0433\u043e \u043a\u043b\u044e\u0447\u0430",
+        "sync.allow_put": "\u041f\u0440\u0438\u043d\u0438\u043c\u0430\u0442\u044c \u0432\u0445\u043e\u0434\u044f\u0449\u0435\u0435 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u043e\u0442 \u0441\u0432\u044f\u0437\u0430\u043d\u043d\u043e\u0433\u043e \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0430",
+        "sync.desc": "\u0421\u0432\u044f\u0436\u0438\u0442\u0435 \u0434\u0440\u0443\u0433\u043e\u0435 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u043e \u0432 \u0432\u0430\u0448\u0435\u0439 \u0441\u0435\u0442\u0438 \u0434\u043b\u044f \u0441\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0430\u0446\u0438\u0438 \u044d\u0442\u043e\u0433\u043e \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0430. \u041f\u0435\u0440\u0435\u0434\u0430\u0451\u0442\u0441\u044f \u0437\u0430\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0435 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435; \u0442\u043e\u043a\u0435\u043d \u0441\u0432\u044f\u0437\u044b\u0432\u0430\u043d\u0438\u044f \u0437\u0430\u0449\u0438\u0449\u0430\u0435\u0442 \u0435\u0433\u043e.",
+        "sync.expires": "\u0418\u0441\u0442\u0435\u043a\u0430\u0435\u0442 \u0447\u0435\u0440\u0435\u0437",
+        "sync.incoming": "\u0412\u0445\u043e\u0434\u044f\u0449\u0438\u0435 \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0438",
+        "sync.note": "\u042d\u0442\u0438 \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u044b \u0441\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0430\u0446\u0438\u0438 \u043e\u0442\u0432\u0435\u0447\u0430\u044e\u0442 \u0442\u043e\u043b\u044c\u043a\u043e \u043d\u0430 \u0438\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0435, \u043a \u043a\u043e\u0442\u043e\u0440\u043e\u043c\u0443 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d\u0430 \u044d\u0442\u0430 \u043f\u0430\u043d\u0435\u043b\u044c. \u041f\u0430\u043d\u0435\u043b\u044c, \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d\u043d\u0430\u044f \u043a 127.0.0.1, \u0441\u0432\u044f\u0437\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u0441 \u044d\u0442\u0438\u043c \u0436\u0435 \u043a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440\u043e\u043c; \u043f\u0440\u0438\u0432\u044f\u0436\u0438\u0442\u0435 \u0435\u0451 \u043a \u0430\u0434\u0440\u0435\u0441\u0443 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u043e\u0439 \u0441\u0435\u0442\u0438, \u0447\u0442\u043e\u0431\u044b \u0441\u0432\u044f\u0437\u044b\u0432\u0430\u0442\u044c \u0434\u0440\u0443\u0433\u0438\u0435 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0430.",
+        "sync.note.h": "\u041d\u0430 \u044d\u0442\u043e\u043c \u0441\u0435\u0440\u0432\u0435\u0440\u0435",
+        "sync.pair.h": "\u0421\u0432\u044f\u0437\u0430\u0442\u044c \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u043e",
+        "sync.seconds": "\u0441\u0435\u043a\u0443\u043d\u0434",
+        "sync.start": "\u041d\u0430\u0447\u0430\u0442\u044c \u0441\u0432\u044f\u0437\u044b\u0432\u0430\u043d\u0438\u0435",
+        "sync.stop": "\u041e\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u0441\u0432\u044f\u0437\u044b\u0432\u0430\u043d\u0438\u0435",
+        "sync.string": "\u0421\u0442\u0440\u043e\u043a\u0430 \u0441\u0432\u044f\u0437\u044b\u0432\u0430\u043d\u0438\u044f",
+        "sync.sub": "\u0421\u0432\u044f\u0436\u0438\u0442\u0435 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u043e \u0432 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u043e\u0439 \u0441\u0435\u0442\u0438 \u0438 \u0441\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0438\u0440\u0443\u0439\u0442\u0435 \u044d\u0442\u043e \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435 \u2014 \u043e\u0444\u043b\u0430\u0439\u043d \u0438 \u0431\u0435\u0437 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.",
+        "sync.window": "\u042d\u0442\u043e\u0442 \u043a\u043e\u0434 \u0441\u0432\u044f\u0437\u044b\u0432\u0430\u043d\u0438\u044f \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0442\u0435\u043b\u0435\u043d \u043d\u0435\u0441\u043a\u043e\u043b\u044c\u043a\u043e \u043c\u0438\u043d\u0443\u0442. \u041e\u0442\u0441\u043a\u0430\u043d\u0438\u0440\u0443\u0439\u0442\u0435 \u0435\u0433\u043e \u043d\u0430 \u0434\u0440\u0443\u0433\u043e\u043c \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0435 \u0438\u043b\u0438 \u0432\u0441\u0442\u0430\u0432\u044c\u0442\u0435 \u0441\u0442\u0440\u043e\u043a\u0443 \u043d\u0438\u0436\u0435.",
         "table.actions": "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044f",
         "table.algo": "\u0410\u043b\u0433\u043e\u0440\u0438\u0442\u043c",
         "table.every": "\u041a\u0430\u0436\u0434\u044b\u0435",
@@ -21593,6 +22460,7 @@ WEB_CATALOGUES = {
         "nav.security": "\u5b89\u5168",
         "nav.settings": "\u8bbe\u7f6e",
         "nav.sharing": "\u5171\u4eab",
+        "nav.sync": "\u540c\u6b65",
         "nav.transfer": "\u5bfc\u51fa / \u5bfc\u5165",
         "nav.trash": "\u56de\u6536\u7ad9",
         "nav.unlock": "\u751f\u7269\u8bc6\u522b\u89e3\u9501",
@@ -21815,6 +22683,19 @@ WEB_CATALOGUES = {
         "ssh.sealed": "\u79c1\u94a5\u90e8\u5206\u53d7\u5bc6\u7801\u77ed\u8bed\u4fdd\u62a4",
         "ssh.type": "\u7c7b\u578b",
         "ssh.unreadable": "SPM \u65e0\u6cd5\u4ece\u8be5\u5bc6\u94a5\u63a8\u5bfc\u51fa\u4efb\u4f55\u4fe1\u606f",
+        "sync.allow_put": "\u63a5\u53d7\u6765\u81ea\u5df2\u914d\u5bf9\u8bbe\u5907\u7684\u4f20\u5165\u4fdd\u7ba1\u5e93",
+        "sync.desc": "\u914d\u5bf9\u7f51\u7edc\u4e2d\u7684\u53e6\u4e00\u53f0\u8bbe\u5907\u4ee5\u540c\u6b65\u6b64\u4fdd\u7ba1\u5e93\u3002\u4f20\u8f93\u7684\u662f\u52a0\u5bc6\u7684\u4fdd\u7ba1\u5e93\uff1b\u914d\u5bf9\u4ee4\u724c\u5bf9\u5176\u8fdb\u884c\u4fdd\u62a4\u3002",
+        "sync.expires": "\u6709\u6548\u671f",
+        "sync.incoming": "\u4f20\u5165\u63a8\u9001",
+        "sync.note": "\u8fd9\u4e9b\u540c\u6b65\u8def\u7531\u4ec5\u5728\u6b64\u4eea\u8868\u677f\u7ed1\u5b9a\u7684\u63a5\u53e3\u4e0a\u54cd\u5e94\u3002\u7ed1\u5b9a\u5230 127.0.0.1 \u7684\u4eea\u8868\u677f\u4ec5\u4e0e\u540c\u4e00\u53f0\u8ba1\u7b97\u673a\u914d\u5bf9\uff1b\u5c06\u5176\u7ed1\u5b9a\u5230\u5c40\u57df\u7f51\u5730\u5740\u4ee5\u4e0e\u5176\u4ed6\u8bbe\u5907\u914d\u5bf9\u3002",
+        "sync.note.h": "\u5728\u6b64\u670d\u52a1\u5668\u4e0a",
+        "sync.pair.h": "\u914d\u5bf9\u8bbe\u5907",
+        "sync.seconds": "\u79d2",
+        "sync.start": "\u5f00\u59cb\u914d\u5bf9",
+        "sync.stop": "\u505c\u6b62\u914d\u5bf9",
+        "sync.string": "\u914d\u5bf9\u5b57\u7b26\u4e32",
+        "sync.sub": "\u5728\u5c40\u57df\u7f51\u4e2d\u914d\u5bf9\u8bbe\u5907\u5e76\u540c\u6b65\u6b64\u4fdd\u7ba1\u5e93\uff0c\u79bb\u7ebf\u4e14\u65e0\u9700\u670d\u52a1\u5668\u3002",
+        "sync.window": "\u6b64\u914d\u5bf9\u7801\u5728\u51e0\u5206\u949f\u5185\u6709\u6548\u3002\u5728\u53e6\u4e00\u53f0\u8bbe\u5907\u4e0a\u626b\u63cf\uff0c\u6216\u7c98\u8d34\u4e0b\u9762\u7684\u5b57\u7b26\u4e32\u3002",
         "table.actions": "\u64cd\u4f5c",
         "table.algo": "\u7b97\u6cd5",
         "table.every": "\u6bcf",
@@ -23822,6 +24703,7 @@ ICON_SPRITE = """
   <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.7 6.2.6-4.7 4.1 1.4 6.1L12 16.9l-5.5 3.2 1.4-6.1L3.2 9.8l6.2-.6z"/></symbol>
   <symbol id="i-share" viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="5.5" r="2.5"/><circle cx="18" cy="18.5" r="2.5"/><path d="M8.2 10.8l7.6-4M8.2 13.2l7.6 4"/></symbol>
   <symbol id="i-schema" viewBox="0 0 24 24"><path d="M4.5 4.5h15v4h-15zM4.5 14.5h15v5h-15zM9 8.5v6M15 8.5v6"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 8M20 4v4h-4M20 12a8 8 0 0 1-13.7 5.6L4 16M4 20v-4h4"/></symbol>
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M9.5 14.5l5-5M8 10l-2.5 2.5a3.5 3.5 0 0 0 5 5L13 15M16 14l2.5-2.5a3.5 3.5 0 0 0-5-5L11 9"/></symbol>
   <symbol id="i-gpg" viewBox="0 0 24 24"><circle cx="8.5" cy="8.5" r="4"/><path d="M11.4 11.4L16 16M14 18l4-4M16 20l4-4"/></symbol>
   <symbol id="i-ssh" viewBox="0 0 24 24"><path d="M3.5 4.5h17v15h-17zM7 9.5l3 2.5-3 2.5M12.5 15h5"/></symbol>
@@ -23934,6 +24816,7 @@ NAV_SECTIONS = [
         ("generator", "/generator", "generator", "nav.generator", "Generator",       None),
         ("transfer",  "/transfer",  "transfer", "nav.transfer",  "Export / Import", None),
         ("sharing",   "/sharing",   "share",  "nav.sharing",   "Sharing",         None),
+        ("sync",      "/sync",      "sync",   "nav.sync",      "Sync",            None),
         ("trash",     "/trash",     "trash",  "nav.trash",     "Trash",           "__trash__"),
     ]),
     ("nav.group.settings", [
@@ -25203,6 +26086,96 @@ def sharing_page(plaintext, csrf, flash=""):
     <th><span class="sr-only" data-i18n="table.actions">Actions</span></th></tr></thead>
     <tbody>%s</tbody></table></div>
 </div></div>""" % (flash, pub_block, create, ci, ci, col_rows)
+
+
+# ----- LAN sync pairing (roadmap 45 & 46) -----------------------------------
+#
+# The dashboard can act as a sync peer for a device that scans a QR: a pairing
+# token opens a bounded window during which the encrypted vault is served (GET)
+# and, if the operator opted in, accepted (PUT) at /spm-<channel>.gpg -- the same
+# route and Bearer-token scheme the CLI `p2p` transport speaks. The window is
+# time-bounded like the CLI's `sync serve`, the token is compared in constant
+# time, and only the sealed container ever crosses the wire. On the default
+# loopback bind these routes are reachable only from the same host; LAN pairing
+# needs the server bound to a LAN interface, which the page states plainly.
+SYNC_PAIR = {"token": "", "expires": 0.0, "allow_put": False, "channel": "web"}
+SYNC_PAIR_WINDOW = 600  # seconds a pairing token stays valid
+
+
+def _sync_pair_active():
+    return bool(SYNC_PAIR["token"]) and time.time() < SYNC_PAIR["expires"]
+
+
+def _sync_pair_token_ok(presented):
+    """Constant-time check of a presented Bearer token against the live one."""
+    if not _sync_pair_active():
+        return False
+    return hmac.compare_digest(presented.encode("utf-8"),
+                               SYNC_PAIR["token"].encode("utf-8"))
+
+
+def sync_page(csrf, host, flash=""):
+    """Device pairing for LAN sync (roadmap 45 & 46).
+
+    Opens a bounded pairing window and shows the token as a scannable QR plus the
+    pairing string a CLI peer can paste. The encrypted vault is served over the
+    same host at /spm-<channel>.gpg while the window is open."""
+    ci = '<input type="hidden" name="csrf" value="%s">' % html.escape(csrf, quote=True)
+    if _sync_pair_active():
+        token = SYNC_PAIR["token"]
+        channel = SYNC_PAIR["channel"]
+        pairing = "spm-sync://%s/%s?token=%s" % (host, channel, token)
+        try:
+            svg = core.qr_svg(core.qr_encode(pairing))
+        except Exception:
+            svg = ""
+        remaining = int(SYNC_PAIR["expires"] - time.time())
+        qr_block = (
+            '<div class="qr-wrap" style="max-width:280px;margin:0 auto">%s</div>'
+            % svg)
+        put_state = ("on" if SYNC_PAIR["allow_put"] else "off")
+        body = """
+  <p class="muted" data-i18n="sync.window">This pairing code is valid for a few
+     minutes. Scan it on the other device, or paste the string below.</p>
+  %s
+  <label class="mono-label" data-i18n="sync.string">Pairing string</label>
+  <textarea class="mono" rows="3" readonly aria-label="Pairing string"
+     style="width:100%%;font-size:12px">%s</textarea>
+  <p class="muted" style="margin-top:8px">
+     <span data-i18n="sync.expires">Expires in</span> %d
+     <span data-i18n="sync.seconds">seconds</span> ·
+     <span data-i18n="sync.incoming">Incoming pushes</span>: %s</p>
+  <form method="post" action="/sync/pair" style="margin-top:10px">%s
+    <button type="submit" class="btn btn-ghost btn-sm" data-i18n="sync.stop">Stop pairing</button>
+  </form>""" % (qr_block, html.escape(pairing), max(remaining, 0), put_state, ci)
+    else:
+        body = """
+  <p class="muted" data-i18n="sync.desc">Pair another device on your network to
+     sync this vault. The encrypted vault travels; the pairing token gates it.</p>
+  <form method="post" action="/sync/pair" style="margin-top:10px">%s
+    <label class="check"><input type="checkbox" name="allow_put" value="1">
+      <span data-i18n="sync.allow_put">Accept an incoming vault from the paired device</span></label>
+    <div style="margin-top:10px"><button type="submit" class="btn btn-primary"
+       data-i18n="sync.start">Start pairing</button></div>
+  </form>""" % ci
+
+    return """
+%s
+<div class="page-head"><div>
+  <h1 class="page-title" data-i18n="nav.sync">Sync</h1>
+  <div class="page-sub" data-i18n="sync.sub">Pair a device over the local network and sync this vault, offline and server-less.</div>
+</div></div>
+<div class="card"><div class="card-body">
+  <h2 data-i18n="sync.pair.h">Pair a device</h2>
+  %s
+</div></div>
+<div class="card" style="margin-top:var(--sp-4)"><div class="card-body">
+  <h2 data-i18n="sync.note.h">On this server</h2>
+  <p class="muted" data-i18n="sync.note">These sync routes answer only on the
+     interface this dashboard is bound to. A dashboard bound to 127.0.0.1 pairs
+     only with the same computer; bind it to a LAN address to pair with other
+     devices on your network.</p>
+</div></div>""" % (flash, body)
 
 
 def schemas_page(plaintext, csrf, flash=""):
@@ -30069,6 +31042,85 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ---- Handlers -----------------------------------------------------------
 
+    def _is_sync_route(self, path):
+        return (path.startswith("/spm-") and path.endswith(".gpg")
+                and path == "/spm-%s.gpg" % SYNC_PAIR["channel"])
+
+    def _sync_bearer(self):
+        got = self.headers.get("Authorization", "")
+        prefix = "Bearer "
+        return got[len(prefix):] if got.startswith(prefix) else ""
+
+    def _sync_deny(self):
+        core.record_event("sync-serve", "fail", "", VAULT_PATH)
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", "Bearer")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _handle_sync_get(self, path):
+        if not _sync_pair_token_ok(self._sync_bearer()):
+            return self._sync_deny()
+        try:
+            with open(VAULT_PATH, "rb") as handle:
+                body = handle.read()
+        except OSError:
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        core.record_event("sync-serve", "ok", "", VAULT_PATH)
+
+    def _handle_sync_put(self, path):
+        if not _sync_pair_token_ok(self._sync_bearer()):
+            return self._sync_deny()
+        if not SYNC_PAIR["allow_put"]:
+            self.send_response(403)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        if length <= 0 or length > core.SYNC_MAX_BODY:
+            self.send_response(413)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        body = self.rfile.read(length)
+        if not core.is_container(body):
+            core.record_event("sync-serve", "fail", "reason=corrupt", VAULT_PATH)
+            self.send_response(422)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        dest_dir = os.path.dirname(os.path.abspath(VAULT_PATH)) or "."
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix=".spm-sync.", dir=dest_dir)
+        try:
+            os.write(tmp_fd, body)
+            os.close(tmp_fd)
+            tmp_fd = -1
+            core.install_vault_file(tmp_path, VAULT_PATH)
+        finally:
+            if tmp_fd != -1:
+                os.close(tmp_fd)
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        core.record_event("sync-serve", "ok", "reason=vault-replaced", VAULT_PATH)
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_PUT(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path or "/"
+        if self._is_sync_route(path):
+            return self._handle_sync_put(path)
+        self.send_error(405, "Method not allowed")
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path or "/"
@@ -30159,6 +31211,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             self._send_html(200, unlock_page(VERSION, self._session_csrf()))
             return
+
+        # Token-gated LAN sync pull, above the login gate: a paired device
+        # presents only the Bearer pairing token, never a session cookie. The
+        # sealed container is all that is served.
+        if self._is_sync_route(path):
+            return self._handle_sync_get(path)
 
         master = self._require_login()
         if master is None:
@@ -30258,6 +31316,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 sharing_page(plaintext, self._session_csrf(), flash),
                 "sharing", VERSION, VAULT_PATH,
                 title="Sharing", counts=self._counts(plaintext)))
+            return
+
+        if path == "/sync":
+            try:
+                plaintext = load_vault(master, self._session_rec)
+            except Exception:
+                return self._expire_session()
+            flash = ""
+            msg = (urllib.parse.parse_qs(parsed.query).get("msg") or [""])[0]
+            if msg == "paired":
+                flash = '<div class="flash">Pairing window opened.</div>'
+            elif msg == "stopped":
+                flash = '<div class="flash">Pairing stopped.</div>'
+            host = (self.headers.get("Host", "") or "").strip()
+            self._send_html(200, render_shell(
+                sync_page(self._session_csrf(), host, flash),
+                "sync", VERSION, VAULT_PATH,
+                title="Sync", counts=self._counts(plaintext)))
             return
 
         if path == "/schemas":
@@ -31042,6 +32118,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if not self._write_authorized(raw_body_bytes, data):
             self.send_error(403, "Cross-origin write rejected")
+            return
+
+        if path == "/sync/pair":
+            # Toggle the pairing window. Active -> stop; otherwise open a fresh
+            # window with a strong token, honouring the incoming-push opt-in.
+            if _sync_pair_active():
+                SYNC_PAIR["token"] = ""
+                SYNC_PAIR["expires"] = 0.0
+                SYNC_PAIR["allow_put"] = False
+                self.send_response(303)
+                self.send_header("Location", "/sync?msg=stopped")
+                self.end_headers()
+                return
+            SYNC_PAIR["token"] = secrets.token_urlsafe(24)
+            SYNC_PAIR["expires"] = time.time() + SYNC_PAIR_WINDOW
+            SYNC_PAIR["allow_put"] = bool((data.get("allow_put") or [""])[0])
+            self.send_response(303)
+            self.send_header("Location", "/sync?msg=paired")
+            self.end_headers()
             return
 
         if path == "/settings/lock-timeout":

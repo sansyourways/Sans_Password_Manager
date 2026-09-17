@@ -7,6 +7,36 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.3.0] - 2026-09-17
+
+Three roadmap items in a "get the vault onto more devices and channels" cluster:
+LAN device-to-device sync, QR-based pairing, and a wider set of generated
+package manifests. No vault format change (format 6, additive only): sync moves
+the already-encrypted vault file, and QR and packaging never touch it.
+
+### Added
+- **Encrypted peer-to-peer LAN sync (roadmap 45).** A new `p2p` sync transport
+  reaches another device's listener over the local network, reusing the existing
+  three-way merge and conflict model unchanged -- only the encrypted vault file
+  crosses the wire. `spm sync serve` runs a token-gated listener (constant-time
+  token compare, bound to a chosen interface, time-bounded, validates any
+  received vault as a container before replacing, and records a security event
+  on replace), detects the LAN address, and prints a pairing string plus its QR.
+  A peer pulls or pushes with `spm sync pull|push p2p:<host:port> --token …`, or
+  by pasting a scanned `spm-sync://host:port/channel?token=…` string.
+- **QR-based device pairing (roadmap 46).** A dependency-free, pure-Python QR
+  encoder (byte mode, error-correction level M, versions 1-10, standard mask
+  selection) renders the pairing string as a scannable code -- Unicode
+  half-blocks in the terminal (`spm qr <text>`) and an SVG in the dashboard.
+- **A LAN Sync page in the dashboard.** Opens a bounded pairing window, shows the
+  token as a QR and a pairing string, and answers the same token-gated
+  `/spm-<channel>.gpg` GET/PUT routes the `p2p` transport speaks, so a scanned
+  device can sync with a LAN-bound dashboard. Translated across all 12 locales.
+- **Wider packaging (roadmap 43).** Alongside the Homebrew formula and Termux
+  `.deb`, each release now generates an AUR `PKGBUILD`, a Scoop manifest, and a
+  Nix derivation, each pinned to the published archive's checksum and attached to
+  the release.
+
 ## [5.2.0] - 2026-09-16
 
 Five more roadmap items, in two clusters -- sharing and the data model -- plus a

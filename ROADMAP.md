@@ -10,6 +10,29 @@ and cryptography in the smallest auditable component, and make the CLI, the SPM
 Dashboard, sync and the browser extension clients of that core rather than
 co-owners of it. That review is a design concept, not a formal security audit.
 
+## Shipped in 5.3.0 — LAN sync, QR pairing and wider packaging
+
+Three backlog items delivered together, with no vault format change (format 6,
+additive only). Sync moves the already-encrypted vault file; QR and packaging
+never touch it.
+
+- **Encrypted peer-to-peer LAN sync — shipped in 5.3.0 (item 45).** A `p2p` sync
+  transport reaches another device's listener over the local network, reusing the
+  existing three-way merge and conflict model — only the encrypted vault crosses
+  the wire. `spm sync serve` runs a token-gated, time-bounded listener (constant-
+  time token compare, chosen interface, container-validated replace, security
+  event on replace) and prints a pairing string with its QR. CLI: `spm sync
+  serve` and `spm sync pull|push p2p:<host:port> --token …`.
+- **QR-based device pairing — shipped in 5.3.0 (item 46).** A dependency-free,
+  pure-Python QR encoder (byte mode, level M, versions 1-10) renders the pairing
+  string for the terminal (Unicode half-blocks, `spm qr`) and the dashboard (an
+  SVG), plus a LAN **Sync** page that opens a bounded pairing window and answers
+  the same token-gated routes the `p2p` transport speaks.
+- **Homebrew / Termux / distro packages — shipped in 5.3.0 (item 43).** Each
+  release now also generates an AUR `PKGBUILD`, a Scoop manifest and a Nix
+  derivation, each pinned to the published archive's checksum and attached to the
+  release, alongside the existing Homebrew formula and Termux `.deb`.
+
 ## Shipped in 5.2.0 — sharing, custom types, per-record locks and relationships
 
 Five backlog items delivered together, with no vault format change (format 6,
@@ -341,11 +364,16 @@ vault format change (format 6, additive only).
   sha256 of one archive, so a committed one is either stale or wrong, and a
   wrong checksum fails for every user at once.
 
-  What the evaluation concluded, and the part worth stating: neither is
-  published to a package index. Homebrew core has notability requirements a
-  single-maintainer project does not meet, and Termux's repository has its own
-  submission process. Both are decisions to take deliberately rather than side
-  effects of a build.
+  **Widened in 5.3.0 (item 43):** the same generated-per-release discipline now
+  also emits an AUR `PKGBUILD`, a Scoop manifest and a Nix derivation, each
+  pinned to the published archive's checksum and attached to the release.
+
+  What the evaluation concluded, and the part worth stating: none is published to
+  a package index. Homebrew core has notability requirements a single-maintainer
+  project does not meet, and Termux's, AUR's, Scoop's and nixpkgs' repositories
+  each have their own submission process. Those are decisions to take
+  deliberately rather than side effects of a build; what a release ships is an
+  installable, checksummed manifest for each.
 
   It also found that `spm --version` did not exist — the flag fell through to
   the interactive banner, so a packager asking which version this is got a menu
