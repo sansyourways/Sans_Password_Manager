@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.3.0"
+VERSION="5.4.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -2659,6 +2659,45 @@ for i in items:
 		*)
 			secure_wipe "$tmp"
 			printf 'Usage: %s trash <list|restore|empty|purge> [args]\n' "$0" >&2
+			exit 1 ;;
+	esac
+}
+
+# ----- archive: a third record state (roadmap 23) ----------------------------
+cmd_archive() {
+	local op="${1:-list}"; [ $# -gt 0 ] && shift
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp out kind rtype rid; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	case "$op" in
+		list)
+			core archived-list "$tmp" | python3 -c '
+import sys, json
+items = json.load(sys.stdin)["items"]
+if not items:
+    print("Nothing is archived."); sys.exit(0)
+print("%-9s %-14s %-30s %s" % ("KIND", "TYPE", "ITEM", "ARCHIVED"))
+print("-" * 66)
+for i in items:
+    print("%-9s %-14s %-30s %s" % (
+        i["kind"], i["type"], (i["label"] or "")[:30], (i["archived_at"] or "")[:10]))
+'
+			secure_wipe "$tmp" ;;
+		set|unset)
+			local on=1; [ "$op" = unset ] && on=0
+			if [ "${1:-}" = "password" ]; then kind=password; rtype=-; rid="${2:-}"
+			else kind=record; rtype="${1:-}"; rid="${2:-}"
+				[ -n "$rtype" ] && record_require_type "$rtype"; fi
+			[ -n "$rid" ] || { secure_wipe "$tmp"; die "Usage: $0 archive set|unset <type> <id> | password <id>"; }
+			out="$(make_tmp)"
+			if core archive-set "$tmp" "$kind" "$rtype" "$rid" "$on" >"$out" 2>/dev/null; then
+				mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+				[ "$on" = 1 ] && printf 'Archived.\n' || printf 'Unarchived.\n'
+			else
+				secure_wipe "$out"; secure_wipe "$tmp"; die "No matching item."
+			fi ;;
+		*)
+			secure_wipe "$tmp"
+			printf 'Usage: %s archive <list|set|unset> [args]\n' "$0" >&2
 			exit 1 ;;
 	esac
 }
@@ -6442,12 +6481,24 @@ PY
 
 cmd_security_dashboard() {
 	[ -f "$VAULT_FILE" ] || die "Vault not found."
-	local tmp report breaches="" days="${SPM_ROTATION_DAYS:-365}" status=0
+	local tmp report breaches="" accounts="" offline="" days="${SPM_ROTATION_DAYS:-365}" status=0
 	case "$days" in ''|*[!0-9]*) days=365 ;; esac
 	[ "$days" -gt 0 ] 2>/dev/null || days=365
+	[ -n "${SPM_PWNED_OFFLINE:-}" ] && offline="--offline-hashes $SPM_PWNED_OFFLINE"
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
 			--breaches) breaches="--breaches" ;;
+			--account-breaches) accounts="--account-breaches" ;;
+			--offline)
+				[ "$#" -ge 2 ] || die "Missing path for --offline."
+				offline="--offline-hashes $2"; shift ;;
+			--refresh-breach-list)
+				[ "$#" -ge 2 ] || die "Missing URL for --refresh-breach-list."
+				local dest="${SPM_BREACHED_DOMAINS:-$SPM_CONFIG_DIR/breached-domains.txt}"
+				mkdir -p "$(dirname "$dest")"
+				core breach-list-refresh "$2" "$dest" \
+					&& printf 'Breach-domain list refreshed at %s.\n' "$dest"
+				return ;;
 			*) die "Unknown option for security: $1" ;;
 		esac
 		shift
@@ -6455,7 +6506,7 @@ cmd_security_dashboard() {
 	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
 	report="$(make_tmp)"
 	# shellcheck disable=SC2086
-	core security-report "$tmp" "$days" $breaches > "$report" || status=$?
+	core security-report "$tmp" "$days" $breaches $accounts $offline > "$report" || status=$?
 	secure_wipe "$tmp"
 	[ "$status" -eq 0 ] || { secure_wipe "$report"; die "Security review failed."; }
 	python3 - "$report" <<'PY'
@@ -6478,7 +6529,14 @@ elif audit["breach_status"] == "unavailable":
     print("Known breach IDs: check unavailable; no clean result assumed")
 else:
     print("Known breach IDs: not checked (use --breaches for the opt-in online check)")
+if audit.get("account_status") == "checked":
+    hits = "; ".join("%s (%s %s)" % (f["id"], f["name"] or f["domain"], f["year"]).strip()
+                     for f in audit["account_findings"])
+    print("Breached-service accounts:", hits or "none")
+else:
+    print("Breached-service accounts: not checked (use --account-breaches, on-device)")
 print("Passwords and full hashes are never sent, printed, or persisted.")
+print("The account check runs on-device from an open breach-domain list; no account identifier leaves it.")
 PY
 	secure_wipe "$report"
 }
@@ -9537,6 +9595,7 @@ main() {
 		record)           cmd_record "$@" ;;
 		favorite|favourite) cmd_favorite "$@" ;;
 		trash)            cmd_trash "$@" ;;
+		archive)          cmd_archive "$@" ;;
 		expiring)         cmd_expiring "$@" ;;
 		searches)         cmd_searches "$@" ;;
 		schema)           cmd_schema "$@" ;;

@@ -118,6 +118,12 @@ WEB_LOCALES = {
 
 WEB_CATALOGUES = {
     "en": {
+        "archive.action": "Archive",
+        "archive.archived": "Archived",
+        "archive.empty.d": "Archived passwords and records are set aside here, out of the default lists, until you bring them back.",
+        "archive.empty.t": "Nothing is archived",
+        "archive.restore": "Unarchive",
+        "archive.sub": "Set records aside without deleting them. Archived items stay out of the default lists until you bring them back.",
         "auth.countdown.refresh_in": "Refreshes in {n}s",
         "auth.countdown.refreshing": "Refreshing...",
         "auth.field.algorithm": "Algorithm",
@@ -356,6 +362,7 @@ WEB_CATALOGUES = {
         "login.note": "All decryption happens on this host. Nothing leaves it.",
         "login.sub": "Unlock your encrypted vault to continue.",
         "login.unlock": "Unlock",
+        "nav.archive": "Archive",
         "nav.authenticators": "Authenticators",
         "nav.backup_codes": "Backup Codes",
         "nav.close": "Close menu",
@@ -498,6 +505,10 @@ WEB_CATALOGUES = {
         "section.passwords": "Passwords",
         "section.secure_notes": "Secure Notes",
         "section.secure_notes_desc": "Encrypted notes stored inside the same vault.",
+        "security.account_check": "Check breached services",
+        "security.account_optin": "On-device check against an open breach-domain list. No account identifier leaves this device.",
+        "security.accounts": "Breached services",
+        "security.accounts_d": "Records that belong to a service in an open breach-domain list. On-device; no account identifier leaves this device.",
         "security.act_change": "Change password",
         "security.act_complete": "Add the details",
         "security.act_fix": "Fix this entry",
@@ -683,6 +694,12 @@ WEB_CATALOGUES = {
         "view.title": "View Entry",
     },
     "ar": {
+        "archive.action": "\u0623\u0631\u0634\u0641\u0629",
+        "archive.archived": "\u0645\u0624\u0631\u0634\u064e\u0641",
+        "archive.empty.d": "\u062a\u064f\u0646\u062d\u0651\u0649 \u0643\u0644\u0645\u0627\u062a \u0627\u0644\u0645\u0631\u0648\u0631 \u0648\u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0627\u0644\u0645\u0624\u0631\u0634\u064e\u0641\u0629 \u0647\u0646\u0627 \u062e\u0627\u0631\u062c \u0627\u0644\u0642\u0648\u0627\u0626\u0645 \u0627\u0644\u0627\u0641\u062a\u0631\u0627\u0636\u064a\u0629 \u062d\u062a\u0649 \u062a\u0639\u064a\u062f\u0647\u0627.",
+        "archive.empty.t": "\u0644\u0627 \u0634\u064a\u0621 \u0641\u064a \u0627\u0644\u0623\u0631\u0634\u064a\u0641",
+        "archive.restore": "\u0625\u0644\u063a\u0627\u0621 \u0627\u0644\u0623\u0631\u0634\u0641\u0629",
+        "archive.sub": "\u0646\u062d\u0650\u0651 \u0627\u0644\u0633\u062c\u0644\u0627\u062a \u062c\u0627\u0646\u0628\u064b\u0627 \u062f\u0648\u0646 \u062d\u0630\u0641\u0647\u0627. \u062a\u0628\u0642\u0649 \u0627\u0644\u0639\u0646\u0627\u0635\u0631 \u0627\u0644\u0645\u0624\u0631\u0634\u064e\u0641\u0629 \u062e\u0627\u0631\u062c \u0627\u0644\u0642\u0648\u0627\u0626\u0645 \u0627\u0644\u0627\u0641\u062a\u0631\u0627\u0636\u064a\u0629 \u062d\u062a\u0649 \u062a\u0639\u064a\u062f\u0647\u0627.",
         "auth.countdown.refresh_in": "\u064a\u062a\u062d\u062f\u0651\u062b \u062e\u0644\u0627\u0644 {n} \u062b\u0627\u0646\u064a\u0629",
         "auth.countdown.refreshing": "\u062c\u0627\u0631\u064d \u0627\u0644\u062a\u062d\u062f\u064a\u062b...",
         "auth.field.algorithm": "\u0627\u0644\u062e\u0648\u0627\u0631\u0632\u0645\u064a\u0629",
@@ -921,6 +938,7 @@ WEB_CATALOGUES = {
         "login.note": "\u064a\u062c\u0631\u064a \u0641\u0643 \u0627\u0644\u062a\u0634\u0641\u064a\u0631 \u0643\u0644\u0647 \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0645\u0636\u064a\u0641. \u0644\u0627 \u0634\u064a\u0621 \u064a\u063a\u0627\u062f\u0631\u0647.",
         "login.sub": "\u0627\u0641\u062a\u062d \u0642\u0641\u0644 \u062e\u0632\u0646\u062a\u0643 \u0627\u0644\u0645\u0634\u0641\u0651\u0631\u0629 \u0644\u0644\u0645\u062a\u0627\u0628\u0639\u0629.",
         "login.unlock": "\u0627\u0641\u062a\u062d \u0627\u0644\u0642\u0641\u0644",
+        "nav.archive": "\u0627\u0644\u0623\u0631\u0634\u064a\u0641",
         "nav.authenticators": "\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0645\u0635\u0627\u062f\u0642\u0629",
         "nav.backup_codes": "\u0631\u0645\u0648\u0632 \u0627\u0644\u0646\u0633\u062e \u0627\u0644\u0627\u062d\u062a\u064a\u0627\u0637\u064a",
         "nav.close": "\u0625\u063a\u0644\u0627\u0642 \u0627\u0644\u0642\u0627\u0626\u0645\u0629",
@@ -1063,6 +1081,10 @@ WEB_CATALOGUES = {
         "section.passwords": "\u0643\u0644\u0645\u0627\u062a \u0627\u0644\u0645\u0631\u0648\u0631",
         "section.secure_notes": "\u0645\u0644\u0627\u062d\u0638\u0627\u062a \u0622\u0645\u0646\u0629",
         "section.secure_notes_desc": "\u0645\u0644\u0627\u062d\u0638\u0627\u062a \u0645\u0634\u0641\u0651\u0631\u0629 \u0645\u062d\u0641\u0648\u0638\u0629 \u062f\u0627\u062e\u0644 \u0627\u0644\u062e\u0632\u0646\u0629 \u0646\u0641\u0633\u0647\u0627.",
+        "security.account_check": "\u0627\u0641\u062d\u0635 \u0627\u0644\u062e\u062f\u0645\u0627\u062a \u0627\u0644\u0645\u062e\u062a\u0631\u064e\u0642\u0629",
+        "security.account_optin": "\u0641\u062d\u0635 \u0639\u0644\u0649 \u0627\u0644\u062c\u0647\u0627\u0632 \u0645\u0642\u0627\u0628\u0644 \u0642\u0627\u0626\u0645\u0629 \u0645\u0641\u062a\u0648\u062d\u0629 \u0644\u0646\u0637\u0627\u0642\u0627\u062a \u0645\u062e\u062a\u0631\u064e\u0642\u0629. \u0644\u0627 \u064a\u063a\u0627\u062f\u0631 \u0627\u0644\u062c\u0647\u0627\u0632 \u0623\u064a \u0645\u0639\u0631\u0651\u0641 \u062d\u0633\u0627\u0628.",
+        "security.accounts": "\u062e\u062f\u0645\u0627\u062a \u0645\u062e\u062a\u0631\u064e\u0642\u0629",
+        "security.accounts_d": "\u0633\u062c\u0644\u0627\u062a \u062a\u0646\u062a\u0645\u064a \u0625\u0644\u0649 \u062e\u062f\u0645\u0629 \u0636\u0645\u0646 \u0642\u0627\u0626\u0645\u0629 \u0645\u0641\u062a\u0648\u062d\u0629 \u0644\u0646\u0637\u0627\u0642\u0627\u062a \u0645\u062e\u062a\u0631\u064e\u0642\u0629. \u0639\u0644\u0649 \u0627\u0644\u062c\u0647\u0627\u0632\u061b \u0648\u0644\u0627 \u064a\u063a\u0627\u062f\u0631\u0647 \u0623\u064a \u0645\u0639\u0631\u0651\u0641 \u062d\u0633\u0627\u0628.",
         "security.act_change": "\u063a\u064a\u0651\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631",
         "security.act_complete": "\u0623\u0636\u0641 \u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644",
         "security.act_fix": "\u0623\u0635\u0644\u062d \u0647\u0630\u0627 \u0627\u0644\u0645\u062f\u062e\u0644",
@@ -1248,6 +1270,12 @@ WEB_CATALOGUES = {
         "view.title": "\u0639\u0631\u0636 \u0627\u0644\u0645\u062f\u062e\u0644",
     },
     "de": {
+        "archive.action": "Archivieren",
+        "archive.archived": "Archiviert",
+        "archive.empty.d": "Archivierte Passw\u00f6rter und Datens\u00e4tze werden hier beiseitegelegt, au\u00dferhalb der Standardlisten, bis Sie sie zur\u00fcckholen.",
+        "archive.empty.t": "Nichts ist archiviert",
+        "archive.restore": "Aus Archiv holen",
+        "archive.sub": "Legen Sie Datens\u00e4tze beiseite, ohne sie zu l\u00f6schen. Archivierte Eintr\u00e4ge bleiben au\u00dferhalb der Standardlisten, bis Sie sie zur\u00fcckholen.",
         "auth.countdown.refresh_in": "Erneuert sich in {n} s",
         "auth.countdown.refreshing": "Wird erneuert...",
         "auth.field.algorithm": "Algorithmus",
@@ -1486,6 +1514,7 @@ WEB_CATALOGUES = {
         "login.note": "Alles wird auf diesem Host entschl\u00fcsselt. Nichts verl\u00e4sst ihn.",
         "login.sub": "Entsperre deinen verschl\u00fcsselten Tresor, um fortzufahren.",
         "login.unlock": "Entsperren",
+        "nav.archive": "Archiv",
         "nav.authenticators": "Authentifikatoren",
         "nav.backup_codes": "Backup-Codes",
         "nav.close": "Men\u00fc schlie\u00dfen",
@@ -1628,6 +1657,10 @@ WEB_CATALOGUES = {
         "section.passwords": "Passw\u00f6rter",
         "section.secure_notes": "Sichere Notizen",
         "section.secure_notes_desc": "Verschl\u00fcsselte Notizen im selben Tresor.",
+        "security.account_check": "Betroffene Dienste pr\u00fcfen",
+        "security.account_optin": "Pr\u00fcfung auf dem Ger\u00e4t anhand einer offenen Liste betroffener Domains. Keine Kontokennung verl\u00e4sst das Ger\u00e4t.",
+        "security.accounts": "Betroffene Dienste",
+        "security.accounts_d": "Datens\u00e4tze, die zu einem Dienst aus einer offenen Liste betroffener Domains geh\u00f6ren. Auf dem Ger\u00e4t; keine Kontokennung verl\u00e4sst es.",
         "security.act_change": "Passwort \u00e4ndern",
         "security.act_complete": "Angaben erg\u00e4nzen",
         "security.act_fix": "Eintrag korrigieren",
@@ -1813,6 +1846,12 @@ WEB_CATALOGUES = {
         "view.title": "Eintrag ansehen",
     },
     "es": {
+        "archive.action": "Archivar",
+        "archive.archived": "Archivado",
+        "archive.empty.d": "Las contrase\u00f1as y registros archivados se apartan aqu\u00ed, fuera de las listas predeterminadas, hasta que los recuperes.",
+        "archive.empty.t": "No hay nada archivado",
+        "archive.restore": "Desarchivar",
+        "archive.sub": "Aparta registros sin eliminarlos. Los elementos archivados quedan fuera de las listas predeterminadas hasta que los recuperes.",
         "auth.countdown.refresh_in": "Se actualiza en {n} s",
         "auth.countdown.refreshing": "Actualizando...",
         "auth.field.algorithm": "Algoritmo",
@@ -2051,6 +2090,7 @@ WEB_CATALOGUES = {
         "login.note": "Todo el descifrado ocurre en este host. Nada sale de \u00e9l.",
         "login.sub": "Desbloquea tu caja fuerte cifrada para continuar.",
         "login.unlock": "Desbloquear",
+        "nav.archive": "Archivo",
         "nav.authenticators": "Autenticadores",
         "nav.backup_codes": "C\u00f3digos de respaldo",
         "nav.close": "Cerrar el men\u00fa",
@@ -2193,6 +2233,10 @@ WEB_CATALOGUES = {
         "section.passwords": "Contrase\u00f1as",
         "section.secure_notes": "Notas seguras",
         "section.secure_notes_desc": "Notas cifradas guardadas dentro de la misma caja fuerte.",
+        "security.account_check": "Comprobar servicios filtrados",
+        "security.account_optin": "Comprobaci\u00f3n en el dispositivo con una lista abierta de dominios filtrados. Ning\u00fan identificador de cuenta sale de este equipo.",
+        "security.accounts": "Servicios filtrados",
+        "security.accounts_d": "Registros que pertenecen a un servicio de una lista abierta de dominios filtrados. En el dispositivo; ning\u00fan identificador de cuenta sale de este equipo.",
         "security.act_change": "Cambiar contrase\u00f1a",
         "security.act_complete": "A\u00f1adir los datos",
         "security.act_fix": "Corregir esta entrada",
@@ -2378,6 +2422,12 @@ WEB_CATALOGUES = {
         "view.title": "Ver entrada",
     },
     "fr": {
+        "archive.action": "Archiver",
+        "archive.archived": "Archiv\u00e9",
+        "archive.empty.d": "Les mots de passe et enregistrements archiv\u00e9s sont mis de c\u00f4t\u00e9 ici, hors des listes par d\u00e9faut, jusqu'\u00e0 ce que vous les rameniez.",
+        "archive.empty.t": "Rien n'est archiv\u00e9",
+        "archive.restore": "D\u00e9sarchiver",
+        "archive.sub": "Mettez des enregistrements de c\u00f4t\u00e9 sans les supprimer. Les \u00e9l\u00e9ments archiv\u00e9s restent hors des listes par d\u00e9faut jusqu'\u00e0 ce que vous les rameniez.",
         "auth.countdown.refresh_in": "Actualisation dans {n} s",
         "auth.countdown.refreshing": "Actualisation...",
         "auth.field.algorithm": "Algorithme",
@@ -2616,6 +2666,7 @@ WEB_CATALOGUES = {
         "login.note": "Tout le d\u00e9chiffrement a lieu sur cet h\u00f4te. Rien n'en sort.",
         "login.sub": "D\u00e9verrouillez votre coffre chiffr\u00e9 pour continuer.",
         "login.unlock": "D\u00e9verrouiller",
+        "nav.archive": "Archives",
         "nav.authenticators": "Authentificateurs",
         "nav.backup_codes": "Codes de secours",
         "nav.close": "Fermer le menu",
@@ -2758,6 +2809,10 @@ WEB_CATALOGUES = {
         "section.passwords": "Mots de passe",
         "section.secure_notes": "Notes s\u00e9curis\u00e9es",
         "section.secure_notes_desc": "Notes chiffr\u00e9es conserv\u00e9es dans le m\u00eame coffre.",
+        "security.account_check": "V\u00e9rifier les services compromis",
+        "security.account_optin": "V\u00e9rification sur l'appareil \u00e0 partir d'une liste ouverte de domaines compromis. Aucun identifiant de compte ne quitte l'appareil.",
+        "security.accounts": "Services compromis",
+        "security.accounts_d": "Enregistrements appartenant \u00e0 un service figurant dans une liste ouverte de domaines compromis. Sur l'appareil ; aucun identifiant de compte ne le quitte.",
         "security.act_change": "Changer le mot de passe",
         "security.act_complete": "Compl\u00e9ter les informations",
         "security.act_fix": "Corriger cette entr\u00e9e",
@@ -2943,6 +2998,12 @@ WEB_CATALOGUES = {
         "view.title": "Consulter la fiche",
     },
     "hi": {
+        "archive.action": "\u0938\u0902\u0917\u094d\u0930\u0939\u093f\u0924 \u0915\u0930\u0947\u0902",
+        "archive.archived": "\u0938\u0902\u0917\u094d\u0930\u0939\u093f\u0924",
+        "archive.empty.d": "\u0938\u0902\u0917\u094d\u0930\u0939\u093f\u0924 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0914\u0930 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0921\u093f\u092b\u093c\u0949\u0932\u094d\u091f \u0938\u0942\u091a\u093f\u092f\u094b\u0902 \u0938\u0947 \u092c\u093e\u0939\u0930 \u092f\u0939\u093e\u0901 \u0930\u0916\u0947 \u091c\u093e\u0924\u0947 \u0939\u0948\u0902, \u091c\u092c \u0924\u0915 \u0906\u092a \u0909\u0928\u094d\u0939\u0947\u0902 \u0935\u093e\u092a\u0938 \u0928 \u0932\u093e\u090f\u0901\u0964",
+        "archive.empty.t": "\u0915\u0941\u091b \u092d\u0940 \u0938\u0902\u0917\u094d\u0930\u0939\u093f\u0924 \u0928\u0939\u0940\u0902 \u0939\u0948",
+        "archive.restore": "\u0938\u0902\u0917\u094d\u0930\u0939 \u0938\u0947 \u0928\u093f\u0915\u093e\u0932\u0947\u0902",
+        "archive.sub": "\u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0915\u094b \u0939\u091f\u093e\u090f \u092c\u093f\u0928\u093e \u0905\u0932\u0917 \u0930\u0916\u0947\u0902\u0964 \u0938\u0902\u0917\u094d\u0930\u0939\u093f\u0924 \u0906\u0907\u091f\u092e \u0906\u092a\u0915\u0947 \u0935\u093e\u092a\u0938 \u0932\u093e\u0928\u0947 \u0924\u0915 \u0921\u093f\u092b\u093c\u0949\u0932\u094d\u091f \u0938\u0942\u091a\u093f\u092f\u094b\u0902 \u0938\u0947 \u092c\u093e\u0939\u0930 \u0930\u0939\u0924\u0947 \u0939\u0948\u0902\u0964",
         "auth.countdown.refresh_in": "{n} \u0938\u0947\u0915\u0902\u0921 \u092e\u0947\u0902 \u0924\u093e\u091c\u093c\u093e \u0939\u094b\u0917\u093e",
         "auth.countdown.refreshing": "\u0924\u093e\u091c\u093c\u093e \u0939\u094b \u0930\u0939\u093e \u0939\u0948...",
         "auth.field.algorithm": "\u090f\u0932\u094d\u0917\u094b\u0930\u093f\u0926\u094d\u092e",
@@ -3181,6 +3242,7 @@ WEB_CATALOGUES = {
         "login.note": "\u0938\u093e\u0930\u093e \u0921\u093f\u0915\u094d\u0930\u093f\u092a\u094d\u0936\u0928 \u0907\u0938\u0940 \u0939\u094b\u0938\u094d\u091f \u092a\u0930 \u0939\u094b\u0924\u093e \u0939\u0948\u0964 \u0915\u0941\u091b \u092d\u0940 \u092c\u093e\u0939\u0930 \u0928\u0939\u0940\u0902 \u091c\u093e\u0924\u093e\u0964",
         "login.sub": "\u091c\u093e\u0930\u0940 \u0930\u0916\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u0905\u092a\u0928\u0940 \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u0924\u093f\u091c\u094b\u0930\u0940 \u0905\u0928\u0932\u0949\u0915 \u0915\u0930\u0947\u0902\u0964",
         "login.unlock": "\u0905\u0928\u0932\u0949\u0915 \u0915\u0930\u0947\u0902",
+        "nav.archive": "\u0938\u0902\u0917\u094d\u0930\u0939",
         "nav.authenticators": "\u092a\u094d\u0930\u092e\u093e\u0923\u0915",
         "nav.backup_codes": "\u092c\u0948\u0915\u0905\u092a \u0915\u094b\u0921",
         "nav.close": "\u092e\u0947\u0928\u094d\u092f\u0942 \u092c\u0902\u0926 \u0915\u0930\u0947\u0902",
@@ -3323,6 +3385,10 @@ WEB_CATALOGUES = {
         "section.passwords": "\u092a\u093e\u0938\u0935\u0930\u094d\u0921",
         "section.secure_notes": "\u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0928\u094b\u091f",
         "section.secure_notes_desc": "\u0909\u0938\u0940 \u0924\u093f\u091c\u094b\u0930\u0940 \u092e\u0947\u0902 \u0930\u0916\u0947 \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u0928\u094b\u091f\u0964",
+        "security.account_check": "\u092a\u094d\u0930\u092d\u093e\u0935\u093f\u0924 \u0938\u0947\u0935\u093e\u090f\u0901 \u091c\u093e\u0901\u091a\u0947\u0902",
+        "security.account_optin": "\u0916\u0941\u0932\u0940 breach-\u0921\u094b\u092e\u0947\u0928 \u0938\u0942\u091a\u0940 \u0915\u0947 \u0935\u093f\u0930\u0941\u0926\u094d\u0927 \u0921\u093f\u0935\u093e\u0907\u0938 \u092a\u0930 \u091c\u093e\u0901\u091a\u0964 \u0915\u094b\u0908 \u0916\u093e\u0924\u093e \u092a\u0939\u091a\u093e\u0928\u0915\u0930\u094d\u0924\u093e \u0921\u093f\u0935\u093e\u0907\u0938 \u0938\u0947 \u092c\u093e\u0939\u0930 \u0928\u0939\u0940\u0902 \u091c\u093e\u0924\u093e\u0964",
+        "security.accounts": "\u092a\u094d\u0930\u092d\u093e\u0935\u093f\u0924 \u0938\u0947\u0935\u093e\u090f\u0901",
+        "security.accounts_d": "\u0910\u0938\u0947 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u091c\u094b \u0915\u093f\u0938\u0940 \u0916\u0941\u0932\u0940 breach-\u0921\u094b\u092e\u0947\u0928 \u0938\u0942\u091a\u0940 \u0915\u0940 \u0938\u0947\u0935\u093e \u0938\u0947 \u0938\u0902\u092c\u0902\u0927\u093f\u0924 \u0939\u0948\u0902\u0964 \u0921\u093f\u0935\u093e\u0907\u0938 \u092a\u0930 \u0939\u0940; \u0915\u094b\u0908 \u0916\u093e\u0924\u093e \u092a\u0939\u091a\u093e\u0928\u0915\u0930\u094d\u0924\u093e \u0907\u0938 \u0921\u093f\u0935\u093e\u0907\u0938 \u0938\u0947 \u092c\u093e\u0939\u0930 \u0928\u0939\u0940\u0902 \u091c\u093e\u0924\u093e\u0964",
         "security.act_change": "\u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u092c\u0926\u0932\u0947\u0902",
         "security.act_complete": "\u0935\u093f\u0935\u0930\u0923 \u091c\u094b\u0921\u093c\u0947\u0902",
         "security.act_fix": "\u092f\u0939 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0920\u0940\u0915 \u0915\u0930\u0947\u0902",
@@ -3508,6 +3574,12 @@ WEB_CATALOGUES = {
         "view.title": "\u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0926\u0947\u0916\u0947\u0902",
     },
     "id": {
+        "archive.action": "Arsipkan",
+        "archive.archived": "Diarsipkan",
+        "archive.empty.d": "Kata sandi dan catatan yang diarsipkan disimpan di sini, di luar daftar bawaan, sampai Anda mengembalikannya.",
+        "archive.empty.t": "Tidak ada yang diarsipkan",
+        "archive.restore": "Batalkan arsip",
+        "archive.sub": "Sisihkan catatan tanpa menghapusnya. Item yang diarsipkan tetap di luar daftar bawaan sampai Anda mengembalikannya.",
         "auth.countdown.refresh_in": "Segar ulang dalam {n}dtk",
         "auth.countdown.refreshing": "Sedang menyegarkan...",
         "auth.field.algorithm": "Algoritma",
@@ -3746,6 +3818,7 @@ WEB_CATALOGUES = {
         "login.note": "Semua dekripsi terjadi di host ini. Tidak ada yang keluar.",
         "login.sub": "Buka brankas terenkripsi Anda untuk melanjutkan.",
         "login.unlock": "Buka",
+        "nav.archive": "Arsip",
         "nav.authenticators": "Autentikator",
         "nav.backup_codes": "Kode Cadangan",
         "nav.close": "Tutup menu",
@@ -3888,6 +3961,10 @@ WEB_CATALOGUES = {
         "section.passwords": "Kata Sandi",
         "section.secure_notes": "Catatan Aman",
         "section.secure_notes_desc": "Catatan terenkripsi di dalam brankas yang sama.",
+        "security.account_check": "Periksa layanan yang bocor",
+        "security.account_optin": "Pemeriksaan di perangkat terhadap daftar domain bocor terbuka. Tidak ada pengenal akun yang keluar dari perangkat.",
+        "security.accounts": "Layanan yang bocor",
+        "security.accounts_d": "Catatan yang terkait dengan layanan dalam daftar domain bocor terbuka. Di perangkat; tidak ada pengenal akun yang keluar dari perangkat ini.",
         "security.act_change": "Ubah kata sandi",
         "security.act_complete": "Lengkapi detailnya",
         "security.act_fix": "Perbaiki entri ini",
@@ -4073,6 +4150,12 @@ WEB_CATALOGUES = {
         "view.title": "Lihat Entri",
     },
     "ja": {
+        "archive.action": "\u30a2\u30fc\u30ab\u30a4\u30d6",
+        "archive.archived": "\u30a2\u30fc\u30ab\u30a4\u30d6\u6e08\u307f",
+        "archive.empty.d": "\u30a2\u30fc\u30ab\u30a4\u30d6\u3057\u305f\u30d1\u30b9\u30ef\u30fc\u30c9\u3068\u30ec\u30b3\u30fc\u30c9\u306f\u3001\u65e2\u5b9a\u306e\u4e00\u89a7\u304b\u3089\u5916\u3057\u3066\u3053\u3053\u306b\u4fdd\u7ba1\u3055\u308c\u3001\u623b\u3059\u307e\u3067\u6b8b\u308a\u307e\u3059\u3002",
+        "archive.empty.t": "\u30a2\u30fc\u30ab\u30a4\u30d6\u306f\u3042\u308a\u307e\u305b\u3093",
+        "archive.restore": "\u30a2\u30fc\u30ab\u30a4\u30d6\u89e3\u9664",
+        "archive.sub": "\u30ec\u30b3\u30fc\u30c9\u3092\u524a\u9664\u305b\u305a\u306b\u8107\u3078\u3088\u3051\u307e\u3059\u3002\u30a2\u30fc\u30ab\u30a4\u30d6\u3057\u305f\u9805\u76ee\u306f\u3001\u623b\u3059\u307e\u3067\u65e2\u5b9a\u306e\u4e00\u89a7\u306b\u8868\u793a\u3055\u308c\u307e\u305b\u3093\u3002",
         "auth.countdown.refresh_in": "{n}\u79d2\u3067\u66f4\u65b0",
         "auth.countdown.refreshing": "\u66f4\u65b0\u4e2d...",
         "auth.field.algorithm": "\u30a2\u30eb\u30b4\u30ea\u30ba\u30e0",
@@ -4311,6 +4394,7 @@ WEB_CATALOGUES = {
         "login.note": "\u5fa9\u53f7\u306f\u3059\u3079\u3066\u3053\u306e\u30db\u30b9\u30c8\u4e0a\u3067\u884c\u308f\u308c\u307e\u3059\u3002\u5916\u90e8\u306b\u306f\u4f55\u3082\u51fa\u307e\u305b\u3093\u3002",
         "login.sub": "\u7d9a\u884c\u3059\u308b\u306b\u306f\u4fdd\u7ba1\u5eab\u306e\u30ed\u30c3\u30af\u3092\u89e3\u9664\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
         "login.unlock": "\u30ed\u30c3\u30af\u89e3\u9664",
+        "nav.archive": "\u30a2\u30fc\u30ab\u30a4\u30d6",
         "nav.authenticators": "\u8a8d\u8a3c\u30a2\u30d7\u30ea",
         "nav.backup_codes": "\u30d0\u30c3\u30af\u30a2\u30c3\u30d7\u30b3\u30fc\u30c9",
         "nav.close": "\u30e1\u30cb\u30e5\u30fc\u3092\u9589\u3058\u308b",
@@ -4453,6 +4537,10 @@ WEB_CATALOGUES = {
         "section.passwords": "\u30d1\u30b9\u30ef\u30fc\u30c9",
         "section.secure_notes": "\u30bb\u30ad\u30e5\u30a2\u30ce\u30fc\u30c8",
         "section.secure_notes_desc": "\u540c\u3058\u30dc\u30fc\u30eb\u30c8\u5185\u306b\u6697\u53f7\u5316\u3057\u3066\u4fdd\u5b58\u3055\u308c\u307e\u3059\u3002",
+        "security.account_check": "\u6f0f\u3048\u3044\u3057\u305f\u30b5\u30fc\u30d3\u30b9\u3092\u78ba\u8a8d",
+        "security.account_optin": "\u516c\u958b\u3055\u308c\u305f\u6f0f\u3048\u3044\u30c9\u30e1\u30a4\u30f3\u4e00\u89a7\u3092\u4f7f\u3063\u305f\u7aef\u672b\u5185\u30c1\u30a7\u30c3\u30af\u3002\u30a2\u30ab\u30a6\u30f3\u30c8\u8b58\u5225\u5b50\u306f\u7aef\u672b\u304b\u3089\u51fa\u307e\u305b\u3093\u3002",
+        "security.accounts": "\u6f0f\u3048\u3044\u3057\u305f\u30b5\u30fc\u30d3\u30b9",
+        "security.accounts_d": "\u516c\u958b\u3055\u308c\u305f\u6f0f\u3048\u3044\u30c9\u30e1\u30a4\u30f3\u4e00\u89a7\u306b\u3042\u308b\u30b5\u30fc\u30d3\u30b9\u306b\u5c5e\u3059\u308b\u30ec\u30b3\u30fc\u30c9\u3002\u7aef\u672b\u5185\u3067\u51e6\u7406\u3055\u308c\u3001\u30a2\u30ab\u30a6\u30f3\u30c8\u8b58\u5225\u5b50\u306f\u7aef\u672b\u304b\u3089\u51fa\u307e\u305b\u3093\u3002",
         "security.act_change": "\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5909\u66f4",
         "security.act_complete": "\u4e0d\u8db3\u3092\u88dc\u3046",
         "security.act_fix": "\u3053\u306e\u30a8\u30f3\u30c8\u30ea\u30fc\u3092\u4fee\u6b63",
@@ -4638,6 +4726,12 @@ WEB_CATALOGUES = {
         "view.title": "\u30a8\u30f3\u30c8\u30ea\u8868\u793a",
     },
     "ko": {
+        "archive.action": "\ubcf4\uad00",
+        "archive.archived": "\ubcf4\uad00\ub428",
+        "archive.empty.d": "\ubcf4\uad00\ub41c \ube44\ubc00\ubc88\ud638\uc640 \ub808\ucf54\ub4dc\ub294 \uae30\ubcf8 \ubaa9\ub85d\uc5d0\uc11c \ube60\uc9c4 \ucc44 \uc5ec\uae30\uc5d0 \ubcf4\uad00\ub418\uba70, \ub418\ub3cc\ub9b4 \ub54c\uae4c\uc9c0 \uc720\uc9c0\ub429\ub2c8\ub2e4.",
+        "archive.empty.t": "\ubcf4\uad00\ub41c \ud56d\ubaa9\uc774 \uc5c6\uc2b5\ub2c8\ub2e4",
+        "archive.restore": "\ubcf4\uad00 \ud574\uc81c",
+        "archive.sub": "\ub808\ucf54\ub4dc\ub97c \uc0ad\uc81c\ud558\uc9c0 \uc54a\uace0 \ub530\ub85c \ubcf4\uad00\ud569\ub2c8\ub2e4. \ubcf4\uad00\ub41c \ud56d\ubaa9\uc740 \ub418\ub3cc\ub9b4 \ub54c\uae4c\uc9c0 \uae30\ubcf8 \ubaa9\ub85d\uc5d0 \ub098\ud0c0\ub098\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
         "auth.countdown.refresh_in": "{n}\ucd08 \ud6c4 \uac31\uc2e0",
         "auth.countdown.refreshing": "\uac31\uc2e0 \uc911...",
         "auth.field.algorithm": "\uc54c\uace0\ub9ac\uc998",
@@ -4876,6 +4970,7 @@ WEB_CATALOGUES = {
         "login.note": "\ubaa8\ub4e0 \ubcf5\ud638\ud654\ub294 \uc774 \ud638\uc2a4\ud2b8\uc5d0\uc11c \uc774\ub8e8\uc5b4\uc9d1\ub2c8\ub2e4. \ubc16\uc73c\ub85c \ub098\uac00\ub294 \uac83\uc740 \uc5c6\uc2b5\ub2c8\ub2e4.",
         "login.sub": "\uacc4\uc18d\ud558\ub824\uba74 \uc554\ud638\ud654\ub41c \uae08\uace0\ub97c \uc7a0\uae08 \ud574\uc81c\ud558\uc138\uc694.",
         "login.unlock": "\uc7a0\uae08 \ud574\uc81c",
+        "nav.archive": "\ubcf4\uad00\ud568",
         "nav.authenticators": "\uc778\uc99d\uae30",
         "nav.backup_codes": "\ubc31\uc5c5 \ucf54\ub4dc",
         "nav.close": "\uba54\ub274 \ub2eb\uae30",
@@ -5018,6 +5113,10 @@ WEB_CATALOGUES = {
         "section.passwords": "\ube44\ubc00\ubc88\ud638",
         "section.secure_notes": "\ubcf4\uc548 \uba54\ubaa8",
         "section.secure_notes_desc": "\uac19\uc740 \uae08\uace0 \uc548\uc5d0 \uc800\uc7a5\ub418\ub294 \uc554\ud638\ud654\ub41c \uba54\ubaa8\uc785\ub2c8\ub2e4.",
+        "security.account_check": "\uc720\ucd9c\ub41c \uc11c\ube44\uc2a4 \ud655\uc778",
+        "security.account_optin": "\uacf5\uac1c\ub41c \uc720\ucd9c \ub3c4\uba54\uc778 \ubaa9\ub85d\uc744 \uc774\uc6a9\ud55c \uae30\uae30 \ub0b4 \ud655\uc778\uc785\ub2c8\ub2e4. \uacc4\uc815 \uc2dd\ubcc4\uc790\ub294 \uae30\uae30\ub97c \ub5a0\ub098\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
+        "security.accounts": "\uc720\ucd9c\ub41c \uc11c\ube44\uc2a4",
+        "security.accounts_d": "\uacf5\uac1c\ub41c \uc720\ucd9c \ub3c4\uba54\uc778 \ubaa9\ub85d\uc758 \uc11c\ube44\uc2a4\uc5d0 \uc18d\ud55c \ub808\ucf54\ub4dc\uc785\ub2c8\ub2e4. \uae30\uae30\uc5d0\uc11c \ucc98\ub9ac\ub418\uba70 \uacc4\uc815 \uc2dd\ubcc4\uc790\ub294 \uae30\uae30\ub97c \ub5a0\ub098\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
         "security.act_change": "\ube44\ubc00\ubc88\ud638 \ubcc0\uacbd",
         "security.act_complete": "\uc138\ubd80 \uc815\ubcf4 \ucd94\uac00",
         "security.act_fix": "\uc774 \ud56d\ubaa9 \uc218\uc815",
@@ -5203,6 +5302,12 @@ WEB_CATALOGUES = {
         "view.title": "\ud56d\ubaa9 \ubcf4\uae30",
     },
     "pt-br": {
+        "archive.action": "Arquivar",
+        "archive.archived": "Arquivado",
+        "archive.empty.d": "Senhas e registros arquivados ficam guardados aqui, fora das listas padr\u00e3o, at\u00e9 voc\u00ea traz\u00ea-los de volta.",
+        "archive.empty.t": "Nada est\u00e1 arquivado",
+        "archive.restore": "Desarquivar",
+        "archive.sub": "Guarde registros sem exclu\u00ed-los. Itens arquivados ficam fora das listas padr\u00e3o at\u00e9 voc\u00ea traz\u00ea-los de volta.",
         "auth.countdown.refresh_in": "Atualiza em {n} s",
         "auth.countdown.refreshing": "Atualizando...",
         "auth.field.algorithm": "Algoritmo",
@@ -5441,6 +5546,7 @@ WEB_CATALOGUES = {
         "login.note": "Toda a descriptografia acontece neste host. Nada sai dele.",
         "login.sub": "Desbloqueie seu cofre criptografado para continuar.",
         "login.unlock": "Desbloquear",
+        "nav.archive": "Arquivo",
         "nav.authenticators": "Autenticadores",
         "nav.backup_codes": "C\u00f3digos de backup",
         "nav.close": "Fechar o menu",
@@ -5583,6 +5689,10 @@ WEB_CATALOGUES = {
         "section.passwords": "Senhas",
         "section.secure_notes": "Notas seguras",
         "section.secure_notes_desc": "Notas criptografadas guardadas dentro do mesmo cofre.",
+        "security.account_check": "Verificar servi\u00e7os vazados",
+        "security.account_optin": "Verifica\u00e7\u00e3o no dispositivo com uma lista aberta de dom\u00ednios vazados. Nenhum identificador de conta sai do dispositivo.",
+        "security.accounts": "Servi\u00e7os vazados",
+        "security.accounts_d": "Registros que pertencem a um servi\u00e7o em uma lista aberta de dom\u00ednios vazados. No dispositivo; nenhum identificador de conta sai dele.",
         "security.act_change": "Alterar senha",
         "security.act_complete": "Adicionar os dados",
         "security.act_fix": "Corrigir esta entrada",
@@ -5768,6 +5878,12 @@ WEB_CATALOGUES = {
         "view.title": "Ver registro",
     },
     "ru": {
+        "archive.action": "\u0412 \u0430\u0440\u0445\u0438\u0432",
+        "archive.archived": "\u0412 \u0430\u0440\u0445\u0438\u0432\u0435",
+        "archive.empty.d": "\u0410\u0440\u0445\u0438\u0432\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0435 \u043f\u0430\u0440\u043e\u043b\u0438 \u0438 \u0437\u0430\u043f\u0438\u0441\u0438 \u043e\u0442\u043b\u043e\u0436\u0435\u043d\u044b \u0437\u0434\u0435\u0441\u044c, \u0432\u043d\u0435 \u043e\u0431\u044b\u0447\u043d\u044b\u0445 \u0441\u043f\u0438\u0441\u043a\u043e\u0432, \u043f\u043e\u043a\u0430 \u0432\u044b \u0438\u0445 \u043d\u0435 \u0432\u0435\u0440\u043d\u0451\u0442\u0435.",
+        "archive.empty.t": "\u0412 \u0430\u0440\u0445\u0438\u0432\u0435 \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435\u0442",
+        "archive.restore": "\u0418\u0437 \u0430\u0440\u0445\u0438\u0432\u0430",
+        "archive.sub": "\u041e\u0442\u043b\u043e\u0436\u0438\u0442\u0435 \u0437\u0430\u043f\u0438\u0441\u0438, \u043d\u0435 \u0443\u0434\u0430\u043b\u044f\u044f \u0438\u0445. \u0410\u0440\u0445\u0438\u0432\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0435 \u044d\u043b\u0435\u043c\u0435\u043d\u0442\u044b \u043e\u0441\u0442\u0430\u044e\u0442\u0441\u044f \u0432\u043d\u0435 \u043e\u0431\u044b\u0447\u043d\u044b\u0445 \u0441\u043f\u0438\u0441\u043a\u043e\u0432, \u043f\u043e\u043a\u0430 \u0432\u044b \u0438\u0445 \u043d\u0435 \u0432\u0435\u0440\u043d\u0451\u0442\u0435.",
         "auth.countdown.refresh_in": "\u041e\u0431\u043d\u043e\u0432\u0438\u0442\u0441\u044f \u0447\u0435\u0440\u0435\u0437 {n} \u0441",
         "auth.countdown.refreshing": "\u041e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435...",
         "auth.field.algorithm": "\u0410\u043b\u0433\u043e\u0440\u0438\u0442\u043c",
@@ -6006,6 +6122,7 @@ WEB_CATALOGUES = {
         "login.note": "\u0412\u0441\u044f \u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043e\u0432\u043a\u0430 \u043f\u0440\u043e\u0438\u0441\u0445\u043e\u0434\u0438\u0442 \u043d\u0430 \u044d\u0442\u043e\u043c \u0445\u043e\u0441\u0442\u0435. \u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043f\u043e\u043a\u0438\u0434\u0430\u0435\u0442 \u0435\u0433\u043e.",
         "login.sub": "\u0420\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u0443\u0439\u0442\u0435 \u0437\u0430\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0435 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435, \u0447\u0442\u043e\u0431\u044b \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c.",
         "login.unlock": "\u0420\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u0442\u044c",
+        "nav.archive": "\u0410\u0440\u0445\u0438\u0432",
         "nav.authenticators": "\u0410\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440\u044b",
         "nav.backup_codes": "\u0420\u0435\u0437\u0435\u0440\u0432\u043d\u044b\u0435 \u043a\u043e\u0434\u044b",
         "nav.close": "\u0417\u0430\u043a\u0440\u044b\u0442\u044c \u043c\u0435\u043d\u044e",
@@ -6148,6 +6265,10 @@ WEB_CATALOGUES = {
         "section.passwords": "\u041f\u0430\u0440\u043e\u043b\u0438",
         "section.secure_notes": "\u0417\u0430\u0449\u0438\u0449\u0451\u043d\u043d\u044b\u0435 \u0437\u0430\u043c\u0435\u0442\u043a\u0438",
         "section.secure_notes_desc": "\u0417\u0430\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0435 \u0437\u0430\u043c\u0435\u0442\u043a\u0438 \u0432 \u0442\u043e\u043c \u0436\u0435 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435.",
+        "security.account_check": "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u0437\u0430\u0442\u0440\u043e\u043d\u0443\u0442\u044b\u0435 \u0441\u0435\u0440\u0432\u0438\u0441\u044b",
+        "security.account_optin": "\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043d\u0430 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0435 \u043f\u043e \u043e\u0442\u043a\u0440\u044b\u0442\u043e\u043c\u0443 \u0441\u043f\u0438\u0441\u043a\u0443 \u0441\u043a\u043e\u043c\u043f\u0440\u043e\u043c\u0435\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0445 \u0434\u043e\u043c\u0435\u043d\u043e\u0432. \u0418\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u0430\u043a\u043a\u0430\u0443\u043d\u0442\u0430 \u043d\u0435 \u043f\u043e\u043a\u0438\u0434\u0430\u0435\u0442 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u043e.",
+        "security.accounts": "\u0417\u0430\u0442\u0440\u043e\u043d\u0443\u0442\u044b\u0435 \u0441\u0435\u0440\u0432\u0438\u0441\u044b",
+        "security.accounts_d": "\u0417\u0430\u043f\u0438\u0441\u0438, \u043e\u0442\u043d\u043e\u0441\u044f\u0449\u0438\u0435\u0441\u044f \u043a \u0441\u0435\u0440\u0432\u0438\u0441\u0443 \u0438\u0437 \u043e\u0442\u043a\u0440\u044b\u0442\u043e\u0433\u043e \u0441\u043f\u0438\u0441\u043a\u0430 \u0441\u043a\u043e\u043c\u043f\u0440\u043e\u043c\u0435\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0445 \u0434\u043e\u043c\u0435\u043d\u043e\u0432. \u041d\u0430 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0435; \u0438\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u0430\u043a\u043a\u0430\u0443\u043d\u0442\u0430 \u0435\u0433\u043e \u043d\u0435 \u043f\u043e\u043a\u0438\u0434\u0430\u0435\u0442.",
         "security.act_change": "\u0421\u043c\u0435\u043d\u0438\u0442\u044c \u043f\u0430\u0440\u043e\u043b\u044c",
         "security.act_complete": "\u0414\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u044c \u0434\u0430\u043d\u043d\u044b\u0435",
         "security.act_fix": "\u0418\u0441\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u044c",
@@ -6333,6 +6454,12 @@ WEB_CATALOGUES = {
         "view.title": "\u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440 \u0437\u0430\u043f\u0438\u0441\u0438",
     },
     "zh-hans": {
+        "archive.action": "\u5f52\u6863",
+        "archive.archived": "\u5df2\u5f52\u6863",
+        "archive.empty.d": "\u5df2\u5f52\u6863\u7684\u5bc6\u7801\u548c\u8bb0\u5f55\u4f1a\u4ece\u9ed8\u8ba4\u5217\u8868\u4e2d\u79fb\u51fa\u5e76\u5b58\u653e\u5728\u6b64\uff0c\u76f4\u5230\u4f60\u5c06\u5176\u53d6\u56de\u3002",
+        "archive.empty.t": "\u6ca1\u6709\u5df2\u5f52\u6863\u7684\u9879\u76ee",
+        "archive.restore": "\u53d6\u6d88\u5f52\u6863",
+        "archive.sub": "\u628a\u8bb0\u5f55\u6401\u7f6e\u4e00\u65c1\u800c\u4e0d\u5220\u9664\u3002\u5df2\u5f52\u6863\u7684\u9879\u76ee\u5728\u4f60\u53d6\u56de\u4e4b\u524d\u4e0d\u4f1a\u51fa\u73b0\u5728\u9ed8\u8ba4\u5217\u8868\u4e2d\u3002",
         "auth.countdown.refresh_in": "{n} \u79d2\u540e\u5237\u65b0",
         "auth.countdown.refreshing": "\u6b63\u5728\u5237\u65b0\u2026\u2026",
         "auth.field.algorithm": "\u7b97\u6cd5",
@@ -6571,6 +6698,7 @@ WEB_CATALOGUES = {
         "login.note": "\u6240\u6709\u89e3\u5bc6\u90fd\u5728\u672c\u673a\u5b8c\u6210\uff0c\u6ca1\u6709\u4efb\u4f55\u5185\u5bb9\u79bb\u5f00\u8fd9\u53f0\u4e3b\u673a\u3002",
         "login.sub": "\u89e3\u9501\u4f60\u7684\u52a0\u5bc6\u5bc6\u7801\u5e93\u4ee5\u7ee7\u7eed\u3002",
         "login.unlock": "\u89e3\u9501",
+        "nav.archive": "\u5f52\u6863",
         "nav.authenticators": "\u9a8c\u8bc1\u5668",
         "nav.backup_codes": "\u5907\u7528\u7801",
         "nav.close": "\u5173\u95ed\u83dc\u5355",
@@ -6713,6 +6841,10 @@ WEB_CATALOGUES = {
         "section.passwords": "\u5bc6\u7801",
         "section.secure_notes": "\u5b89\u5168\u7b14\u8bb0",
         "section.secure_notes_desc": "\u4fdd\u5b58\u5728\u540c\u4e00\u5bc6\u7801\u5e93\u4e2d\u7684\u52a0\u5bc6\u7b14\u8bb0\u3002",
+        "security.account_check": "\u68c0\u67e5\u5df2\u6cc4\u9732\u7684\u670d\u52a1",
+        "security.account_optin": "\u4f7f\u7528\u516c\u5f00\u6cc4\u9732\u57df\u540d\u5217\u8868\u5728\u672c\u673a\u68c0\u67e5\u3002\u6ca1\u6709\u8d26\u6237\u6807\u8bc6\u79bb\u5f00\u672c\u8bbe\u5907\u3002",
+        "security.accounts": "\u5df2\u6cc4\u9732\u7684\u670d\u52a1",
+        "security.accounts_d": "\u5c5e\u4e8e\u516c\u5f00\u6cc4\u9732\u57df\u540d\u5217\u8868\u4e2d\u67d0\u4e2a\u670d\u52a1\u7684\u8bb0\u5f55\u3002\u5728\u672c\u673a\u5904\u7406\uff1b\u6ca1\u6709\u8d26\u6237\u6807\u8bc6\u79bb\u5f00\u672c\u8bbe\u5907\u3002",
         "security.act_change": "\u66f4\u6539\u5bc6\u7801",
         "security.act_complete": "\u8865\u5168\u4fe1\u606f",
         "security.act_fix": "\u4fee\u590d\u6b64\u6761\u76ee",
@@ -8833,6 +8965,7 @@ ICON_SPRITE = """
   <symbol id="i-server" viewBox="0 0 24 24"><path d="M3.5 3.5h17v7h-17zM3.5 13.5h17v7h-17zM7 7h.01M7 17h.01M11 7h6M11 17h6"/></symbol>
   <symbol id="i-certificate" viewBox="0 0 24 24"><path d="M4.5 3.5h15v12h-15zM7.5 7h9M7.5 10h6"/><circle cx="12" cy="17.5" r="3"/><path d="M10 19.6l-.6 2.9 2.6-1.3 2.6 1.3-.6-2.9"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 6.5h15M9 6.5V4.5h6v2M6 6.5l1 14h10l1-14M10 10v7M14 10v7"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24"><path d="M3.5 4.5h17v4h-17zM5 8.5v11h14v-11M9.5 12.5h5"/></symbol>
   <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6M10 20.5a2 2 0 0 0 4 0"/></symbol>
   <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.7 6.2.6-4.7 4.1 1.4 6.1L12 16.9l-5.5 3.2 1.4-6.1L3.2 9.8l6.2-.6z"/></symbol>
   <symbol id="i-share" viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="5.5" r="2.5"/><circle cx="18" cy="18.5" r="2.5"/><path d="M8.2 10.8l7.6-4M8.2 13.2l7.6 4"/></symbol>
@@ -8951,6 +9084,7 @@ NAV_SECTIONS = [
         ("transfer",  "/transfer",  "transfer", "nav.transfer",  "Export / Import", None),
         ("sharing",   "/sharing",   "share",  "nav.sharing",   "Sharing",         None),
         ("sync",      "/sync",      "sync",   "nav.sync",      "Sync",            None),
+        ("archive",   "/archive",   "archive", "nav.archive",  "Archive",         "__archive__"),
         ("trash",     "/trash",     "trash",  "nav.trash",     "Trash",           "__trash__"),
     ]),
     ("nav.group.settings", [
@@ -9231,6 +9365,25 @@ def _favorite_toggle(kind, record_type, record_id, on, back):
            "true" if on else "false", label, _icon("star", "icon icon-sm")))
 
 
+def _archive_button(kind, record_type, record_id, back):
+    """A one-click archive control (roadmap 23), same-origin like the star beside
+    it. Archiving sets the row aside; unarchiving happens from the Archive page.
+    """
+    return (
+        '<form method="post" action="/archive-set" style="display:inline">'
+        '<input type="hidden" name="kind" value="%s">'
+        '<input type="hidden" name="type" value="%s">'
+        '<input type="hidden" name="id" value="%s">'
+        '<input type="hidden" name="on" value="1">'
+        '<input type="hidden" name="back" value="%s">'
+        '<button class="icon-btn" type="submit" aria-label="Archive" '
+        'title="Archive" data-i18n-title="archive.action" '
+        'data-i18n-aria="archive.action">%s</button></form>'
+        % (html.escape(kind, quote=True), html.escape(record_type, quote=True),
+           html.escape(str(record_id), quote=True), html.escape(back, quote=True),
+           _icon("archive", "icon icon-sm")))
+
+
 def _empty(icon, title_key, title, desc_key, desc, cta_html="", colspan=4):
     return (
         f'<tr class="empty-row"><td colspan="{colspan}">'
@@ -9406,7 +9559,7 @@ def build_rows_html(entries, filtered=False, reveal_hidden=False):
             f'<td class="num">{eid}</td>'
             f'<td class="strong">{name} {aging}{chips}</td>'
             f'<td class="muted">{user or "&mdash;"}</td>'
-            f'<td class="actions">{_favorite_toggle("password", "", eid, favorite, "/passwords")}{_actions(f"/view?id={eid}", f"/edit?id={eid}", "/delete", eid, "confirm.delete_entry", "Delete this entry?")}</td>'
+            f'<td class="actions">{_favorite_toggle("password", "", eid, favorite, "/passwords")}{_archive_button("password", "", eid, "/passwords")}{_actions(f"/view?id={eid}", f"/edit?id={eid}", "/delete", eid, "confirm.delete_entry", "Delete this entry?")}</td>'
             f'</tr>'
         )
     return "".join(rows)
@@ -9788,6 +9941,32 @@ def security_page(audit, entries):
             'Passwords and full hashes are never sent.</div>'
             '<a class="btn btn-ghost btn-sm" href="/security?breaches=1" '
             'data-i18n="security.breach_check">Check known breaches</a>')
+    account_status = audit.get("account_status", "not_checked")
+    if account_status == "checked":
+        findings = audit.get("account_findings", [])
+        if findings:
+            arows = ""
+            for f in findings:
+                name, _user, _ = lookup.get(f["id"], ("&mdash;", "&mdash;", False))
+                svc = _esc(f.get("name") or f.get("domain") or "")
+                year = _esc(f.get("year") or "")
+                arows += (
+                    '<tr><td class="num">%s</td><td class="strong">%s</td>'
+                    '<td class="muted">%s %s</td>'
+                    '<td class="actions"><a class="btn btn-primary btn-sm" href="/edit?id=%s" '
+                    'data-i18n="security.act_change">Change password</a></td></tr>'
+                    % (_esc(f["id"]), name, svc, year, _esc(f["id"])))
+            account_html = ('<div class="table-wrap"><table class="t"><tbody>'
+                            + arows + '</tbody></table></div>')
+        else:
+            account_html = ('<div class="hint" data-i18n="security.none">'
+                            'Nothing to fix here.</div>')
+    else:
+        account_html = (
+            '<div class="hint" data-i18n="security.account_optin">On-device check '
+            'against an open breach-domain list. No account identifier leaves this device.</div>'
+            '<a class="btn btn-ghost btn-sm" href="/security?accounts=1" '
+            'data-i18n="security.account_check">Check breached services</a>')
     days = audit["rotation_days"]
     return f"""
 <div class="page-head">
@@ -9829,6 +10008,10 @@ def security_page(audit, entries):
     <div class="field"><label data-i18n="security.breached">Known breaches</label>
       <div class="hint" data-i18n="security.breached_d">Matches in Pwned Passwords. Only five SHA-1 prefix characters leave this device.</div>
       {breach_html}
+    </div>
+    <div class="field"><label data-i18n="security.accounts">Breached services</label>
+      <div class="hint" data-i18n="security.accounts_d">Records that belong to a service in an open breach-domain list. On-device; no account identifier leaves this device.</div>
+      {account_html}
     </div>
   </div>
 </div>"""
@@ -10139,6 +10322,60 @@ def trash_page(items, csrf):
   <div class="page-actions">%s</div>
 </div>
 %s""" % (empty_btn, content)
+
+
+def archive_page(items, csrf):
+    """Archived passwords and records, with unarchive (roadmap 23). Archive sets
+    an item aside without deleting it, so there is no permanent delete here --
+    unlike Trash, an archived item is never on a purge clock."""
+    if not items:
+        content = """
+<div class="card"><div class="empty">
+  <div class="empty-ico" aria-hidden="true">%s</div>
+  <div class="empty-t" data-i18n="archive.empty.t">Nothing is archived</div>
+  <div class="empty-d" data-i18n="archive.empty.d">Archived passwords and records are set aside here, out of the default lists, until you bring them back.</div>
+</div></div>""" % _icon("archive", "icon icon-lg")
+    else:
+        rows = []
+        for it in items:
+            hidden = ('<input type="hidden" name="csrf" value="%s">'
+                      '<input type="hidden" name="kind" value="%s">'
+                      '<input type="hidden" name="type" value="%s">'
+                      '<input type="hidden" name="id" value="%s">'
+                      % (html.escape(csrf, quote=True), html.escape(it["kind"], quote=True),
+                         html.escape(it["type"], quote=True), html.escape(str(it["id"]), quote=True)))
+            actions = (
+                '<div class="icon-row">'
+                '<form class="inline" method="post" action="/archive-set">%s'
+                '<input type="hidden" name="on" value="0">'
+                '<button type="submit" class="btn btn-ghost btn-sm" data-i18n="archive.restore">Unarchive</button></form>'
+                '</div>' % hidden)
+            rows.append(
+                '<tr data-row=""><td>%s</td>'
+                '<td class="strong">%s</td>'
+                '<td class="muted">%s</td>'
+                '<td class="actions">%s</td></tr>'
+                % (_expiry_type_cell(it), _esc(it["label"]) or "&mdash;",
+                   _esc((it.get("archived_at") or "")[:10]), actions))
+        content = """
+<div class="card">
+  <div class="table-wrap"><table class="t">
+    <thead><tr>
+      <th scope="col" data-i18n="table.type">Type</th>
+      <th scope="col" data-i18n="table.item">Item</th>
+      <th scope="col" data-i18n="archive.archived">Archived</th>
+      <th scope="col"><span class="sr-only" data-i18n="table.actions">Actions</span></th>
+    </tr></thead>
+    <tbody>%s</tbody></table></div>
+</div>""" % "".join(rows)
+    return """
+<div class="page-head">
+  <div>
+    <h1 class="page-title" data-i18n="nav.archive">Archive</h1>
+    <div class="page-sub" data-i18n="archive.sub">Set records aside without deleting them. Archived items stay out of the default lists until you bring them back.</div>
+  </div>
+</div>
+%s""" % content
 
 
 def sharing_page(plaintext, csrf, flash=""):
@@ -12588,6 +12825,7 @@ def build_records_page(plaintext, active_type="", counts=None):
           <td>{html.escape(folder)}</td>
           <td style="text-align:end">
             {_favorite_toggle("record", record_type, record_id, favorite, "/records")}
+            {_archive_button("record", record_type, record_id, "/records")}
             <a class="icon-btn" href="{href}" aria-label="View">{_icon("view", "icon icon-sm")}</a>
             <a class="icon-btn" href="{edit}" aria-label="Edit">{_icon("edit", "icon icon-sm")}</a>
             <form method="post" action="/records-delete" style="display:inline"
@@ -12782,6 +13020,7 @@ def build_record_view(parsed, counts=None, sealed=None, links=None,
   </div>
   <div class="page-actions">
     {_favorite_toggle("record", record_type, record_id, favorite, back)}
+    {_archive_button("record", record_type, record_id, back)}
     <a class="btn btn-primary" href="{edit}" data-i18n="btn.edit">Edit</a>
     <a class="btn btn-ghost" href="{back}" data-i18n="form.back_list">Back to list</a>
   </div>
@@ -13796,7 +14035,7 @@ def parse_multipart(body_bytes: bytes, content_type: str):
 		out[name] = payload
 	return out
 
-def parse_entries(plaintext: str, include_trashed=False):
+def parse_entries(plaintext: str, include_trashed=False, include_archived=False):
     """Password entries.
 
     A password row is identified the way the CLI identifies one: field 1 is a
@@ -13821,8 +14060,10 @@ def parse_entries(plaintext: str, include_trashed=False):
             continue
         parts = line.split("\t")
         if len(parts) >= 6 and parts[0].isdigit():
-            if not include_trashed and len(parts) > 7:
-                if core.decode_attrs(parts[7])[4]:   # trashed_at set
+            if len(parts) > 7:
+                if not include_trashed and core.decode_attrs(parts[7])[4]:
+                    continue
+                if not include_archived and core.attrs_archived(parts[7]):
                     continue
             entries.append((idx, parts))
     return lines, entries
@@ -13853,6 +14094,17 @@ def _row_set_trashed(line, col):
 def _row_clear_trashed(line, col):
     """Restore a soft-deleted row."""
     return _row_attrs_edit(line, col, trashed_at="")
+
+
+def _row_set_archived(line, col):
+    """Set a row aside in the archive, stamped now (roadmap 23)."""
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return _row_attrs_edit(line, col, archived_at=now)
+
+
+def _row_clear_archived(line, col):
+    """Bring an archived row back to the default views."""
+    return _row_attrs_edit(line, col, archived_at="")
 
 
 def _row_set_favorite(line, col, on):
@@ -14063,7 +14315,8 @@ def _entry_age_days(created, now):
     return (now - stamp) / 86400.0
 
 
-def compute_security(entries, plaintext, check_breaches=False):
+def compute_security(entries, plaintext, check_breaches=False,
+                     check_accounts=False):
     """Score the vault and name the offending IDs.
 
     The CLI's `spm security-dashboard` and this function have to agree: two
@@ -14076,8 +14329,10 @@ def compute_security(entries, plaintext, check_breaches=False):
     Secrets are read to compare and measure them; only IDs are ever returned.
     """
     del entries  # retained for call-site compatibility; the core parses once.
+    offline = os.environ.get("SPM_PWNED_OFFLINE") or None
     return core.security_report(
-        plaintext, rotation_days(), check_breaches=check_breaches)
+        plaintext, rotation_days(), check_breaches=check_breaches,
+        offline_source=offline, check_accounts=check_accounts)
 
 
 # A tag is a #word in a plaintext field. The lookbehind keeps "C#" and the
@@ -15405,7 +15660,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             _, entries = parse_entries(plaintext)
             params = urllib.parse.parse_qs(parsed.query)
             check_breaches = (params.get("breaches") or [""])[0] == "1"
-            audit = compute_security(entries, plaintext, check_breaches)
+            check_accounts = (params.get("accounts") or [""])[0] == "1"
+            audit = compute_security(entries, plaintext, check_breaches,
+                                     check_accounts)
             self._send_html(200, render_shell(
                 security_page(audit, entries), "security", VERSION, VAULT_PATH,
                 title="Security", counts=self._counts(plaintext)))
@@ -15431,6 +15688,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 trash_page(core.trashed_items(plaintext), self._session_csrf()),
                 "trash", VERSION, VAULT_PATH,
                 title="Trash", counts=self._counts(plaintext)))
+            return
+
+        if path == "/archive":
+            try:
+                plaintext = load_vault(master, self._session_rec)
+            except Exception:
+                return self._expire_session()
+            self._send_html(200, render_shell(
+                archive_page(core.archived_items(plaintext), self._session_csrf()),
+                "archive", VERSION, VAULT_PATH,
+                title="Archive", counts=self._counts(plaintext)))
             return
 
         if path == "/sharing":
@@ -16845,6 +17113,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 save_vault(master, new_plain, self._session_rec)
             self.send_response(302)
             self.send_header("Location", "/trash")
+            self.end_headers()
+            return
+
+        if path == "/archive-set":
+            # Archive (on=1) or unarchive (on=0) one row (roadmap 23).
+            kind = (data.get("kind") or [""])[0]
+            record_type = (data.get("type") or [""])[0]
+            record_id = (data.get("id") or [""])[0]
+            on = (data.get("on") or ["1"])[0] != "0"
+            if kind not in ("record", "password") or not record_id:
+                self.send_error(400, "Missing target")
+                return
+            if kind == "record" and record_type not in core.RECORD_TYPES:
+                self.send_error(400, "Unknown record type")
+                return
+            plaintext = load_vault(master, self._session_rec)
+            new_plain, changed = core.set_archived(
+                plaintext, kind, record_type, record_id, on)
+            if changed:
+                save_vault(master, new_plain, self._session_rec)
+            # Unarchiving returns to the Archive view; archiving returns to where
+            # the record lived, so the list it just left reflects the change.
+            back = "/archive" if not on else (
+                "/records?type=" + urllib.parse.quote(record_type)
+                if kind == "record" else "/passwords")
+            self.send_response(302)
+            self.send_header("Location", back)
             self.end_headers()
             return
 

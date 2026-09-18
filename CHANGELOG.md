@@ -7,6 +7,38 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.4.0] - 2026-09-18
+
+Four roadmap items, a "finish the security-and-lifecycle backlog" cluster. No
+vault format change (format 6, additive only): archive is a new optional
+attributes key, and the breach work adds report fields and read paths.
+
+### Added
+- **Archive state (roadmap 23).** A third record state beside favourite and
+  trash: archiving sets a password or record aside — out of the default lists,
+  counts and search — without deleting it or putting it on a purge clock.
+  Independent of trash. Dashboard: an **Archive** page with unarchive, plus an
+  archive control on record and password rows and views. CLI: `spm archive
+  list|set|unset`.
+- **Offline compromised-password database (roadmap 34).** The password breach
+  check can now run **entirely on-device** against a local dataset, auto-detected:
+  a single HIBP "ordered-by-hash" file (seek-based binary search, never loaded
+  whole) or a directory of per-prefix range files. Point `SPM_PWNED_OFFLINE` (or
+  `spm security --offline PATH`) at it; the free, keyless, k-anonymous online
+  range API remains the opt-in fallback. The local dataset is source-agnostic.
+- **Account-identifier breach monitoring (roadmap 33).** A new on-device check
+  flags records whose service belongs to a known breach, matching the account's
+  email domain and the record's URL host against an **open breach-metadata list**
+  (which domains were breached and when — never credentials). A small bundled
+  list is overridable/extendable via `SPM_BREACHED_DOMAINS` and refreshable from
+  a public list URL (`spm security --refresh-breach-list`); no account identifier
+  ever leaves the device, and no HIBP account API or subscription is used.
+  Dashboard: a **Breached services** section on Security. CLI: `spm security
+  --account-breaches`.
+- **Browser-extension vault-lock control (roadmap 38).** Verified end to end and
+  marked shipped — the popup's "Lock SPM" button clears the native host's cached
+  session; the native-host regression now asserts the session is locked after it.
+
 ## [5.3.0] - 2026-09-17
 
 Three roadmap items in a "get the vault onto more devices and channels" cluster:

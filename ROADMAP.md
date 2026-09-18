@@ -10,6 +10,32 @@ and cryptography in the smallest auditable component, and make the CLI, the SPM
 Dashboard, sync and the browser extension clients of that core rather than
 co-owners of it. That review is a design concept, not a formal security audit.
 
+## Shipped in 5.4.0 — archive, and breach coverage for accounts and offline
+
+Four backlog items delivered together, with no vault format change (format 6,
+additive only).
+
+- **Archive state — shipped in 5.4.0 (item 23).** A third record state beside
+  favourite and trash: an `archived_at` attributes key sets a password or record
+  aside, out of the default lists, counts and search, without deleting it or
+  putting it on a purge clock. Independent of trash, with its own page and
+  restore. CLI: `spm archive`.
+- **Offline compromised-password database — shipped in 5.4.0 (item 34).** The
+  password breach check runs entirely on-device against a local dataset,
+  auto-detected: an HIBP ordered-by-hash file (seek-based binary search) or a
+  per-prefix directory. Source-agnostic; `SPM_PWNED_OFFLINE` / `--offline`. The
+  free, keyless, k-anonymous online range API stays the opt-in fallback.
+- **Username/email breach monitoring — shipped in 5.4.0 (item 33).** An on-device
+  check flags records whose service belongs to a known breach, matching the
+  email domain and URL host against an open breach-metadata list (which domains
+  were breached, never credentials), bundled and overridable via
+  `SPM_BREACHED_DOMAINS`. Fully free: no HIBP account API, no subscription, and no
+  account identifier leaves the device. CLI: `spm security --account-breaches`.
+- **Browser-extension vault-lock control — shipped in 5.4.0 (item 38).** Already
+  present and now verified end to end and marked shipped: the popup's "Lock SPM"
+  button clears the native host's cached session, asserted by the native-host
+  regression.
+
 ## Shipped in 5.3.0 — LAN sync, QR pairing and wider packaging
 
 Three backlog items delivered together, with no vault format change (format 6,

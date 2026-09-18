@@ -755,7 +755,7 @@ _KEEP = object()
 
 
 def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
-                 trashed_at="", sealed=None, links=None):
+                 trashed_at="", sealed=None, links=None, archived_at=""):
     """The attributes column for a record, or "" when there is nothing to say.
 
     Empty is empty rather than an encoded empty object, so a record that uses
@@ -773,9 +773,10 @@ def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
     hidden = bool(hidden)
     favorite = bool(favorite)
     trashed_at = (trashed_at or "").strip()
+    archived_at = (archived_at or "").strip()
     links = links or []
     if (not folder and not fields and not hidden and not favorite
-            and not trashed_at and not sealed and not links):
+            and not trashed_at and not sealed and not links and not archived_at):
         return ""
     if len(folder) > ATTRS_FOLDER_MAX:
         raise VaultError("folder name is longer than %d characters"
@@ -785,6 +786,8 @@ def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
                          % ATTRS_FIELD_MAX)
     if len(trashed_at) > 40:
         raise VaultError("trashed_at timestamp is malformed")
+    if len(archived_at) > 40:
+        raise VaultError("archived_at timestamp is malformed")
     seen = set()
     for name, value in fields:
         if len(name) > ATTRS_FIELD_NAME_MAX:
@@ -808,6 +811,8 @@ def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
         payload["favorite"] = True
     if trashed_at:
         payload["trashed_at"] = trashed_at
+    if archived_at:
+        payload["archived_at"] = archived_at
     if sealed:
         payload["sealed"] = sealed
     if links:
@@ -884,6 +889,16 @@ def attrs_sealed(column):
     return None
 
 
+def attrs_archived(column):
+    """The archived-at timestamp on a record (roadmap 23), or "".
+
+    Like `sealed` and `links`, archive lives outside the decode_attrs tuple and
+    is reached by accessor, so widening the positional tuple -- and every caller
+    that unpacks it -- is not needed for one more optional flag."""
+    archived = _attrs_payload(column).get("archived_at") or ""
+    return archived.strip()[:40] if isinstance(archived, str) else ""
+
+
 def attrs_links(column):
     """The relationship links [{kind,type,id}] on a record (roadmap 25)."""
     out = []
@@ -903,7 +918,7 @@ def attrs_links(column):
 
 
 def attrs_edit(column, folder=None, fields=None, hidden=None, favorite=None,
-               trashed_at=None, sealed=_KEEP, links=None):
+               trashed_at=None, sealed=_KEEP, links=None, archived_at=None):
     """Return an attributes column with only the named parts changed.
 
     The point of the whole codec is that no path re-encodes a record without
@@ -917,6 +932,7 @@ def attrs_edit(column, folder=None, fields=None, hidden=None, favorite=None,
         decode_attrs(column)
     cur_sealed = attrs_sealed(column)
     cur_links = attrs_links(column)
+    cur_archived = attrs_archived(column)
     return encode_attrs(
         folder=cur_folder if folder is None else folder,
         fields=cur_fields if fields is None else fields,
@@ -925,6 +941,7 @@ def attrs_edit(column, folder=None, fields=None, hidden=None, favorite=None,
         trashed_at=cur_trashed if trashed_at is None else trashed_at,
         sealed=cur_sealed if sealed is _KEEP else sealed,
         links=cur_links if links is None else links,
+        archived_at=cur_archived if archived_at is None else archived_at,
     )
 
 
@@ -2570,7 +2587,8 @@ def record_is_trashed(parsed):
     return bool(parsed[9]) if len(parsed) > 9 else False
 
 
-def iter_records(plaintext, record_type="", include_trashed=False):
+def iter_records(plaintext, record_type="", include_trashed=False,
+                 include_archived=False):
     """(line_index, parsed) for every typed record row, in vault order.
 
     The index is the caller's half of a rewrite: the dashboard edits and
@@ -2597,6 +2615,9 @@ def iter_records(plaintext, record_type="", include_trashed=False):
             continue
         if not include_trashed and record_is_trashed(parsed):
             continue
+        if not include_archived and attrs_archived(
+                line.split("\t")[5] if line.count("\t") >= 5 else ""):
+            continue
         yield index, parsed
 
 
@@ -2612,7 +2633,8 @@ def find_record(plaintext, record_type, record_id):
     report a record it can see in the trash as missing.
     """
     for index, parsed in iter_records(plaintext, record_type,
-                                      include_trashed=True):
+                                      include_trashed=True,
+                                      include_archived=True):
         if parsed[1] == str(record_id):
             return index, parsed
     return None
@@ -2642,6 +2664,13 @@ def _row_trashed_at(parts):
     if col is None or len(parts) <= col:
         return ""
     return decode_attrs(parts[col])[4]
+
+
+def _row_archived_at(parts):
+    col = _attrs_col(parts)
+    if col is None or len(parts) <= col:
+        return ""
+    return attrs_archived(parts[col])
 
 
 def trashed_items(plaintext):
@@ -2697,6 +2726,72 @@ def set_trashed(plaintext, kind, record_type, record_id, on):
         while len(parts) <= col:
             parts.append("")
         parts[col] = attrs_edit(parts[col], trashed_at=now) or "-"
+        lines[i] = "\t".join(parts)
+        return "\n".join(lines) + "\n", True
+    return plaintext, False
+
+
+# ----- archive: a third record state (roadmap 23) ----------------------------
+# Archive hides a record from the default views without deleting it or putting it
+# on a purge clock: an archived record is simply set aside. It is a separate
+# attributes key from trash, so the two are independent -- a record is out of the
+# default list if it is trashed OR archived, and each has its own view and its
+# own restore. Every mutation goes through attrs_edit, so archiving never
+# disturbs a row's folder, fields, favourite or trashed marker.
+
+def archived_items(plaintext):
+    """Every archived password and record, most recently archived first.
+
+    Each item is {kind, type, id, label, archived_at}, the same shape as
+    `trashed_items`, so an archive view addresses either back to its unarchive.
+    A row that is also trashed is not listed here -- trash takes precedence, and
+    it already has its own view.
+    """
+    items = []
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        archived = _row_archived_at(parts)
+        if not archived or _row_trashed_at(parts):
+            continue
+        if _attrs_col(parts) == 5:
+            parsed = parse_record_row(line)
+            if parsed is None:
+                continue
+            items.append({"kind": "record", "type": parsed[0], "id": parsed[1],
+                          "label": parsed[2], "archived_at": archived})
+        else:
+            items.append({"kind": "password", "type": "password",
+                          "id": parts[0], "label": parts[1] if len(parts) > 1
+                          else "?", "archived_at": archived})
+    items.sort(key=lambda i: i["archived_at"], reverse=True)
+    return items
+
+
+def set_archived(plaintext, kind, record_type, record_id, on):
+    """Archive or unarchive one row by id. Returns (plaintext, changed).
+
+    `kind` is "record" (with its type) or "password", exactly as set_trashed.
+    """
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()) if on else ""
+    lines = (plaintext or "").splitlines()
+    for i, line in enumerate(lines):
+        parts = line.split("\t")
+        col = _attrs_col(parts)
+        if col is None:
+            continue
+        if kind == "record":
+            if col != 5:
+                continue
+            parsed = parse_record_row(line)
+            if parsed is None or parsed[0] != record_type \
+                    or parsed[1] != str(record_id):
+                continue
+        else:
+            if col != 7 or parts[0] != str(record_id):
+                continue
+        while len(parts) <= col:
+            parts.append("")
+        parts[col] = attrs_edit(parts[col], archived_at=now) or "-"
         lines[i] = "\t".join(parts)
         return "\n".join(lines) + "\n", True
     return plaintext, False
@@ -2781,20 +2876,30 @@ def record_next_id(plaintext, record_type):
 
 
 def record_counts(plaintext):
-    """{type: n} for the live types present, plus "" -> the total and
-    "__trash__" -> how many records are soft-deleted.
+    """{type: n} for the live types present, plus "" -> the total,
+    "__trash__" -> how many records are soft-deleted, and "__archive__" -> how
+    many are archived (roadmap 23).
 
     The total is carried here rather than summed by each caller because the
     nav badge and the overview tile disagreeing about how many records a
     vault holds is the class of defect a shared core exists to prevent. Trashed
-    records are excluded from the per-type and total counts -- a trashed record
-    is not in the list its count labels -- and reported separately so a Trash
-    entry can carry its own badge.
+    and archived records are excluded from the per-type and total counts -- a
+    record set aside is not in the list its count labels -- and reported
+    separately so the Trash and Archive entries can carry their own badges.
+    Trash takes precedence over archive, so a row that is both counts once.
     """
-    counts = {"": 0, "__trash__": 0}
-    for _index, parsed in iter_records(plaintext, include_trashed=True):
+    counts = {"": 0, "__trash__": 0, "__archive__": 0}
+    for line in (plaintext or "").splitlines():
+        if not line.startswith(RECORD_TAG_PREFIX):
+            continue
+        parsed = parse_record_row(line)
+        if parsed is None:
+            continue
         if record_is_trashed(parsed):
             counts["__trash__"] += 1
+            continue
+        if attrs_archived(line.split("\t")[5] if line.count("\t") >= 5 else ""):
+            counts["__archive__"] += 1
             continue
         counts[parsed[0]] = counts.get(parsed[0], 0) + 1
         counts[""] += 1
@@ -5218,6 +5323,20 @@ def _password_security_rows(plaintext):
     return rows, malformed
 
 
+def _parse_pwned_payload(payload):
+    """Parse a range body (online response or an offline per-prefix file) into
+    {suffix: count}. Lines are 35-hex-suffix:count; anything else is ignored."""
+    found = {}
+    for line in payload.splitlines():
+        suffix, separator, raw_count = line.partition(":")
+        suffix = suffix.strip().upper()
+        raw_count = raw_count.strip()
+        if (separator and re.fullmatch(r"[0-9A-F]{35}", suffix)
+                and raw_count.isdigit()):
+            found[suffix] = int(raw_count)
+    return found
+
+
 def _pwned_range(prefix, timeout=5, opener=None):
     """Suffix -> breach count for one HIBP range response.
 
@@ -5241,24 +5360,87 @@ def _pwned_range(prefix, timeout=5, opener=None):
                 close()
     except Exception as exc:
         raise VaultError("breach service unavailable") from exc
-    found = {}
-    for line in payload.splitlines():
-        suffix, separator, raw_count = line.partition(":")
-        suffix = suffix.strip().upper()
-        raw_count = raw_count.strip()
-        if (separator and re.fullmatch(r"[0-9A-F]{35}", suffix)
-                and raw_count.isdigit()):
-            found[suffix] = int(raw_count)
+    found = _parse_pwned_payload(payload)
     if not found:
         raise VaultError("invalid breach-service response")
     return found
 
 
-def breached_password_ids(rows, timeout=5, opener=None):
+def _pwned_offline_search(path, prefix):
+    """{suffix: count} for a five-character prefix via binary search over an HIBP
+    "ordered-by-hash" file (lines '<40-hex-SHA1>:<count>', ascending). The file
+    is never loaded whole. Returns {} when the prefix is absent (that is a clean
+    answer, not an error)."""
+    prefix = prefix.upper()
+    try:
+        size = os.path.getsize(path)
+    except OSError as exc:
+        raise VaultError("offline breach database is unreadable") from exc
+    if size == 0:
+        return {}
+    with open(path, "rb") as handle:
+        lo, hi = 0, size
+        # Left-bound binary search: converge lo to just before the first line
+        # whose 5-char prefix is >= the target. hi = mid keeps the region that
+        # still contains the boundary line even when mid lands mid-line.
+        while lo < hi:
+            mid = (lo + hi) // 2
+            handle.seek(mid)
+            if mid:
+                handle.readline()          # discard the partial line at mid
+            line = handle.readline()
+            if not line:
+                hi = mid
+                continue
+            key = line[:5].decode("ascii", errors="replace").upper()
+            if key < prefix:
+                lo = handle.tell()
+            else:
+                hi = mid
+        # Back up a line's width so a boundary line that began just before `lo`
+        # is not missed, then scan forward: skip < prefix, collect ==, stop on >.
+        handle.seek(max(0, lo - 64))
+        if lo > 64:
+            handle.readline()
+        found = {}
+        for raw in handle:
+            key = raw[:5].decode("ascii", errors="replace").upper()
+            if key < prefix:
+                continue
+            if key > prefix:
+                break
+            suffix, sep, raw_count = raw.decode("ascii", "replace").partition(":")
+            suffix = suffix.strip().upper()[5:]
+            raw_count = raw_count.strip()
+            if sep and re.fullmatch(r"[0-9A-F]{35}", suffix) and raw_count.isdigit():
+                found[suffix] = int(raw_count)
+        return found
+
+
+def _pwned_range_local(prefix, source):
+    """{suffix: count} for a prefix from a local source, auto-detected: a
+    directory of per-prefix files (<PREFIX>.txt, the online range format), or a
+    single ordered-by-hash file (binary search)."""
+    if not re.fullmatch(r"[0-9A-F]{5}", prefix):
+        raise VaultError("invalid breach-check prefix")
+    if os.path.isdir(source):
+        path = os.path.join(source, prefix + ".txt")
+        try:
+            with open(path, encoding="ascii", errors="replace") as handle:
+                return _parse_pwned_payload(handle.read())
+        except OSError:
+            return {}          # a range with no breached passwords has no file
+    return _pwned_offline_search(source, prefix)
+
+
+def breached_password_ids(rows, timeout=5, opener=None, offline_source=None):
     """[{id, count}] for passwords present in Pwned Passwords.
 
     Full hashes remain in memory on this device and are never returned. One
-    request is made per unique five-character prefix, not per record.
+    lookup is made per unique five-character prefix, not per record. When
+    `offline_source` is a local file or directory (roadmap 34) the check runs
+    entirely on-device and no request is made; otherwise the free, keyless,
+    k-anonymous HIBP range API is used, one request per prefix.
     """
     by_prefix = {}
     for parts in rows:
@@ -5274,14 +5456,19 @@ def breached_password_ids(rows, timeout=5, opener=None):
     prefixes = sorted(by_prefix)
     if not prefixes:
         return breached
-    # A slow service must not cost one full timeout per password, but the
-    # client also must not turn a large vault into unbounded request fan-out.
-    workers = min(4, len(prefixes))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        ranges = pool.map(
-            lambda prefix: _pwned_range(prefix, timeout=timeout, opener=opener),
-            prefixes)
-        fetched = dict(zip(prefixes, ranges))
+    if offline_source is not None:
+        # On-device: no network, no fan-out; read each prefix from the local set.
+        fetched = {prefix: _pwned_range_local(prefix, offline_source)
+                   for prefix in prefixes}
+    else:
+        # A slow service must not cost one full timeout per password, but the
+        # client also must not turn a large vault into unbounded request fan-out.
+        workers = min(4, len(prefixes))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            ranges = pool.map(
+                lambda prefix: _pwned_range(prefix, timeout=timeout, opener=opener),
+                prefixes)
+            fetched = dict(zip(prefixes, ranges))
     for prefix in prefixes:
         suffixes = fetched[prefix]
         for record_id, suffix in by_prefix[prefix]:
@@ -5291,8 +5478,178 @@ def breached_password_ids(rows, timeout=5, opener=None):
     return breached
 
 
+# ----- account-identifier breach review (roadmap 33) -------------------------
+# The password check above is HIBP's k-anonymous range API. There is no equally
+# clean way to ask "was this email in a breach" -- the services that answer it
+# either wrap HIBP's paid account API or require sending the whole address. So
+# account monitoring here is done the other way round and entirely on-device:
+# from open breach *metadata* -- the public record of which domains were breached
+# and when, never any credentials -- flag records that belong to a breached
+# service. It is a domain-level prompt to rotate, not a per-account oracle, and
+# nothing about the account leaves the device.
+
+# A small, illustrative, overridable set of well-documented public breaches,
+# {domain: (name, year)}. Extend or replace it with SPM_BREACHED_DOMAINS.
+BREACHED_DOMAINS_DEFAULT = {
+    "linkedin.com": ("LinkedIn", "2012"),
+    "adobe.com": ("Adobe", "2013"),
+    "yahoo.com": ("Yahoo", "2013"),
+    "dropbox.com": ("Dropbox", "2012"),
+    "myspace.com": ("MySpace", "2008"),
+    "tumblr.com": ("Tumblr", "2013"),
+    "last.fm": ("Last.fm", "2012"),
+    "canva.com": ("Canva", "2019"),
+    "dailymotion.com": ("Dailymotion", "2016"),
+    "disqus.com": ("Disqus", "2012"),
+    "imgur.com": ("Imgur", "2014"),
+    "wattpad.com": ("Wattpad", "2020"),
+    "edmodo.com": ("Edmodo", "2017"),
+    "zynga.com": ("Zynga", "2019"),
+    "deezer.com": ("Deezer", "2019"),
+    "twitter.com": ("Twitter", "2022"),
+    "facebook.com": ("Facebook", "2019"),
+    "chegg.com": ("Chegg", "2018"),
+    "500px.com": ("500px", "2018"),
+    "houzz.com": ("Houzz", "2018"),
+    "bitly.com": ("Bitly", "2014"),
+    "patreon.com": ("Patreon", "2015"),
+    "gawker.com": ("Gawker", "2010"),
+    "kickstarter.com": ("Kickstarter", "2014"),
+    "mate1.com": ("Mate1", "2016"),
+}
+
+
+def _normalise_domain(host):
+    """A registrable-ish host: lower-cased, no port, no leading www."""
+    host = (host or "").strip().lower().rstrip(".")
+    if "@" in host:
+        host = host.rsplit("@", 1)[-1]
+    if ":" in host:
+        host = host.split(":", 1)[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def load_breach_catalogue(path=None):
+    """The breach-domain catalogue: the bundled default merged with an optional
+    user file (roadmap 33). The file is `domain[<TAB>name[<TAB>year]]` per line,
+    '#' comments allowed; a user entry overrides the default for that domain."""
+    catalogue = dict(BREACHED_DOMAINS_DEFAULT)
+    path = path if path is not None else os.environ.get("SPM_BREACHED_DOMAINS", "")
+    if path and os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    cols = line.split("\t")
+                    domain = _normalise_domain(cols[0])
+                    if not domain:
+                        continue
+                    name = cols[1].strip() if len(cols) > 1 else ""
+                    year = cols[2].strip() if len(cols) > 2 else ""
+                    catalogue[domain] = (name, year)
+        except OSError:
+            pass
+    return catalogue
+
+
+def _match_breached_domain(candidate, catalogue):
+    """The catalogue key a candidate host matches (exact or a subdomain of), or
+    None. Longest match wins so a.b.example.com prefers example.com over com."""
+    candidate = _normalise_domain(candidate)
+    if not candidate:
+        return None
+    if candidate in catalogue:
+        return candidate
+    best = None
+    for key in catalogue:
+        if candidate.endswith("." + key) and (best is None or len(key) > len(best)):
+            best = key
+    return best
+
+
+def breached_account_domains(rows, catalogue=None):
+    """[{id, domain, name, year}] for records whose account belongs to a domain
+    in the breach catalogue (roadmap 33). The email domain (when the username is
+    an email) and the record's URL host are checked. On-device; nothing sent."""
+    if catalogue is None:
+        catalogue = load_breach_catalogue()
+    findings = []
+    for parts in rows:
+        record_id = parts[0]
+        username = parts[2] if len(parts) > 2 else ""
+        url = parts[6] if len(parts) > 6 else ""
+        candidates = []
+        if "@" in username:
+            candidates.append(username.rsplit("@", 1)[-1])
+        if url:
+            try:
+                host = urllib.parse.urlsplit(
+                    url if "//" in url else "//" + url).hostname or ""
+            except ValueError:
+                host = ""
+            if host:
+                candidates.append(host)
+        for candidate in candidates:
+            key = _match_breached_domain(candidate, catalogue)
+            if key:
+                name, year = catalogue[key]
+                findings.append({"id": record_id, "domain": key,
+                                 "name": name, "year": year})
+                break
+    return findings
+
+
+def refresh_breach_catalogue(url, dest, timeout=10, opener=None):
+    """Download an updated public breach-domain list to `dest` (roadmap 33).
+
+    Only a public list is fetched; no account identifier is sent. The body must
+    parse as the `domain[<TAB>name[<TAB>year]]` line format, and it is written
+    atomically. Returns the number of domains written."""
+    if not re.match(r"https?://", url or ""):
+        raise VaultError("a breach-list URL must be http(s)")
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "Sans-Password-Manager"})
+    open_url = opener or urllib.request.urlopen
+    try:
+        response = open_url(request, timeout=timeout)
+        try:
+            body = response.read().decode("utf-8", errors="replace")
+        finally:
+            close = getattr(response, "close", None)
+            if close:
+                close()
+    except Exception as exc:
+        raise VaultError("breach-list source unavailable") from exc
+    domains = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if _normalise_domain(line.split("\t")[0]):
+            domains.append(line)
+    if not domains:
+        raise VaultError("the breach list held no usable domains")
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        prefix="." + os.path.basename(dest) + ".", dir=os.path.dirname(
+            os.path.abspath(dest)) or ".")
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(domains) + "\n")
+        os.replace(tmp_path, dest)
+        os.chmod(dest, 0o600)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    return len(domains)
+
+
 def security_report(plaintext, rotation_days=365, check_breaches=False,
-                    timeout=5, opener=None):
+                    timeout=5, opener=None, offline_source=None,
+                    check_accounts=False, catalogue=None):
     """One secret-free security report shared by CLI and Dashboard."""
     rows, malformed = _password_security_rows(plaintext)
     now = time.time()
@@ -5324,15 +5681,21 @@ def security_report(plaintext, rotation_days=365, check_breaches=False,
         "weak": weak, "reused": reused, "reused_flat": reused_flat,
         "old": old, "incomplete": incomplete, "malformed": malformed,
         "rotation_days": rotation_days, "breach_status": "not_checked",
-        "breached": [],
+        "breached": [], "account_status": "not_checked", "account_findings": [],
     }
     if check_breaches:
         try:
             report["breached"] = breached_password_ids(
-                rows, timeout=timeout, opener=opener)
+                rows, timeout=timeout, opener=opener,
+                offline_source=offline_source)
             report["breach_status"] = "checked"
         except VaultError:
             report["breach_status"] = "unavailable"
+    if check_accounts:
+        # On-device only: an unreadable catalogue is still a completed check
+        # against the bundled default, never a network fallback.
+        report["account_findings"] = breached_account_domains(rows, catalogue)
+        report["account_status"] = "checked"
     return report
 
 
@@ -6855,12 +7218,27 @@ def main(argv):
                     sys.stdout.write(name + "\n")
         elif command == "security-report":
             # security-report <plainfile> [rotation-days] [--breaches]
+            #   [--account-breaches] [--offline-hashes PATH]
             # stdout is secret-free JSON; breach checking is explicit opt-in.
+            opts = argv[4:]
             days = int(argv[3]) if len(argv) > 3 and argv[3] else 365
-            check_breaches = "--breaches" in argv[4:]
+            check_breaches = "--breaches" in opts
+            check_accounts = "--account-breaches" in opts
+            offline_source = None
+            if "--offline-hashes" in opts:
+                offline_source = opts[opts.index("--offline-hashes") + 1]
+            elif os.environ.get("SPM_PWNED_OFFLINE"):
+                offline_source = os.environ["SPM_PWNED_OFFLINE"]
             with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
-                report = security_report(handle.read(), days, check_breaches)
+                report = security_report(
+                    handle.read(), days, check_breaches,
+                    offline_source=offline_source, check_accounts=check_accounts)
             sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        elif command == "breach-list-refresh":
+            # breach-list-refresh <url> <dest> ; stderr: count. Fetches a public
+            # list only -- no account identifier is sent.
+            written = refresh_breach_catalogue(argv[2], argv[3])
+            sys.stderr.write("%d\n" % written)
         elif command == "expiring":
             # expiring <plainfile> [horizon-days] [rotation-days]
             # stdout: one JSON document; secret-free.
@@ -6875,13 +7253,19 @@ def main(argv):
             with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
                 sys.stdout.write(json.dumps(
                     {"items": trashed_items(handle.read())}, indent=2) + "\n")
-        elif command in ("trash-set", "favorite-set"):
+        elif command == "archived-list":
+            # archived-list <plainfile> ; stdout: one JSON document
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.write(json.dumps(
+                    {"items": archived_items(handle.read())}, indent=2) + "\n")
+        elif command in ("trash-set", "favorite-set", "archive-set"):
             # <cmd> <plainfile> <kind> <record-type> <id> <0|1>
             # stdout: the new plaintext; exit 3 if nothing matched.
             kind, rtype, rid, flag = argv[3], argv[4], argv[5], argv[6] == "1"
             with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
                 plaintext = handle.read()
-            fn = set_trashed if command == "trash-set" else set_favorite
+            fn = {"trash-set": set_trashed, "favorite-set": set_favorite,
+                  "archive-set": set_archived}[command]
             new_plain, changed = fn(plaintext, kind, rtype, rid, flag)
             sys.stdout.write(new_plain)
             if not changed:

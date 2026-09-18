@@ -1314,6 +1314,37 @@ fi
 grep -q 'href="/security?breaches=1"' "$TEST_ROOT/security.html"
 grep -q 'data-i18n="security.breach_optin"' "$TEST_ROOT/security.html"
 
+# 5.4.0: archive (23), offline compromised-password check (34) and on-device
+# account-breach (33), exercised through the core CLI the shell wraps. Plaintext
+# fixtures, so no vault state is disturbed and no network is touched.
+arch_plain="$TEST_ROOT/arch.plain"
+printf '1\tGitHub\talice@linkedin.com\tArchiveDemo9\tnote\t2024-01-01T00:00:00Z\thttps://github.com\t\n' > "$arch_plain"
+core archive-set "$arch_plain" password - 1 1 > "$TEST_ROOT/arch.set"
+mv "$TEST_ROOT/arch.set" "$arch_plain"
+core archived-list "$arch_plain" | grep -q '"id": "1"' \
+	|| { printf 'archive-set did not archive the row\n' >&2; exit 1; }
+core archive-set "$arch_plain" password - 1 0 > "$TEST_ROOT/arch.unset"
+mv "$TEST_ROOT/arch.unset" "$arch_plain"
+core archived-list "$arch_plain" | grep -q '"items": \[\]' \
+	|| { printf 'archive unset did not clear the row\n' >&2; exit 1; }
+# Offline breach against a per-prefix fixture built from this password's SHA-1.
+pw_hash="$(printf '%s' 'ArchiveDemo9' | sha1sum | cut -d' ' -f1 | tr 'a-f' 'A-F')"
+mkdir -p "$TEST_ROOT/pwned"
+printf '%s:99\n' "${pw_hash:5}" > "$TEST_ROOT/pwned/${pw_hash:0:5}.txt"
+core security-report "$arch_plain" 365 --breaches --offline-hashes "$TEST_ROOT/pwned" \
+	| grep -q '"count": 99' \
+	|| { printf 'offline breach did not flag the seeded password\n' >&2; exit 1; }
+# On-device account check: alice@linkedin.com matches the bundled LinkedIn entry.
+core security-report "$arch_plain" 365 --account-breaches \
+	| grep -q '"domain": "linkedin.com"' \
+	|| { printf 'account breach did not flag the linkedin domain\n' >&2; exit 1; }
+# The shell commands wire through: archive lists, and the dashboard prints the
+# on-device account-breach line whatever the vault holds.
+cmd_archive list >/dev/null
+cmd_security_dashboard --account-breaches | grep -q 'Breached-service accounts:' \
+	|| { printf 'security dashboard did not run the account-breach check\n' >&2; exit 1; }
+printf '  security: archive round-trips, offline password check and on-device account check run through the CLI\n'
+
 # Global search covers every record type by label, and must NOT search secret
 # fields -- a query that could match a password turns the result count into a
 # confirmation oracle.
@@ -2327,6 +2358,11 @@ pages = {
     # 5.1.0 pages, so their controls (restore/delete/empty forms, the favourite
     # stars, the save-search input) go through the same accessible-name check.
     "trash": web.trash_page(_trash_items, "csrf-token"),
+    # 5.4.0: the Archive page (roadmap 23); its unarchive control goes through
+    # the same accessible-name check.
+    "archive": web.archive_page(
+        [{"kind": "password", "type": "password", "id": "1", "label": "GitHub",
+          "archived_at": "2026-09-18T00:00:00Z"}], "csrf-token"),
     "expiring": web.expiring_page(_expiry_scan),
     "saved searches": web.saved_searches_bar(
         [{"name": "Tokens", "query": "type:api-token"}], "type:api-token",
@@ -2455,6 +2491,26 @@ if "spm-sync://192.168.1.5:8777/web?token=navtok-xyz789" not in _sync:
     sys.exit("the Sync page does not render the pairing string")
 if "<svg" not in _sync or 'aria-label="QR code"' not in _sync:
     sys.exit("the Sync page does not render a labelled QR code")
+
+# 5.4.0: the sidebar gains an Archive entry with its own count badge (roadmap 23).
+full_nav4 = web._nav_html("archive", {"__archive__": 2})
+if 'href="/archive"' not in full_nav4 or 'data-i18n="nav.archive"' not in full_nav4:
+    sys.exit("the sidebar has no Archive entry")
+if web.archive_page([], "csrf-token").count('data-i18n="archive.empty.t"') != 1:
+    sys.exit("the empty Archive page does not render its empty state once")
+# 5.4.0: the security page renders the on-device breached-services section
+# (roadmap 33), and states that no account identifier leaves the device.
+_acc_audit = {"score": 90, "passwords": 1, "weak": [], "reused": [], "reused_flat": [],
+              "old": [], "incomplete": [], "malformed": [], "rotation_days": 365,
+              "breach_status": "not_checked", "breached": [],
+              "account_status": "checked",
+              "account_findings": [{"id": "1", "domain": "linkedin.com",
+                                    "name": "LinkedIn", "year": "2012"}]}
+_acc_entries = [(0, ["1", "Acct", "a@linkedin.com", "x", "n",
+                     "2024-01-01T00:00:00Z", "https://linkedin.com"])]
+_sec = web.security_page(_acc_audit, _acc_entries)
+if 'data-i18n="security.accounts"' not in _sec or "LinkedIn" not in _sec:
+    sys.exit("the security page does not render the breached-services finding")
 
 # Custom schemas: a defined type flows through the schema engine like a built-in.
 _sp = web.core.add_custom_schema("", "crypto-wallet", "Crypto Wallet", "token",

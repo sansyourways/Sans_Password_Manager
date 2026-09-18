@@ -3389,6 +3389,85 @@ def t_sync_serve_loopback():
         eq(handle.read(), peer_b)
 
 
+def t_archive_state():
+    # A password row (attrs col 7) and a typed record (attrs col 5).
+    pw = ("1\tGitHub\talice@example.com\ts3cr3t\tnote\t"
+          "2024-01-01T00:00:00Z\thttps://github.com\t\n")
+    rec = core.build_record_row("wifi", "1", "Home",
+                                {"ssid": "n", "password": "p", "security": "WPA2"},
+                                "2024-01-01T00:00:00Z")
+    plain = pw + rec + "\n"
+    # Archiving the record removes it from the default walk but keeps it findable.
+    p2, changed = core.set_archived(plain, "record", "wifi", "1", True)
+    eq(changed, True)
+    eq(len(list(core.iter_records(p2))), 0)
+    eq(len(list(core.iter_records(p2, include_archived=True))), 1)
+    assert core.find_record(p2, "wifi", "1") is not None
+    eq([(i["kind"], i["id"]) for i in core.archived_items(p2)], [("record", "1")])
+    counts = core.record_counts(p2)
+    eq(counts["__archive__"], 1)
+    eq(counts[""], 0)
+    # A second archived item (the password) joins the list.
+    p3, _ = core.set_archived(p2, "password", "", "1", True)
+    eq(len(core.archived_items(p3)), 2)
+    # Archive survives an unrelated edit (attrs_edit carry-through).
+    col = p3.splitlines()[0].split("\t")[7]
+    eq(bool(core.attrs_archived(core.attrs_edit(col, favorite=True))), True)
+    # Unarchiving brings the record back to the default walk.
+    p4, _ = core.set_archived(p3, "record", "wifi", "1", False)
+    eq(len(list(core.iter_records(p4))), 1)
+    # Trash and archive are independent: a record that is both is in Trash, not
+    # Archive (trash takes precedence), and clearing archive leaves trash intact.
+    p5, _ = core.set_trashed(p4, "record", "wifi", "1", True)
+    p5, _ = core.set_archived(p5, "record", "wifi", "1", True)
+    eq([i["id"] for i in core.archived_items(p5) if i["kind"] == "record"], [])
+    eq([i["id"] for i in core.trashed_items(p5) if i["kind"] == "record"], ["1"])
+
+
+def t_offline_pwned_both_layouts():
+    import hashlib
+    pw = "password123"
+    digest = hashlib.sha1(pw.encode()).hexdigest().upper()
+    prefix, suffix = digest[:5], digest[5:]
+    root = os.path.join(ROOT, "pwned")
+    os.makedirs(root, exist_ok=True)
+    ordered = os.path.join(root, "ordered.txt")
+    with open(ordered, "w", encoding="ascii") as handle:
+        handle.write("\n".join(sorted(
+            [digest + ":42", "00000" + "A" * 35 + ":1", "FFFFF" + "B" * 35 + ":1"])) + "\n")
+    prefix_dir = os.path.join(root, "ranges")
+    os.makedirs(prefix_dir, exist_ok=True)
+    with open(os.path.join(prefix_dir, prefix + ".txt"), "w", encoding="ascii") as handle:
+        handle.write(suffix + ":42\n")
+    rows = [["1", "GitHub", "a@x", pw, "", "", ""],
+            ["2", "Clean", "b@y", "Str0ng!Pass#2026zzz", "", "", ""]]
+    for source in (ordered, prefix_dir):
+        found = core.breached_password_ids(rows, offline_source=source)
+        eq(found, [{"id": "1", "count": 42}])
+    # A prefix with no breached password is a clean answer, not an error.
+    eq(core.breached_password_ids([["9", "x", "u", "no-such-pw-here-9271", "", "", ""]],
+                                  offline_source=ordered), [])
+
+
+def t_account_breach_domains():
+    rows = [
+        ["1", "Work", "alice@linkedin.com", "x", "", "", "https://example.test"],
+        ["2", "Site", "bob", "y", "", "", "https://login.dropbox.com/x"],
+        ["3", "Clean", "carol@nowhere.example", "z", "", "", "https://nowhere.example"],
+    ]
+    findings = {f["id"]: f["domain"] for f in core.breached_account_domains(rows)}
+    eq(findings.get("1"), "linkedin.com")     # email domain
+    eq(findings.get("2"), "dropbox.com")      # url host (subdomain match)
+    assert "3" not in findings, findings       # clean domain not flagged
+    # A user file overrides/extends the catalogue.
+    extra = os.path.join(ROOT, "breached-domains.txt")
+    with open(extra, "w", encoding="utf-8") as handle:
+        handle.write("nowhere.example\tExample Leak\t2025\n")
+    cat = core.load_breach_catalogue(extra)
+    hits = {f["id"]: f["name"] for f in core.breached_account_domains(rows, cat)}
+    eq(hits.get("3"), "Example Leak")
+
+
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):
         check(name[2:], fn)
