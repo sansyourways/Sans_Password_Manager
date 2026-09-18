@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **5.2.0**
+Current release: **5.3.0**
 
 ---
 
@@ -272,6 +272,19 @@ cannot reveal them.
 | A record that is passphrase-locked and linked to another |
 | --- |
 | ![SPM record view with its secret token field shown as Locked, a passphrase-lock panel offering unlock and remove, and a Related-records block linking to another record](docs/screenshots/web-v2.13.0/48-record-protected.png) |
+
+### LAN sync and device pairing
+
+New in 5.3.0. Sync a vault directly between two devices on the same network —
+offline and server-less. The **Sync** page opens a bounded pairing window and
+shows a **QR code** and a `spm-sync://` pairing string; the other device scans it
+and pulls or pushes over the `p2p` transport, and only the encrypted vault ever
+crosses the wire. From the CLI, `spm sync serve` prints the same code and runs a
+token-gated listener.
+
+| Sync — a pairing QR and string for another device on the network |
+| --- |
+| ![SPM Sync page showing a device-pairing QR code and its spm-sync pairing string, with a note that the routes answer only on the interface the dashboard is bound to](docs/screenshots/web-v2.13.0/49-sync.png) |
 
 <details>
 <summary><strong>Complete web interface gallery</strong></summary>
