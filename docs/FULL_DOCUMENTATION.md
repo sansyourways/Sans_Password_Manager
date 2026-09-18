@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **5.3.0**
+Current release: **5.4.0**
 
 ---
 
@@ -285,6 +285,18 @@ token-gated listener.
 | Sync — a pairing QR and string for another device on the network |
 | --- |
 | ![SPM Sync page showing a device-pairing QR code and its spm-sync pairing string, with a note that the routes answer only on the interface the dashboard is bound to](docs/screenshots/web-v2.13.0/49-sync.png) |
+
+### Archive
+
+New in 5.4.0. **Archiving** a password or record sets it aside — out of the
+default lists, counts and search — without deleting it or putting it on a purge
+clock. It is a third state beside favourite and trash: independent of the trash,
+with its own page and a one-click unarchive. Archive an item from its row or
+detail view; bring it back whenever you like.
+
+| Archive — items set aside, out of the default lists, with a one-click unarchive |
+| --- |
+| ![SPM Archive page listing an archived password with an Unarchive action, set aside from the default lists without being deleted](docs/screenshots/web-v2.13.0/50-archive.png) |
 
 <details>
 <summary><strong>Complete web interface gallery</strong></summary>
