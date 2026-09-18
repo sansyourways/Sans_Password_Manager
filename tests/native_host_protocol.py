@@ -38,7 +38,11 @@ esac
     assert status["idle"] == 300, status
     assert 0 < status["expires_in"] <= 300, status
     assert "password" not in json.dumps(status)
-    request({"id":"6","action":"lock"})
+    # Roadmap 38: the extension's "Lock SPM" control. A lock from an open session
+    # must clear it outright -- status locked, nothing left to expire.
+    assert request({"id":"6","action":"lock"})["ok"] is True
+    after_lock = request({"id":"6b","action":"status"})
+    assert after_lock["unlocked"] is False and after_lock["expires_in"] == 0, after_lock
     over = request({"id":"7","action":"unlock","host":"example.invalid",
                     "master":"test-master","idle":86400})
     assert over["ok"] is True
