@@ -2340,7 +2340,15 @@ pages = {
     "schemas": web.schemas_page(
         web.core.add_custom_schema("", "crypto-wallet", "Crypto Wallet", "token",
             [["wallet_name", "plain", "line", True]]), "csrf-token"),
+    # 5.3.0: the Sync page in its active pairing state, so the QR, the readonly
+    # pairing-string field and the stop-pairing control all pass the name check.
+    "sync": (lambda: (
+        web.SYNC_PAIR.update(token="pairtok-abc123",
+                             expires=web.time.time() + 300,
+                             allow_put=True, channel="web"),
+        web.sync_page("csrf-token", "127.0.0.1:8777"))[1])(),
 }
+web.SYNC_PAIR.update(token="", expires=0.0, allow_put=False)  # reset pairing state
 web.core.register_custom_schemas("")   # reset the module registry after the page build
 for name, markup in pages.items():
     bad = unnamed(markup)
@@ -2434,6 +2442,19 @@ if 'href="/sharing"' not in full_nav2 or 'data-i18n="nav.sharing"' not in full_n
     sys.exit("the sidebar has no Sharing entry")
 if 'href="/schemas"' not in full_nav2 or 'data-i18n="nav.schemas"' not in full_nav2:
     sys.exit("the sidebar has no Record Types entry")
+
+# 5.3.0: the sidebar gains a Sync entry, and its page renders a scannable QR.
+full_nav3 = web._nav_html("sync", {})
+if 'href="/sync"' not in full_nav3 or 'data-i18n="nav.sync"' not in full_nav3:
+    sys.exit("the sidebar has no Sync entry")
+web.SYNC_PAIR.update(token="navtok-xyz789", expires=web.time.time() + 300,
+                     allow_put=False, channel="web")
+_sync = web.sync_page("csrf-token", "192.168.1.5:8777")
+web.SYNC_PAIR.update(token="", expires=0.0, allow_put=False)
+if "spm-sync://192.168.1.5:8777/web?token=navtok-xyz789" not in _sync:
+    sys.exit("the Sync page does not render the pairing string")
+if "<svg" not in _sync or 'aria-label="QR code"' not in _sync:
+    sys.exit("the Sync page does not render a labelled QR code")
 
 # Custom schemas: a defined type flows through the schema engine like a built-in.
 _sp = web.core.add_custom_schema("", "crypto-wallet", "Crypto Wallet", "token",
@@ -2789,12 +2810,60 @@ if "$ROOT_DIR/packaging/homebrew/generate.sh" "$pkg_version" "not-a-sha" >/dev/n
 	printf 'the formula generator accepted a bad sha256\n' >&2
 	exit 1
 fi
+
+# --- AUR, Scoop, Nix --------------------------------------------------------
+# Every generator emits a manifest that names the release and pins the one
+# published archive's checksum, and every one refuses a bad version or sha the
+# same way the formula does -- a manifest that installed something other than
+# the archive it was generated for would fail for everyone at once.
+"$ROOT_DIR/packaging/aur/generate.sh" "$pkg_version" "$fake_sha" > "$pkg_dir/PKGBUILD"
+grep -q "^pkgname=spm$" "$pkg_dir/PKGBUILD"
+grep -q "^pkgver=$pkg_version$" "$pkg_dir/PKGBUILD"
+grep -q "sha256sums=('$fake_sha')" "$pkg_dir/PKGBUILD"
+grep -q "releases/download/v${pkg_version}/Sans_Password_Manager_v${pkg_version}.zip" \
+	"$pkg_dir/PKGBUILD"
+grep -q "install -Dm755 spm.sh" "$pkg_dir/PKGBUILD"
+
+"$ROOT_DIR/packaging/scoop/generate.sh" "$pkg_version" "$fake_sha" > "$pkg_dir/spm.json"
+python3 - "$pkg_dir/spm.json" "$pkg_version" "$fake_sha" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d["version"] == sys.argv[2], "scoop version wrong"
+assert d["hash"] == sys.argv[3], "scoop hash wrong"
+assert d["bin"] == [["spm.sh", "spm"]], "scoop bin shim wrong"
+assert sys.argv[2] in d["url"], "scoop url does not name the version"
+PY
+
+"$ROOT_DIR/packaging/nix/generate.sh" "$pkg_version" "$fake_sha" > "$pkg_dir/default.nix"
+grep -q "version = \"$pkg_version\";" "$pkg_dir/default.nix"
+grep -q "sha256 = \"$fake_sha\";" "$pkg_dir/default.nix"
+grep -q "releases/download/v${pkg_version}/Sans_Password_Manager_v${pkg_version}.zip" \
+	"$pkg_dir/default.nix"
+grep -q "install -Dm755 spm.sh" "$pkg_dir/default.nix"
+
+for gen in aur scoop nix; do
+	for bad in "3.11" "v3.11.0" "" "3.11.0; rm -rf /"; do
+		if "$ROOT_DIR/packaging/$gen/generate.sh" "$bad" "$fake_sha" >/dev/null 2>&1; then
+			printf 'the %s generator accepted the version %s\n' "$gen" "$bad" >&2
+			exit 1
+		fi
+	done
+	if "$ROOT_DIR/packaging/$gen/generate.sh" "$pkg_version" "not-a-sha" >/dev/null 2>&1; then
+		printf 'the %s generator accepted a bad sha256\n' "$gen" >&2
+		exit 1
+	fi
+	# Deterministic: the same inputs give the same manifest, byte for byte.
+	a="$("$ROOT_DIR/packaging/$gen/generate.sh" "$pkg_version" "$fake_sha")"
+	b="$("$ROOT_DIR/packaging/$gen/generate.sh" "$pkg_version" "$fake_sha")"
+	[ "$a" = "$b" ] || { printf 'the %s generator is not deterministic\n' "$gen" >&2; exit 1; }
+done
+
 # The closing line reports what actually ran. Printing the .deb claim after
 # skipping the .deb build is the same overclaim this suite exists to prevent.
 if [ "$pkg_can_build" -eq 1 ]; then
-	printf '  packaging: reproducible .deb into the Termux prefix, formula pinned to one archive\n'
+	printf '  packaging: reproducible .deb into the Termux prefix; formula, PKGBUILD, Scoop and Nix manifests pinned to one archive\n'
 else
-	printf '  packaging: formula pinned to one archive (.deb build not verified here)\n'
+	printf '  packaging: formula, PKGBUILD, Scoop and Nix manifests pinned to one archive (.deb build not verified here)\n'
 fi
 
 printf 'Docs regression: every capture reaches the documentation\n'
@@ -4749,6 +4818,70 @@ for sync_t in $sync_available; do
 		}
 	) || exit 1
 done
+
+# The p2p transport reaches a listener over the network rather than a path, so
+# it is exercised on its own against a real core `sync-serve` on loopback: the
+# encrypted vault is what crosses, a pairing string carries the token, and a
+# wrong or missing token is refused rather than read as an empty remote.
+if command -v curl >/dev/null 2>&1; then
+	p2p_peer="$sync_root/p2p-peer.gpg"   # absent at first: a push must create it
+	p2p_token="p2p-regress-token-$$"
+	p2p_port="$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')"
+	python3 "$ROOT_DIR/src/spm_core.py" sync-serve "$p2p_peer" \
+		127.0.0.1 "$p2p_port" "$p2p_token" chan --idle 30 >/dev/null 2>&1 &
+	p2p_pid=$!
+	p2p_ready=0
+	for _ in $(seq 1 50); do
+		if curl -s -o /dev/null "http://127.0.0.1:$p2p_port/"; then p2p_ready=1; break; fi
+		sleep 0.1
+	done
+	[ "$p2p_ready" -eq 1 ] || {
+		printf 'the p2p listener never came up\n' >&2
+		kill "$p2p_pid" 2>/dev/null; exit 1
+	}
+	(
+		export SPM_CONFIG_DIR="$sync_root/cfg-p2p"; mkdir -p "$SPM_CONFIG_DIR"
+		# An empty peer reads as a missing remote, not an error.
+		cmd_sync status "127.0.0.1:$p2p_port" chan --transport p2p \
+			--token "$p2p_token" > "$sync_root/p2p-status"
+		grep -q '^transport=p2p$' "$sync_root/p2p-status" || {
+			printf 'p2p status does not name its transport\n' >&2; exit 1; }
+		grep -q '^remote=missing$' "$sync_root/p2p-status" || {
+			printf 'an empty p2p peer was not reported as missing\n' >&2; exit 1; }
+		# The wrong token is refused, not reported as an empty remote.
+		if ( cmd_sync status "127.0.0.1:$p2p_port" chan --transport p2p \
+			--token wrong-token ) >/dev/null 2>&1; then
+			printf 'p2p accepted the wrong token\n' >&2; exit 1
+		fi
+		# No token at all is refused before any request is made.
+		if ( unset SPM_SYNC_P2P_TOKEN
+			cmd_sync status "127.0.0.1:$p2p_port" chan --transport p2p ) >/dev/null 2>&1; then
+			printf 'p2p ran without a pairing token\n' >&2; exit 1
+		fi
+		# A push lands the encrypted vault on the peer.
+		cmd_sync push "127.0.0.1:$p2p_port" chan --transport p2p \
+			--token "$p2p_token" >/dev/null
+		# A scanned pairing string carries the token and the channel, so a pull
+		# needs no --token and converges on the vault just pushed.
+		export SPM_CONFIG_DIR="$sync_root/cfg-p2p2"; mkdir -p "$SPM_CONFIG_DIR"
+		SPM_SYNC_FORCE_INITIAL=1 cmd_sync pull \
+			"spm-sync://127.0.0.1:$p2p_port/chan?token=$p2p_token" \
+			--transport p2p >/dev/null
+	) || { kill "$p2p_pid" 2>/dev/null; exit 1; }
+	# What the peer holds after the push is exactly the local encrypted vault,
+	# and it is ciphertext -- the transport never saw the plaintext.
+	[ "$(sha256sum "$p2p_peer" | awk '{print $1}')" = "$sync_vault_sha" ] || {
+		printf 'the p2p push did not land the local vault\n' >&2
+		kill "$p2p_pid" 2>/dev/null; exit 1
+	}
+	if grep -q 'META_RECOVERY_PUBKEY' "$p2p_peer"; then
+		printf 'the vault crossed the p2p transport as plaintext\n' >&2
+		kill "$p2p_pid" 2>/dev/null; exit 1
+	fi
+	kill "$p2p_pid" 2>/dev/null || true
+	wait "$p2p_pid" 2>/dev/null || true
+	printf '  sync: p2p pairs over loopback, refuses a wrong or missing token, and moves only ciphertext\n'
+fi
 
 # Apple still ships rsync 2.6.9, which has no --chmod. A push must still work
 # there, and must still use the flag where it exists. CI on macOS found this

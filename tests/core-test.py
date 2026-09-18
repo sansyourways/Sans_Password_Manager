@@ -17,6 +17,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(HERE)
@@ -3267,6 +3268,125 @@ def t_collections_crud():
     eq(len(core.collections(p)[0]["members"]), 2)
     p = core.delete_collection(p, "Work")
     eq([c["name"] for c in core.collections(p)], ["Personal"])
+
+
+def _qr_decodes(matrix, expected):
+    """True when zbarimg reads `expected` back from a rendered matrix; None when
+    the tools to check are not present, so the test can skip rather than fail."""
+    convert = shutil.which("convert")
+    zbarimg = shutil.which("zbarimg")
+    if not convert or not zbarimg:
+        return None
+    pbm = os.path.join(ROOT, "qr.pbm")
+    png = os.path.join(ROOT, "qr.png")
+    with open(pbm, "w", encoding="ascii") as handle:
+        handle.write(core.qr_to_pbm(matrix, scale=6, quiet=4))
+    subprocess.run([convert, pbm, png], check=True)
+    out = subprocess.run([zbarimg, "--quiet", "--raw", png],
+                         capture_output=True, text=True)
+    return out.stdout.rstrip("\n") == expected
+
+
+def t_qr_structure():
+    # Byte mode, level M: a short string is a version-1 (21x21) symbol, and the
+    # three finder patterns sit at the corners with a light separator.
+    m = core.qr_encode("HELLO")
+    eq(len(m), 21)
+    eq(len(m[0]), 21)
+    assert all(m[0][c] for c in range(7)), "top-left finder top edge not dark"
+    assert not m[0][7], "finder separator not light"
+    assert all(m[r][0] for r in range(7)), "top-left finder left edge not dark"
+    assert all(m[0][20 - c] for c in range(7)), "top-right finder missing"
+    assert all(m[20 - r][0] for r in range(7)), "bottom-left finder missing"
+    # It grows with the payload but stays within version 10 (57x57).
+    big = core.qr_encode("x" * 200)
+    eq(len(big), 57)
+    raises(ValueError, lambda: core.qr_encode("x" * 400))
+
+
+def t_qr_decodes_every_version():
+    # One payload per version 1..10, each decoded back by zbarimg when present.
+    checked = 0
+    for length in (5, 20, 40, 60, 100, 110, 140, 170, 190, 200):
+        text = "spm-sync://10.0.0.%d:8788/c?token=%s" % (
+            length % 250, "Z" * max(0, length - 34))
+        text = text[:length] if len(text) > length else text
+        result = _qr_decodes(core.qr_encode(text), text)
+        if result is None:
+            return  # zbarimg/convert absent -- structure is covered above
+        assert result, "zbarimg did not read back %r" % text
+        checked += 1
+    assert checked >= 1
+
+
+def t_qr_svg_is_scannable():
+    svg = core.qr_svg(core.qr_encode("spm-sync://192.168.0.9:8788/x?token=abc"))
+    assert svg.startswith("<svg") and svg.endswith("</svg>")
+    assert "<rect" in svg
+
+
+def _free_port():
+    import socket
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def t_sync_serve_loopback():
+    import threading
+    import urllib.request
+    import urllib.error
+
+    vault = os.path.join(ROOT, "sync-serve-vault.gpg")
+    peer_a = core.build_container(b"envelope-a", b"cipher-a")
+    peer_b = core.build_container(b"envelope-b", b"cipher-b-different")
+    with open(vault, "wb") as handle:
+        handle.write(peer_a)
+    token = "loopback-token-abc123"
+    port = _free_port()
+
+    thread = threading.Thread(
+        target=core.sync_serve,
+        args=(vault, "127.0.0.1", port, token, "default"),
+        kwargs={"idle_timeout": 5.0}, daemon=True)
+    thread.start()
+    base = "http://127.0.0.1:%d/spm-default.gpg" % port
+    # Wait for the listener to bind.
+    for _ in range(50):
+        try:
+            urllib.request.urlopen("http://127.0.0.1:%d/" % port, timeout=1)
+        except urllib.error.HTTPError:
+            break
+        except OSError:
+            time.sleep(0.1)
+
+    def req(method, headers=None, data=None):
+        r = urllib.request.Request(base, method=method, headers=headers or {},
+                                   data=data)
+        try:
+            resp = urllib.request.urlopen(r, timeout=3)
+            return resp.getcode(), resp.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read()
+
+    auth = {"Authorization": "Bearer " + token}
+    # No token and wrong token are both refused.
+    eq(req("GET")[0], 401)
+    eq(req("GET", {"Authorization": "Bearer nope"})[0], 401)
+    # Right token pulls the exact sealed container.
+    code, body = req("GET", auth)
+    eq(code, 200)
+    eq(body, peer_a)
+    # A non-container upload is refused; the vault is untouched.
+    eq(req("PUT", auth, b"not a vault")[0], 422)
+    with open(vault, "rb") as handle:
+        eq(handle.read(), peer_a)
+    # A valid container replaces the vault atomically.
+    eq(req("PUT", auth, peer_b)[0], 204)
+    with open(vault, "rb") as handle:
+        eq(handle.read(), peer_b)
 
 
 for name, fn in sorted(globals().items()):

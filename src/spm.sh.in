@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.2.0"
+VERSION="5.3.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -6666,7 +6666,49 @@ sync_rsync() {
 
 
 sync_transport_names() {
-	printf 'dir rsync rclone'
+	printf 'dir rsync rclone p2p'
+}
+
+# The pairing token for the `p2p` transport. Set by cmd_sync from --token, the
+# SPM_SYNC_P2P_TOKEN environment variable, or a scanned pairing string, and read
+# by the fetch/publish branches as the Bearer credential. Never printed.
+SYNC_P2P_TOKEN=""
+
+# Best-effort LAN address for a pairing string: the source address the kernel
+# would use to reach off-box, falling back to the first configured address and
+# finally to loopback.
+sync_lan_address() {
+	local addr=""
+	if command -v ip >/dev/null 2>&1; then
+		addr="$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.][0-9.]*\).*/\1/p' | head -n1)"
+	fi
+	if [ -z "$addr" ] && command -v hostname >/dev/null 2>&1; then
+		addr="$(hostname -I 2>/dev/null | awk '{print $1}')"
+	fi
+	[ -n "$addr" ] || addr="127.0.0.1"
+	printf '%s' "$addr"
+}
+
+# Parse a `spm-sync://host:port/channel?token=...` pairing string, echoing
+# "host:port<TAB>channel<TAB>token". Any field may be empty if absent.
+sync_p2p_parse() {
+	local url="$1" rest hostport after channel token
+	rest="${url#spm-sync://}"
+	hostport="${rest%%/*}"
+	after=""
+	case "$rest" in
+		*/*) after="${rest#*/}" ;;
+	esac
+	channel="${after%%\?*}"
+	token=""
+	case "$after" in
+		*\?*)
+			token="${after#*\?}"
+			# take only the token= parameter, whichever position it holds
+			token="$(printf '%s' "$token" | tr '&' '\n' | sed -n 's/^token=//p' | head -n1)"
+			;;
+	esac
+	printf '%s\t%s\t%s' "$hostport" "$channel" "$token"
 }
 
 sync_known_transport() {
@@ -6706,6 +6748,16 @@ sync_transport_probe() {
 			rclone lsf "$target" >/dev/null 2>&1 \
 				|| die "Cannot reach rclone target '$target'. Is the remote configured?"
 			;;
+		p2p)
+			require_cmd curl
+			printf '%s' "$target" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9.-]*:[0-9]{1,5}$' \
+				|| die "A p2p target looks like host:port."
+			# Any HTTP answer proves the peer is up; the listener replies 401 to
+			# an unauthenticated probe, which is reachable, not a failure.
+			curl -sS -o /dev/null --max-time "${SPM_SYNC_P2P_TIMEOUT:-10}" \
+				"http://$target/" >/dev/null 2>&1 \
+				|| die "Cannot reach p2p peer '$target'."
+			;;
 		*) die "Unknown sync transport: $transport" ;;
 	esac
 }
@@ -6728,6 +6780,20 @@ sync_transport_fetch() {
 			rclone lsf "$remote" >/dev/null 2>&1 || return 1
 			rclone copyto "$remote" "$dest" >/dev/null 2>&1 \
 				|| die "Cannot read the remote vault."
+			;;
+		p2p)
+			require_cmd curl
+			local code
+			code="$(curl -sS -o "$dest" -w '%{http_code}' \
+				--max-time "${SPM_SYNC_P2P_TIMEOUT:-30}" \
+				-H "Authorization: Bearer $SYNC_P2P_TOKEN" "$remote" 2>/dev/null)" \
+				|| die "Cannot reach the p2p peer."
+			case "$code" in
+				200) ;;
+				404) return 1 ;;
+				401|403) die "The p2p peer rejected the pairing token." ;;
+				*) die "The p2p peer returned HTTP $code." ;;
+			esac
 			;;
 		*) die "Unknown sync transport: $transport" ;;
 	esac
@@ -6767,6 +6833,22 @@ sync_transport_publish() {
 			rclone copyto "$src" "$remote" >/dev/null 2>&1 \
 				|| die "Cannot write to the rclone target."
 			;;
+		p2p)
+			require_cmd curl
+			local code
+			code="$(curl -sS -o /dev/null -w '%{http_code}' \
+				--max-time "${SPM_SYNC_P2P_TIMEOUT:-30}" \
+				-X PUT --data-binary @"$src" \
+				-H "Content-Type: application/octet-stream" \
+				-H "Authorization: Bearer $SYNC_P2P_TOKEN" "$remote" 2>/dev/null)" \
+				|| die "Cannot reach the p2p peer."
+			case "$code" in
+				200|204) ;;
+				401|403) die "The p2p peer rejected the pairing token." ;;
+				422) die "The p2p peer rejected the upload as not an SPM vault." ;;
+				*) die "The p2p peer returned HTTP $code on push." ;;
+			esac
+			;;
 		*) die "Unknown sync transport: $transport" ;;
 	esac
 }
@@ -6779,7 +6861,14 @@ sync_paths() {
 	# name are not, and must not share a base digest.
 	target_id="$(printf '%s\t%s\t%s' "$transport" "$target" "$channel" | sha256sum | awk '{print substr($1,1,16)}')"
 	mkdir -p "$SPM_CONFIG_DIR"; chmod 700 "$SPM_CONFIG_DIR" 2>/dev/null || true
-	SYNC_REMOTE="$target/spm-$channel.gpg"; SYNC_STATE="$SPM_CONFIG_DIR/sync-$target_id.base-sha256"
+	# p2p reaches an HTTP listener, not a filesystem path; the channel is a URL
+	# path segment there, matching the listener's /spm-<channel>.gpg route.
+	if [ "$transport" = "p2p" ]; then
+		SYNC_REMOTE="http://$target/spm-$channel.gpg"
+	else
+		SYNC_REMOTE="$target/spm-$channel.gpg"
+	fi
+	SYNC_STATE="$SPM_CONFIG_DIR/sync-$target_id.base-sha256"
 }
 
 write_sync_state() {
@@ -6790,13 +6879,46 @@ write_sync_state() {
 }
 
 sync_usage() {
-	printf 'Usage: %s sync status|push|pull <target> [channel] [--transport %s]\n' \
+	printf 'Usage: %s sync status|push|pull <target> [channel] [--transport %s] [--token TOKEN]\n' \
 		"$0" "$(sync_transport_names | tr ' ' '|')"
+	printf '       %s sync serve [--bind ADDR] [--port PORT] [--channel NAME] [--token TOKEN] [--once]\n' "$0"
+	printf '\nFor the p2p transport a target may be host:port or a scanned\n'
+	printf 'spm-sync://host:port/channel?token=... pairing string.\n'
+}
+
+# `sync serve`: turn this device into a LAN sync peer. Generates a pairing token
+# (unless one is supplied), prints the pairing string and its QR, then runs the
+# listener from the core. The encrypted vault is what travels; the token gates it.
+sync_serve_action() {
+	local channel="$1" bind="$2" port="$3" token="$4" once="$5" idle="$6"
+	local pairing extra="" lanhost
+	[ -n "$bind" ] || bind="0.0.0.0"
+	[ -n "$port" ] || port="8788"
+	[ -n "$channel" ] || channel="default"
+	printf '%s' "$channel" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' \
+		|| die "Invalid sync channel."
+	printf '%s' "$port" | grep -Eq '^[0-9]{1,5}$' || die "Invalid port."
+	[ -f "$VAULT_FILE" ] || die "No vault to serve."
+	if [ -z "$token" ]; then
+		require_cmd openssl
+		token="$(openssl rand -hex 24)" || die "Cannot generate a pairing token."
+	fi
+	lanhost="$(sync_lan_address)"
+	pairing="spm-sync://$lanhost:$port/$channel?token=$token"
+	printf 'Pairing string (scan the QR or paste it on the other device):\n\n  %s\n\n' "$pairing"
+	core qr "$pairing" || true
+	printf '\nThe encrypted vault is offered on %s:%s for channel "%s".\n' "$bind" "$port" "$channel"
+	printf 'The pairing token above is required; press Ctrl-C to stop.\n\n'
+	[ "$once" = "1" ] && extra="--once"
+	# shellcheck disable=SC2086
+	core sync-serve "$VAULT_FILE" "$bind" "$port" "$token" "$channel" $extra \
+		${idle:+--idle "$idle"}
 }
 
 cmd_sync() {
 	local action="" target="" channel="default" transport="dir"
 	local positional=0 local_sha remote_sha base_sha tmp fetched rc
+	local bind="" port="" token_opt="" once=0 idle="" channel_set=0
 
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
@@ -6804,13 +6926,34 @@ cmd_sync() {
 				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --transport."; }
 				transport="$2"; shift 2 ;;
 			--transport=*) transport="${1#--transport=}"; shift ;;
+			--token)
+				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --token."; }
+				token_opt="$2"; shift 2 ;;
+			--token=*) token_opt="${1#--token=}"; shift ;;
+			--bind)
+				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --bind."; }
+				bind="$2"; shift 2 ;;
+			--bind=*) bind="${1#--bind=}"; shift ;;
+			--port)
+				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --port."; }
+				port="$2"; shift 2 ;;
+			--port=*) port="${1#--port=}"; shift ;;
+			--channel)
+				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --channel."; }
+				channel="$2"; channel_set=1; shift 2 ;;
+			--channel=*) channel="${1#--channel=}"; channel_set=1; shift ;;
+			--once) once=1; shift ;;
+			--idle)
+				[ "$#" -ge 2 ] || { sync_usage >&2; die "Missing value for --idle."; }
+				idle="$2"; shift 2 ;;
+			--idle=*) idle="${1#--idle=}"; shift ;;
 			-h|--help) sync_usage; return ;;
 			-*) sync_usage >&2; die "Unknown option: $1" ;;
 			*)
 				case "$positional" in
 					0) action="$1" ;;
 					1) target="$1" ;;
-					2) channel="$1" ;;
+					2) channel="$1"; channel_set=1 ;;
 					*) sync_usage >&2; die "Unexpected argument: $1" ;;
 				esac
 				positional=$((positional + 1)); shift ;;
@@ -6818,6 +6961,14 @@ cmd_sync() {
 	done
 
 	[ -n "$action" ] || { sync_usage >&2; return 1; }
+
+	# `serve` needs no target or transport: it runs the listener on this device.
+	if [ "$action" = "serve" ]; then
+		[ -z "$target" ] || { sync_usage >&2; die "sync serve takes no target."; }
+		sync_serve_action "$channel" "$bind" "$port" "$token_opt" "$once" "$idle"
+		return
+	fi
+
 	sync_known_transport "$transport" \
 		|| { sync_usage >&2; die "Unknown sync transport: $transport"; }
 	case "$action" in
@@ -6831,6 +6982,33 @@ cmd_sync() {
 	if [ "$transport" = "dir" ]; then
 		mkdir -p "$target" || die "Cannot create sync target."
 		target="$(canon_path "$target")"
+	fi
+
+	# p2p reaches an HTTP listener. The target may be a bare host:port or a
+	# scanned spm-sync://host:port/channel?token=... pairing string; the token
+	# comes from --token, that string, or SPM_SYNC_P2P_TOKEN, in that order.
+	if [ "$transport" = "p2p" ]; then
+		local parsed p_hostport p_channel p_token
+		case "$target" in
+			spm-sync://*)
+				parsed="$(sync_p2p_parse "$target")"
+				p_hostport="$(printf '%s' "$parsed" | cut -f1)"
+				p_channel="$(printf '%s' "$parsed" | cut -f2)"
+				p_token="$(printf '%s' "$parsed" | cut -f3)"
+				target="$p_hostport"
+				[ -n "$p_channel" ] && [ "$channel_set" -eq 0 ] && channel="$p_channel"
+				;;
+			*) p_token="" ;;
+		esac
+		if [ -n "$token_opt" ]; then
+			SYNC_P2P_TOKEN="$token_opt"
+		elif [ -n "$p_token" ]; then
+			SYNC_P2P_TOKEN="$p_token"
+		elif [ -n "${SPM_SYNC_P2P_TOKEN:-}" ]; then
+			SYNC_P2P_TOKEN="$SPM_SYNC_P2P_TOKEN"
+		else
+			die "A p2p pairing token is required (--token, a pairing string, or SPM_SYNC_P2P_TOKEN)."
+		fi
 	fi
 	# Before any decision. An unreachable target must fail here; further down it
 	# would be indistinguishable from a remote that is merely empty, which is
