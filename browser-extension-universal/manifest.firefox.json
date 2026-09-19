@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sans Password Manager",
-  "version": "5.4.0",
+  "version": "5.5.0",
   "description": "Explicit, domain-bound autofill through the local SPM native host.",
   "permissions": [
     "activeTab",
@@ -20,7 +20,7 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "browser-extension@sansyourways.xyz",
+      "id": "sans@silentprotocol.top",
       "strict_min_version": "109.0"
     }
   },

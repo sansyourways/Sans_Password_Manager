@@ -7,7 +7,14 @@ VERSION="latest"
 # genuinely has nothing to verify, and treating that as a failure would make
 # the installer refuse releases that were fine when they were made.
 FIRST_ATTESTED_VERSION="3.9.0"
-PREFIX="${SPM_INSTALL_PREFIX:-/usr/local}"
+# Windows shells (Git-Bash / MSYS / Cygwin) have no writable /usr/local on PATH,
+# so a per-user prefix is the sane default there. WSL is an ordinary Linux
+# userland and keeps /usr/local. An explicit SPM_INSTALL_PREFIX or --prefix wins.
+_default_prefix=/usr/local
+case "$(uname -s 2>/dev/null)" in
+	MINGW*|MSYS*|CYGWIN*) _default_prefix="$HOME/.local" ;;
+esac
+PREFIX="${SPM_INSTALL_PREFIX:-$_default_prefix}"
 DRY_RUN=0
 MODIFY_PATH=1
 [ -n "${SPM_NO_MODIFY_PATH:-}" ] && MODIFY_PATH=0

@@ -100,6 +100,9 @@ def valid_scheme(value):
 ACTIONS = {
     "unlock": (),
     "lock": (),
+    # save-on-submit (roadmap 39): the one write path. Returns ok only -- never
+    # the credential it just stored, which the page already had.
+    "save": (),
     "list": ("matches",),
     "get": ("username", "password"),
     # Session state, and nothing that depends on the vault: whether a session
@@ -155,8 +158,13 @@ def project(action, response):
     return out
 
 
-def run_spm(command, *args, password):
-    result = subprocess.run([SPM_BIN, command, *args], input=password + "\n", text=True,
+def run_spm(command, *args, password, stdin_extra=None):
+    payload = password + "\n"
+    if stdin_extra is not None:
+        # A second stdin line -- the new password for bridge-save -- kept off the
+        # argument vector so it never appears in a process listing.
+        payload += stdin_extra + "\n"
+    result = subprocess.run([SPM_BIN, command, *args], input=payload, text=True,
                             capture_output=True, timeout=30, env={**os.environ, "NO_COLOR":"1"})
     line = result.stdout.strip().splitlines()[-1:] or [""]
     try: response = json.loads(line[0])
@@ -221,6 +229,24 @@ def handle(message):
                                       valid_host(message.get("host")),
                                       valid_scheme(message.get("scheme")),
                                       password=message["master"]))
+    if action == "save":
+        # The extension's only write, and only from an open session -- never a
+        # one-shot password in the message. The page's own host and scheme, an
+        # explicit user click, and the new password on stdin, not argv.
+        if not is_unlocked():
+            return {"ok":False,"error":"SPM is locked or the session expired"}
+        new_password = message.get("password")
+        if not isinstance(new_password, str) or not new_password:
+            return {"ok":False,"error":"a password is required"}
+        username = message.get("username")
+        if not isinstance(username, str):
+            username = ""
+        response = run_spm("bridge-save", valid_host(message.get("host")),
+                           valid_scheme(message.get("scheme")), username,
+                           password=master, stdin_extra=new_password)
+        if response.get("ok"):
+            last_used = time.monotonic()
+        return project("save", response)
     if action in ("list", "get"):
         if not is_unlocked():
             return {"ok":False,"error":"SPM is locked or the session expired"}

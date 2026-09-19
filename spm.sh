@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.4.0"
+VERSION="5.5.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -5012,6 +5012,43 @@ def bridge_match(requested, scheme, label, notes, url):
     return False, BRIDGE_INSECURE
 
 
+def bridge_save(plaintext, host, scheme, username, password):
+    """Create or update a password from a browser save-on-submit (roadmap 39).
+
+    If a password already scoped to `host` (by bridge_match) with the same
+    username exists, its secret is updated in place; otherwise a new password row
+    is appended, bound to the page's scheme + host so it autofills there. Returns
+    (new_plaintext, "updated"|"created"). The secret is never returned or logged.
+    This is the extension's one write path, and it goes through the same row
+    format and, via the caller, the same history the CLI's own writes use.
+    """
+    host = (host or "").lower().strip(".")
+    if not host or any(ch.isspace() for ch in host):
+        raise VaultError("invalid browser hostname")
+    if not password:
+        raise VaultError("a password is required")
+    username = username or ""
+    lines = plaintext.splitlines()
+    highest = 0
+    for i, line in enumerate(lines):
+        parts = line.split("\t")
+        if not parts or not parts[0].isdigit() or len(parts) < 6:
+            continue
+        highest = max(highest, int(parts[0]))
+        url = parts[6] if len(parts) > 6 else ""
+        ok, _reason = bridge_match(host, scheme, parts[1], parts[4], url)
+        if ok and parts[2] == username:
+            parts[3] = password
+            lines[i] = "\t".join(parts)
+            return "\n".join(lines) + "\n", "updated"
+    page_scheme = scheme if scheme in ("http", "https") else "https"
+    created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    row = "\t".join([str(highest + 1), host, username, password, "", created,
+                     "%s://%s" % (page_scheme, host), ""])
+    lines.append(row)
+    return "\n".join(lines) + "\n", "created"
+
+
 def tidy_proposals(plaintext):
     """What a tidy would change, as data. Changes nothing.
 
@@ -8338,6 +8375,20 @@ def main(argv):
                     sys.stdout.write(json.dumps(
                         {"ok": False, "error": "record not found"}) + "\n")
                     return 1
+        elif command == "bridge-save":
+            # bridge-save <plainfile> <host> <scheme> <username>
+            # The new password is read from stdin, never argv (no ps exposure).
+            # stdout: the new plaintext; stderr: "created" or "updated".
+            host = (argv[3] or "").lower().strip(".")
+            scheme = argv[4] if len(argv) > 4 else ""
+            username = argv[5] if len(argv) > 5 else ""
+            new_password = sys.stdin.readline().rstrip("\n")
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            new_plain, outcome = bridge_save(
+                plaintext, host, scheme, username, new_password)
+            sys.stdout.write(new_plain)
+            sys.stderr.write(outcome + "\n")
         elif command == "sync-serve":
             # sync-serve <vault> <bind> <port> <token> [channel] [--once]
             #                                                     [--idle SECONDS]
@@ -14824,6 +14875,28 @@ cmd_bridge_list() {
 	python3 "$(core_script_path)" bridge-list "$tmp" "$host" "$scheme" || status=$?
 	secure_wipe "$tmp"; MASTER_PW=""
 	return "$status"
+}
+
+# Save-on-submit from the extension (roadmap 39): the one write path the browser
+# reaches. Master on stdin line 1, the new password on line 2 -- neither on argv.
+# Emits a single JSON line like the other bridge commands, never the secret.
+cmd_bridge_save() {
+	local host="${1:-}" scheme="${2:-}" username="${3:-}" tmp out newpw status=0
+	[ -n "$host" ] || die "Browser hostname required."
+	IFS= read -r MASTER_PW || die "Master password required on stdin."
+	IFS= read -r newpw || die "New password required on stdin."
+	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"; out="$(make_tmp)"
+	if printf '%s\n' "$newpw" | python3 "$(core_script_path)" \
+			bridge-save "$tmp" "$host" "$scheme" "$username" > "$out" 2>/dev/null; then
+		mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"
+		secure_wipe "$tmp"; MASTER_PW=""; newpw=""
+		printf '{"ok":true}\n'
+	else
+		status=$?
+		secure_wipe "$out"; secure_wipe "$tmp"; MASTER_PW=""; newpw=""
+		printf '{"ok":false,"error":"save refused"}\n'
+		return "$status"
+	fi
 }
 
 cmd_help() {
@@ -34417,6 +34490,69 @@ PY
 	echo "$script_path"
 }
 
+# Open a URL in the user's browser, cross-platform (roadmap 41/42). Prefers an
+# app-mode window on a Chromium-family browser so the dashboard opens chromeless;
+# otherwise the platform default opener, including the Windows browser reached
+# from WSL (wslview / cmd.exe) so `spm desktop` works there too.
+open_in_browser() {
+	local url="$1" b
+	for b in chromium chromium-browser google-chrome google-chrome-stable brave-browser microsoft-edge; do
+		if command -v "$b" >/dev/null 2>&1; then
+			"$b" --app="$url" --new-window >/dev/null 2>&1 &
+			return 0
+		fi
+	done
+	if command -v wslview >/dev/null 2>&1; then wslview "$url" >/dev/null 2>&1 & return 0; fi
+	if command -v xdg-open >/dev/null 2>&1; then xdg-open "$url" >/dev/null 2>&1 & return 0; fi
+	if command -v open >/dev/null 2>&1; then open "$url" >/dev/null 2>&1 & return 0; fi
+	if command -v cmd.exe >/dev/null 2>&1; then cmd.exe /c start "" "$url" >/dev/null 2>&1 & return 0; fi
+	if command -v powershell.exe >/dev/null 2>&1; then
+		powershell.exe -NoProfile -Command "Start-Process '$url'" >/dev/null 2>&1 &
+		return 0
+	fi
+	printf 'Open this in your browser: %s\n' "$url"
+}
+
+# `spm desktop` (roadmap 41): the lightweight native launcher. Starts the local
+# dashboard on loopback, waits for it, opens it in the browser (an app window
+# where possible), and stays attached so Ctrl-C or closing the launcher stops the
+# server. No packaged runtime -- the OS browser is the window.
+cmd_desktop() {
+	local bind_addr="127.0.0.1" bind_port="8777" server_pid ready=0 i url script
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--port) bind_port="${2:-}"; shift 2 ;;
+			--port=*) bind_port="${1#--port=}"; shift ;;
+			--bind) bind_addr="${2:-}"; shift 2 ;;
+			--bind=*) bind_addr="${1#--bind=}"; shift ;;
+			-h|--help) printf 'Usage: %s desktop [--port PORT] [--bind ADDR]\n' "$0"; return ;;
+			*) die "Unknown option for desktop: $1" ;;
+		esac
+	done
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	printf '%s' "$bind_port" | grep -Eq '^[0-9]{1,5}$' || die "Invalid port."
+	script="$(write_spm_web_script)" || die "Could not prepare the dashboard."
+	url="http://${bind_addr}:${bind_port}/"
+	SPM_VAULT_PATH="$VAULT_FILE" SPM_WEB_BIND="$bind_addr" SPM_WEB_PORT="$bind_port" \
+		SPM_VERSION="$VERSION" SPM_WEB_RP_ID="${SPM_WEB_RP_ID:-localhost}" \
+		python3 "$script" &
+	server_pid=$!
+	trap 'kill "$server_pid" 2>/dev/null' EXIT INT TERM
+	for i in $(seq 1 40); do
+		if python3 - "$bind_addr" "$bind_port" <<'PY' >/dev/null 2>&1
+import socket, sys
+socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=1).close()
+PY
+		then ready=1; break; fi
+		kill -0 "$server_pid" 2>/dev/null || break
+		sleep 0.25
+	done
+	[ "$ready" -eq 1 ] || { printf 'SPM Dashboard did not start on %s.\n' "$url" >&2; return 1; }
+	printf 'SPM Dashboard is open at %s (Ctrl-C to stop).\n' "$url"
+	open_in_browser "$url"
+	wait "$server_pid"
+}
+
 get_external_ip() {
 	# Keep the SPM Dashboard offline: never call a public IP-discovery service merely to
 	# print the access URL. Prefer a LAN address already known by the device.
@@ -35174,13 +35310,15 @@ interactive_menu() {
 main() {
 	# Native messaging is a machine-readable protocol: never emit language or
 	# consent prompts before its single JSON response.
-	if [ "${1:-}" = "bridge-get" ] || [ "${1:-}" = "bridge-list" ]; then
+	if [ "${1:-}" = "bridge-get" ] || [ "${1:-}" = "bridge-list" ] \
+			|| [ "${1:-}" = "bridge-save" ]; then
 		local bridge_cmd="$1"
 		shift
 		acquire_cli_vault_lock
 		case "$bridge_cmd" in
 			bridge-get) cmd_bridge_get "$@" ;;
 			bridge-list) cmd_bridge_list "$@" ;;
+			bridge-save) cmd_bridge_save "$@" ;;
 		esac
 		return
 	fi
@@ -35234,7 +35372,7 @@ main() {
 	local cmd="$1"
 	shift || true
 	case "$cmd" in
-		update|auto-update|generate|password-generate|web|web-mode|help|-h|--help|vault-profile) ;;
+		update|auto-update|generate|password-generate|web|web-mode|desktop|help|-h|--help|vault-profile) ;;
 		*) acquire_cli_vault_lock ;;
 	esac
 
@@ -35311,6 +35449,7 @@ main() {
 		# history, scripts and process managers. `dashboard` is the name the
 		# interface now goes by, not a replacement verb.
 		web|web-mode|dashboard) start_web_mode "$@" ;;
+		desktop) cmd_desktop "$@" ;;
 		help|-h|--help)   cmd_help ;;
 		*)
 			printf "Unknown command: %s\n\n" "$cmd" >&2

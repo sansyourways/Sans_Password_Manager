@@ -10,6 +10,7 @@ read master
 case "$1" in
  bridge-list) printf '{"ok":true,"matches":[{"id":"7","label":"Example","username":"alice","url":"https://example.invalid"}]}\\n' ;;
  bridge-get) printf '{"ok":true,"username":"alice","password":"test-secret"}\\n' ;;
+ bridge-save) read newpw; printf '{"ok":true}\\n' ;;
 esac
 """, encoding="utf-8")
     fake.chmod(0o700)
@@ -38,6 +39,14 @@ esac
     assert status["idle"] == 300, status
     assert 0 < status["expires_in"] <= 300, status
     assert "password" not in json.dumps(status)
+    # Roadmap 39: save-on-submit is the one write, allowed only from an open
+    # session, and it returns ok -- never the credential it just stored.
+    saved = request({"id":"5s","action":"save","host":"example.invalid",
+                     "username":"alice","password":"a-new-secret"})
+    assert saved["ok"] is True and "a-new-secret" not in json.dumps(saved), saved
+    # A save with no password is refused before anything is written.
+    assert request({"id":"5t","action":"save","host":"example.invalid",
+                    "username":"alice","password":""})["ok"] is False
     # Roadmap 38: the extension's "Lock SPM" control. A lock from an open session
     # must clear it outright -- status locked, nothing left to expire.
     assert request({"id":"6","action":"lock"})["ok"] is True
@@ -70,6 +79,9 @@ esac
 
     assert request({"id":"18","action":"lock"})["ok"] is True
     assert request({"id":"19","action":"get","host":"example.invalid","record":"7"})["ok"] is False
+    # A locked session cannot write either.
+    assert request({"id":"19s","action":"save","host":"example.invalid",
+                    "username":"alice","password":"nope"})["ok"] is False
     process.stdin.close(); process.wait(timeout=5)
     assert process.returncode == 0
 print("Native host regression: unlock, secret-free list, get, lock, "

@@ -20,4 +20,4 @@ and accurate description of origin.
   identities.
 
 Forks should use a distinct name and branding and clearly state that they are
-unofficial. Trademark questions may be sent to business@sansyourways.xyz.
+unofficial. Trademark questions may be sent to sans@silentprotocol.top.

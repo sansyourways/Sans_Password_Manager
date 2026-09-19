@@ -23,7 +23,7 @@ write_chromium_manifest() {
 write_firefox_manifest() {
 	local directory="$1"
 	mkdir -p "$directory"
-	printf '{\n  "name": "%s",\n  "description": "Sans Password Manager native bridge",\n  "path": "%s",\n  "type": "stdio",\n  "allowed_extensions": ["browser-extension@sansyourways.xyz"]\n}\n' \
+	printf '{\n  "name": "%s",\n  "description": "Sans Password Manager native bridge",\n  "path": "%s",\n  "type": "stdio",\n  "allowed_extensions": ["sans@silentprotocol.top"]\n}\n' \
 		"$HOST_NAME" "$HOST_PATH" > "$directory/$HOST_NAME.json"
 }
 

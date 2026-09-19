@@ -7,6 +7,38 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.5.0] - 2026-09-19
+
+The browser-extension and platform backlog, plus a contact-email cleanup. No
+vault format change (format 6, additive only).
+
+### Added
+- **Browser-extension password capture (roadmap 39).** The extension can now
+  save a submitted login: on a form submit it offers "Save to SPM?", and on your
+  click it creates a new password (or updates the matching one) through a new
+  `bridge-save` write path. This is the extension's first write — gated to an
+  unlocked session, the page's exact host, and an explicit click; the new
+  password travels on stdin, never argv, and only `{ok}` comes back.
+- **Browser-extension password generator (roadmap 40).** A strong password is
+  generated on the device (`crypto.getRandomValues`, all four character classes,
+  ambiguous characters excluded) — offered on new-password fields to fill the
+  password and confirm boxes, and from the popup to generate and copy. No vault,
+  no unlock.
+- **Native desktop launcher (roadmap 41).** `spm desktop` starts the local
+  Dashboard and opens it in your browser (an app window where possible), staying
+  attached so Ctrl-C stops it. Each release ships Linux `.desktop`, macOS
+  `.command`, and Windows `.cmd` launchers that run it. No bundled browser engine.
+- **Windows / WSL first-class support (roadmap 42).** `install.sh` detects
+  Git-Bash/MSYS/Cygwin and installs to a per-user prefix there; `spm.cmd`/
+  `spm.ps1` shims run SPM under Git-Bash or WSL from a Windows prompt; the
+  Dashboard opens in the Windows browser (WSL localhost forwarding); and a
+  Windows/WSL section is added to the documentation.
+
+### Changed
+- **One contact email.** Every published contact and maintainer address
+  (documentation, policies, the Firefox manifest, the AUR/Termux maintainer
+  lines) is now `sans@silentprotocol.top`.
+
 ## [5.4.0] - 2026-09-18
 
 Four roadmap items, a "finish the security-and-lifecycle backlog" cluster. No

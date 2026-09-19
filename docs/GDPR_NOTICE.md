@@ -48,7 +48,7 @@ maintain security, and operate the open-source project. Do not include vaults,
 passwords, keys, tokens, or unrelated personal data.
 
 Requests concerning information submitted directly to project-maintained
-channels may be sent to support@sansyourways.xyz. Requests about data held by
+channels may be sent to sans@silentprotocol.top. Requests about data held by
 GitHub, an email provider, a fork, or an independent deployment should be sent
 to that operator.
 
@@ -64,4 +64,4 @@ the vulnerability.
 
 This notice will be updated when relevant application or project communication
 practices change. Security reports should be sent to
-security@sansyourways.xyz.
+sans@silentprotocol.top.

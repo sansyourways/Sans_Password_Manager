@@ -173,7 +173,7 @@ obscurity is not part of the protection.
 
 ## 8. Contact Information
 Security issues: **sans@silentprotocol.top**
-General support: **support@sansyourways.xyz**
-Trademark and partnership questions: **business@sansyourways.xyz**
+General support: **sans@silentprotocol.top**
+Trademark and partnership questions: **sans@silentprotocol.top**
 
 Copyright 2025–2026 Sansyourways and contributors.

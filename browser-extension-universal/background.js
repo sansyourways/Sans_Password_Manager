@@ -162,10 +162,25 @@ async function handleMenu(action, message, sender) {
     return {ok: true};
   }
 
+  if (action === "menu-save") {
+    // save-on-submit (roadmap 39). The host and scheme are the browser's view of
+    // this frame, never the credential-bearing message; only an open session
+    // writes, and the native host enforces that again. Returns ok only.
+    const page = pageContext(sender);
+    if (!page || !unlocked) return {ok: false};
+    const username = typeof message.username === "string" ? message.username : "";
+    const password = typeof message.password === "string" ? message.password : "";
+    if (!password) return {ok: false};
+    const response = await nativeRequest(
+      {action: "save", host: page.host, scheme: page.scheme, username, password});
+    if (response?.error === LOCKED) unlocked = false;
+    return {ok: Boolean(response?.ok)};
+  }
+
   return {ok: false, error: REFUSED};
 }
 
-const MENU_ACTIONS = new Set(["menu-open", "menu-rows", "menu-choose", "menu-key", "menu-commit", "menu-close"]);
+const MENU_ACTIONS = new Set(["menu-open", "menu-rows", "menu-choose", "menu-key", "menu-commit", "menu-close", "menu-save"]);
 
 api.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || message.channel !== "spm") return false;
