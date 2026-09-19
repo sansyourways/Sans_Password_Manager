@@ -90,5 +90,5 @@ requirements.
 ## Changes and contact
 
 Material privacy changes will be documented in the repository and changelog.
-Questions may be sent to support@sansyourways.xyz; security reports should be
-sent to security@sansyourways.xyz.
+Questions may be sent to sans@silentprotocol.top; security reports should be
+sent to sans@silentprotocol.top.

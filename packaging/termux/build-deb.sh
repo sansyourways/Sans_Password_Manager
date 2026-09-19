@@ -100,7 +100,7 @@ cat > "$stage/control/control" <<CONTROL
 Package: spm
 Version: $version
 Architecture: all
-Maintainer: Sans Password Manager <team@silentprotocol.top>
+Maintainer: Sans Password Manager <sans@silentprotocol.top>
 Installed-Size: $installed_kb
 Depends: bash, gnupg, python
 Recommends: termux-api

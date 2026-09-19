@@ -36,4 +36,35 @@ function spmFillForm(username, password) {
   set(passwords[0], password);
 }
 
-if (typeof module !== "undefined" && module.exports) module.exports = { spmFillForm };
+/* A strong password generated on the device (roadmap 40). No vault, no host
+ * round-trip -- so it works whether or not SPM is unlocked. Its own function for
+ * the same reason as spmFillForm: the popup, the content script and the test all
+ * drive the one implementation. crypto.getRandomValues with rejection sampling
+ * avoids modulo bias; at least one of each class is guaranteed, then shuffled so
+ * the guaranteed characters are not always in front. Visually ambiguous
+ * characters (0/O, 1/l/I) are left out. */
+function spmGeneratePassword(length) {
+  const lower = "abcdefghijkmnpqrstuvwxyz";
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const digits = "23456789";
+  const symbols = "!@#$%^&*()-_=+[]?";
+  const all = lower + upper + digits + symbols;
+  const n = (typeof length === "number" && length >= 8) ? Math.floor(length) : 20;
+  const rand = (max) => {
+    const buf = new Uint32Array(1);
+    const limit = Math.floor(0x100000000 / max) * max;
+    let x;
+    do { crypto.getRandomValues(buf); x = buf[0]; } while (x >= limit);
+    return x % max;
+  };
+  const chars = [lower[rand(lower.length)], upper[rand(upper.length)],
+                 digits[rand(digits.length)], symbols[rand(symbols.length)]];
+  while (chars.length < n) chars.push(all[rand(all.length)]);
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = rand(i + 1);
+    const t = chars[i]; chars[i] = chars[j]; chars[j] = t;
+  }
+  return chars.join("");
+}
+
+if (typeof module !== "undefined" && module.exports) module.exports = { spmFillForm, spmGeneratePassword };

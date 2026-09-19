@@ -106,6 +106,14 @@ $("unlockButton").addEventListener("click",async()=>{
 });
 $("refresh").addEventListener("click",list);
 $("lock").addEventListener("click",async()=>{ await call({action:"lock"}); $("accounts").classList.add("hidden"); $("unlock").classList.remove("hidden"); setStatus("SPM is locked."); });
+// Roadmap 40: a strong password generated on the device (no vault, no unlock),
+// copied to the clipboard. spmGeneratePassword lives in fill.js, the one the
+// content script and the test share.
+$("generate").addEventListener("click",async()=>{
+  const value=spmGeneratePassword(20);
+  try { await navigator.clipboard.writeText(value); setStatus("Generated a 20-character password and copied it to the clipboard."); }
+  catch { setStatus(`Generated: ${value}`); }
+});
 
 (async()=>{
   const chosen=await readSetting();

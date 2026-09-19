@@ -10,6 +10,30 @@ and cryptography in the smallest auditable component, and make the CLI, the SPM
 Dashboard, sync and the browser extension clients of that core rather than
 co-owners of it. That review is a design concept, not a formal security audit.
 
+## Shipped in 5.5.0 — extension capture & generator, a desktop launcher, Windows/WSL
+
+Four backlog items delivered together, with no vault format change (format 6,
+additive only), plus a repo-wide contact-email cleanup.
+
+- **Browser-extension password capture — shipped in 5.5.0 (item 39).** A
+  save-on-submit prompt writes a new password (or updates a matching one) through
+  a new `bridge-save` path — the extension's first write, gated to an unlocked
+  session, the page's exact host and an explicit click, with the secret on stdin
+  and only `{ok}` returned.
+- **Browser-extension password generator — shipped in 5.5.0 (item 40).** A strong
+  password generated on the device (`crypto.getRandomValues`, all classes,
+  ambiguous characters excluded), offered on new-password fields and from the
+  popup. No vault, no unlock.
+- **Native desktop wrapper — shipped in 5.5.0 (item 41).** `spm desktop` starts
+  the Dashboard and opens it in the browser (app window where possible), plus
+  generated Linux/macOS/Windows launchers. No bundled runtime — the OS browser is
+  the window.
+- **Windows / WSL first-class support — shipped in 5.5.0 (item 42).** Installer
+  detection for Git-Bash/MSYS/Cygwin/WSL, `spm.cmd`/`spm.ps1` shims, the Dashboard
+  opening in the Windows browser, and a documentation section.
+
+The published contact and maintainer email is unified to `sans@silentprotocol.top`.
+
 ## Shipped in 5.4.0 — archive, and breach coverage for accounts and offline
 
 Four backlog items delivered together, with no vault format change (format 6,

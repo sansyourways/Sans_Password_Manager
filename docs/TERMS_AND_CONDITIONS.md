@@ -40,5 +40,5 @@ are official SPM releases. Forks and modified builds are permitted by
 Apache-2.0 but are maintained and supported by their distributors unless the
 SPM maintainers explicitly agree otherwise.
 
-Questions may be sent to support@sansyourways.xyz. Trademark and partnership
-questions may be sent to business@sansyourways.xyz.
+Questions may be sent to sans@silentprotocol.top. Trademark and partnership
+questions may be sent to sans@silentprotocol.top.

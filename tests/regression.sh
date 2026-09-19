@@ -1145,7 +1145,7 @@ case "$(uname -s)" in
 		chromium_manifest="$setup_home/.config/google-chrome/NativeMessagingHosts/xyz.sansyourways.spm.json"
 		;;
 esac
-grep -q 'browser-extension@sansyourways.xyz' "$firefox_manifest"
+grep -q 'sans@silentprotocol.top' "$firefox_manifest"
 grep -q 'infdncbkefpjncplegccokcfpiicadlo' "$chromium_manifest"
 
 # --- 2.10.12 integrity regressions -------------------------------------------
@@ -1344,6 +1344,29 @@ cmd_archive list >/dev/null
 cmd_security_dashboard --account-breaches | grep -q 'Breached-service accounts:' \
 	|| { printf 'security dashboard did not run the account-breach check\n' >&2; exit 1; }
 printf '  security: archive round-trips, offline password check and on-device account check run through the CLI\n'
+
+# 5.5.0: the extension's save-on-submit write path (roadmap 39) at the core CLI,
+# and the desktop launcher (roadmap 41). Plaintext fixtures; no vault disturbed.
+bs_plain="$TEST_ROOT/bridge.plain"
+printf '1\tExample\talice\told\tnote\t2024-01-01T00:00:00Z\thttps://example.com\t\n' > "$bs_plain"
+# A new host creates a bound row; the new password arrives on stdin, not argv.
+printf 'from-the-browser-9\n' | core bridge-save "$bs_plain" github.com https octocat \
+	> "$TEST_ROOT/bridge.out" 2>"$TEST_ROOT/bridge.outcome"
+grep -q '^created$' "$TEST_ROOT/bridge.outcome" \
+	|| { printf 'bridge-save did not create a new entry\n' >&2; exit 1; }
+awk -F'\t' '$2=="github.com" && $3=="octocat" && $4=="from-the-browser-9" && $7=="https://github.com"{f=1} END{exit f?0:1}' \
+	"$TEST_ROOT/bridge.out" || { printf 'bridge-save wrote the wrong row\n' >&2; exit 1; }
+# A matching host + username updates in place rather than adding a duplicate.
+printf 'rotated-secret\n' | core bridge-save "$bs_plain" example.com https alice \
+	> "$TEST_ROOT/bridge.out2" 2>"$TEST_ROOT/bridge.outcome2"
+grep -q '^updated$' "$TEST_ROOT/bridge.outcome2" \
+	|| { printf 'bridge-save did not update the matching entry\n' >&2; exit 1; }
+[ "$(wc -l < "$TEST_ROOT/bridge.out2")" -eq 1 ] \
+	|| { printf 'bridge-save update changed the row count\n' >&2; exit 1; }
+# The desktop launcher advertises itself without needing a vault.
+cmd_desktop --help | grep -q 'desktop \[--port' \
+	|| { printf 'spm desktop --help did not print usage\n' >&2; exit 1; }
+printf '  extension/desktop: bridge-save creates and updates a bound password on stdin; the desktop launcher is wired\n'
 
 # Global search covers every record type by label, and must NOT search secret
 # fields -- a query that could match a password turns the result count into a
@@ -2281,8 +2304,12 @@ if project("get", {"ok": False, "error": "record not found"})["error"] != "recor
 if project("some-new-action", {"ok": True, "password": "p"}) != {"ok": True}:
     sys.exit("an undeclared action returned fields")
 
-if set(actions) != {"unlock", "lock", "list", "get", "status"}:
+if set(actions) != {"unlock", "lock", "list", "get", "status", "save"}:
     sys.exit("the action table changed without this test changing: %r" % sorted(actions))
+# save (roadmap 39) is the one write, and it must return only a verdict -- never
+# the credential it stored.
+if project("save", {"ok": True, "password": "p"}) != {"ok": True}:
+    sys.exit("the save action can expose fields")
 
 # Every refusal the core's matcher can produce must be declared here. A
 # refusal the host has not been told about is projected onto the generic one,
@@ -2913,6 +2940,43 @@ for gen in aur scoop nix; do
 	b="$("$ROOT_DIR/packaging/$gen/generate.sh" "$pkg_version" "$fake_sha")"
 	[ "$a" = "$b" ] || { printf 'the %s generator is not deterministic\n' "$gen" >&2; exit 1; }
 done
+
+# --- desktop launchers (roadmap 41) and the Windows shim (roadmap 42) -------
+"$ROOT_DIR/packaging/desktop/generate.sh" "$pkg_version" "$pkg_dir/desktop" >/dev/null
+grep -q '^Exec=spm desktop$' "$pkg_dir/desktop/spm.desktop" \
+	|| { printf 'the .desktop entry does not launch spm desktop\n' >&2; exit 1; }
+grep -q 'X-SPM-Version='"$pkg_version" "$pkg_dir/desktop/spm.desktop" \
+	|| { printf 'the .desktop entry is not stamped with the version\n' >&2; exit 1; }
+[ -x "$pkg_dir/desktop/spm-desktop.command" ] \
+	|| { printf 'the macOS .command launcher is not executable\n' >&2; exit 1; }
+grep -q 'spm desktop' "$pkg_dir/desktop/spm-desktop.cmd" \
+	|| { printf 'the Windows desktop launcher does not run spm desktop\n' >&2; exit 1; }
+if "$ROOT_DIR/packaging/desktop/generate.sh" "not-a-version" "$pkg_dir/desktop" >/dev/null 2>&1; then
+	printf 'the desktop generator accepted a non-version\n' >&2; exit 1
+fi
+# The Windows shim runs spm under bash or wsl, forwarding arguments.
+grep -q 'bash -lc "spm' "$ROOT_DIR/packaging/windows/spm.cmd" \
+	|| { printf 'the Windows .cmd shim does not run spm under bash\n' >&2; exit 1; }
+grep -q 'wsl spm' "$ROOT_DIR/packaging/windows/spm.cmd" \
+	|| { printf 'the Windows .cmd shim has no WSL fallback\n' >&2; exit 1; }
+
+# --- contact email is unified (roadmap-adjacent cleanup) --------------------
+# Every published contact/maintainer address is sans@silentprotocol.top; the old
+# per-role sansyourways.xyz / duck.com / team@ addresses are gone from the tree.
+for stale in 'support@sansyourways.xyz' 'security@sansyourways.xyz' \
+		'business@sansyourways.xyz' 'browser-extension@sansyourways.xyz' \
+		'team@silentprotocol.top' 'sansyourways@duck.com'; do
+	# Exclude this test, which necessarily names the old addresses to look for
+	# them, and the changelog/release history, which records the change.
+	if git -C "$ROOT_DIR" grep -qF "$stale" -- . \
+			':(exclude)tests/regression.sh' ':(exclude)CHANGELOG.md' \
+			':(exclude)docs/releases/*' 2>/dev/null; then
+		printf 'a published contact still uses %s\n' "$stale" >&2; exit 1
+	fi
+done
+grep -q 'sans@silentprotocol.top' "$ROOT_DIR/docs/SECURITY.md" \
+	|| { printf 'the security policy does not carry the unified contact email\n' >&2; exit 1; }
+printf '  packaging: desktop launchers + Windows shim, and the contact email unified to sans@silentprotocol.top\n'
 
 # The closing line reports what actually ran. Printing the .deb claim after
 # skipping the .deb build is the same overclaim this suite exists to prevent.

@@ -146,14 +146,114 @@ async function commit(nonce) {
   response.password = "";
 }
 
+/* ----- save-on-submit (roadmap 39) and generate (roadmap 40) -------------
+ * The host and scheme are never supplied from here: the save message carries
+ * only the credential, and the background reads the host from the browser's own
+ * view of this frame, exactly as the picker does. */
+function spmVisible(el) {
+  return el && el.offsetParent !== null && !el.disabled && !el.readOnly;
+}
+
+function captureFrom(form) {
+  const scope = form && form.querySelectorAll ? form : document;
+  const pw = [...scope.querySelectorAll('input[type="password"]')].filter(spmVisible)[0];
+  if (!pw || !pw.value) return null;
+  const user = [...scope.querySelectorAll(
+    'input[type="email"],input[autocomplete="username"],input[type="text"]')].filter(spmVisible)[0];
+  return {username: user ? user.value : "", password: pw.value};
+}
+
+let banner = null;
+function closeBanner() { if (banner) { banner.remove(); banner = null; } }
+function showSaveBanner(cred) {
+  closeBanner();
+  const shell = document.createElement("div");
+  const root = shell.attachShadow({mode: "closed"});
+  const box = document.createElement("div");
+  box.setAttribute("style", "all:initial;position:fixed;z-index:2147483647;right:16px;bottom:16px;"
+    + "font:14px system-ui,sans-serif;background:#16161a;color:#f5f5f7;padding:14px 16px;"
+    + "border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.35);max-width:300px;color-scheme:light dark");
+  const msg = document.createElement("div");
+  msg.textContent = "Save this password to SPM?";
+  msg.setAttribute("style", "margin:0 0 10px");
+  const save = document.createElement("button");
+  save.textContent = "Save";
+  save.setAttribute("style", "all:initial;cursor:pointer;border-radius:8px;padding:8px 14px;font:700 14px system-ui;"
+    + "background:#d8d2ff;color:#17131f;margin-right:8px");
+  const no = document.createElement("button");
+  no.textContent = "Not now";
+  no.setAttribute("style", "all:initial;cursor:pointer;border-radius:8px;padding:8px 14px;font:14px system-ui;background:#34343b;color:#eee");
+  const status = document.createElement("div");
+  status.setAttribute("style", "margin-top:8px;min-height:16px;color:#a9a9b2;font-size:12px");
+  save.addEventListener("click", async (event) => {
+    if (!event.isTrusted) return;
+    save.disabled = true;
+    status.textContent = "Saving…";
+    const response = await send({action: "menu-save", username: cred.username, password: cred.password});
+    cred.password = "";
+    if (response && response.ok) { status.textContent = "Saved to SPM."; setTimeout(closeBanner, 1200); }
+    else { status.textContent = "Could not save — is SPM unlocked?"; save.disabled = false; }
+  });
+  no.addEventListener("click", () => { cred.password = ""; closeBanner(); });
+  box.append(msg, save, no, status);
+  root.append(box);
+  (document.body || document.documentElement).append(shell);
+  banner = shell;
+  setTimeout(closeBanner, 15000);
+}
+
+function isNewPasswordField(el) {
+  if (!(el instanceof HTMLInputElement) || el.type !== "password" || !spmVisible(el)) return false;
+  if ((el.getAttribute("autocomplete") || "").toLowerCase().includes("new-password")) return true;
+  // A sign-up/change form has a password box and a confirm box.
+  return [...(el.form || document).querySelectorAll('input[type="password"]')].filter(spmVisible).length >= 2;
+}
+
+let gen = null;
+function closeGen() { if (gen) { gen.remove(); gen = null; } }
+function showGenerate(field) {
+  closeGen();
+  const shell = document.createElement("div");
+  const root = shell.attachShadow({mode: "closed"});
+  const btn = document.createElement("button");
+  btn.textContent = "Generate strong password";
+  const rect = field.getBoundingClientRect();
+  btn.setAttribute("style", "all:initial;position:fixed;z-index:2147483647;font:12px system-ui,sans-serif;"
+    + "cursor:pointer;background:#d8d2ff;color:#17131f;border-radius:8px;padding:6px 10px;box-shadow:0 4px 14px rgba(0,0,0,.3);"
+    + `top:${Math.round(rect.bottom + 4)}px;left:${Math.round(rect.left)}px`);
+  btn.addEventListener("click", (event) => {
+    if (!event.isTrusted) return;
+    const value = spmGeneratePassword(20);
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    for (const p of [...(field.form || document).querySelectorAll('input[type="password"]')].filter(spmVisible)) {
+      p.focus();
+      setter.call(p, value);
+      p.dispatchEvent(new Event("input", {bubbles: true}));
+      p.dispatchEvent(new Event("change", {bubbles: true}));
+    }
+    closeGen();
+  });
+  root.append(btn);
+  (document.body || document.documentElement).append(shell);
+  gen = shell;
+}
+
+document.addEventListener("submit", (event) => {
+  if (!event.isTrusted) return;
+  const cred = captureFrom(event.target);
+  if (cred) showSaveBanner(cred);
+}, true);
+
 document.addEventListener("focusin", (event) => {
   if (isLoginField(event.target)) open(event.target);
   else close();
+  if (isNewPasswordField(event.target)) showGenerate(event.target);
+  else closeGen();
 }, true);
 document.addEventListener("keydown", onKeyDown, true);
-window.addEventListener("scroll", place, true);
-window.addEventListener("resize", place, true);
-window.addEventListener("pagehide", close);
+window.addEventListener("scroll", () => { place(); closeGen(); }, true);
+window.addEventListener("resize", () => { place(); closeGen(); }, true);
+window.addEventListener("pagehide", () => { close(); closeGen(); closeBanner(); });
 
 api.runtime.onMessage.addListener((message) => {
   if (!message || message.channel !== "spm") return false;

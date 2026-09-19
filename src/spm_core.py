@@ -4201,6 +4201,43 @@ def bridge_match(requested, scheme, label, notes, url):
     return False, BRIDGE_INSECURE
 
 
+def bridge_save(plaintext, host, scheme, username, password):
+    """Create or update a password from a browser save-on-submit (roadmap 39).
+
+    If a password already scoped to `host` (by bridge_match) with the same
+    username exists, its secret is updated in place; otherwise a new password row
+    is appended, bound to the page's scheme + host so it autofills there. Returns
+    (new_plaintext, "updated"|"created"). The secret is never returned or logged.
+    This is the extension's one write path, and it goes through the same row
+    format and, via the caller, the same history the CLI's own writes use.
+    """
+    host = (host or "").lower().strip(".")
+    if not host or any(ch.isspace() for ch in host):
+        raise VaultError("invalid browser hostname")
+    if not password:
+        raise VaultError("a password is required")
+    username = username or ""
+    lines = plaintext.splitlines()
+    highest = 0
+    for i, line in enumerate(lines):
+        parts = line.split("\t")
+        if not parts or not parts[0].isdigit() or len(parts) < 6:
+            continue
+        highest = max(highest, int(parts[0]))
+        url = parts[6] if len(parts) > 6 else ""
+        ok, _reason = bridge_match(host, scheme, parts[1], parts[4], url)
+        if ok and parts[2] == username:
+            parts[3] = password
+            lines[i] = "\t".join(parts)
+            return "\n".join(lines) + "\n", "updated"
+    page_scheme = scheme if scheme in ("http", "https") else "https"
+    created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    row = "\t".join([str(highest + 1), host, username, password, "", created,
+                     "%s://%s" % (page_scheme, host), ""])
+    lines.append(row)
+    return "\n".join(lines) + "\n", "created"
+
+
 def tidy_proposals(plaintext):
     """What a tidy would change, as data. Changes nothing.
 
@@ -7527,6 +7564,20 @@ def main(argv):
                     sys.stdout.write(json.dumps(
                         {"ok": False, "error": "record not found"}) + "\n")
                     return 1
+        elif command == "bridge-save":
+            # bridge-save <plainfile> <host> <scheme> <username>
+            # The new password is read from stdin, never argv (no ps exposure).
+            # stdout: the new plaintext; stderr: "created" or "updated".
+            host = (argv[3] or "").lower().strip(".")
+            scheme = argv[4] if len(argv) > 4 else ""
+            username = argv[5] if len(argv) > 5 else ""
+            new_password = sys.stdin.readline().rstrip("\n")
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            new_plain, outcome = bridge_save(
+                plaintext, host, scheme, username, new_password)
+            sys.stdout.write(new_plain)
+            sys.stderr.write(outcome + "\n")
         elif command == "sync-serve":
             # sync-serve <vault> <bind> <port> <token> [channel] [--once]
             #                                                     [--idle SECONDS]

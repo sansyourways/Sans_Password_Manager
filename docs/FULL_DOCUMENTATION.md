@@ -583,6 +583,37 @@ runs as root — under `sudo`, `$HOME` may belong to root rather than to you, so
 the installer prints the line to add instead of editing the wrong account's
 profile.
 
+### The desktop launcher
+
+`spm desktop` is a one-command way to open SPM: it starts the local Dashboard on
+loopback, waits for it, and opens it in your browser — in an app window when a
+Chromium-family browser is present, otherwise your default browser. It stays
+attached, so pressing Ctrl-C (or closing the launcher) stops the Dashboard. It
+is not a bundled app with its own browser engine — the window is your own
+browser, which keeps SPM the small bash-and-Python program it is.
+
+Each release also carries desktop-integration launchers (a Linux `.desktop`
+entry, a macOS `.command`, and a Windows `.cmd`), all of which just run `spm
+desktop`. The installer places the `.desktop` entry so SPM appears in your
+application menu on Linux.
+
+### Windows and WSL
+
+SPM is a Bash program, and it runs first-class on Windows through either
+**Git-Bash** (Git for Windows) or **WSL**:
+
+- **Install.** Run `install.sh` from Git-Bash or a WSL shell. Under Git-Bash it
+  installs to a per-user prefix (`~/.local/bin`) that is already on your `PATH`;
+  under WSL it behaves like any other Linux install.
+- **Run from PowerShell/cmd.** Each release ships a `spm.cmd` and `spm.ps1` shim
+  (in `packaging/windows/`); put one on your `PATH` as `spm` and it forwards to
+  Bash or WSL, so `spm ...` works from a Windows prompt.
+- **The Dashboard.** `spm desktop` opens the Dashboard in your Windows browser —
+  from WSL it reaches the Windows side over WSL2's localhost forwarding, using
+  `wslview` or `cmd.exe` to launch the browser.
+- **Scoop.** The release also generates a Scoop manifest (`spm.json`) for
+  installing under Git-Bash/WSL.
+
 To do it by hand, or if you installed from source, add the directory yourself:
 
 ```bash

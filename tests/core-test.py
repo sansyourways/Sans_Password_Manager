@@ -3468,6 +3468,26 @@ def t_account_breach_domains():
     eq(hits.get("3"), "Example Leak")
 
 
+def t_bridge_save():
+    # A save-on-submit for a host with no matching entry creates one, bound so it
+    # will autofill there; the secret never appears in the outcome.
+    plain = "1\tExample\talice\told\tnote\t2024-01-01T00:00:00Z\thttps://example.com\t\n"
+    created, outcome = core.bridge_save(plain, "github.com", "https", "octo", "s3cret!")
+    eq(outcome, "created")
+    last = created.splitlines()[-1].split("\t")
+    eq((last[1], last[2], last[3], last[6]),
+       ("github.com", "octo", "s3cret!", "https://github.com"))
+    # A save for a matching host + username updates the existing secret in place,
+    # not a new row.
+    updated, outcome2 = core.bridge_save(plain, "example.com", "https", "alice", "rotated")
+    eq(outcome2, "updated")
+    eq(len(updated.splitlines()), len(plain.splitlines()))
+    eq(updated.splitlines()[0].split("\t")[3], "rotated")
+    # A blank host or password is refused.
+    raises(core.VaultError, lambda: core.bridge_save(plain, "", "https", "u", "p"))
+    raises(core.VaultError, lambda: core.bridge_save(plain, "x.example", "https", "u", ""))
+
+
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):
         check(name[2:], fn)

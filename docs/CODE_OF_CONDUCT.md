@@ -45,6 +45,6 @@ Maintainers may edit or remove inappropriate content, close interactions, issue
 warnings, or temporarily or permanently restrict participation. Enforcement
 will consider context, severity, repetition, and community safety.
 
-Report conduct concerns to support@sansyourways.xyz. Report vulnerabilities to
-security@sansyourways.xyz. Maintainers will handle reports as confidentially as
+Report conduct concerns to sans@silentprotocol.top. Report vulnerabilities to
+sans@silentprotocol.top. Maintainers will handle reports as confidentially as
 reasonably possible.
