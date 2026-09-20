@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **5.4.0**
+Current release: **5.5.0**
 
 ---
 
@@ -297,6 +297,20 @@ detail view; bring it back whenever you like.
 | Archive — items set aside, out of the default lists, with a one-click unarchive |
 | --- |
 | ![SPM Archive page listing an archived password with an Unarchive action, set aside from the default lists without being deleted](docs/screenshots/web-v2.13.0/50-archive.png) |
+
+### The desktop launcher and Windows
+
+New in 5.5.0. `spm desktop` starts the local Dashboard and opens it in your
+browser — an app window where a Chromium-family browser is present — staying
+attached so Ctrl-C stops it. Each release also ships Linux `.desktop`, macOS
+`.command` and Windows `.cmd` launchers that run it. SPM also runs first-class on
+**Windows** through Git-Bash or WSL: the installer picks a per-user prefix there,
+`spm.cmd`/`spm.ps1` shims run it from a Windows prompt, and the Dashboard opens in
+the Windows browser.
+
+| The `spm desktop` launcher | Installing under Git-Bash / WSL |
+| --- | --- |
+| ![Terminal showing the spm desktop command starting the local dashboard and printing its URL, with a note that it opens the browser and Ctrl-C stops it](docs/screenshots/web-v2.13.0/51-desktop.png) | ![Terminal showing uname reporting MINGW, install.sh --dry-run choosing a per-user prefix under Git-Bash, and spm --version run from PowerShell through the shim](docs/screenshots/web-v2.13.0/52-windows.png) |
 
 <details>
 <summary><strong>Complete web interface gallery</strong></summary>
