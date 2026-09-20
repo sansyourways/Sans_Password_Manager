@@ -91,7 +91,11 @@ SPM may not be a good fit when you need:
 - Passphrases, backup codes, authenticator/TOTP entries, and biometric unlock where supported.
 - Security keys that open the vault outright: the vault key is sealed under the bytes a WebAuthn PRF credential derives, so there is no master password in that path at all.
 - Import and export across common and advanced text formats.
-- Browser extensions for Chromium and Firefox with a local native host, including an in-field account picker rendered at the extension's own origin so the page cannot read your account list, and a session lock you set.
+- Browser extensions for Chromium and Firefox with a local native host: an in-field account picker rendered at the extension's own origin so the page cannot read your account list, save-on-submit password capture, on-device password generation, a session lock you set, and a non-blocking look-alike/phishing caution when a page resembles a site you use.
+- Secret scopes and injection for automation: name a least-privilege set of records and hand them to a command with `spm run` (in its environment, never on disk or argv) or `spm env` — without exposing the rest of the vault.
+- A capability-sandboxed plugin SDK: extend SPM with separate programs that declare a `plugin.json` capability manifest, run only after explicit consent, and never see the vault key.
+- A native desktop launcher (`spm desktop`) that opens the Dashboard in your browser, plus generated Linux/macOS/Windows launchers — no bundled browser engine.
+- Shell completion for bash, zsh and fish (`spm completion <shell>`).
 - Portable and save bundles for user-controlled transfer and recovery.
 - Pluggable sync transports (directory, rsync, rclone) that move only encrypted bytes to infrastructure you already run.
 - Bulk tidy for imported vaults: folders read from notes, package identifiers renamed, reviewed before anything is written.
@@ -104,8 +108,8 @@ SPM may not be a good fit when you need:
 | Linux | Yes | Yes | Yes | Yes | Yes |
 | macOS | Yes | Yes | Yes | Yes | Yes |
 | Android / Termux | Yes | Available | Yes | No native host | CLI/install |
-| Windows via WSL | Best effort | Best effort | Environment-dependent | Not supported | No |
-| Native Windows | No | No | No | No | No |
+| Windows via WSL | Yes | Yes | Environment-dependent | Not supported | No |
+| Windows via Git-Bash | Yes | Yes | Environment-dependent | Not supported | No |
 
 For platform-specific requirements and limitations, see the [requirements](https://spm-docs.silentprotocol.top/#requirements) and [installation](https://spm-docs.silentprotocol.top/#installation) sections.
 
@@ -141,6 +145,11 @@ Paths can differ when you select another vault or override XDG directories. Trea
 | `spm add` | Add an entry |
 | `spm list` | List entries |
 | `spm get <id>` | Retrieve an entry |
+| `spm scope add <name> --secret VAR=<id>` | Define a least-privilege secret scope |
+| `spm run --scope <name> -- <cmd>` | Run a command with a scope's secrets in its environment |
+| `spm plugin run <name>` | Run a capability-sandboxed plugin |
+| `spm completion <bash\|zsh\|fish>` | Emit a shell completion script |
+| `spm desktop` | Open the Dashboard in your browser |
 | `spm web` | Start the local dashboard |
 | `spm doctor` | Check vault health and structure |
 | `spm portable` | Build a portable bundle |

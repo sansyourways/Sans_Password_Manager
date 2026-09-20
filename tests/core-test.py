@@ -3488,6 +3488,61 @@ def t_bridge_save():
     raises(core.VaultError, lambda: core.bridge_save(plain, "x.example", "https", "u", ""))
 
 
+def t_phishing_warning_catches_lookalikes_and_spares_the_real_thing():
+    # Roadmap 35. A page bound to no record but confusingly like one you use.
+    known = {"paypal.com", "google.com", "github.com"}
+    # A digit standing in for a letter: same skeleton, ASCII -> "lookalike".
+    eq(core.phishing_warning("paypa1.com", known),
+       {"suspected": "paypal.com", "reason": "lookalike"})
+    # A Cyrillic 'a' that reads as Latin: same skeleton, non-ASCII -> "homoglyph".
+    eq(core.phishing_warning("pаypal.com", known),
+       {"suspected": "paypal.com", "reason": "homoglyph"})
+    # One edit away on the same TLD -> "typosquat".
+    eq(core.phishing_warning("goggle.com", known)["reason"], "typosquat")
+    # The genuine site, and an unrelated one, warn about nothing.
+    eq(core.phishing_warning("github.com", known), None)
+    eq(core.phishing_warning("example.org", known), None)
+    # A different registrar of the same brand is not one edit away and does not
+    # share a skeleton, so it is left alone rather than flagged as a twin.
+    eq(core.phishing_warning("google.co.uk", known), None)
+    # The skeleton itself folds punycode, diacritics and the rn->m trap.
+    eq(core.confusable_skeleton("paypa1.com"), core.confusable_skeleton("paypal.com"))
+
+
+def t_bound_hosts_are_every_host_a_record_binds():
+    plain = ("1\tGitHub\talice\ts\tn\t2024-01-01T00:00:00Z\thttps://github.com\t\n"
+             "2\tWork\tb\ts\t\t2024-01-01T00:00:00Z\thttps://*.example.com\t\n")
+    eq(core.bound_hosts(plain), {"github.com", "example.com"})
+
+
+def t_secret_scopes_round_trip_and_resolve():
+    # Roadmap 48. A scope names records and the field to read; resolving it is
+    # the only path from a name to a value, and it is all-or-nothing.
+    plain = ("META_RECOVERY_PUBKEY\tx\t-\t-\t-\t-\n"
+             "1\tGitHub\talice\ttok_gh\tn\t2024-01-01T00:00:00Z\thttps://github.com\t\n"
+             "2\tProdDB\tadmin\tdbpass\t\t2024-01-01T00:00:00Z\thttps://db.example.com\t\n")
+    saved = core.set_secret_scope(plain, "ci", [
+        {"var": "GH", "ref": "1", "field": "password"},
+        {"var": "DB_USER", "ref": "ProdDB", "field": "username"}])
+    scopes = core.secret_scopes(saved)
+    eq(scopes[0]["name"], "ci")
+    eq(core.resolve_scope(saved, "ci"), [("GH", "tok_gh"), ("DB_USER", "admin")])
+    # An unknown scope, a bad variable name, an unknown field, and an ambiguous
+    # pattern are each refused rather than guessed.
+    raises(core.VaultError, lambda: core.resolve_scope(saved, "nope"))
+    raises(core.VaultError, lambda: core.set_secret_scope(plain, "bad", [{"var": "1x", "ref": "1"}]))
+    raises(core.VaultError, lambda: core.set_secret_scope(plain, "bad", [{"var": "V", "ref": "1", "field": "totp"}]))
+    # 'o' matches both GitHub (no) ... use a pattern hitting two rows: 'admin'
+    # only hits row 2, so build ambiguity with a shared substring.
+    plain2 = plain + "3\tGitHubBackup\talice\tt2\t\t2024-01-01T00:00:00Z\thttps://github.io\t\n"
+    scoped = core.set_secret_scope(plain2, "amb", [{"var": "V", "ref": "GitHub", "field": "password"}])
+    raises(core.VaultError, lambda: core.resolve_scope(scoped, "amb"))
+    # Deleting a scope leaves the rest intact.
+    twice = core.set_secret_scope(saved, "other", [{"var": "X", "ref": "1"}])
+    pruned = core.delete_secret_scope(twice, "ci")
+    eq([s["name"] for s in core.secret_scopes(pruned)], ["other"])
+
+
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):
         check(name[2:], fn)
