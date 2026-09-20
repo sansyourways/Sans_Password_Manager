@@ -91,7 +91,15 @@ async function open(field) {
   close();
   if (Date.now() < suppressUntil) return;
   const response = await send({action: "menu-open"});
-  if (!response || !response.ok || !response.count) return;
+  if (!response || !response.ok || !response.count) {
+    // Nothing to fill. The one useful thing left to say is a look-alike caution,
+    // and only once per page so a focused field does not nag.
+    if (response && response.warning && !cautioned) {
+      cautioned = true;
+      showPhishingCaution(response.warning);
+    }
+    return;
+  }
   if (document.activeElement !== field) return;
 
   // The shadow root is here for CSS, not for safety: it stops the page's own
@@ -164,7 +172,46 @@ function captureFrom(form) {
 }
 
 let banner = null;
+let cautioned = false;
 function closeBanner() { if (banner) { banner.remove(); banner = null; } }
+
+/* ----- look-alike / phishing caution (roadmap 35) ------------------------
+ * Shown when the page is bound to no account but resembles one the vault knows.
+ * A closed shadow root, like the save banner: the page cannot read the name of
+ * the site it is imitating out of our warning. It never blocks -- it says a
+ * true, local thing ("this looks like somewhere you have an account") and lets
+ * the person decide. */
+let caution = null;
+function closeCaution() { if (caution) { caution.remove(); caution = null; } }
+function showPhishingCaution(warning) {
+  closeCaution();
+  const how = {
+    homoglyph: "uses look-alike characters imitating",
+    lookalike: "reads like a swapped-character copy of",
+    typosquat: "is one keystroke away from",
+  }[warning.reason] || "resembles";
+  const shell = document.createElement("div");
+  const root = shell.attachShadow({mode: "closed"});
+  const box = document.createElement("div");
+  box.setAttribute("style", "all:initial;position:fixed;z-index:2147483647;right:16px;bottom:16px;"
+    + "font:14px system-ui,sans-serif;background:#3a1d1d;color:#ffe9e5;padding:14px 16px;"
+    + "border-left:4px solid #e06a5a;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.4);"
+    + "max-width:320px;color-scheme:dark");
+  const msg = document.createElement("div");
+  msg.textContent = "This site " + how + " " + warning.suspected
+    + ", where you have an account. If you did not mean to come here, do not enter those credentials.";
+  msg.setAttribute("style", "margin:0 0 10px;line-height:1.4");
+  const ok = document.createElement("button");
+  ok.textContent = "Dismiss";
+  ok.setAttribute("style", "all:initial;cursor:pointer;border-radius:8px;padding:8px 14px;"
+    + "font:700 13px system-ui;background:#e06a5a;color:#2a1210");
+  ok.addEventListener("click", closeCaution);
+  box.append(msg, ok);
+  root.append(box);
+  (document.body || document.documentElement).append(shell);
+  caution = shell;
+  setTimeout(closeCaution, 20000);
+}
 function showSaveBanner(cred) {
   closeBanner();
   const shell = document.createElement("div");

@@ -7,6 +7,54 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.6.0] - 2026-09-20
+
+Look-alike warnings, scoped secret access and injection, shell completion, and a
+capability-sandboxed plugin SDK. No vault format change (format 6, additive only).
+
+### Added
+- **Domain look-alike / phishing warnings (roadmap 35).** A pure-Python check in
+  the trusted core flags a page bound to no record that resembles one the vault
+  knows — a homoglyph (`pаypal.com` with a Cyrillic `а`), a swapped character
+  (`paypa1.com`), or a one-keystroke typosquat (`goggle.com`) — folding punycode
+  and confusables to a skeleton and measuring edit distance. The browser
+  extension shows a non-blocking caution before any fill (in a closed shadow root,
+  so the page cannot read the name of the site it imitates), and `spm
+  phishing-check <host>` answers from the CLI. No blocklist, no network, no new
+  permission.
+- **Scoped CLI secret access (roadmap 48).** A *secret scope* is a named,
+  least-privilege allow-list of records stored in the vault: `spm scope add ci
+  --secret DB_PASS=42 --secret API=my-token`. It is the one place that says which
+  records a non-interactive caller may read, and under which environment-variable
+  names; resolving a scope is the only path from a name to a value.
+- **Secret injection for commands (roadmap 52).** `spm run --scope ci -- ./deploy`
+  runs a command with the scope's secrets in its environment and nowhere else —
+  never on disk, never on the argument vector, and the vault lock is dropped
+  before the child starts. `spm env --scope ci --format sh|json|dotenv` prints the
+  same values for `eval`, with a one-line stderr caution that eval exposes them to
+  the calling shell. Both also take ad-hoc `--secret VAR=ref[:field]`.
+- **Shell completion (roadmap 49).** `spm completion bash|zsh|fish` emits a
+  completion script for the top-level verbs and common subcommands. Like `help`,
+  it runs before any dependency, language or policy prompt, so it works on a fresh
+  platform.
+- **Plugin SDK with capability sandboxing (roadmap 50).** A plugin is a separate
+  program in `~/.config/spm/plugins/<name>/` with a `plugin.json` manifest
+  declaring a subset of a closed capability set (`records.list`, `secret.get`,
+  `password.generate`, `clipboard.copy`, `notify`). `spm plugin
+  list|info|install|remove|run` manages them; consent is explicit and pinned to
+  the manifest. A plugin never sees the vault key: the trusted host resolves
+  exactly what each granted capability entitles it to (record summaries carry
+  labels, never secrets; `secret.get` delivers only the records of one granted
+  scope), and honours a plugin's clipboard/notify requests only where granted. A
+  reference plugin ships in `examples/plugins/spm-inventory/`.
+
+### Changed
+- The release archive now includes `examples/`, and skips any listed source path
+  a given tree does not contain (so a checkout predating a directory still builds
+  reproducibly).
+- `README.md` is refreshed to the new version and features, and its platform table
+  reflects 5.5.0's Windows/WSL support.
+
 ## [5.5.0] - 2026-09-19
 
 The browser-extension and platform backlog, plus a contact-email cleanup. No

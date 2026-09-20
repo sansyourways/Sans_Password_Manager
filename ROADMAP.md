@@ -10,6 +10,35 @@ and cryptography in the smallest auditable component, and make the CLI, the SPM
 Dashboard, sync and the browser extension clients of that core rather than
 co-owners of it. That review is a design concept, not a formal security audit.
 
+## Shipped in 5.6.0 — phishing warnings, secret scopes and injection, completion, a plugin SDK
+
+Five backlog items delivered together, with no vault format change (format 6,
+additive only).
+
+- **Domain look-alike / phishing warnings — shipped in 5.6.0 (item 35).** A
+  pure-Python skeleton-and-edit-distance check in the trusted core flags a page
+  bound to no record that resembles one the vault knows — homoglyph, swapped
+  character or one-keystroke typosquat. The extension shows a non-blocking caution
+  (in a closed shadow root) before any fill; `spm phishing-check` answers from the
+  CLI. No blocklist, no network, no new permission.
+- **Scoped CLI secret access — shipped in 5.6.0 (item 48).** A *secret scope* is a
+  named, least-privilege allow-list of records stored in the vault (`spm scope
+  add ci --secret DB=42:password`). It is the one place that says which records a
+  non-interactive caller may read, and resolving it is the only path from a name
+  to a value.
+- **Secret injection for commands — shipped in 5.6.0 (item 52).** `spm run --scope
+  ci -- ./cmd` runs a command with the scope's secrets in its environment and
+  nowhere else — never on disk or argv, and the vault lock is dropped before the
+  child starts. `spm env` prints them for `eval` with a stderr caution.
+- **Shell completion — shipped in 5.6.0 (item 49).** `spm completion bash|zsh|fish`
+  emits a completion script, prompt-free and lock-free like `help`.
+- **Plugin / extension SDK with capability sandboxing — shipped in 5.6.0 (item
+  50).** Plugins are separate programs with a `plugin.json` capability manifest
+  and explicit, manifest-pinned consent; the trusted host mediates every
+  capability and a plugin never sees the vault key. `secret.get` reaches only the
+  records of one granted scope (item 48). A reference plugin ships in
+  `examples/plugins/`.
+
 ## Shipped in 5.5.0 — extension capture & generator, a desktop launcher, Windows/WSL
 
 Four backlog items delivered together, with no vault format change (format 6,

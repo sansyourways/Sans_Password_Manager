@@ -1,0 +1,7 @@
+{
+  "name": "spm-inventory",
+  "version": "1.0.0",
+  "description": "Lists your accounts and flags any without a URL. Read-only; it sees labels, never secrets.",
+  "exec": "run.py",
+  "capabilities": ["records.list"]
+}

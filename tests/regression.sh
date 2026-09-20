@@ -1368,6 +1368,65 @@ cmd_desktop --help | grep -q 'desktop \[--port' \
 	|| { printf 'spm desktop --help did not print usage\n' >&2; exit 1; }
 printf '  extension/desktop: bridge-save creates and updates a bound password on stdin; the desktop launcher is wired\n'
 
+# 5.6.0: look-alike warnings (35), secret scopes (48), secret injection (52),
+# shell completion (49) and the plugin SDK (50).
+# -- 35: the core names a resembled host and spares the real one and unrelated ones.
+ph_plain="$TEST_ROOT/phish.plain"
+printf '1\tGitHub\ta\ts\tn\t2024-01-01T00:00:00Z\thttps://github.com\t\n2\tPayPal\tb\ts\t\t2024-01-01T00:00:00Z\thttps://paypal.com\t\n' > "$ph_plain"
+ph_warn="$(core phishing-check "$ph_plain" paypa1.com 2>/dev/null || true)"
+printf '%s' "$ph_warn" | grep -q '"suspected": "paypal.com"' \
+	|| { printf 'phishing-check did not flag the paypal look-alike\n' >&2; exit 1; }
+ph_ok="$(core phishing-check "$ph_plain" github.com 2>/dev/null || true)"
+printf '%s' "$ph_ok" | grep -q '"warning": null' \
+	|| { printf 'phishing-check warned about the genuine host\n' >&2; exit 1; }
+# -- 48: a scope stores refs and fields, and resolving it yields NUL-delimited
+#    VAR=value pairs (no secret on argv, no scope resolving on a list).
+sc_plain="$TEST_ROOT/scope.plain"
+printf 'META_RECOVERY_PUBKEY\tx\t-\t-\t-\t-\n1\tGitHub\talice\ttok_gh\tn\t2024-01-01T00:00:00Z\thttps://github.com\t\n' > "$sc_plain"
+printf 'GH 1 password\n' | core scope-set "$sc_plain" ci > "$TEST_ROOT/scope.out"
+core scopes-list "$TEST_ROOT/scope.out" | grep -q 'tok_gh' \
+	&& { printf 'scopes-list leaked a secret value\n' >&2; exit 1; } || true
+core scope-resolve "$TEST_ROOT/scope.out" ci | tr '\0' '\n' | grep -q '^GH=tok_gh$' \
+	|| { printf 'scope-resolve did not resolve the named secret\n' >&2; exit 1; }
+# -- 52: run injects only the named variables (subshell: cmd_run execs its child);
+#    env prints them for eval. Record 1 in the harness vault is DemoSecret42.
+( cmd_run --secret PW=1:password -- sh -c '[ "$PW" = DemoSecret42 ]' ) \
+	|| { printf 'spm run did not inject the secret into the child\n' >&2; exit 1; }
+( cmd_env --secret PW=1:password --format dotenv 2>/dev/null ) | grep -q '^PW=DemoSecret42$' \
+	|| { printf 'spm env did not project the secret\n' >&2; exit 1; }
+if ( cmd_run --scope no-such-scope -- true ) 2>/dev/null; then
+	printf 'spm run ran with an unresolved scope\n' >&2; exit 1
+fi
+# -- 49: the completion script parses, registers, and names only real verbs.
+cmd_completion bash > "$TEST_ROOT/spm.bash"
+bash -n "$TEST_ROOT/spm.bash" \
+	|| { printf 'the bash completion script does not parse\n' >&2; exit 1; }
+grep -q 'complete -F _spm_complete spm' "$TEST_ROOT/spm.bash" \
+	|| { printf 'the bash completion did not register\n' >&2; exit 1; }
+cmd_completion fish >/dev/null && cmd_completion zsh >/dev/null \
+	|| { printf 'a completion shell failed to emit\n' >&2; exit 1; }
+for verb in scope run env plugin phishing-check completion; do
+	grep -qE "^[[:space:]]+$verb\)" "$ROOT_DIR/spm.sh" \
+		|| { printf 'completion names %s, which main does not dispatch\n' "$verb" >&2; exit 1; }
+done
+# -- 50: the shipped example plugin installs and runs under consent, sees labels
+#    but no secret, and an invalid manifest is refused.
+cmd_plugin_install "$ROOT_DIR/examples/plugins/spm-inventory" >/dev/null \
+	|| { printf 'could not install the example plugin\n' >&2; exit 1; }
+plug_out="$(printf 'y\n' | cmd_plugin_run spm-inventory 2>/dev/null || true)"
+printf '%s' "$plug_out" | grep -q 'SPM inventory:' \
+	|| { printf 'the example plugin did not run\n' >&2; exit 1; }
+printf '%s' "$plug_out" | grep -q 'DemoSecret42' \
+	&& { printf 'a plugin with records.list saw a secret\n' >&2; exit 1; } || true
+mkdir -p "$TEST_ROOT/badplug"
+printf '{"name":"bad","exec":"missing.sh","capabilities":["records.list"]}' > "$TEST_ROOT/badplug/plugin.json"
+# A subshell contains the refusal's own `exit`, so a correct refusal does not end
+# the suite.
+if ( cmd_plugin_install "$TEST_ROOT/badplug" ) >/dev/null 2>&1; then
+	printf 'an invalid plugin manifest was accepted\n' >&2; exit 1
+fi
+printf '  scopes/injection/completion/plugins: phishing caution, scoped run/env, completion verbs, and a capability-sandboxed plugin all wired\n'
+
 # Global search covers every record type by label, and must NOT search secret
 # fields -- a query that could match a password turns the result count into a
 # confirmation oracle.
@@ -2268,6 +2327,22 @@ if set(row) != {"id", "label", "username", "url"}:
     sys.exit("a list match carried %r" % sorted(set(row) - {"id", "label", "username", "url"}))
 if "should-not-cross" in repr(listed):
     sys.exit("a secret crossed the boundary inside a match")
+
+# The look-alike caution (roadmap 35) is two strings and no more. A response that
+# tacks on extra keys, or a non-string suspected host, is projected down to
+# exactly {suspected, reason} -- and a list with no warning grows no warning key.
+warned = project("list", {"ok": True, "matches": [], "warning": {
+    "suspected": "paypal.com", "reason": "lookalike",
+    "note": "should-not-cross", "password": "should-not-cross"}})
+if set(warned.get("warning", {})) != {"suspected", "reason"}:
+    sys.exit("a warning carried %r" % sorted(warned.get("warning", {})))
+if "should-not-cross" in repr(warned):
+    sys.exit("an extra field crossed the boundary inside a warning")
+if "warning" in project("list", {"ok": True, "matches": []}):
+    sys.exit("a warning appeared where the core sent none")
+if "warning" in project("list", {"ok": True, "matches": [],
+                                 "warning": {"reason": "lookalike"}}):
+    sys.exit("a warning with no suspected host was still projected")
 
 # unlock answers whether the password worked, not what it found.
 if project("unlock", {"ok": True, "matches": [{"id": "1"}]}) != {"ok": True}:

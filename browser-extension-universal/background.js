@@ -107,7 +107,15 @@ async function handleMenu(action, message, sender) {
       return {ok: false};
     }
     const matches = response.matches || [];
-    if (!matches.length) return {ok: false};
+    // No account is bound to this page. If the host resembles one the vault
+    // does know (roadmap 35), pass the caution back so the content script can
+    // warn -- the one moment a look-alike is worth a word, since nothing fills.
+    if (!matches.length) {
+      const warn = response.warning;
+      return warn && typeof warn.suspected === "string"
+        ? {ok: false, warning: {suspected: warn.suspected, reason: String(warn.reason || "")}}
+        : {ok: false};
+    }
     const nonce = crypto.randomUUID();
     menus.set(nonce, {...page, matches, chosen: null, at: Date.now()});
     // The count, not the accounts. It is what the menu has to be sized to, and

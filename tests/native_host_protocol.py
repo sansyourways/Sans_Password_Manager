@@ -8,7 +8,11 @@ with tempfile.TemporaryDirectory() as directory:
 read master
 [ "$master" = test-master ] || { printf '{"ok":false,"error":"bad password"}\\n'; exit 1; }
 case "$1" in
- bridge-list) printf '{"ok":true,"matches":[{"id":"7","label":"Example","username":"alice","url":"https://example.invalid"}]}\\n' ;;
+ bridge-list)
+   case "$2" in
+    *paypa1*) printf '{"ok":true,"matches":[],"warning":{"suspected":"paypal.com","reason":"lookalike","leak":"drop-me"}}\\n' ;;
+    *) printf '{"ok":true,"matches":[{"id":"7","label":"Example","username":"alice","url":"https://example.invalid"}]}\\n' ;;
+   esac ;;
  bridge-get) printf '{"ok":true,"username":"alice","password":"test-secret"}\\n' ;;
  bridge-save) read newpw; printf '{"ok":true}\\n' ;;
 esac
@@ -30,6 +34,12 @@ esac
     assert unlocked["ok"] is True and "password" not in json.dumps(unlocked)
     listed=request({"id":"3","action":"list","host":"example.invalid"})
     assert listed["matches"][0]["username"] == "alice" and "test-secret" not in json.dumps(listed)
+    assert "warning" not in listed, listed
+    # Roadmap 35: a look-alike host carries a two-string caution and nothing else
+    # -- the extra "leak" field the core sent is dropped at the boundary.
+    warned=request({"id":"3w","action":"list","host":"paypa1.invalid"})
+    assert warned["matches"] == [] and warned["warning"] == {"suspected":"paypal.com","reason":"lookalike"}, warned
+    assert "drop-me" not in json.dumps(warned), warned
     assert request({"id":"4","action":"get","host":"example.invalid","record":"7"})["password"] == "test-secret"
     # The idle window a caller asks for is clamped, not obeyed and not refused.
     # Refusing would let a caller map the configuration by probing it, and the

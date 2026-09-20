@@ -103,7 +103,9 @@ ACTIONS = {
     # save-on-submit (roadmap 39): the one write path. Returns ok only -- never
     # the credential it just stored, which the page already had.
     "save": (),
-    "list": ("matches",),
+    # `warning` is the look-alike caution (roadmap 35): a page bound to no record
+    # that resembles one the vault knows. Projected to two strings, never a secret.
+    "list": ("matches", "warning"),
     "get": ("username", "password"),
     # Session state, and nothing that depends on the vault: whether a session
     # is open, the window it was opened with, and how long is left. A popup
@@ -153,6 +155,13 @@ def project(action, response):
                 for row in (rows if isinstance(rows, list) else [])
                 if isinstance(row, dict)
             ]
+        elif field == "warning":
+            warn = response[field]
+            if isinstance(warn, dict):
+                suspected = warn.get("suspected", "")
+                reason = warn.get("reason", "")
+                if isinstance(suspected, str) and isinstance(reason, str) and suspected:
+                    out["warning"] = {"suspected": suspected, "reason": reason}
         else:
             out[field] = response[field]
     return out

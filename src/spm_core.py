@@ -3758,6 +3758,157 @@ def delete_saved_search(plaintext, name):
     return _write_saved_searches(plaintext, items)
 
 
+# ----- secret scopes (roadmap 48) --------------------------------------------
+# A named, least-privilege allow-list of secrets. It is the one place that says
+# which records a non-interactive caller -- `spm run`/`spm env` (52) or a plugin
+# (50) -- may read, and under which environment-variable names. Scopes are stored
+# in the vault like saved searches; resolving one is the only path from a scope
+# name to a secret value, and it never widens: a caller with scope "ci" reaches
+# exactly the records "ci" lists and no others.
+
+SECRET_SCOPES_TAG = "META_SECRET_SCOPES"
+SECRET_SCOPE_MAX = 64
+SECRET_SCOPE_NAME_MAX = 64
+SECRET_SCOPE_ENTRY_MAX = 64
+SECRET_SCOPE_FIELDS = ("password", "username", "url", "notes")
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _normalize_scope_entries(entries):
+    """Validate and canonicalise a scope's entries: [{var, ref, field}]."""
+    out, seen = [], set()
+    for entry in (entries or []):
+        if not isinstance(entry, dict):
+            continue
+        var = str(entry.get("var", "")).strip()
+        ref = str(entry.get("ref", "")).strip()
+        field = str(entry.get("field", "password")).strip().lower() or "password"
+        if not _ENV_NAME_RE.match(var):
+            raise VaultError("'%s' is not a valid environment variable name" % var)
+        if not ref:
+            raise VaultError("entry %s names no record" % var)
+        if field not in SECRET_SCOPE_FIELDS:
+            raise VaultError("unknown field '%s' (one of: %s)"
+                             % (field, ", ".join(SECRET_SCOPE_FIELDS)))
+        if var in seen:
+            raise VaultError("environment variable %s is named twice" % var)
+        seen.add(var)
+        out.append({"var": var, "ref": ref, "field": field})
+    if not out:
+        raise VaultError("a scope needs at least one secret")
+    if len(out) > SECRET_SCOPE_ENTRY_MAX:
+        raise VaultError("a scope holds at most %d secrets" % SECRET_SCOPE_ENTRY_MAX)
+    return out
+
+
+def secret_scopes(plaintext):
+    """[{name, entries:[{var, ref, field}]}] this vault holds, in stored order."""
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if parts[0] == SECRET_SCOPES_TAG and len(parts) > 1:
+            try:
+                data = json.loads(base64.b64decode(parts[1], validate=True)
+                                  .decode("utf-8"))
+            except Exception:
+                return []
+            out = []
+            if isinstance(data, list):
+                for item in data[:SECRET_SCOPE_MAX]:
+                    if not isinstance(item, dict):
+                        continue
+                    name = item.get("name")
+                    entries = item.get("entries")
+                    if isinstance(name, str) and name.strip() and isinstance(entries, list):
+                        try:
+                            norm = _normalize_scope_entries(entries)
+                        except VaultError:
+                            continue
+                        out.append({"name": name.strip()[:SECRET_SCOPE_NAME_MAX],
+                                    "entries": norm})
+            return out
+    return []
+
+
+def _write_secret_scopes(plaintext, items):
+    rows = [line for line in (plaintext or "").splitlines()
+            if line.split("\t")[0] != SECRET_SCOPES_TAG]
+    if items:
+        raw = json.dumps(items, separators=(",", ":"), ensure_ascii=False)
+        col = base64.b64encode(raw.encode("utf-8")).decode("ascii")
+        rows.append("%s\t%s\t-\t-\t-\t-" % (SECRET_SCOPES_TAG, col))
+    return "\n".join(rows) + "\n"
+
+
+def set_secret_scope(plaintext, name, entries):
+    """Add or replace a scope by name (case-insensitive). Returns plaintext."""
+    name = (name or "").strip()[:SECRET_SCOPE_NAME_MAX]
+    if not name:
+        raise VaultError("a scope needs a name")
+    norm = _normalize_scope_entries(entries)
+    items = [s for s in secret_scopes(plaintext)
+             if s["name"].casefold() != name.casefold()]
+    if len(items) >= SECRET_SCOPE_MAX:
+        raise VaultError("this vault already holds the maximum of %d scopes"
+                         % SECRET_SCOPE_MAX)
+    items.append({"name": name, "entries": norm})
+    return _write_secret_scopes(plaintext, items)
+
+
+def delete_secret_scope(plaintext, name):
+    """Remove a scope by name. Returns plaintext (unchanged if absent)."""
+    name = (name or "").strip()
+    items = [s for s in secret_scopes(plaintext)
+             if s["name"].casefold() != name.casefold()]
+    return _write_secret_scopes(plaintext, items)
+
+
+def _resolve_secret_ref(plaintext, ref, field):
+    """The one field value a scope entry names, or raise. id or unique pattern.
+
+    A numeric ref is a record id, matched exactly. Otherwise it is a pattern that
+    must identify exactly one password record by label, username or URL -- an
+    ambiguous or missing pattern is refused rather than guessed, because guessing
+    which secret to hand a script is the wrong kind of convenience.
+    """
+    col = {"password": 3, "username": 2, "notes": 4, "url": 6}[field]
+    numeric = ref.isdigit()
+    needle = ref.casefold()
+    hits = []
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if not parts or not parts[0].isdigit() or len(parts) < 6:
+            continue
+        if numeric:
+            if parts[0] == ref:
+                hits = [parts]
+                break
+            continue
+        url = parts[6] if len(parts) > 6 else ""
+        if (needle in parts[1].casefold() or needle in parts[2].casefold()
+                or needle in url.casefold()):
+            hits.append(parts)
+    if not hits:
+        raise VaultError("no record matches '%s'" % ref)
+    if len(hits) > 1:
+        raise VaultError("'%s' matches %d records; name one by id" % (ref, len(hits)))
+    parts = hits[0]
+    return parts[col] if len(parts) > col else ""
+
+
+def resolve_scope(plaintext, name):
+    """Every (var, value) a scope resolves to, or raise. The whole scope or none.
+
+    If any single entry cannot be resolved the scope fails as a unit -- a caller
+    asked for a named set of secrets and half of one is not what it asked for.
+    """
+    scope = next((s for s in secret_scopes(plaintext)
+                  if s["name"].casefold() == name.casefold()), None)
+    if scope is None:
+        raise VaultError("no scope named '%s'" % name)
+    return [(e["var"], _resolve_secret_ref(plaintext, e["ref"], e["field"]))
+            for e in scope["entries"]]
+
+
 # ----- public-key sharing and collections (roadmap 6 & 7) --------------------
 # Sharing is offline and account-free: a share is selected records (or a named
 # collection) encrypted to another SPM user's public key, as a file they import.
@@ -4199,6 +4350,133 @@ def bridge_match(requested, scheme, label, notes, url):
         if bound != "https" or scheme == "https":
             return True, ""
     return False, BRIDGE_INSECURE
+
+
+# ---- Look-alike / phishing detection (roadmap 35) --------------------------
+# bridge_match answers "may this page see this record?". This answers the danger
+# it is silent about: a page bound to NO record that is a visual twin of one that
+# is. paypa1.com, pаypal.com (a Cyrillic a), goggle.com -- each is unbound, so
+# autofill offers nothing and says nothing, which is exactly the moment a
+# look-alike works. This warns, on the extension and the CLI, with no blocklist,
+# no network call and no new permission. It never blocks: the judgement it can
+# make locally is "this resembles somewhere you have an account", not "this is
+# fraud".
+
+# Characters that read as another in a hostname. Deliberately small and legible:
+# the full Unicode confusables table is enormous and mostly irrelevant to hosts,
+# which are letters, digits and hyphens. This covers the ASCII homoglyphs and the
+# Latin-looking Cyrillic and Greek letters that make an IDN homograph, each folded
+# to the Latin letter it imitates.
+_CONFUSABLE_FOLD = {
+    "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "6": "g",
+    "7": "t", "8": "b", "9": "g",
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "х": "x", "у": "y",
+    "ѕ": "s", "і": "i", "ј": "j", "һ": "h", "ԁ": "d", "ո": "n", "м": "m",
+    "к": "k", "т": "t", "в": "b", "г": "r",
+    "ο": "o", "α": "a", "ν": "v", "ρ": "p", "τ": "t", "ι": "i", "κ": "k",
+    "μ": "m", "χ": "x", "ε": "e",
+}
+
+
+def confusable_skeleton(host):
+    """A host folded so visual twins collapse to one string.
+
+    A punycode label is decoded first so its real letters show; diacritics are
+    stripped; each confusable character is mapped to the Latin letter it
+    imitates; then 'rn'->'m' and 'vv'->'w', which no single-character map can
+    catch. Two hosts with the same skeleton look alike -- that is the whole test.
+    """
+    host = (host or "").lower().strip(".")
+    if "xn--" in host:
+        try:
+            host = host.encode("ascii").decode("idna")
+        except Exception:
+            pass
+    stripped = "".join(c for c in unicodedata.normalize("NFKD", host)
+                       if not unicodedata.combining(c))
+    folded = "".join(_CONFUSABLE_FOLD.get(c, c) for c in stripped)
+    return folded.replace("rn", "m").replace("vv", "w")
+
+
+def _is_ascii(text):
+    try:
+        text.encode("ascii")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def _levenshtein(a, b, ceiling):
+    """Edit distance between two short strings, abandoned once it passes ceiling."""
+    if abs(len(a) - len(b)) > ceiling:
+        return ceiling + 1
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        current, best = [i], i
+        for j, cb in enumerate(b, 1):
+            current.append(min(previous[j] + 1, current[j - 1] + 1,
+                               previous[j - 1] + (0 if ca == cb else 1)))
+            best = min(best, current[-1])
+        if best > ceiling:
+            return ceiling + 1
+        previous = current
+    return previous[-1]
+
+
+def phishing_warning(requested, known_hosts):
+    """Whether `requested` is a look-alike of a host the vault already knows.
+
+    Returns {"suspected": host, "reason": code} or None. Fires only when
+    `requested` is NOT itself a known host (an exact match is the site, not a
+    twin) yet collides with one under the confusable skeleton, or sits one edit
+    away from one on the same top-level domain. The strongest, lowest-noise
+    signal wins and the resembled host is named. Reasons: 'homoglyph' (a
+    non-ASCII twin), 'lookalike' (an ASCII digit/letter twin) or 'typosquat'.
+    """
+    requested = (requested or "").lower().strip(".")
+    if not requested:
+        return None
+    known = {h.lower().strip(".") for h in known_hosts if h}
+    known.discard("")
+    if requested in known:
+        return None
+    req_skel = confusable_skeleton(requested)
+    req_ascii = _is_ascii(requested)
+    req_tld = requested.rsplit(".", 1)[-1]
+    best = None  # (rank, distance, suspected, reason)
+    for host in known:
+        if confusable_skeleton(host) == req_skel:
+            reason = "lookalike" if req_ascii else "homoglyph"
+            cand = (0, 0, host, reason)
+        elif (host.rsplit(".", 1)[-1] == req_tld
+              and _levenshtein(requested, host, 1) == 1):
+            cand = (1, 1, host, "typosquat")
+        else:
+            continue
+        if best is None or cand[:2] < best[:2]:
+            best = cand
+    if best is None:
+        return None
+    return {"suspected": best[2], "reason": best[3]}
+
+
+def bound_hosts(plaintext):
+    """Every registrable host any password row is bound to, wildcards flattened.
+
+    The set a page host is checked against for a look-alike warning. A '*.'
+    scope contributes the parent it covers, not the star.
+    """
+    hosts = set()
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if not parts or not parts[0].isdigit() or len(parts) < 6:
+            continue
+        url = parts[6] if len(parts) > 6 else ""
+        for pattern, _scheme in record_bindings(parts[1], parts[4], url):
+            host = wildcard_scope(pattern) or pattern
+            if host and "." in host:
+                hosts.add(host)
+    return hosts
 
 
 def bridge_save(plaintext, host, scheme, username, password):
@@ -7327,6 +7605,56 @@ def main(argv):
                 sys.stdout.write(set_saved_search(plaintext, argv[3], argv[4]))
             else:
                 sys.stdout.write(delete_saved_search(plaintext, argv[3]))
+        elif command == "scopes-list":
+            # scopes-list <plainfile> ; stdout: JSON. Names refs and fields, not
+            # secret values -- listing a scope must never resolve one.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.write(json.dumps(
+                    {"scopes": secret_scopes(handle.read())}, indent=2) + "\n")
+        elif command in ("scope-set", "scope-delete"):
+            # scope-set <plainfile> <name> ; stdin: one entry per line
+            #   "VAR ref [field]". scope-delete <plainfile> <name>. Writes plaintext.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            if command == "scope-set":
+                entries = []
+                for line in sys.stdin.read().splitlines():
+                    bits = line.split()
+                    if not bits:
+                        continue
+                    entries.append({"var": bits[0],
+                                    "ref": bits[1] if len(bits) > 1 else "",
+                                    "field": bits[2] if len(bits) > 2 else "password"})
+                sys.stdout.write(set_secret_scope(plaintext, argv[3], entries))
+            else:
+                sys.stdout.write(delete_secret_scope(plaintext, argv[3]))
+        elif command == "scope-resolve":
+            # scope-resolve <plainfile> <name> ; stdout: one NUL-delimited
+            #   VAR=value pair per secret. NUL-delimited so a value may hold any
+            #   byte a newline or space could not survive; the caller splits on
+            #   NUL and never sees a secret on argv or in a temp file.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            pairs = resolve_scope(plaintext, argv[3])
+            sys.stdout.write("".join("%s=%s\0" % (var, val) for var, val in pairs))
+        elif command == "refs-resolve":
+            # refs-resolve <plainfile> ; stdin: one "VAR ref [field]" per line
+            #   (the ad-hoc --secret of `run`/`env`). Same NUL-delimited output
+            #   and same all-or-nothing rule as scope-resolve.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            entries = []
+            for line in sys.stdin.read().splitlines():
+                bits = line.split()
+                if not bits:
+                    continue
+                entries.append({"var": bits[0],
+                                "ref": bits[1] if len(bits) > 1 else "",
+                                "field": bits[2] if len(bits) > 2 else "password"})
+            norm = _normalize_scope_entries(entries)
+            sys.stdout.write("".join(
+                "%s=%s\0" % (e["var"], _resolve_secret_ref(plaintext, e["ref"], e["field"]))
+                for e in norm))
         elif command == "schemas-list":
             with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
                 sys.stdout.write(json.dumps(
@@ -7531,17 +7859,26 @@ def main(argv):
                     {"ok": False, "error": "invalid browser hostname"}) + "\n")
                 return 2
             with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
-                matches = []
-                for line in handle:
-                    parts = line.rstrip("\n").split("\t")
-                    if not parts or not parts[0].isdigit() or len(parts) < 6:
-                        continue
-                    url = parts[6] if len(parts) > 6 else ""
-                    ok, _reason = bridge_match(host, scheme, parts[1], parts[4], url)
-                    if ok:
-                        matches.append({"id": parts[0], "label": parts[1],
-                                        "username": parts[2], "url": url})
-            sys.stdout.write(json.dumps({"ok": True, "matches": matches}) + "\n")
+                plaintext = handle.read()
+            matches = []
+            for line in plaintext.splitlines():
+                parts = line.split("\t")
+                if not parts or not parts[0].isdigit() or len(parts) < 6:
+                    continue
+                url = parts[6] if len(parts) > 6 else ""
+                ok, _reason = bridge_match(host, scheme, parts[1], parts[4], url)
+                if ok:
+                    matches.append({"id": parts[0], "label": parts[1],
+                                    "username": parts[2], "url": url})
+            result = {"ok": True, "matches": matches}
+            # A look-alike does its work precisely when nothing matched: the page
+            # is bound to no record, so autofill is silent. If it resembles a host
+            # the vault does know, say so -- a caution, never a block.
+            if not matches:
+                warning = phishing_warning(host, bound_hosts(plaintext))
+                if warning:
+                    result["warning"] = warning
+            sys.stdout.write(json.dumps(result) + "\n")
         elif command == "bridge-get":
             # bridge-get <plainfile> <record id> <page host> <page scheme>
             rid, host = argv[3], (argv[4] or "").lower().strip(".")
@@ -7578,6 +7915,29 @@ def main(argv):
                 plaintext, host, scheme, username, new_password)
             sys.stdout.write(new_plain)
             sys.stderr.write(outcome + "\n")
+        elif command == "records-summary":
+            # records-summary <plainfile> ; stdout: JSON {records:[{id,label,
+            #   username,url}]}. Secret-free by construction -- the password
+            #   column is never read. This is all a plugin's records.list sees.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                records = []
+                for line in handle:
+                    parts = line.rstrip("\n").split("\t")
+                    if not parts or not parts[0].isdigit() or len(parts) < 6:
+                        continue
+                    records.append({"id": parts[0], "label": parts[1],
+                                    "username": parts[2],
+                                    "url": parts[6] if len(parts) > 6 else ""})
+            sys.stdout.write(json.dumps({"records": records}) + "\n")
+        elif command == "phishing-check":
+            # phishing-check <plainfile> <host> ; stdout: JSON verdict (roadmap 35)
+            host = (argv[3] or "").lower().strip(".") if len(argv) > 3 else ""
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            warning = phishing_warning(host, bound_hosts(plaintext))
+            out = {"ok": True, "host": host, "warning": warning}
+            sys.stdout.write(json.dumps(out) + "\n")
+            return 3 if warning else 0
         elif command == "sync-serve":
             # sync-serve <vault> <bind> <port> <token> [channel] [--once]
             #                                                     [--idle SECONDS]
