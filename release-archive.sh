@@ -49,7 +49,7 @@ rm -f -- "$archive" "$archive.sha256"
 paths=(
 	spm.sh install.sh build.sh
 	README.md ROADMAP.md CHANGELOG.md CONTRIBUTING.md LICENSE NOTICE DCO
-	src docs browser-extension browser-extension-universal tests
+	src docs browser-extension browser-extension-universal tests examples
 	.github/PULL_REQUEST_TEMPLATE.md .github/ISSUE_TEMPLATE
 )
 
@@ -57,7 +57,17 @@ paths=(
 listing="$(mktemp "${TMPDIR:-/tmp}/spm-archive.XXXXXX")"
 stage=""
 trap 'rm -f "$listing"; [ -n "$stage" ] && rm -rf "$stage"' EXIT INT TERM
-find "${paths[@]}" -type f \
+# Only the listed paths that this tree actually holds. A path may be legitimately
+# absent from the tree being archived -- a checkout that predates a directory, or
+# a `git archive HEAD` taken before it was committed -- and a missing entry should
+# leave it out, not abort the build. The entry-count and packaged-vs-source checks
+# guard completeness separately.
+existing=()
+for candidate in "${paths[@]}"; do
+	[ -e "$candidate" ] && existing+=("$candidate")
+done
+[ "${#existing[@]}" -gt 0 ] || { printf 'release-archive: no source paths present\n' >&2; exit 1; }
+find "${existing[@]}" -type f \
 	! -name '*.bak' ! -path '*/dist/*' ! -path '*/__pycache__/*' \
 	| LC_ALL=C sort > "$listing"
 [ -s "$listing" ] || { printf 'release-archive: nothing to archive\n' >&2; exit 1; }

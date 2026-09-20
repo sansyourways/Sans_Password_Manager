@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.5.0"
+VERSION="5.6.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -4569,6 +4569,157 @@ def delete_saved_search(plaintext, name):
     return _write_saved_searches(plaintext, items)
 
 
+# ----- secret scopes (roadmap 48) --------------------------------------------
+# A named, least-privilege allow-list of secrets. It is the one place that says
+# which records a non-interactive caller -- `spm run`/`spm env` (52) or a plugin
+# (50) -- may read, and under which environment-variable names. Scopes are stored
+# in the vault like saved searches; resolving one is the only path from a scope
+# name to a secret value, and it never widens: a caller with scope "ci" reaches
+# exactly the records "ci" lists and no others.
+
+SECRET_SCOPES_TAG = "META_SECRET_SCOPES"
+SECRET_SCOPE_MAX = 64
+SECRET_SCOPE_NAME_MAX = 64
+SECRET_SCOPE_ENTRY_MAX = 64
+SECRET_SCOPE_FIELDS = ("password", "username", "url", "notes")
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _normalize_scope_entries(entries):
+    """Validate and canonicalise a scope's entries: [{var, ref, field}]."""
+    out, seen = [], set()
+    for entry in (entries or []):
+        if not isinstance(entry, dict):
+            continue
+        var = str(entry.get("var", "")).strip()
+        ref = str(entry.get("ref", "")).strip()
+        field = str(entry.get("field", "password")).strip().lower() or "password"
+        if not _ENV_NAME_RE.match(var):
+            raise VaultError("'%s' is not a valid environment variable name" % var)
+        if not ref:
+            raise VaultError("entry %s names no record" % var)
+        if field not in SECRET_SCOPE_FIELDS:
+            raise VaultError("unknown field '%s' (one of: %s)"
+                             % (field, ", ".join(SECRET_SCOPE_FIELDS)))
+        if var in seen:
+            raise VaultError("environment variable %s is named twice" % var)
+        seen.add(var)
+        out.append({"var": var, "ref": ref, "field": field})
+    if not out:
+        raise VaultError("a scope needs at least one secret")
+    if len(out) > SECRET_SCOPE_ENTRY_MAX:
+        raise VaultError("a scope holds at most %d secrets" % SECRET_SCOPE_ENTRY_MAX)
+    return out
+
+
+def secret_scopes(plaintext):
+    """[{name, entries:[{var, ref, field}]}] this vault holds, in stored order."""
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if parts[0] == SECRET_SCOPES_TAG and len(parts) > 1:
+            try:
+                data = json.loads(base64.b64decode(parts[1], validate=True)
+                                  .decode("utf-8"))
+            except Exception:
+                return []
+            out = []
+            if isinstance(data, list):
+                for item in data[:SECRET_SCOPE_MAX]:
+                    if not isinstance(item, dict):
+                        continue
+                    name = item.get("name")
+                    entries = item.get("entries")
+                    if isinstance(name, str) and name.strip() and isinstance(entries, list):
+                        try:
+                            norm = _normalize_scope_entries(entries)
+                        except VaultError:
+                            continue
+                        out.append({"name": name.strip()[:SECRET_SCOPE_NAME_MAX],
+                                    "entries": norm})
+            return out
+    return []
+
+
+def _write_secret_scopes(plaintext, items):
+    rows = [line for line in (plaintext or "").splitlines()
+            if line.split("\t")[0] != SECRET_SCOPES_TAG]
+    if items:
+        raw = json.dumps(items, separators=(",", ":"), ensure_ascii=False)
+        col = base64.b64encode(raw.encode("utf-8")).decode("ascii")
+        rows.append("%s\t%s\t-\t-\t-\t-" % (SECRET_SCOPES_TAG, col))
+    return "\n".join(rows) + "\n"
+
+
+def set_secret_scope(plaintext, name, entries):
+    """Add or replace a scope by name (case-insensitive). Returns plaintext."""
+    name = (name or "").strip()[:SECRET_SCOPE_NAME_MAX]
+    if not name:
+        raise VaultError("a scope needs a name")
+    norm = _normalize_scope_entries(entries)
+    items = [s for s in secret_scopes(plaintext)
+             if s["name"].casefold() != name.casefold()]
+    if len(items) >= SECRET_SCOPE_MAX:
+        raise VaultError("this vault already holds the maximum of %d scopes"
+                         % SECRET_SCOPE_MAX)
+    items.append({"name": name, "entries": norm})
+    return _write_secret_scopes(plaintext, items)
+
+
+def delete_secret_scope(plaintext, name):
+    """Remove a scope by name. Returns plaintext (unchanged if absent)."""
+    name = (name or "").strip()
+    items = [s for s in secret_scopes(plaintext)
+             if s["name"].casefold() != name.casefold()]
+    return _write_secret_scopes(plaintext, items)
+
+
+def _resolve_secret_ref(plaintext, ref, field):
+    """The one field value a scope entry names, or raise. id or unique pattern.
+
+    A numeric ref is a record id, matched exactly. Otherwise it is a pattern that
+    must identify exactly one password record by label, username or URL -- an
+    ambiguous or missing pattern is refused rather than guessed, because guessing
+    which secret to hand a script is the wrong kind of convenience.
+    """
+    col = {"password": 3, "username": 2, "notes": 4, "url": 6}[field]
+    numeric = ref.isdigit()
+    needle = ref.casefold()
+    hits = []
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if not parts or not parts[0].isdigit() or len(parts) < 6:
+            continue
+        if numeric:
+            if parts[0] == ref:
+                hits = [parts]
+                break
+            continue
+        url = parts[6] if len(parts) > 6 else ""
+        if (needle in parts[1].casefold() or needle in parts[2].casefold()
+                or needle in url.casefold()):
+            hits.append(parts)
+    if not hits:
+        raise VaultError("no record matches '%s'" % ref)
+    if len(hits) > 1:
+        raise VaultError("'%s' matches %d records; name one by id" % (ref, len(hits)))
+    parts = hits[0]
+    return parts[col] if len(parts) > col else ""
+
+
+def resolve_scope(plaintext, name):
+    """Every (var, value) a scope resolves to, or raise. The whole scope or none.
+
+    If any single entry cannot be resolved the scope fails as a unit -- a caller
+    asked for a named set of secrets and half of one is not what it asked for.
+    """
+    scope = next((s for s in secret_scopes(plaintext)
+                  if s["name"].casefold() == name.casefold()), None)
+    if scope is None:
+        raise VaultError("no scope named '%s'" % name)
+    return [(e["var"], _resolve_secret_ref(plaintext, e["ref"], e["field"]))
+            for e in scope["entries"]]
+
+
 # ----- public-key sharing and collections (roadmap 6 & 7) --------------------
 # Sharing is offline and account-free: a share is selected records (or a named
 # collection) encrypted to another SPM user's public key, as a file they import.
@@ -5010,6 +5161,133 @@ def bridge_match(requested, scheme, label, notes, url):
         if bound != "https" or scheme == "https":
             return True, ""
     return False, BRIDGE_INSECURE
+
+
+# ---- Look-alike / phishing detection (roadmap 35) --------------------------
+# bridge_match answers "may this page see this record?". This answers the danger
+# it is silent about: a page bound to NO record that is a visual twin of one that
+# is. paypa1.com, pаypal.com (a Cyrillic a), goggle.com -- each is unbound, so
+# autofill offers nothing and says nothing, which is exactly the moment a
+# look-alike works. This warns, on the extension and the CLI, with no blocklist,
+# no network call and no new permission. It never blocks: the judgement it can
+# make locally is "this resembles somewhere you have an account", not "this is
+# fraud".
+
+# Characters that read as another in a hostname. Deliberately small and legible:
+# the full Unicode confusables table is enormous and mostly irrelevant to hosts,
+# which are letters, digits and hyphens. This covers the ASCII homoglyphs and the
+# Latin-looking Cyrillic and Greek letters that make an IDN homograph, each folded
+# to the Latin letter it imitates.
+_CONFUSABLE_FOLD = {
+    "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "6": "g",
+    "7": "t", "8": "b", "9": "g",
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "х": "x", "у": "y",
+    "ѕ": "s", "і": "i", "ј": "j", "һ": "h", "ԁ": "d", "ո": "n", "м": "m",
+    "к": "k", "т": "t", "в": "b", "г": "r",
+    "ο": "o", "α": "a", "ν": "v", "ρ": "p", "τ": "t", "ι": "i", "κ": "k",
+    "μ": "m", "χ": "x", "ε": "e",
+}
+
+
+def confusable_skeleton(host):
+    """A host folded so visual twins collapse to one string.
+
+    A punycode label is decoded first so its real letters show; diacritics are
+    stripped; each confusable character is mapped to the Latin letter it
+    imitates; then 'rn'->'m' and 'vv'->'w', which no single-character map can
+    catch. Two hosts with the same skeleton look alike -- that is the whole test.
+    """
+    host = (host or "").lower().strip(".")
+    if "xn--" in host:
+        try:
+            host = host.encode("ascii").decode("idna")
+        except Exception:
+            pass
+    stripped = "".join(c for c in unicodedata.normalize("NFKD", host)
+                       if not unicodedata.combining(c))
+    folded = "".join(_CONFUSABLE_FOLD.get(c, c) for c in stripped)
+    return folded.replace("rn", "m").replace("vv", "w")
+
+
+def _is_ascii(text):
+    try:
+        text.encode("ascii")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def _levenshtein(a, b, ceiling):
+    """Edit distance between two short strings, abandoned once it passes ceiling."""
+    if abs(len(a) - len(b)) > ceiling:
+        return ceiling + 1
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        current, best = [i], i
+        for j, cb in enumerate(b, 1):
+            current.append(min(previous[j] + 1, current[j - 1] + 1,
+                               previous[j - 1] + (0 if ca == cb else 1)))
+            best = min(best, current[-1])
+        if best > ceiling:
+            return ceiling + 1
+        previous = current
+    return previous[-1]
+
+
+def phishing_warning(requested, known_hosts):
+    """Whether `requested` is a look-alike of a host the vault already knows.
+
+    Returns {"suspected": host, "reason": code} or None. Fires only when
+    `requested` is NOT itself a known host (an exact match is the site, not a
+    twin) yet collides with one under the confusable skeleton, or sits one edit
+    away from one on the same top-level domain. The strongest, lowest-noise
+    signal wins and the resembled host is named. Reasons: 'homoglyph' (a
+    non-ASCII twin), 'lookalike' (an ASCII digit/letter twin) or 'typosquat'.
+    """
+    requested = (requested or "").lower().strip(".")
+    if not requested:
+        return None
+    known = {h.lower().strip(".") for h in known_hosts if h}
+    known.discard("")
+    if requested in known:
+        return None
+    req_skel = confusable_skeleton(requested)
+    req_ascii = _is_ascii(requested)
+    req_tld = requested.rsplit(".", 1)[-1]
+    best = None  # (rank, distance, suspected, reason)
+    for host in known:
+        if confusable_skeleton(host) == req_skel:
+            reason = "lookalike" if req_ascii else "homoglyph"
+            cand = (0, 0, host, reason)
+        elif (host.rsplit(".", 1)[-1] == req_tld
+              and _levenshtein(requested, host, 1) == 1):
+            cand = (1, 1, host, "typosquat")
+        else:
+            continue
+        if best is None or cand[:2] < best[:2]:
+            best = cand
+    if best is None:
+        return None
+    return {"suspected": best[2], "reason": best[3]}
+
+
+def bound_hosts(plaintext):
+    """Every registrable host any password row is bound to, wildcards flattened.
+
+    The set a page host is checked against for a look-alike warning. A '*.'
+    scope contributes the parent it covers, not the star.
+    """
+    hosts = set()
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if not parts or not parts[0].isdigit() or len(parts) < 6:
+            continue
+        url = parts[6] if len(parts) > 6 else ""
+        for pattern, _scheme in record_bindings(parts[1], parts[4], url):
+            host = wildcard_scope(pattern) or pattern
+            if host and "." in host:
+                hosts.add(host)
+    return hosts
 
 
 def bridge_save(plaintext, host, scheme, username, password):
@@ -8138,6 +8416,56 @@ def main(argv):
                 sys.stdout.write(set_saved_search(plaintext, argv[3], argv[4]))
             else:
                 sys.stdout.write(delete_saved_search(plaintext, argv[3]))
+        elif command == "scopes-list":
+            # scopes-list <plainfile> ; stdout: JSON. Names refs and fields, not
+            # secret values -- listing a scope must never resolve one.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.write(json.dumps(
+                    {"scopes": secret_scopes(handle.read())}, indent=2) + "\n")
+        elif command in ("scope-set", "scope-delete"):
+            # scope-set <plainfile> <name> ; stdin: one entry per line
+            #   "VAR ref [field]". scope-delete <plainfile> <name>. Writes plaintext.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            if command == "scope-set":
+                entries = []
+                for line in sys.stdin.read().splitlines():
+                    bits = line.split()
+                    if not bits:
+                        continue
+                    entries.append({"var": bits[0],
+                                    "ref": bits[1] if len(bits) > 1 else "",
+                                    "field": bits[2] if len(bits) > 2 else "password"})
+                sys.stdout.write(set_secret_scope(plaintext, argv[3], entries))
+            else:
+                sys.stdout.write(delete_secret_scope(plaintext, argv[3]))
+        elif command == "scope-resolve":
+            # scope-resolve <plainfile> <name> ; stdout: one NUL-delimited
+            #   VAR=value pair per secret. NUL-delimited so a value may hold any
+            #   byte a newline or space could not survive; the caller splits on
+            #   NUL and never sees a secret on argv or in a temp file.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            pairs = resolve_scope(plaintext, argv[3])
+            sys.stdout.write("".join("%s=%s\0" % (var, val) for var, val in pairs))
+        elif command == "refs-resolve":
+            # refs-resolve <plainfile> ; stdin: one "VAR ref [field]" per line
+            #   (the ad-hoc --secret of `run`/`env`). Same NUL-delimited output
+            #   and same all-or-nothing rule as scope-resolve.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            entries = []
+            for line in sys.stdin.read().splitlines():
+                bits = line.split()
+                if not bits:
+                    continue
+                entries.append({"var": bits[0],
+                                "ref": bits[1] if len(bits) > 1 else "",
+                                "field": bits[2] if len(bits) > 2 else "password"})
+            norm = _normalize_scope_entries(entries)
+            sys.stdout.write("".join(
+                "%s=%s\0" % (e["var"], _resolve_secret_ref(plaintext, e["ref"], e["field"]))
+                for e in norm))
         elif command == "schemas-list":
             with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
                 sys.stdout.write(json.dumps(
@@ -8342,17 +8670,26 @@ def main(argv):
                     {"ok": False, "error": "invalid browser hostname"}) + "\n")
                 return 2
             with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
-                matches = []
-                for line in handle:
-                    parts = line.rstrip("\n").split("\t")
-                    if not parts or not parts[0].isdigit() or len(parts) < 6:
-                        continue
-                    url = parts[6] if len(parts) > 6 else ""
-                    ok, _reason = bridge_match(host, scheme, parts[1], parts[4], url)
-                    if ok:
-                        matches.append({"id": parts[0], "label": parts[1],
-                                        "username": parts[2], "url": url})
-            sys.stdout.write(json.dumps({"ok": True, "matches": matches}) + "\n")
+                plaintext = handle.read()
+            matches = []
+            for line in plaintext.splitlines():
+                parts = line.split("\t")
+                if not parts or not parts[0].isdigit() or len(parts) < 6:
+                    continue
+                url = parts[6] if len(parts) > 6 else ""
+                ok, _reason = bridge_match(host, scheme, parts[1], parts[4], url)
+                if ok:
+                    matches.append({"id": parts[0], "label": parts[1],
+                                    "username": parts[2], "url": url})
+            result = {"ok": True, "matches": matches}
+            # A look-alike does its work precisely when nothing matched: the page
+            # is bound to no record, so autofill is silent. If it resembles a host
+            # the vault does know, say so -- a caution, never a block.
+            if not matches:
+                warning = phishing_warning(host, bound_hosts(plaintext))
+                if warning:
+                    result["warning"] = warning
+            sys.stdout.write(json.dumps(result) + "\n")
         elif command == "bridge-get":
             # bridge-get <plainfile> <record id> <page host> <page scheme>
             rid, host = argv[3], (argv[4] or "").lower().strip(".")
@@ -8389,6 +8726,29 @@ def main(argv):
                 plaintext, host, scheme, username, new_password)
             sys.stdout.write(new_plain)
             sys.stderr.write(outcome + "\n")
+        elif command == "records-summary":
+            # records-summary <plainfile> ; stdout: JSON {records:[{id,label,
+            #   username,url}]}. Secret-free by construction -- the password
+            #   column is never read. This is all a plugin's records.list sees.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                records = []
+                for line in handle:
+                    parts = line.rstrip("\n").split("\t")
+                    if not parts or not parts[0].isdigit() or len(parts) < 6:
+                        continue
+                    records.append({"id": parts[0], "label": parts[1],
+                                    "username": parts[2],
+                                    "url": parts[6] if len(parts) > 6 else ""})
+            sys.stdout.write(json.dumps({"records": records}) + "\n")
+        elif command == "phishing-check":
+            # phishing-check <plainfile> <host> ; stdout: JSON verdict (roadmap 35)
+            host = (argv[3] or "").lower().strip(".") if len(argv) > 3 else ""
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            warning = phishing_warning(host, bound_hosts(plaintext))
+            out = {"ok": True, "host": host, "warning": warning}
+            sys.stdout.write(json.dumps(out) + "\n")
+            return 3 if warning else 0
         elif command == "sync-serve":
             # sync-serve <vault> <bind> <port> <token> [channel] [--once]
             #                                                     [--idle SECONDS]
@@ -14897,6 +15257,546 @@ cmd_bridge_save() {
 		printf '{"ok":false,"error":"save refused"}\n'
 		return "$status"
 	fi
+}
+
+# ----- secret scopes (roadmap 48) --------------------------------------------
+# A scope is a named, least-privilege allow-list of secrets: which records a
+# non-interactive caller may read, under which environment-variable names. It is
+# the one thing `run`, `env` and plugins consult, and it never widens.
+cmd_scope() {
+	local op="${1:-list}"; [ $# -gt 0 ] && shift
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp out; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	case "$op" in
+		list)
+			core scopes-list "$tmp" | python3 -c '
+import sys, json
+s = json.load(sys.stdin)["scopes"]
+if not s:
+    print("No secret scopes. Add one with: spm scope add <name> --secret VAR=ref[:field]")
+    sys.exit(0)
+for sc in s:
+    body = ", ".join("%s<-%s:%s" % (e["var"], e["ref"], e["field"]) for e in sc["entries"])
+    print("%-20s %s" % (sc["name"], body))
+'
+			secure_wipe "$tmp" ;;
+		show)
+			local name="${1:-}"
+			[ -n "$name" ] || { secure_wipe "$tmp"; die "Usage: $0 scope show <name>"; }
+			core scopes-list "$tmp" | SPM_SCOPE="$name" python3 -c '
+import sys, json, os
+want = os.environ["SPM_SCOPE"].casefold()
+hit = [x for x in json.load(sys.stdin)["scopes"] if x["name"].casefold() == want]
+if not hit:
+    sys.stderr.write("No scope named %s.\n" % os.environ["SPM_SCOPE"]); sys.exit(1)
+for e in hit[0]["entries"]:
+    print("%-24s %s (%s)" % (e["var"], e["ref"], e["field"]))
+'
+			local status=$?; secure_wipe "$tmp"; return "$status" ;;
+		add)
+			local name="${1:-}"; [ $# -gt 0 ] && shift
+			[ -n "$name" ] || { secure_wipe "$tmp"; die "Usage: $0 scope add <name> --secret VAR=ref[:field] ..."; }
+			local entries=""
+			while [ $# -gt 0 ]; do
+				case "$1" in
+					--secret)
+						shift; [ $# -gt 0 ] || { secure_wipe "$tmp"; die "--secret needs VAR=ref[:field]."; }
+						entries="${entries}$(_spec_to_entry "$1")
+"; shift ;;
+					*) secure_wipe "$tmp"; die "Unknown argument: $1" ;;
+				esac
+			done
+			[ -n "$entries" ] || { secure_wipe "$tmp"; die "A scope needs at least one --secret."; }
+			out="$(make_tmp)"
+			if printf '%s' "$entries" | core scope-set "$tmp" "$name" >"$out" 2>/dev/null; then
+				mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+				printf 'Saved scope %s.\n' "$name"
+			else
+				secure_wipe "$out"; secure_wipe "$tmp"
+				die "Could not save the scope (check VAR names, records and fields)."
+			fi ;;
+		remove|delete)
+			local name="${1:-}"
+			[ -n "$name" ] || { secure_wipe "$tmp"; die "Usage: $0 scope remove <name>"; }
+			out="$(make_tmp)"
+			core scope-delete "$tmp" "$name" >"$out"
+			mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+			printf 'Removed scope %s.\n' "$name" ;;
+		*)
+			secure_wipe "$tmp"
+			printf 'Usage: %s scope <list|show|add|remove> [args]\n' "$0" >&2
+			exit 1 ;;
+	esac
+}
+
+# One "VAR=ref[:field]" spec -> the "VAR ref field" line the core expects. The
+# field suffix is recognised only when it is a known field name, so a ref that
+# is itself a URL ("https://x") keeps its colon.
+_spec_to_entry() {
+	local spec="$1" var rest ref field
+	var="${spec%%=*}"; rest="${spec#*=}"
+	field="password"; ref="$rest"
+	case "$rest" in
+		*:password) field="password"; ref="${rest%:*}" ;;
+		*:username) field="username"; ref="${rest%:*}" ;;
+		*:url)      field="url";      ref="${rest%:*}" ;;
+		*:notes)    field="notes";    ref="${rest%:*}" ;;
+	esac
+	printf '%s %s %s' "$var" "$ref" "$field"
+}
+
+# Streams NUL-delimited VAR=value pairs for every requested secret, then the
+# sentinel "__SPM_SECRETS_OK__\0" -- printed only if every resolve above
+# succeeded. A reader that never sees the sentinel knows resolution failed and
+# runs nothing.
+_emit_scope_secrets() {
+	local tmp="$1" scopes="$2" adhoc="$3" name oldifs
+	oldifs="$IFS"; IFS='
+'
+	for name in $scopes; do
+		[ -n "$name" ] || continue
+		if ! core scope-resolve "$tmp" "$name"; then IFS="$oldifs"; return 1; fi
+	done
+	IFS="$oldifs"
+	if [ -n "$adhoc" ]; then
+		printf '%s' "$adhoc" | _specs_to_entries | core refs-resolve "$tmp" || return 1
+	fi
+	printf '__SPM_SECRETS_OK__\0'
+}
+
+_specs_to_entries() {
+	local spec
+	while IFS= read -r spec; do
+		[ -n "$spec" ] || continue
+		_spec_to_entry "$spec"; printf '\n'
+	done
+}
+
+# ----- secret injection: run / env (roadmap 52) ------------------------------
+# `run` hands the named secrets to a child in its environment and nowhere else:
+# not on disk, not on argv, not in this shell after the child is gone (the vault
+# lock is dropped before exec so a long child does not hold it). `env` prints the
+# same values for `eval`, which necessarily exposes them to the calling shell --
+# so it says so on stderr.
+cmd_run() {
+	local scopes="" adhoc=""
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--scope)  shift; [ $# -gt 0 ] || die "--scope needs a name."; scopes="${scopes}$1
+"; shift ;;
+			--secret) shift; [ $# -gt 0 ] || die "--secret needs VAR=ref[:field]."; adhoc="${adhoc}$1
+"; shift ;;
+			-h|--help)
+				printf 'Usage: %s run [--scope NAME]... [--secret VAR=ref[:field]]... -- command [args]\n' "$0"
+				printf 'Runs the command with the named secrets in its environment. Nothing reaches disk or argv.\n'
+				return 0 ;;
+			--) shift; break ;;
+			-*) die "Unknown option: $1" ;;
+			*) break ;;
+		esac
+	done
+	[ $# -gt 0 ] || die "Usage: $0 run [--scope NAME]... [--secret VAR=ref[:field]]... -- command [args]"
+	[ -n "$scopes$adhoc" ] || die "run needs at least one --scope or --secret."
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	local resolved_ok=""
+	while IFS= read -r -d '' pair; do
+		if [ "$pair" = "__SPM_SECRETS_OK__" ]; then resolved_ok=1; continue; fi
+		export "${pair%%=*}=${pair#*=}"
+	done < <(_emit_scope_secrets "$tmp" "$scopes" "$adhoc")
+	secure_wipe "$tmp"; MASTER_PW=""
+	[ -n "$resolved_ok" ] || die "Could not resolve one or more secrets; nothing was run."
+	exec 9>&- 2>/dev/null || true
+	exec "$@" || die "Could not execute: $1"
+}
+
+cmd_env() {
+	local scopes="" adhoc="" format="sh"
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--scope)  shift; [ $# -gt 0 ] || die "--scope needs a name."; scopes="${scopes}$1
+"; shift ;;
+			--secret) shift; [ $# -gt 0 ] || die "--secret needs VAR=ref[:field]."; adhoc="${adhoc}$1
+"; shift ;;
+			--format) shift; [ $# -gt 0 ] || die "--format needs sh|json|dotenv."; format="$1"; shift ;;
+			-h|--help)
+				printf 'Usage: %s env [--scope NAME]... [--secret VAR=ref[:field]]... [--format sh|json|dotenv]\n' "$0"
+				return 0 ;;
+			*) die "Unknown argument: $1" ;;
+		esac
+	done
+	case "$format" in sh|json|dotenv) ;; *) die "--format must be sh, json or dotenv." ;; esac
+	[ -n "$scopes$adhoc" ] || die "env needs at least one --scope or --secret."
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp status; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	printf 'spm env: these lines carry secrets in the clear; eval exposes them to this shell and its children.\n' >&2
+	_emit_scope_secrets "$tmp" "$scopes" "$adhoc" | SPM_ENV_FMT="$format" python3 -c '
+import sys, os, json
+raw = sys.stdin.buffer.read().split(b"\x00")
+ok = False; pairs = []
+for chunk in raw:
+    if chunk == b"__SPM_SECRETS_OK__":
+        ok = True; continue
+    if not chunk:
+        continue
+    k, _, v = chunk.partition(b"=")
+    pairs.append((k.decode("utf-8", "surrogateescape"), v.decode("utf-8", "surrogateescape")))
+if not ok:
+    sys.stderr.write("Could not resolve one or more secrets; nothing printed.\n"); sys.exit(1)
+fmt = os.environ["SPM_ENV_FMT"]
+if fmt == "json":
+    sys.stdout.write(json.dumps(dict(pairs), ensure_ascii=False) + "\n")
+elif fmt == "dotenv":
+    for k, v in pairs:
+        sys.stdout.write("%s=%s\n" % (k, v))
+else:
+    for k, v in pairs:
+        sys.stdout.write("export %s=%s\n" % (k, "\x27" + v.replace("\x27", "\x27\\\x27\x27") + "\x27"))
+'
+	status=$?
+	secure_wipe "$tmp"; MASTER_PW=""
+	return "$status"
+}
+
+# ----- look-alike / phishing check (roadmap 35) ------------------------------
+cmd_phishing_check() {
+	local host="${1:-}"
+	[ -n "$host" ] || die "Usage: $0 phishing-check <hostname>"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp status; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	core phishing-check "$tmp" "$host" | SPM_HOST="$host" python3 -c '
+import sys, json, os
+host = os.environ["SPM_HOST"]
+w = json.load(sys.stdin).get("warning")
+if not w:
+    print("No look-alike warning for %s." % host); sys.exit(0)
+how = {"homoglyph": "uses look-alike characters imitating",
+       "lookalike": "reads like a swapped-character copy of",
+       "typosquat": "is one keystroke away from"}.get(w["reason"], "resembles")
+print("Warning: %s %s %s, where you have an account." % (host, how, w["suspected"]))
+print("If you did not mean to visit %s, do not enter your %s credentials here." % (host, w["suspected"]))
+sys.exit(3)
+'
+	status=$?
+	secure_wipe "$tmp"
+	return "$status"
+}
+
+# ----- shell completion (roadmap 49) -----------------------------------------
+# The verbs a fresh shell should complete. One maintained list; the regression
+# suite checks that every verb here is one `main` actually dispatches.
+spm_command_names() {
+	printf '%s' 'init add list get edit delete generate change-master secret-key portable save restore update auto-update shares doctor password-history export import backup-now backup-auto vault-profile sync record trash archive expiring searches schema link unlink share collection ssh gpg notes-add notes-list notes-view notes-delete passphrase-add passphrase-list passphrase-view passphrase-delete authenticator-add authenticator-list authenticator-view authenticator-edit authenticator-delete backup-codes-add backup-codes-list backup-codes-view backup-codes-delete attachment-add attachment-list attachment-extract attachment-delete emergency-create emergency-open events scope run env plugin phishing-check completion web dashboard desktop help'
+}
+
+cmd_completion() {
+	local shell="${1:-bash}" cmds; cmds="$(spm_command_names)"
+	case "$shell" in
+		bash)
+			sed "s|@@CMDS@@|$cmds|g" <<'BASHDONE'
+# spm bash completion.  Enable with:  source <(spm completion bash)
+_spm_complete() {
+	local cur; cur="${COMP_WORDS[COMP_CWORD]}"
+	if [ "$COMP_CWORD" -eq 1 ]; then
+		mapfile -t COMPREPLY < <(compgen -W "@@CMDS@@" -- "$cur") 2>/dev/null \
+			|| COMPREPLY=( $(compgen -W "@@CMDS@@" -- "$cur") )
+		return 0
+	fi
+	local sub=""
+	case "${COMP_WORDS[1]}" in
+		scope)      sub="list show add remove" ;;
+		plugin)     sub="list info install remove run" ;;
+		record)     sub="types add list view delete favorite lock unlock" ;;
+		ssh)        sub="import list show public load unload agent" ;;
+		gpg)        sub="import list show" ;;
+		sync)       sub="push pull serve status" ;;
+		completion) sub="bash zsh fish" ;;
+	esac
+	if [ -n "$sub" ] && [ "$COMP_CWORD" -eq 2 ]; then
+		COMPREPLY=( $(compgen -W "$sub" -- "$cur") )
+	fi
+	return 0
+}
+complete -F _spm_complete spm
+BASHDONE
+			;;
+		zsh)
+			sed "s|@@CMDS@@|$cmds|g" <<'ZSHDONE'
+#compdef spm
+# spm zsh completion.  Enable with:  spm completion zsh > "${fpath[1]}/_spm"
+_spm() {
+	local -a cmds; cmds=(@@CMDS@@)
+	if (( CURRENT == 2 )); then
+		compadd -- $cmds
+		return
+	fi
+	case "${words[2]}" in
+		scope)      compadd -- list show add remove ;;
+		plugin)     compadd -- list info install remove run ;;
+		completion) compadd -- bash zsh fish ;;
+	esac
+}
+compdef _spm spm
+ZSHDONE
+			;;
+		fish)
+			sed "s|@@CMDS@@|$cmds|g" <<'FISHDONE'
+# spm fish completion.  Enable with:  spm completion fish > ~/.config/fish/completions/spm.fish
+complete -c spm -f
+complete -c spm -n __fish_use_subcommand -a "@@CMDS@@"
+complete -c spm -n "__fish_seen_subcommand_from scope" -a "list show add remove"
+complete -c spm -n "__fish_seen_subcommand_from plugin" -a "list info install remove run"
+complete -c spm -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"
+FISHDONE
+			;;
+		-h|--help)
+			printf 'Usage: %s completion <bash|zsh|fish>\n' "$0" ;;
+		*)
+			die "Usage: $0 completion <bash|zsh|fish>" ;;
+	esac
+}
+
+# ----- plugin SDK (roadmap 50) -----------------------------------------------
+# A plugin is a separate program in $SPM_CONFIG_DIR/plugins/<name>/ with a
+# plugin.json manifest that declares a subset of a closed capability set. It
+# never sees the vault key or any secret outside the scope it is granted: the
+# trusted host resolves exactly what each granted capability entitles the plugin
+# to and hands it over, and honours the plugin's clipboard/notify requests only
+# where they were granted. Consent is explicit and pinned to the manifest.
+plugin_dir() { printf '%s/plugins' "$SPM_CONFIG_DIR"; }
+
+# <dir> -> TSV "name\tversion\texec\tcaps\tscope\tdescription"; nonzero on invalid.
+_plugin_read_manifest() {
+	SPM_PLUGDIR="$1" python3 - <<'PY'
+import json, os, re, sys
+d = os.environ["SPM_PLUGDIR"]
+CAPS = {"records.list", "secret.get", "password.generate", "clipboard.copy", "notify"}
+path = os.path.join(d, "plugin.json")
+try:
+    m = json.load(open(path, encoding="utf-8"))
+except Exception as exc:
+    sys.stderr.write("cannot read %s: %s\n" % (path, exc)); sys.exit(1)
+name = str(m.get("name", "")).strip()
+if not re.match(r"^[a-z0-9][a-z0-9._-]{0,63}$", name):
+    sys.stderr.write("invalid plugin name (lowercase letters, digits, . _ -)\n"); sys.exit(1)
+exe = str(m.get("exec", "")).strip()
+if not exe or "/" in exe or exe.startswith("."):
+    sys.stderr.write("exec must be a bare filename inside the plugin directory\n"); sys.exit(1)
+if not os.path.isfile(os.path.join(d, exe)):
+    sys.stderr.write("exec '%s' is not in the plugin directory\n" % exe); sys.exit(1)
+caps = m.get("capabilities", [])
+if not isinstance(caps, list) or any(c not in CAPS for c in caps):
+    sys.stderr.write("capabilities must be a subset of: %s\n" % ", ".join(sorted(CAPS))); sys.exit(1)
+scope = str(m.get("scope", "")).strip()
+if "secret.get" in caps and not scope:
+    sys.stderr.write('secret.get requires a "scope" naming which secrets the plugin may read\n'); sys.exit(1)
+ver = str(m.get("version", "0")).strip()
+desc = str(m.get("description", "")).strip().replace("\t", " ").replace("\n", " ")
+sys.stdout.write("\t".join([name, ver, exe, ",".join(caps), scope, desc]) + "\n")
+PY
+}
+
+cmd_plugin() {
+	local op="${1:-list}"; [ $# -gt 0 ] && shift
+	case "$op" in
+		list)             cmd_plugin_list ;;
+		info)             cmd_plugin_info "$@" ;;
+		install)          cmd_plugin_install "$@" ;;
+		remove|uninstall) cmd_plugin_remove "$@" ;;
+		run)              cmd_plugin_run "$@" ;;
+		-h|--help)        printf 'Usage: %s plugin <list|info|install|remove|run> [args]\n' "$0" ;;
+		*)                printf 'Usage: %s plugin <list|info|install|remove|run> [args]\n' "$0" >&2; exit 1 ;;
+	esac
+}
+
+cmd_plugin_list() {
+	local dir base info name caps granted found=""
+	dir="$(plugin_dir)"
+	for base in "$dir"/*/; do
+		[ -d "$base" ] || continue
+		[ -f "${base}plugin.json" ] || continue
+		found=1
+		if info="$(_plugin_read_manifest "$base" 2>/dev/null)"; then
+			name="$(printf '%s' "$info" | cut -f1)"
+			caps="$(printf '%s' "$info" | cut -f4)"
+			granted="no"; [ -f "${base}.granted" ] && granted="yes"
+			printf '%-20s caps=[%s] granted=%s\n' "$name" "$caps" "$granted"
+		else
+			printf '%-20s (invalid manifest)\n' "$(basename "$base")"
+		fi
+	done
+	[ -n "$found" ] || printf 'No plugins installed. Install one with: %s plugin install <dir>\n' "$0"
+}
+
+cmd_plugin_info() {
+	local name="${1:-}"; [ -n "$name" ] || die "Usage: $0 plugin info <name>"
+	case "$name" in */*|..|.) die "Invalid plugin name." ;; esac
+	local base info; base="$(plugin_dir)/$name/"
+	[ -d "$base" ] || die "No plugin named '$name'."
+	info="$(_plugin_read_manifest "$base")" || die "Invalid plugin manifest."
+	printf 'name:         %s\n' "$(printf '%s' "$info" | cut -f1)"
+	printf 'version:      %s\n' "$(printf '%s' "$info" | cut -f2)"
+	printf 'exec:         %s\n' "$(printf '%s' "$info" | cut -f3)"
+	printf 'capabilities: %s\n' "$(printf '%s' "$info" | cut -f4)"
+	local scope; scope="$(printf '%s' "$info" | cut -f5)"
+	[ -n "$scope" ] && printf 'secret scope: %s\n' "$scope"
+	printf 'description:  %s\n' "$(printf '%s' "$info" | cut -f6)"
+	[ -f "${base}.granted" ] && printf 'consent:      granted\n' || printf 'consent:      not yet granted\n'
+}
+
+cmd_plugin_install() {
+	local src="${1:-}"; [ -n "$src" ] || die "Usage: $0 plugin install <directory>"
+	[ -d "$src" ] || die "Not a directory: $src"
+	local info name exe; info="$(_plugin_read_manifest "$src")" || die "Refusing to install: invalid plugin."
+	name="$(printf '%s' "$info" | cut -f1)"; exe="$(printf '%s' "$info" | cut -f3)"
+	local dir dest; dir="$(plugin_dir)"; dest="$dir/$name"
+	mkdir -p "$dir"; chmod 700 "$dir" 2>/dev/null || true
+	[ -e "$dest" ] && die "A plugin named '$name' is already installed; remove it first."
+	cp -R "$src" "$dest" || die "Could not copy the plugin."
+	rm -f "$dest/.granted" 2>/dev/null || true
+	chmod +x "$dest/$exe" 2>/dev/null || true
+	printf "Installed plugin '%s'. It will ask for consent the first time you run it.\n" "$name"
+}
+
+cmd_plugin_remove() {
+	local name="${1:-}"; [ -n "$name" ] || die "Usage: $0 plugin remove <name>"
+	case "$name" in */*|..|.) die "Invalid plugin name." ;; esac
+	local dest; dest="$(plugin_dir)/$name"
+	[ -d "$dest" ] || die "No plugin named '$name'."
+	rm -rf "$dest" && printf "Removed plugin '%s'.\n" "$name"
+}
+
+# Consent pinned to the exact capabilities+scope the manifest declares. A manifest
+# that later asks for more must be granted again.
+_plugin_ensure_consent() {
+	local base="$1" name="$2" caps="$3" scope="$4"
+	local grantfile="${base}.granted" want="caps=$caps scope=$scope"
+	if [ -f "$grantfile" ] && [ "$(cat "$grantfile" 2>/dev/null)" = "$want" ]; then
+		return 0
+	fi
+	printf "Plugin '%s' requests these capabilities:\n" "$name" >&2
+	local c oldifs; oldifs="$IFS"; IFS=,
+	for c in $caps; do
+		[ -n "$c" ] || continue
+		if [ "$c" = "secret.get" ]; then
+			printf '  - secret.get (scope: %s)\n' "$scope" >&2
+		else
+			printf '  - %s\n' "$c" >&2
+		fi
+	done
+	IFS="$oldifs"
+	[ -n "$caps" ] || printf '  (none)\n' >&2
+	printf 'Grant these and run it? [y/N] ' >&2
+	local reply; read -r reply || reply=""
+	case "$reply" in
+		y|Y|yes|YES)
+			printf '%s' "$want" > "$grantfile"; chmod 600 "$grantfile" 2>/dev/null || true
+			return 0 ;;
+		*)
+			printf 'Declined; the plugin was not run.\n' >&2
+			return 1 ;;
+	esac
+}
+
+cmd_plugin_run() {
+	local name="${1:-}"; [ $# -gt 0 ] && shift
+	[ -n "$name" ] || die "Usage: $0 plugin run <name> [args]"
+	case "$name" in */*|..|.) die "Invalid plugin name." ;; esac
+	local base; base="$(plugin_dir)/$name/"
+	[ -d "$base" ] || die "No plugin named '$name'. Install it with: $0 plugin install <dir>"
+	local info exe caps scope
+	info="$(_plugin_read_manifest "$base")" || die "Refusing to run: invalid plugin."
+	exe="$(printf '%s' "$info" | cut -f3)"
+	caps="$(printf '%s' "$info" | cut -f4)"
+	scope="$(printf '%s' "$info" | cut -f5)"
+	_plugin_ensure_consent "$base" "$name" "$caps" "$scope" || return 1
+
+	# password.generate needs no vault: it is client-side generation offered so a
+	# plugin does not have to carry its own.
+	local generated=""
+	case ",$caps," in *,password.generate,*) generated="$(generate_password 20 2>/dev/null || true)" ;; esac
+
+	# records.list and secret.get do need the vault; open it once, take only what
+	# the granted capabilities entitle the plugin to, then wipe.
+	local records_json="" secret_names="" tmp="" needs_vault=""
+	case ",$caps," in *,records.list,*|*,secret.get,*) needs_vault=1 ;; esac
+	if [ -n "$needs_vault" ]; then
+		[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+		tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+		case ",$caps," in *,records.list,*) records_json="$(core records-summary "$tmp")" ;; esac
+		case ",$caps," in *,secret.get,*)
+			local ok=""
+			while IFS= read -r -d '' pair; do
+				if [ "$pair" = "__SPM_SECRETS_OK__" ]; then ok=1; continue; fi
+				export "SPM_SECRET_${pair%%=*}=${pair#*=}"
+				secret_names="${secret_names}SPM_SECRET_${pair%%=*}
+"
+			done < <(core scope-resolve "$tmp" "$scope" && printf '__SPM_SECRETS_OK__\0')
+			if [ -z "$ok" ]; then
+				secure_wipe "$tmp"; _plugin_unset_secrets "$secret_names"
+				die "Plugin '$name' needs scope '$scope', which did not resolve."
+			fi ;;
+		esac
+		secure_wipe "$tmp"; MASTER_PW=""
+	fi
+
+	# The context the plugin reads on stdin: capabilities, record summaries
+	# (labels only, never secrets) and any generated password. Secrets, if
+	# granted, are in SPM_SECRET_* -- never in this document.
+	local resultfile; resultfile="$(make_tmp)"; : > "$resultfile"
+	local status=0
+	SPM_CTX_CAPS="$caps" SPM_CTX_GEN="$generated" SPM_CTX_RECS="$records_json" python3 -c '
+import sys, os, json
+recs = []
+raw = os.environ.get("SPM_CTX_RECS", "").strip()
+if raw:
+    try: recs = json.loads(raw).get("records", [])
+    except Exception: recs = []
+ctx = {"caps": [c for c in os.environ["SPM_CTX_CAPS"].split(",") if c], "records": recs}
+gen = os.environ.get("SPM_CTX_GEN", "")
+if gen: ctx["generated"] = gen
+sys.stdout.write(json.dumps(ctx))
+' > "${resultfile}.ctx"
+
+	# The vault has been read and closed; drop the lock so the plugin's run does
+	# not hold it, then hand the plugin only its context and granted secrets.
+	exec 9>&- 2>/dev/null || true
+	( cd "$base" && SPM_PLUGIN_CAPS="$caps" SPM_PLUGIN_NAME="$name" \
+		SPM_PLUGIN_RESULT="$resultfile" "./$exe" "$@" ) < "${resultfile}.ctx" || status=$?
+
+	rm -f "${resultfile}.ctx" 2>/dev/null || true
+	_plugin_unset_secrets "$secret_names"
+
+	# Host-mediated side effects the plugin asked for, honoured only where granted.
+	if [ -s "$resultfile" ]; then
+		local clip note
+		clip="$(SPM_RF="$resultfile" python3 -c 'import json,os,sys
+try: d=json.load(open(os.environ["SPM_RF"]))
+except Exception: d={}
+sys.stdout.write(str(d.get("clipboard","") or ""))' 2>/dev/null || true)"
+		note="$(SPM_RF="$resultfile" python3 -c 'import json,os,sys
+try: d=json.load(open(os.environ["SPM_RF"]))
+except Exception: d={}
+sys.stdout.write(str(d.get("notify","") or ""))' 2>/dev/null || true)"
+		case ",$caps," in *,clipboard.copy,*) [ -n "$clip" ] && copy_password_with_autoclear "$clip" ;; esac
+		case ",$caps," in *,notify,*)
+			if [ -n "$note" ]; then
+				if command -v notify-send >/dev/null 2>&1; then notify-send "SPM: $name" "$note" 2>/dev/null || printf 'notify: %s\n' "$note"
+				else printf 'notify: %s\n' "$note"; fi
+			fi ;;
+		esac
+	fi
+	rm -f "$resultfile" 2>/dev/null || true
+	return "$status"
+}
+
+_plugin_unset_secrets() {
+	local names="$1" n oldifs
+	[ -n "$names" ] || return 0
+	oldifs="$IFS"; IFS='
+'
+	for n in $names; do [ -n "$n" ] && unset "$n" 2>/dev/null || true; done
+	IFS="$oldifs"
 }
 
 cmd_help() {
@@ -35341,6 +36241,14 @@ main() {
 		cmd_events "$@"
 		return
 	fi
+	# `completion` prints a shell script and reads nothing: it must work on a
+	# fresh platform before dependency, language or policy prompts, exactly like
+	# help -- a completion script polluted by a banner is worse than none.
+	if [ "${1:-}" = "completion" ]; then
+		shift
+		cmd_completion "$@"
+		return
+	fi
 	# Help must remain available before dependency installation, language, or
 	# policy prompts so users can inspect the CLI on a fresh platform.
 	#
@@ -35372,7 +36280,7 @@ main() {
 	local cmd="$1"
 	shift || true
 	case "$cmd" in
-		update|auto-update|generate|password-generate|web|web-mode|desktop|help|-h|--help|vault-profile) ;;
+		update|auto-update|generate|password-generate|web|web-mode|desktop|help|-h|--help|vault-profile|completion) ;;
 		*) acquire_cli_vault_lock ;;
 	esac
 
@@ -35450,6 +36358,12 @@ main() {
 		# interface now goes by, not a replacement verb.
 		web|web-mode|dashboard) start_web_mode "$@" ;;
 		desktop) cmd_desktop "$@" ;;
+		scope)            cmd_scope "$@" ;;
+		run)              cmd_run "$@" ;;
+		env)              cmd_env "$@" ;;
+		plugin)           cmd_plugin "$@" ;;
+		phishing-check)   cmd_phishing_check "$@" ;;
+		completion)       cmd_completion "$@" ;;
 		help|-h|--help)   cmd_help ;;
 		*)
 			printf "Unknown command: %s\n\n" "$cmd" >&2
