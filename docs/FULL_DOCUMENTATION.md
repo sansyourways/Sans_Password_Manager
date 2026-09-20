@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **5.5.0**
+Current release: **5.6.0**
 
 ---
 
@@ -311,6 +311,34 @@ the Windows browser.
 | The `spm desktop` launcher | Installing under Git-Bash / WSL |
 | --- | --- |
 | ![Terminal showing the spm desktop command starting the local dashboard and printing its URL, with a note that it opens the browser and Ctrl-C stops it](docs/screenshots/web-v2.13.0/51-desktop.png) | ![Terminal showing uname reporting MINGW, install.sh --dry-run choosing a per-user prefix under Git-Bash, and spm --version run from PowerShell through the shim](docs/screenshots/web-v2.13.0/52-windows.png) |
+
+### Secret scopes, injection, plugins and phishing warnings
+
+New in 5.6.0, on the command line and in the extension.
+
+A **secret scope** is a named, least-privilege allow-list of records. `spm scope
+add` stores it in the vault; `spm run --scope <name> -- <command>` then hands only
+those secrets to a command in its environment — never on disk, never on the
+argument vector — and `spm env` prints them for `eval`. A scope is the one thing a
+non-interactive caller reads secrets through.
+
+A **plugin** extends SPM as a separate program with a `plugin.json` capability
+manifest and explicit, manifest-pinned consent. The trusted host mediates every
+capability and a plugin never sees the vault key: `records.list` gives labels but
+no secret, and `secret.get` reaches only the records of one granted scope.
+
+A **look-alike warning** flags a page bound to no record that resembles one you
+use — a homoglyph, a swapped character, or a one-keystroke typosquat. The
+extension shows a non-blocking caution before any fill, and `spm phishing-check`
+answers the same question from the shell. No blocklist, no network.
+
+| Secret scopes and `spm run` | The plugin SDK, under consent |
+| --- | --- |
+| ![Terminal: spm scope add stores a named allow-list, spm scope list shows it as environment-variable mappings, and spm run --scope injects those secrets into a child command's environment](docs/screenshots/web-v2.13.0/53-scopes.png) | ![Terminal: spm plugin install and list, then spm plugin run asking for consent to the records.list capability and printing an account inventory of labels only](docs/screenshots/web-v2.13.0/54-plugins.png) |
+
+| A look-alike / phishing warning |
+| --- |
+| ![Terminal: spm phishing-check flags paypa1.com as a swapped-character copy of paypal.com where you have an account, and reports no warning for the genuine github.com](docs/screenshots/web-v2.13.0/55-phishing.png) |
 
 <details>
 <summary><strong>Complete web interface gallery</strong></summary>
