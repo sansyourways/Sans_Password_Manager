@@ -1437,15 +1437,22 @@ assert d[0]["service"], "list --json missing service"' \
 cmd_get --json 1 | python3 -c 'import sys,json
 d=json.load(sys.stdin); assert d["password"]=="DemoSecret42", d' \
 	|| { printf 'get --json did not return the record\n' >&2; exit 1; }
-# -- 29: a per-record rotation window round-trips through the CLI.
+# -- 29: a per-record rotation window round-trips through the CLI. Output is
+#    captured before matching: piping a producer straight into `grep -q` lets
+#    grep close the pipe early and, under `set -o pipefail`, fails the producer
+#    on the broken pipe.
 cmd_rotation set 1 7 >/dev/null || { printf 'rotation set failed\n' >&2; exit 1; }
-cmd_rotation list | grep -q 'every 7 days' || { printf 'rotation list wrong\n' >&2; exit 1; }
+rotation_out="$(cmd_rotation list)"
+printf '%s' "$rotation_out" | grep -q 'every 7 days' || { printf 'rotation list wrong\n' >&2; exit 1; }
 cmd_rotation clear 1 >/dev/null || { printf 'rotation clear failed\n' >&2; exit 1; }
-cmd_rotation list | grep -q 'Every 7 days' && { printf 'rotation clear did not clear\n' >&2; exit 1; } || true
+rotation_out="$(cmd_rotation list)"
+printf '%s' "$rotation_out" | grep -q 'every 7 days' && { printf 'rotation clear did not clear\n' >&2; exit 1; } || true
 # -- extension install seam works without a vault, and names the host dir.
-cmd_extension manual | grep -q 'Manual browser-extension installation' \
+ext_out="$(cmd_extension manual)"
+printf '%s' "$ext_out" | grep -q 'Manual browser-extension installation' \
 	|| { printf 'extension manual missing\n' >&2; exit 1; }
-cmd_extension path | grep -q 'browser-extension' \
+ext_out="$(cmd_extension path)"
+printf '%s' "$ext_out" | grep -q 'browser-extension' \
 	|| { printf 'extension path missing\n' >&2; exit 1; }
 # -- 5: an emergency kit built with a tiny --delay-hours carries a time-lock and
 #    still opens (the payload behind sequential work); one without is unchanged.
@@ -1453,10 +1460,12 @@ em_dir="$TEST_ROOT/emergency"; mkdir -p "$em_dir"
 openssl genrsa -out "$em_dir/recip.pem" 2048 >/dev/null 2>&1
 openssl rsa -in "$em_dir/recip.pem" -pubout -out "$em_dir/recip.pub" >/dev/null 2>&1
 em_kit="$(cmd_emergency_create 1 "$em_dir/recip.pub" 2020-01-01 "$em_dir/kit.tgz" --delay-hours 0.0002)"
-tar -tzf "$em_kit" | grep -q timelock.json || { printf 'time-locked kit has no timelock.json\n' >&2; exit 1; }
+em_listing="$(tar -tzf "$em_kit")"
+printf '%s' "$em_listing" | grep -q timelock.json || { printf 'time-locked kit has no timelock.json\n' >&2; exit 1; }
 ( cmd_emergency_open "$em_kit" "$em_dir/recip.pem" "$em_dir/out.json" >/dev/null 2>&1 )
 grep -q 'DemoSecret42' "$em_dir/out.json" || { printf 'time-locked kit did not open\n' >&2; exit 1; }
-core events "$VAULT_FILE" 40 2>/dev/null | grep -q '"kind": "emergency"' \
+em_events="$(core events "$VAULT_FILE" 40 2>/dev/null)"
+printf '%s' "$em_events" | grep -q '"kind": "emergency"' \
 	|| { printf 'emergency kit creation was not audited\n' >&2; exit 1; }
 printf '  partials/extension: list/get --json, per-record rotation, extension setup seam, and a time-locked audited emergency kit all wired\n'
 
