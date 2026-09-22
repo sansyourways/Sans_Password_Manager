@@ -10,6 +10,37 @@ and cryptography in the smallest auditable component, and make the CLI, the SPM
 Dashboard, sync and the browser extension clients of that core rather than
 co-owners of it. That review is a design concept, not a formal security audit.
 
+## Shipped in 5.7.0 — the six partial items completed, and first-class extension install
+
+The remaining partials finished, plus first-class browser-extension installation.
+No vault format change (format 6, additive only).
+
+- **Machine-readable CLI output — completed in 5.7.0 (item 47).** `spm list
+  --json` (secret-free) and `spm get <id> --json` join `doctor`/`events`/
+  `expiring --json`.
+- **Per-record password expiration — completed in 5.7.0 (item 29).** `spm
+  rotation set|clear|list` overrides the vault-wide window for one record (or
+  opts it out); the security score reads it.
+- **Advanced search grammar — completed in 5.7.0 (item 27).** The Dashboard
+  search understands `type:`, `tag:`/`#tag`, `folder:`, `is:` and `expires:`,
+  combinable with free text.
+- **Enhanced form matching — completed in 5.7.0 (item 51).** The extension
+  recognises username/email, new+confirm password and one-time-code fields by
+  their hints, and fills a matching authenticator's TOTP through a secret-free
+  `totp` bridge action.
+- **Hardware-backed recovery — completed in 5.7.0 (item 2).** Reset the master
+  with a registered security key (the 4.8.0 PRF path), no RSA recovery file in
+  the path; a Dashboard "reset master with a security key" flow. TPM/Enclave stay
+  out of reach on SPM's terms, like Argon2id.
+- **Emergency-access delay — completed in 5.7.0 (item 5).** `--delay-hours` seals
+  the kit behind a sequential-squaring time-lock so an offline recipient cannot
+  open it early; kit creation is audited. A hard cancellation of an offline kit
+  stays outside SPM's serverless design, stated plainly.
+
+First-class extension install: `spm extension <setup|host|manual|path>`, an
+interactive-menu entry, and a Dashboard **Browser extension** page — manual and
+guided, wherever you are.
+
 ## Shipped in 5.6.0 — phishing warnings, secret scopes and injection, completion, a plugin SDK
 
 Five backlog items delivered together, with no vault format change (format 6,

@@ -388,6 +388,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "Sharing",
         "nav.sync": "Sync",
         "nav.transfer": "Export / Import",
+        "nav.extension": "Browser extension",
         "nav.trash": "Trash",
         "nav.unlock": "Biometric Unlock",
         "note.field.content": "Content",
@@ -964,6 +965,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u0627\u0644\u0645\u0634\u0627\u0631\u0643\u0629",
         "nav.sync": "\u0627\u0644\u0645\u0632\u0627\u0645\u0646\u0629",
         "nav.transfer": "\u062a\u0635\u062f\u064a\u0631 / \u0627\u0633\u062a\u064a\u0631\u0627\u062f",
+        "nav.extension": "\u0627\u0645\u062a\u062f\u0627\u062f \u0627\u0644\u0645\u062a\u0635\u0641\u062d",
         "nav.trash": "\u0627\u0644\u0645\u0647\u0645\u0644\u0627\u062a",
         "nav.unlock": "\u0641\u062a\u062d \u0627\u0644\u0642\u0641\u0644 \u0628\u0627\u0644\u0628\u0635\u0645\u0629",
         "note.field.content": "\u0627\u0644\u0645\u062d\u062a\u0648\u0649",
@@ -1540,6 +1542,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "Teilen",
         "nav.sync": "Synchronisierung",
         "nav.transfer": "Exportieren / Importieren",
+        "nav.extension": "Browser-Erweiterung",
         "nav.trash": "Papierkorb",
         "nav.unlock": "Biometrisches Entsperren",
         "note.field.content": "Inhalt",
@@ -2116,6 +2119,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "Compartir",
         "nav.sync": "Sincronizaci\u00f3n",
         "nav.transfer": "Exportar / Importar",
+        "nav.extension": "Extensi\u00f3n del navegador",
         "nav.trash": "Papelera",
         "nav.unlock": "Desbloqueo biom\u00e9trico",
         "note.field.content": "Contenido",
@@ -2692,6 +2696,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "Partage",
         "nav.sync": "Synchronisation",
         "nav.transfer": "Exporter / Importer",
+        "nav.extension": "Extension de navigateur",
         "nav.trash": "Corbeille",
         "nav.unlock": "D\u00e9verrouillage biom\u00e9trique",
         "note.field.content": "Contenu",
@@ -3268,6 +3273,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u0938\u093e\u091d\u093e\u0915\u0930\u0923",
         "nav.sync": "\u0938\u093f\u0902\u0915",
         "nav.transfer": "\u0928\u093f\u0930\u094d\u092f\u093e\u0924 / \u0906\u092f\u093e\u0924",
+        "nav.extension": "\u092c\u094d\u0930\u093e\u0909\u091c\u093c\u0930 \u090f\u0915\u094d\u0938\u091f\u0947\u0902\u0936\u0928",
         "nav.trash": "\u0915\u091a\u0930\u093e",
         "nav.unlock": "\u092c\u093e\u092f\u094b\u092e\u0947\u091f\u094d\u0930\u093f\u0915 \u0905\u0928\u0932\u0949\u0915",
         "note.field.content": "\u0938\u093e\u092e\u0917\u094d\u0930\u0940",
@@ -3844,6 +3850,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "Berbagi",
         "nav.sync": "Sinkronisasi",
         "nav.transfer": "Ekspor / Impor",
+        "nav.extension": "Ekstensi browser",
         "nav.trash": "Sampah",
         "nav.unlock": "Buka Biometrik",
         "note.field.content": "Konten",
@@ -4420,6 +4427,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u5171\u6709",
         "nav.sync": "\u540c\u671f",
         "nav.transfer": "\u30a8\u30af\u30b9\u30dd\u30fc\u30c8 / \u30a4\u30f3\u30dd\u30fc\u30c8",
+        "nav.extension": "\u30d6\u30e9\u30a6\u30b6\u62e1\u5f35\u6a5f\u80fd",
         "nav.trash": "\u30b4\u30df\u7bb1",
         "nav.unlock": "\u751f\u4f53\u8a8d\u8a3c\u30ed\u30c3\u30af\u89e3\u9664",
         "note.field.content": "\u5185\u5bb9",
@@ -4996,6 +5004,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "\uacf5\uc720",
         "nav.sync": "\ub3d9\uae30\ud654",
         "nav.transfer": "\ub0b4\ubcf4\ub0b4\uae30 / \uac00\uc838\uc624\uae30",
+        "nav.extension": "\ube0c\ub77c\uc6b0\uc800 \ud655\uc7a5",
         "nav.trash": "\ud734\uc9c0\ud1b5",
         "nav.unlock": "\uc0dd\uccb4 \uc778\uc2dd \uc7a0\uae08 \ud574\uc81c",
         "note.field.content": "\ub0b4\uc6a9",
@@ -5572,6 +5581,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "Compartilhamento",
         "nav.sync": "Sincroniza\u00e7\u00e3o",
         "nav.transfer": "Exportar / Importar",
+        "nav.extension": "Extens\u00e3o do navegador",
         "nav.trash": "Lixeira",
         "nav.unlock": "Desbloqueio biom\u00e9trico",
         "note.field.content": "Conte\u00fado",
@@ -6148,6 +6158,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u041e\u0431\u0449\u0438\u0439 \u0434\u043e\u0441\u0442\u0443\u043f",
         "nav.sync": "\u0421\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0430\u0446\u0438\u044f",
         "nav.transfer": "\u042d\u043a\u0441\u043f\u043e\u0440\u0442 / \u0418\u043c\u043f\u043e\u0440\u0442",
+        "nav.extension": "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043d\u0438\u0435 \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0430",
         "nav.trash": "\u041a\u043e\u0440\u0437\u0438\u043d\u0430",
         "nav.unlock": "\u0411\u0438\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u0440\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430",
         "note.field.content": "\u0421\u043e\u0434\u0435\u0440\u0436\u0438\u043c\u043e\u0435",
@@ -6724,6 +6735,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u5171\u4eab",
         "nav.sync": "\u540c\u6b65",
         "nav.transfer": "\u5bfc\u51fa / \u5bfc\u5165",
+        "nav.extension": "Browser extension",
         "nav.trash": "\u56de\u6536\u7ad9",
         "nav.unlock": "\u751f\u7269\u8bc6\u522b\u89e3\u9501",
         "note.field.content": "\u5185\u5bb9",
@@ -9082,6 +9094,7 @@ NAV_SECTIONS = [
         ("events",    "/events",    "shield", "nav.events",    "Security Events", None),
         ("generator", "/generator", "generator", "nav.generator", "Generator",       None),
         ("transfer",  "/transfer",  "transfer", "nav.transfer",  "Export / Import", None),
+        ("extension", "/extension", "record", "nav.extension", "Browser extension", None),
         ("sharing",   "/sharing",   "share",  "nav.sharing",   "Sharing",         None),
         ("sync",      "/sync",      "sync",   "nav.sync",      "Sync",            None),
         ("archive",   "/archive",   "archive", "nav.archive",  "Archive",         "__archive__"),
@@ -11148,6 +11161,23 @@ def login_page(version, message=""):
       <div id="hardware-unlock" hidden style="margin-top:var(--sp-4)">
         <button class="btn btn-ghost btn-block" type="button" id="hardware-btn"
                 data-i18n="login.hardware">Unlock with a security key</button>
+        <button class="btn btn-ghost btn-block" type="button" id="hardware-reset-toggle"
+                style="margin-top:var(--sp-2)">Reset master with a security key</button>
+        <div id="hardware-reset-form" hidden style="margin-top:var(--sp-3)">
+          <div class="input-reveal" style="margin-bottom:var(--sp-2)">
+            <input class="input" type="password" id="hardware-reset-new"
+                   placeholder="New master password (12+ characters)" autocomplete="new-password">
+            <button class="icon-btn reveal-btn" type="button" data-act="reveal-input"
+                    data-target="hardware-reset-new" aria-label="Show" aria-pressed="false"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-view"></use></svg></button>
+          </div>
+          <div class="input-reveal" style="margin-bottom:var(--sp-2)">
+            <input class="input" type="password" id="hardware-reset-confirm"
+                   placeholder="Confirm new master password" autocomplete="new-password">
+            <button class="icon-btn reveal-btn" type="button" data-act="reveal-input"
+                    data-target="hardware-reset-confirm" aria-label="Show" aria-pressed="false"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-view"></use></svg></button>
+          </div>
+          <button class="btn btn-block" type="button" id="hardware-reset-go">Touch key and reset</button>
+        </div>
         <div class="faint" id="hardware-status" role="status" aria-live="polite"
              style="margin-top:var(--sp-3);min-height:1.2em"></div>
       </div>
@@ -11438,6 +11468,60 @@ HARDWARE_UNLOCK_SCRIPT = """
       btn.disabled = false;
     });
   });
+
+  /* Roadmap 2: reset the master with a security key. The same PRF ceremony as
+     unlock, but the secret it derives resets the master rather than opening a
+     session -- so a lost master is recoverable from the key alone, with no RSA
+     recovery file. */
+  var resetToggle = document.getElementById("hardware-reset-toggle");
+  var resetForm = document.getElementById("hardware-reset-form");
+  var resetGo = document.getElementById("hardware-reset-go");
+  if (resetToggle && resetForm && resetGo) {
+    resetToggle.addEventListener("click", function () {
+      resetForm.hidden = !resetForm.hidden;
+    });
+    resetGo.addEventListener("click", function () {
+      var next = document.getElementById("hardware-reset-new").value || "";
+      var confirmValue = document.getElementById("hardware-reset-confirm").value || "";
+      if (next.length < 12) {
+        status.textContent = "The new master password must be at least 12 characters.";
+        return;
+      }
+      if (next !== confirmValue) {
+        status.textContent = "The two new passwords do not match.";
+        return;
+      }
+      resetGo.disabled = true;
+      status.textContent = t("hardware.waiting", "Touch your security key...");
+      var challenge = new Uint8Array(32);
+      crypto.getRandomValues(challenge);
+      navigator.credentials.get({publicKey: {
+        challenge: challenge, rpId: conf.rp_id, userVerification: "required",
+        timeout: 60000, extensions: {prf: {eval: {first: b64ToBytes(conf.salt)}}}
+      }}).then(function (cred) {
+        if (!cred) throw new Error(t("hardware.failed", "That security key does not open this vault."));
+        var secret = prfSecret(cred);
+        if (!secret) throw new Error(t("hardware.noprf", "This security key cannot derive a vault secret."));
+        return fetch("/hardware/reset", {
+          method: "POST", credentials: "same-origin",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({credential_id: cred.id, secret: bytesToB64(secret), new_master: next})
+        }).then(function (r) {
+          return r.json().catch(function () { return {}; }).then(function (j) {
+            if (!r.ok) throw new Error(j.error || t("hardware.failed", "That security key does not open this vault."));
+            return j;
+          });
+        });
+      }).then(function () {
+        status.textContent = "Master reset. Sign in with your new password.";
+        setTimeout(function () { window.location.replace("/login"); }, 1500);
+      }).catch(function (err) {
+        status.textContent = (err && err.message) ? err.message
+          : t("hardware.failed", "That security key does not open this vault.");
+        resetGo.disabled = false;
+      });
+    });
+  }
 })();
 </script>
 """
@@ -12231,6 +12315,53 @@ def generator_page():
 
 EXPORT_FORMATS = ["csv", "json", "tsv", "ndjson", "jsonl", "md", "html", "txt", "yaml", "yml",
                   "xml", "sql", "ini", "psv", "rst", "toml", "org", "scsv", "csv-noheader", "jsonc"]
+
+
+def extension_page():
+    """The browser-extension setup page: manual steps that work anywhere, plus
+    the exact commands the CLI offers. The Dashboard cannot register a native
+    host in the viewer's browser -- that is a local step -- so it documents it."""
+    host_dir = os.path.join(
+        os.environ.get("SPM_DATA_DIR") or os.path.join(
+            os.environ.get("XDG_DATA_HOME") or os.path.join(
+                os.path.expanduser("~"), ".local", "share"), "spm"),
+        "browser-extension")
+    content = f"""
+<div class="page-head"><div>
+  <h1 class="page-title">Browser extension</h1>
+  <div class="page-sub">Install the local extension and its native host. Nothing leaves this machine.</div>
+</div></div>
+<div class="card"><div class="card-body">
+  <p>The extension autofills logins, captures new passwords, generates strong ones,
+  fills one-time codes and warns about look-alike sites &mdash; talking to this SPM
+  install over a local native-messaging host.</p>
+  <h2 style="margin-top:var(--sp-4)">Guided (Linux/macOS)</h2>
+  <pre>spm extension setup</pre>
+  <p class="faint">Builds the extension, registers the native host, detects a browser and opens the install page.</p>
+  <h2 style="margin-top:var(--sp-4)">Manual (any platform)</h2>
+  <ol>
+    <li>Build the unpacked extension on the machine running SPM:
+      <pre>&lt;spm&gt;/browser-extension-universal/build.sh chromium   # or: firefox</pre></li>
+    <li>Load it unpacked:
+      <ul>
+        <li><strong>Chromium / Chrome / Edge / Brave / Vivaldi / Opera:</strong> open
+        <code>chrome://extensions</code>, enable Developer mode, click
+        &ldquo;Load unpacked&rdquo; and choose the built <code>dist/chromium</code> folder.</li>
+        <li><strong>Firefox:</strong> open <code>about:debugging#/runtime/this-firefox</code>,
+        click &ldquo;Load Temporary Add-on&rdquo; and choose <code>manifest.firefox.json</code>
+        in <code>dist/firefox</code>.</li>
+      </ul></li>
+    <li>Register the native host for the extension&rsquo;s ID (shown on the extensions page):
+      <pre>spm extension host &lt;extension-id&gt;</pre>
+      It installs the host under:
+      <pre>{html.escape(host_dir)}</pre></li>
+    <li>Open the extension&rsquo;s popup, unlock with your master password, and use it on your login pages.</li>
+  </ol>
+  <p class="faint">In a terminal, <code>spm extension manual</code> prints these steps and
+  <code>spm extension path</code> shows where everything lives.</p>
+</div></div>
+"""
+    return render_shell(content, "extension", VERSION, VAULT_PATH, title="Browser extension")
 
 
 def transfer_page():
@@ -14377,22 +14508,53 @@ def search_vault(plaintext, term):
     needle = (term or "").strip().lower()
     if not needle:
         return []
+    # Roadmap 27: the structured grammar (type:, tag:/#tag, folder:, is:, expires:)
+    # parsed in the trusted core. A plain query -- no operator -- takes the exact
+    # substring path it always did, so nothing about ordinary search changes; an
+    # advanced query filters each record through core.query_record_matches on a
+    # richer, still secret-free haystack (label, username, url, folder, notes and
+    # non-secret typed values, from which its #tags are read).
+    terms, filters = core.parse_search_query(term)
+    advanced = core.query_is_advanced(filters)
+    expiry_by_id = {}
+    if filters["expires"]:
+        try:
+            rotation = int(os.environ.get("SPM_ROTATION_DAYS", "0") or 0)
+        except ValueError:
+            rotation = 0
+        for entry in core.expiry_scan(plaintext, horizon_days=36500, rotation_days=rotation):
+            expiry_by_id[(entry["kind"], entry["type"], entry["id"])] = entry["days_left"]
     out = []
     _, entries = parse_entries(plaintext)
     for _, p in entries:
         url = p[6] if len(p) > 6 else ""
-        if needle in " ".join((p[0], p[1], p[2], url)).lower():
+        base = " ".join((p[0], p[1], p[2], url)).lower()
+        if not advanced:
+            keep = needle in base
+        else:
+            folder, _f, hidden, favorite, _t = core.decode_attrs(p[7] if len(p) > 7 else "")
+            hay = " ".join((base, folder, p[4] if len(p) > 4 else "")).lower()
+            keep = core.query_record_matches(
+                terms, filters, "password", folder, hidden, favorite,
+                expiry_by_id.get(("password", "password", p[0])), hay)
+        if keep:
             out.append(("nav.passwords", "Password", p[0], p[1], f"/view?id={urllib.parse.quote(p[0])}"))
-    for kind_key, kind, parser, href in (
-            ("nav.notes", "Note", parse_notes, "/notes-view?id="),
-            ("nav.passphrases", "Passphrase", parse_passphrases, "/passphrase-view?id="),
-            ("nav.backup_codes", "Backup codes", parse_backup_codes, "/backup-codes-view?id="),
-            ("nav.authenticators", "Authenticator", parse_authenticators, "/authenticator-view?id=")):
+    for kind_key, kind, kind_token, parser, href in (
+            ("nav.notes", "Note", "note", parse_notes, "/notes-view?id="),
+            ("nav.passphrases", "Passphrase", "passphrase", parse_passphrases, "/passphrase-view?id="),
+            ("nav.backup_codes", "Backup codes", "backup-codes", parse_backup_codes, "/backup-codes-view?id="),
+            ("nav.authenticators", "Authenticator", "authenticator", parse_authenticators, "/authenticator-view?id=")):
         _, items = parser(plaintext)
         for _, p in items:
             rid = p[1] if len(p) > 1 else ""
             label = p[2] if len(p) > 2 else ""
-            if needle in (rid + " " + label).lower():
+            base = (rid + " " + label).lower()
+            if not advanced:
+                keep = needle in base
+            else:
+                keep = core.query_record_matches(
+                    terms, filters, kind_token, "", False, False, None, base)
+            if keep:
                 out.append((kind_key, kind, rid, label, href + urllib.parse.quote(rid)))
     # Typed records. This page says it looks "across every record type", and
     # until they were listed here it did not -- a wifi record could not be
@@ -14408,12 +14570,19 @@ def search_vault(plaintext, term):
     # way it does on the security page, rather than making search the one
     # place a hidden name can be read.
     for _index, parsed in core.iter_records(plaintext):
-        record_type, rid, label, values, _created, folder, custom, hidden, _fav, _trash = parsed
+        record_type, rid, label, values, _created, folder, custom, hidden, favorite, _trash = parsed
         secrets_of = core.record_secret_fields(record_type)
         haystack = [rid, label, folder]
         haystack += [v for k, v in values.items() if k not in secrets_of]
         haystack += [n for n, _v in custom or []]
-        if needle in " ".join(haystack).lower():
+        base = " ".join(haystack).lower()
+        if not advanced:
+            keep = needle in base
+        else:
+            keep = core.query_record_matches(
+                terms, filters, record_type, folder, hidden, favorite,
+                expiry_by_id.get(("record", record_type, rid)), base)
+        if keep:
             # The kind column carries the type's own key, not a generic
             # "Records": every other page names the type, and a translated
             # locale is the one place where a wrong key is invisible in
@@ -15074,7 +15243,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         none to subvert.
         """
         if path not in ("/hardware/unlock", "/hardware/salt",
-                        "/hardware/enroll", "/hardware/forget"):
+                        "/hardware/enroll", "/hardware/forget", "/hardware/reset"):
             return False
         if not HARDWARE_ENABLED:
             self._send_json(400, {"error": "security keys are not configured"})
@@ -15159,6 +15328,52 @@ class Handler(http.server.BaseHTTPRequestHandler):
                              f"spm_session={token}; {self._session_cookie_attrs()}")
             self.end_headers()
             self.wfile.write(body)
+            return True
+
+        if path == "/hardware/reset":
+            # Roadmap 2: reset the master with a registered security key. Pre-auth
+            # like /hardware/unlock -- a lost master is exactly when this is
+            # reached, so it cannot require the master or a session -- and
+            # rate-limited by the same counter. The RSA recovery file is not in
+            # this path; the security key alone authorises a new master.
+            if self._login_lockout_remaining() > 0:
+                self._send_json(429, {"error": "too many attempts"})
+                return True
+            raw = self._read_body(limit=8192)
+            if raw is None:
+                return True
+            try:
+                payload = jsonlib.loads(raw.decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("not an object")
+            except (UnicodeDecodeError, ValueError):
+                self._send_json(400, {"error": "malformed request"})
+                return True
+            credential = str(payload.get("credential_id") or "")
+            secret = self._hardware_secret(payload)
+            new_master = str(payload.get("new_master") or "")
+            if len(new_master) < 12:
+                self._send_json(400, {"error": "the new master password must be at least 12 characters"})
+                return True
+            entry = next((item for item in core.read_hardware(VAULT_PATH)["keys"]
+                          if item.get("credential_id") == credential), None)
+
+            def reset_refuse():
+                self._record_login_failure()
+                core.record_event("hardware", "fail", "reason=reset-bad-secret", VAULT_PATH)
+                self._send_json(403, {"error": "that security key does not open this vault"})
+
+            if entry is None or not secret:
+                reset_refuse()
+                return True
+            try:
+                core.reset_master_with_hardware(VAULT_PATH, credential, secret, new_master)
+            except (core.VaultError, OSError):
+                reset_refuse()
+                return True
+            self._clear_login_failures()
+            core.record_event("hardware", "ok", "reason=master-reset", VAULT_PATH)
+            self._send_json(200, {"ok": True})
             return True
 
         _, session = self._session_record()
@@ -15980,6 +16195,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/generator":
             page = generator_page()
             self._send_html(200, page)
+            return
+
+        if path == "/extension":
+            self._send_html(200, extension_page())
             return
 
         query = urllib.parse.parse_qs(parsed.query)

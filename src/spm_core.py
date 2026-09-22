@@ -714,7 +714,7 @@ EVENT_RETENTION_DEFAULT = 500
 # attempts into one would be the log lying about the thing it is for.
 EVENT_COALESCE_DEFAULT = 60
 EVENT_KINDS = ("unlock", "write", "rewrap", "recover", "restore", "archive",
-               "hardware", "secret-key", "sync-serve")
+               "hardware", "secret-key", "sync-serve", "emergency")
 EVENT_OUTCOMES = ("ok", "fail")
 # Details are key=value with both sides constrained, rather than free text.
 # Free text is how a label ends up in a log one day: someone adds a helpful
@@ -755,7 +755,8 @@ _KEEP = object()
 
 
 def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
-                 trashed_at="", sealed=None, links=None, archived_at=""):
+                 trashed_at="", sealed=None, links=None, archived_at="",
+                 rotation_days=None):
     """The attributes column for a record, or "" when there is nothing to say.
 
     Empty is empty rather than an encoded empty object, so a record that uses
@@ -776,7 +777,8 @@ def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
     archived_at = (archived_at or "").strip()
     links = links or []
     if (not folder and not fields and not hidden and not favorite
-            and not trashed_at and not sealed and not links and not archived_at):
+            and not trashed_at and not sealed and not links and not archived_at
+            and rotation_days is None):
         return ""
     if len(folder) > ATTRS_FOLDER_MAX:
         raise VaultError("folder name is longer than %d characters"
@@ -817,6 +819,11 @@ def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
         payload["sealed"] = sealed
     if links:
         payload["links"] = links
+    if rotation_days is not None:
+        rotation_days = int(rotation_days)
+        if rotation_days < 0 or rotation_days > 36500:
+            raise VaultError("rotation window must be between 0 and 36500 days")
+        payload["rotation_days"] = rotation_days
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     return base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
@@ -899,6 +906,19 @@ def attrs_archived(column):
     return archived.strip()[:40] if isinstance(archived, str) else ""
 
 
+def attrs_rotation_days(column):
+    """The per-record rotation window in days (roadmap 29), or None for the
+    vault default. 0 means this record opts out of rotation aging entirely --
+    a credential that is not meant to rotate (a lifelong recovery code, say).
+    """
+    value = _attrs_payload(column).get("rotation_days")
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and 0 <= value <= 36500:
+        return value
+    return None
+
+
 def attrs_links(column):
     """The relationship links [{kind,type,id}] on a record (roadmap 25)."""
     out = []
@@ -918,7 +938,8 @@ def attrs_links(column):
 
 
 def attrs_edit(column, folder=None, fields=None, hidden=None, favorite=None,
-               trashed_at=None, sealed=_KEEP, links=None, archived_at=None):
+               trashed_at=None, sealed=_KEEP, links=None, archived_at=None,
+               rotation_days=_KEEP):
     """Return an attributes column with only the named parts changed.
 
     The point of the whole codec is that no path re-encodes a record without
@@ -933,6 +954,7 @@ def attrs_edit(column, folder=None, fields=None, hidden=None, favorite=None,
     cur_sealed = attrs_sealed(column)
     cur_links = attrs_links(column)
     cur_archived = attrs_archived(column)
+    cur_rotation = attrs_rotation_days(column)
     return encode_attrs(
         folder=cur_folder if folder is None else folder,
         fields=cur_fields if fields is None else fields,
@@ -942,6 +964,7 @@ def attrs_edit(column, folder=None, fields=None, hidden=None, favorite=None,
         sealed=cur_sealed if sealed is _KEEP else sealed,
         links=cur_links if links is None else links,
         archived_at=cur_archived if archived_at is None else archived_at,
+        rotation_days=cur_rotation if rotation_days is _KEEP else rotation_days,
     )
 
 
@@ -2823,6 +2846,44 @@ def set_favorite(plaintext, kind, record_type, record_id, on):
     return plaintext, False
 
 
+def set_rotation(plaintext, record_id, days):
+    """Set or clear one password's rotation window (roadmap 29).
+
+    `days` is an int (a custom window in days; 0 opts the record out of rotation
+    aging) or None (clear the override so the vault-wide default applies again).
+    Returns (plaintext, changed). Rotation aging is measured on password rows, so
+    this targets those.
+    """
+    lines = (plaintext or "").splitlines()
+    for i, line in enumerate(lines):
+        parts = line.split("\t")
+        if not parts or not parts[0].isdigit() or len(parts) < 6:
+            continue
+        if parts[0] != str(record_id):
+            continue
+        while len(parts) <= 7:
+            parts.append("")
+        parts[7] = attrs_edit(parts[7], rotation_days=days) or "-"
+        lines[i] = "\t".join(parts)
+        return "\n".join(lines) + "\n", True
+    return plaintext, False
+
+
+def rotation_overrides(plaintext):
+    """[{id, service, rotation_days}] for the passwords that set their own
+    window (roadmap 29), in stored order. Secret-free."""
+    out = []
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if not parts or not parts[0].isdigit() or len(parts) < 6:
+            continue
+        override = attrs_rotation_days(parts[7] if len(parts) > 7 else "")
+        if override is not None:
+            out.append({"id": parts[0], "service": parts[1],
+                        "rotation_days": override})
+    return out
+
+
 def purge_trash(plaintext, older_than_days=0, today=None):
     """Permanently remove trashed rows. Returns (plaintext, removed_count).
 
@@ -3285,6 +3346,28 @@ def remove_hardware_key(vault_path, credential_id):
                if entry.get("credential_id") != credential_id]
     write_hardware(vault_path, current["salt"], entries)
     return {"salt": current["salt"] if entries else "", "keys": entries}
+
+
+def reset_master_with_hardware(vault_path, credential_id, secret, new_master):
+    """Reset the master password using a registered security key (roadmap 2).
+
+    Hardware-backed recovery of the ability to set a new master, with no RSA
+    recovery file in the path. The vault key is recovered from the same
+    PRF-sealed envelope that has opened the vault without a master since 4.8.0,
+    then the key envelope is rewrapped under `new_master`. It never derives or
+    needs the old master, which is the point: a lost master is exactly when this
+    is reached. A `new_master` of "" is refused -- recovery sets a password, it
+    does not remove the one protecting the copies that leave this machine.
+    """
+    if not new_master:
+        raise VaultError("a new master password is required")
+    entry = next((k for k in read_hardware(vault_path)["keys"]
+                  if k.get("credential_id") == credential_id), None)
+    if entry is None:
+        raise VaultSecretError("that security key is not registered for this vault")
+    vault_key = hardware_unwrap_key(secret, entry["wrapped"])
+    rewrap_with_key(vault_path, vault_key, new_master)
+    return True
 
 
 # ----- the secret key on disk ------------------------------------------------
@@ -3756,6 +3839,116 @@ def delete_saved_search(plaintext, name):
     items = [i for i in saved_searches(plaintext)
              if i["name"].casefold() != name.casefold()]
     return _write_saved_searches(plaintext, items)
+
+
+# ----- advanced search grammar (roadmap 27) ----------------------------------
+# The search box already matches free text across every type. This adds the
+# structured operators the roadmap named: `type:`, `tag:` (or `#tag`), `folder:`,
+# `is:favorite`/`is:hidden`, and `expires:` for dated records. The parser is here,
+# pure and testable; the Dashboard search applies it because that is the surface
+# the grammar is typed into. An unknown prefix stays free text, so a value that
+# merely contains a colon is not mistaken for an operator.
+
+_TAG_RE = re.compile(r"#(\w+)")
+
+
+def _parse_expires_filter(value):
+    """A parsed `expires:` value, or None. Forms: <Nd / >Nd (days from now),
+    overdue, or <YYYY-MM-DD / >YYYY-MM-DD (an absolute date)."""
+    value = (value or "").strip().lower()
+    if not value:
+        return None
+    if value == "overdue":
+        return ("overdue", 0)
+    op = None
+    if value[0] in "<>":
+        op, value = ("within" if value[0] == "<" else "after"), value[1:]
+    else:
+        op = "within"
+    if value.endswith("d") and value[:-1].isdigit():
+        return (op, int(value[:-1]))
+    try:
+        stamp = time.mktime(time.strptime(value, "%Y-%m-%d"))
+        return (op, int((stamp - time.time()) / 86400.0))
+    except (ValueError, OverflowError):
+        return None
+
+
+def parse_search_query(query):
+    """Free-text terms and structured filters from a search query (roadmap 27).
+
+    Returns (terms, filters). `terms` are lowercase substrings that must all be
+    present. `filters` holds `type` (a kind or record-type token), `tags` (each a
+    hashtag or folder name that must be present), `folder`, `is` (favorite /
+    hidden), and `expires` (an operator, day-count pair).
+    """
+    terms = []
+    filters = {"type": None, "tags": [], "folder": None, "is": [], "expires": None}
+    for token in (query or "").split():
+        if token.startswith("#") and len(token) > 1:
+            filters["tags"].append(token[1:].lower())
+            continue
+        key, sep, value = token.partition(":")
+        key, value = key.lower(), value.strip()
+        if sep and value:
+            if key == "type":
+                filters["type"] = value.lower()
+                continue
+            if key == "tag":
+                filters["tags"].append(value.lower())
+                continue
+            if key == "folder":
+                filters["folder"] = value.lower()
+                continue
+            if key == "is" and value.lower() in ("favorite", "favourite", "fav", "hidden"):
+                filters["is"].append("hidden" if value.lower() == "hidden" else "favorite")
+                continue
+            if key == "expires":
+                parsed = _parse_expires_filter(value)
+                if parsed:
+                    filters["expires"] = parsed
+                    continue
+        terms.append(token.lower())
+    return terms, filters
+
+
+def query_is_advanced(filters):
+    """Whether a parsed query uses any structured operator."""
+    return bool(filters["type"] or filters["tags"] or filters["folder"]
+                or filters["is"] or filters["expires"])
+
+
+def query_record_matches(terms, filters, type_token, folder, hidden, favorite,
+                         expiry_days, haystack):
+    """Whether one record passes a parsed query. `haystack` is its lowercase
+    searchable text (no secrets); `expiry_days` is days until it expires
+    (negative = overdue) or None; `type_token` is a lowercase kind/type name."""
+    type_token = (type_token or "").lower()
+    folder = (folder or "").lower()
+    tags = set(_TAG_RE.findall(haystack))
+    if filters["type"] and filters["type"] not in type_token:
+        return False
+    for tag in filters["tags"]:
+        if tag not in tags and tag != folder:
+            return False
+    if filters["folder"] and filters["folder"] not in folder:
+        return False
+    for flag in filters["is"]:
+        if flag == "favorite" and not favorite:
+            return False
+        if flag == "hidden" and not hidden:
+            return False
+    if filters["expires"]:
+        op, days = filters["expires"]
+        if expiry_days is None:
+            return False
+        if op == "within" and not expiry_days <= days:
+            return False
+        if op == "after" and not expiry_days > days:
+            return False
+        if op == "overdue" and not expiry_days < 0:
+            return False
+    return all(term in haystack for term in terms)
 
 
 # ----- secret scopes (roadmap 48) --------------------------------------------
@@ -4514,6 +4707,155 @@ def bridge_save(plaintext, host, scheme, username, password):
                      "%s://%s" % (page_scheme, host), ""])
     lines.append(row)
     return "\n".join(lines) + "\n", "created"
+
+
+# ----- time-lock puzzle for emergency access (roadmap 5) ---------------------
+# A recipient holds the emergency kit offline, so a delay cannot be enforced by a
+# clock they control. What can be enforced is *work*: the kit's key is sealed
+# behind a sequential-squaring puzzle (Rivest-Shamir-Wagner). Recovering it needs
+# t squarings mod n done in order -- no shortcut, no parallelism -- so the
+# recipient cannot open the kit before spending roughly the intended time. The
+# owner seals it cheaply because they know n's factors and reduce the exponent
+# 2^t modulo phi(n); the recipient does not, and must iterate. Wall-clock depends
+# on the recipient's hardware, so this bounds the delay from below rather than
+# pinning it, which the kit says plainly.
+
+def _is_probable_prime(candidate, rounds=40):
+    small = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37)
+    if candidate < 2:
+        return False
+    for prime in small:
+        if candidate % prime == 0:
+            return candidate == prime
+    d, r = candidate - 1, 0
+    while d % 2 == 0:
+        d //= 2
+        r += 1
+    for _ in range(rounds):
+        a = 2 + int.from_bytes(os.urandom(16), "big") % (candidate - 3)
+        x = pow(a, d, candidate)
+        if x in (1, candidate - 1):
+            continue
+        for _ in range(r - 1):
+            x = x * x % candidate
+            if x == candidate - 1:
+                break
+        else:
+            return False
+    return True
+
+
+def _random_prime(bits):
+    while True:
+        candidate = int.from_bytes(os.urandom(bits // 8), "big")
+        candidate |= (1 << (bits - 1)) | 1
+        if _is_probable_prime(candidate):
+            return candidate
+
+
+def _timelock_rate(modulus):
+    """Squarings per second on this machine, measured briefly. Used to turn a
+    delay in seconds into a squaring count."""
+    x, count, start = 3, 0, time.time()
+    while time.time() - start < 0.05:
+        for _ in range(4000):
+            x = x * x % modulus
+        count += 4000
+    elapsed = time.time() - start
+    return count / elapsed if elapsed > 0 else 200000.0
+
+
+def timelock_seal(secret, seconds):
+    """Seal up to 32 bytes behind a ~`seconds` sequential-squaring puzzle.
+
+    Returns a dict {n, a, t, sealed} (all but `sealed` are ints; `sealed` is
+    hex). The owner computes the mask a^(2^t) mod n cheaply via phi(n).
+    """
+    if len(secret) > 32:
+        raise VaultError("time-lock secret is longer than 32 bytes")
+    p, q = _random_prime(1024), _random_prime(1024)
+    while p == q:
+        q = _random_prime(1024)
+    n, phi = p * q, (p - 1) * (q - 1)
+    a = 2 + int.from_bytes(os.urandom(32), "big") % (n - 4)
+    t = max(1, int(max(seconds, 0) * _timelock_rate(n)))
+    mask = pow(a, pow(2, t, phi), n)
+    stream = hashlib.sha256(str(mask).encode("ascii")).digest()
+    sealed = bytes(b ^ s for b, s in zip(secret, stream))
+    return {"n": n, "a": a, "t": t, "sealed": sealed.hex()}
+
+
+def timelock_unseal(puzzle):
+    """Recover the sealed bytes by doing t sequential squarings. Slow by design."""
+    n, a, t = int(puzzle["n"]), int(puzzle["a"]), int(puzzle["t"])
+    sealed = bytes.fromhex(puzzle["sealed"])
+    x = a
+    for _ in range(t):
+        x = x * x % n
+    stream = hashlib.sha256(str(x).encode("ascii")).digest()
+    return bytes(b ^ s for b, s in zip(sealed, stream))
+
+
+def totp_code(secret_b32, period=30, algo="sha1"):
+    """RFC 6238 TOTP for a base32 secret. "" if the secret is empty/unreadable.
+
+    A second, independent copy of the Dashboard's `totp_code`; the algorithm is
+    fixed by the RFC, so the two cannot drift, and a regression asserts they
+    agree. This one lets the browser bridge (roadmap 51) fill a one-time code
+    without the Dashboard.
+    """
+    secret = (secret_b32 or "").replace(" ", "").upper()
+    if not secret:
+        return ""
+    padded = secret + "=" * ((8 - len(secret) % 8) % 8)
+    key = base64.b32decode(padded, casefold=True)
+    counter = int(time.time() // max(period, 1))
+    algo = (algo or "sha1").lower()
+    digest_mod = {"sha1": hashlib.sha1, "sha256": hashlib.sha256,
+                  "sha512": hashlib.sha512}.get(algo, hashlib.sha1)
+    mac = hmac.new(key, counter.to_bytes(8, "big"), digest_mod).digest()
+    offset = mac[-1] & 0x0F
+    code_int = int.from_bytes(mac[offset:offset + 4], "big") & 0x7FFFFFFF
+    return str(code_int % 10 ** 6).zfill(6)
+
+
+def bridge_totp(plaintext, host):
+    """The current TOTP for a browser host (roadmap 51), or None.
+
+    Matches an authenticator whose label names the site -- the host's registrable
+    label appears in the authenticator's label, or the label appears in the host
+    -- and returns {code, seconds}. Exactly one match yields a code; zero or
+    several yield None, because a code typed into the wrong field is worse than
+    none. Secret-free but for the six digits it exists to return.
+    """
+    host = (host or "").lower().strip(".")
+    if not host:
+        return None
+    parts_host = host.split(".")
+    label_key = parts_host[-2] if len(parts_host) >= 2 else host
+    matches = []
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if not parts or parts[0] != "AUTH" or len(parts) < 4:
+            continue
+        auth_label = (parts[2] or "").lower()
+        secret = parts[3] or ""
+        period = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else 30
+        algo = parts[6] if len(parts) > 6 else "sha1"
+        if not secret:
+            continue
+        if label_key and (label_key in auth_label or (auth_label and auth_label in host)):
+            matches.append((secret, period, algo))
+    if len(matches) != 1:
+        return None
+    secret, period, algo = matches[0]
+    try:
+        code = totp_code(secret, period, algo)
+    except Exception:
+        return None
+    if not code:
+        return None
+    return {"code": code, "seconds": period - int(time.time()) % period}
 
 
 def tidy_proposals(plaintext):
@@ -5980,10 +6322,15 @@ def security_report(plaintext, rotation_days=365, check_breaches=False,
             weak.append(record_id)
         if not parts[1] or not parts[2]:
             incomplete.append(record_id)
+        # Roadmap 29: a record may set its own rotation window, overriding the
+        # vault-wide default. 0 means "never rotate" (opt out); absent means use
+        # the default.
+        override = attrs_rotation_days(parts[7] if len(parts) > 7 else "")
+        effective = rotation_days if override is None else override
         try:
             stamp = time.mktime(time.strptime(
                 parts[5].replace("Z", ""), "%Y-%m-%dT%H:%M:%S"))
-            if (now - stamp) / 86400.0 > rotation_days:
+            if effective and (now - stamp) / 86400.0 > effective:
                 old.append(record_id)
         except (IndexError, ValueError, OverflowError):
             pass
@@ -7115,6 +7462,27 @@ def main(argv):
             if not key:
                 raise VaultError("a vault key is required")
             rewrap_with_key(argv[2], key, new)
+        elif command == "hardware-reset":
+            # hardware-reset <vault> <credential_id> ; stdin: PRF secret\nnew
+            #   master (roadmap 2). Resets the master using a registered security
+            #   key -- the RSA recovery file is not in this path.
+            secret, new = _secrets(2)
+            reset_master_with_hardware(argv[2], argv[3], secret, new)
+        elif command == "timelock-seal":
+            # timelock-seal <seconds> ; stdin: secret as hex ; stdout: puzzle JSON
+            #   (roadmap 5). Cheap for the owner; slow to open.
+            secret = bytes.fromhex(sys.stdin.readline().strip())
+            sys.stdout.write(json.dumps(timelock_seal(secret, float(argv[2]))) + "\n")
+        elif command == "timelock-unseal":
+            # timelock-unseal <puzzlefile> ; stdout: secret as hex. Slow by
+            #   design -- t sequential squarings.
+            with open(argv[2], "r", encoding="utf-8") as handle:
+                sys.stdout.write(timelock_unseal(json.load(handle)).hex() + "\n")
+        elif command == "record-event":
+            # record-event <vault> <kind> <outcome> <detail> ; appends one
+            #   security-event line (never raises, never fails the caller).
+            record_event(argv[3], argv[4] if len(argv) > 4 else "ok",
+                         argv[5] if len(argv) > 5 else "", argv[2])
         elif command == "record":
             # record <op> [args] -- how the shell reads a schema. The
             # dashboard imports this module and calls the functions directly,
@@ -7549,6 +7917,25 @@ def main(argv):
                     handle.read(), days, check_breaches,
                     offline_source=offline_source, check_accounts=check_accounts)
             sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        elif command == "rotation-set":
+            # rotation-set <plainfile> <id> <days|default> ; writes plaintext,
+            # "changed"/"unchanged" on stderr (roadmap 29). "default" clears the
+            # per-record override.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            spec = argv[4]
+            days = None if spec in ("default", "clear", "") else int(spec)
+            if days is not None and (days < 0 or days > 36500):
+                sys.exit("rotation window must be between 0 and 36500 days")
+            out, changed = set_rotation(plaintext, argv[3], days)
+            sys.stdout.write(out)
+            sys.stderr.write(("changed" if changed else "unchanged") + "\n")
+            return 0 if changed else 1
+        elif command == "rotation-list":
+            # rotation-list <plainfile> ; stdout: JSON of per-record overrides.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.write(json.dumps(
+                    {"overrides": rotation_overrides(handle.read())}, indent=2) + "\n")
         elif command == "breach-list-refresh":
             # breach-list-refresh <url> <dest> ; stderr: count. Fetches a public
             # list only -- no account identifier is sent.
@@ -7915,6 +8302,21 @@ def main(argv):
                 plaintext, host, scheme, username, new_password)
             sys.stdout.write(new_plain)
             sys.stderr.write(outcome + "\n")
+        elif command == "bridge-totp":
+            # bridge-totp <plainfile> <host> ; stdout: JSON {ok, code, seconds}
+            #   or {ok:false} (roadmap 51). A one-time code for a matching
+            #   authenticator, computed for the browser to fill an OTP field.
+            host = (argv[3] or "").lower().strip(".") if len(argv) > 3 else ""
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                result = bridge_totp(handle.read(), host)
+            if result:
+                sys.stdout.write(json.dumps(
+                    {"ok": True, "code": result["code"],
+                     "seconds": result["seconds"]}) + "\n")
+            else:
+                sys.stdout.write(json.dumps(
+                    {"ok": False, "error": "no matching authenticator"}) + "\n")
+                return 1
         elif command == "records-summary":
             # records-summary <plainfile> ; stdout: JSON {records:[{id,label,
             #   username,url}]}. Secret-free by construction -- the password
@@ -7929,6 +8331,54 @@ def main(argv):
                                     "username": parts[2],
                                     "url": parts[6] if len(parts) > 6 else ""})
             sys.stdout.write(json.dumps({"records": records}) + "\n")
+        elif command == "list-json":
+            # list-json <plainfile> ; stdout: JSON {passwords:[...]} matching the
+            # CLI `list` table (id, service, username, url, created) plus the
+            # attrs-derived state a script needs to filter. Secret-free: the
+            # password column is never read.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                passwords = []
+                for line in handle:
+                    parts = line.rstrip("\n").split("\t")
+                    if not parts or not parts[0].isdigit() or len(parts) < 6:
+                        continue
+                    attrs = parts[7] if len(parts) > 7 else ""
+                    folder, _fields, hidden, favorite, trashed_at = decode_attrs(attrs)
+                    passwords.append({
+                        "id": parts[0], "service": parts[1], "username": parts[2],
+                        "url": parts[6] if len(parts) > 6 else "",
+                        "created": parts[5] if len(parts) > 5 else "",
+                        "folder": folder, "hidden": bool(hidden),
+                        "favorite": bool(favorite),
+                        "trashed": bool(trashed_at),
+                        "archived": bool(attrs_archived(attrs))})
+            sys.stdout.write(json.dumps({"passwords": passwords}) + "\n")
+        elif command == "get-json":
+            # get-json <plainfile> <id> ; stdout: one password as JSON, password
+            # included -- `get` already shows it to the caller, and --json is the
+            # same reveal in a form a script can read.
+            rid = argv[3]
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    parts = line.rstrip("\n").split("\t")
+                    if parts and parts[0] == rid and parts[0].isdigit() and len(parts) >= 6:
+                        attrs = parts[7] if len(parts) > 7 else ""
+                        folder, fields, hidden, favorite, trashed_at = decode_attrs(attrs)
+                        sys.stdout.write(json.dumps({
+                            "id": parts[0], "service": parts[1],
+                            "username": parts[2], "password": parts[3],
+                            "notes": parts[4] if len(parts) > 4 else "",
+                            "created": parts[5] if len(parts) > 5 else "",
+                            "url": parts[6] if len(parts) > 6 else "",
+                            "folder": folder, "fields": fields,
+                            "hidden": bool(hidden), "favorite": bool(favorite),
+                            "trashed": bool(trashed_at),
+                            "archived": bool(attrs_archived(attrs))},
+                            ensure_ascii=False) + "\n")
+                        break
+                else:
+                    sys.stdout.write(json.dumps({"ok": False, "error": "record not found"}) + "\n")
+                    return 1
         elif command == "phishing-check":
             # phishing-check <plainfile> <host> ; stdout: JSON verdict (roadmap 35)
             host = (argv[3] or "").lower().strip(".") if len(argv) > 3 else ""

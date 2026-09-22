@@ -42,17 +42,43 @@ function send(message) {
   });
 }
 
-/* A password box is a login field. A text or email box is one when it is
- * labelled as a username, or when it shares a form with a password box --
- * which is the shape of every login form and of almost nothing else. Guessing
- * more widely would put a credential menu on search bars and comment fields.
- */
+/* Enhanced form matching (roadmap 51). Three shapes the picker cares about:
+ * a login field, a new-password field, and a one-time-code field. Each is read
+ * from the field's own hints (autocomplete, name, id, placeholder, aria-label)
+ * as well as the company it keeps in the form, so a two-step login whose
+ * username page carries no password box is still recognised -- while staying
+ * conservative enough not to put a credential menu on a search or comment box. */
+const SPM_USER_HINT = /(^|[^a-z])(user(name|id)?|login|e-?mail|account)([^a-z]|$)/i;
+const SPM_OTP_HINT = /(one[-_ ]?time|\botp\b|\btotp\b|2fa|mfa|auth[-_ ]?code|verif\w*[-_ ]?code|security[-_ ]?code|passcode)/i;
+
+function spmFieldHints(el) {
+  return [el.name, el.id, el.getAttribute("autocomplete"), el.placeholder,
+          el.getAttribute("aria-label")].filter(Boolean).join(" ").toLowerCase();
+}
+
+function isTotpField(el) {
+  if (!(el instanceof HTMLInputElement) || el.disabled || el.readOnly) return false;
+  const autocomplete = (el.getAttribute("autocomplete") || "").toLowerCase();
+  if (autocomplete.includes("one-time-code")) return true;
+  if (el.type !== "text" && el.type !== "tel" && el.type !== "number") return false;
+  return SPM_OTP_HINT.test(spmFieldHints(el));
+}
+
+function looksLikeUsername(el) {
+  if (el.type === "email") return true;
+  const autocomplete = (el.getAttribute("autocomplete") || "").toLowerCase();
+  if (autocomplete.includes("username") || autocomplete.includes("email")) return true;
+  return SPM_USER_HINT.test(spmFieldHints(el));
+}
+
 function isLoginField(element) {
   if (!(element instanceof HTMLInputElement) || element.disabled || element.readOnly) return false;
+  // A one-time-code box is not a login box: offering the account picker there
+  // would fill a password into the field waiting for a six-digit code.
+  if (isTotpField(element)) return false;
   if (element.type === "password") return true;
   if (element.type !== "text" && element.type !== "email") return false;
-  const autocomplete = (element.getAttribute("autocomplete") || "").toLowerCase();
-  if (autocomplete.includes("username") || autocomplete.includes("email")) return true;
+  if (looksLikeUsername(element)) return true;
   return Boolean((element.form || document).querySelector('input[type="password"]'));
 }
 
@@ -285,6 +311,40 @@ function showGenerate(field) {
   gen = shell;
 }
 
+/* One-time-code fill (roadmap 51). On focusing an OTP field, ask the background
+ * for the current code for this host; if a single authenticator matches, offer
+ * to fill it. The seed never reaches the page -- only the six digits, and only
+ * on an explicit click. */
+let totp = null;
+function closeTotp() { if (totp) { totp.remove(); totp = null; } }
+async function showTotpFill(field) {
+  closeTotp();
+  const response = await send({action: "menu-totp"});
+  if (!response || !response.ok || !response.code) return;
+  if (document.activeElement !== field) return;
+  const code = String(response.code);
+  const shell = document.createElement("div");
+  const root = shell.attachShadow({mode: "closed"});
+  const btn = document.createElement("button");
+  btn.textContent = "Fill code from SPM";
+  const rect = field.getBoundingClientRect();
+  btn.setAttribute("style", "all:initial;position:fixed;z-index:2147483647;font:12px system-ui,sans-serif;"
+    + "cursor:pointer;background:#d8d2ff;color:#17131f;border-radius:8px;padding:6px 10px;box-shadow:0 4px 14px rgba(0,0,0,.3);"
+    + `top:${Math.round(rect.bottom + 4)}px;left:${Math.round(rect.left)}px`);
+  btn.addEventListener("click", (event) => {
+    if (!event.isTrusted) return;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    field.focus();
+    setter.call(field, code);
+    field.dispatchEvent(new Event("input", {bubbles: true}));
+    field.dispatchEvent(new Event("change", {bubbles: true}));
+    closeTotp();
+  });
+  root.append(btn);
+  (document.body || document.documentElement).append(shell);
+  totp = shell;
+}
+
 document.addEventListener("submit", (event) => {
   if (!event.isTrusted) return;
   const cred = captureFrom(event.target);
@@ -296,10 +356,13 @@ document.addEventListener("focusin", (event) => {
   else close();
   if (isNewPasswordField(event.target)) showGenerate(event.target);
   else closeGen();
+  if (isTotpField(event.target)) showTotpFill(event.target);
+  else closeTotp();
 }, true);
 document.addEventListener("keydown", onKeyDown, true);
-window.addEventListener("scroll", () => { place(); closeGen(); }, true);
-window.addEventListener("resize", () => { place(); closeGen(); }, true);
+window.addEventListener("scroll", () => { place(); closeGen(); closeTotp(); }, true);
+window.addEventListener("resize", () => { place(); closeGen(); closeTotp(); }, true);
+window.addEventListener("pagehide", () => { closeGen(); closeTotp(); closeBanner(); }, true);
 window.addEventListener("pagehide", () => { close(); closeGen(); closeBanner(); });
 
 api.runtime.onMessage.addListener((message) => {

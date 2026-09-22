@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.6.0"
+VERSION="5.7.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -1525,7 +1525,7 @@ EVENT_RETENTION_DEFAULT = 500
 # attempts into one would be the log lying about the thing it is for.
 EVENT_COALESCE_DEFAULT = 60
 EVENT_KINDS = ("unlock", "write", "rewrap", "recover", "restore", "archive",
-               "hardware", "secret-key", "sync-serve")
+               "hardware", "secret-key", "sync-serve", "emergency")
 EVENT_OUTCOMES = ("ok", "fail")
 # Details are key=value with both sides constrained, rather than free text.
 # Free text is how a label ends up in a log one day: someone adds a helpful
@@ -1566,7 +1566,8 @@ _KEEP = object()
 
 
 def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
-                 trashed_at="", sealed=None, links=None, archived_at=""):
+                 trashed_at="", sealed=None, links=None, archived_at="",
+                 rotation_days=None):
     """The attributes column for a record, or "" when there is nothing to say.
 
     Empty is empty rather than an encoded empty object, so a record that uses
@@ -1587,7 +1588,8 @@ def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
     archived_at = (archived_at or "").strip()
     links = links or []
     if (not folder and not fields and not hidden and not favorite
-            and not trashed_at and not sealed and not links and not archived_at):
+            and not trashed_at and not sealed and not links and not archived_at
+            and rotation_days is None):
         return ""
     if len(folder) > ATTRS_FOLDER_MAX:
         raise VaultError("folder name is longer than %d characters"
@@ -1628,6 +1630,11 @@ def encode_attrs(folder="", fields=None, hidden=False, favorite=False,
         payload["sealed"] = sealed
     if links:
         payload["links"] = links
+    if rotation_days is not None:
+        rotation_days = int(rotation_days)
+        if rotation_days < 0 or rotation_days > 36500:
+            raise VaultError("rotation window must be between 0 and 36500 days")
+        payload["rotation_days"] = rotation_days
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     return base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
@@ -1710,6 +1717,19 @@ def attrs_archived(column):
     return archived.strip()[:40] if isinstance(archived, str) else ""
 
 
+def attrs_rotation_days(column):
+    """The per-record rotation window in days (roadmap 29), or None for the
+    vault default. 0 means this record opts out of rotation aging entirely --
+    a credential that is not meant to rotate (a lifelong recovery code, say).
+    """
+    value = _attrs_payload(column).get("rotation_days")
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and 0 <= value <= 36500:
+        return value
+    return None
+
+
 def attrs_links(column):
     """The relationship links [{kind,type,id}] on a record (roadmap 25)."""
     out = []
@@ -1729,7 +1749,8 @@ def attrs_links(column):
 
 
 def attrs_edit(column, folder=None, fields=None, hidden=None, favorite=None,
-               trashed_at=None, sealed=_KEEP, links=None, archived_at=None):
+               trashed_at=None, sealed=_KEEP, links=None, archived_at=None,
+               rotation_days=_KEEP):
     """Return an attributes column with only the named parts changed.
 
     The point of the whole codec is that no path re-encodes a record without
@@ -1744,6 +1765,7 @@ def attrs_edit(column, folder=None, fields=None, hidden=None, favorite=None,
     cur_sealed = attrs_sealed(column)
     cur_links = attrs_links(column)
     cur_archived = attrs_archived(column)
+    cur_rotation = attrs_rotation_days(column)
     return encode_attrs(
         folder=cur_folder if folder is None else folder,
         fields=cur_fields if fields is None else fields,
@@ -1753,6 +1775,7 @@ def attrs_edit(column, folder=None, fields=None, hidden=None, favorite=None,
         sealed=cur_sealed if sealed is _KEEP else sealed,
         links=cur_links if links is None else links,
         archived_at=cur_archived if archived_at is None else archived_at,
+        rotation_days=cur_rotation if rotation_days is _KEEP else rotation_days,
     )
 
 
@@ -3634,6 +3657,44 @@ def set_favorite(plaintext, kind, record_type, record_id, on):
     return plaintext, False
 
 
+def set_rotation(plaintext, record_id, days):
+    """Set or clear one password's rotation window (roadmap 29).
+
+    `days` is an int (a custom window in days; 0 opts the record out of rotation
+    aging) or None (clear the override so the vault-wide default applies again).
+    Returns (plaintext, changed). Rotation aging is measured on password rows, so
+    this targets those.
+    """
+    lines = (plaintext or "").splitlines()
+    for i, line in enumerate(lines):
+        parts = line.split("\t")
+        if not parts or not parts[0].isdigit() or len(parts) < 6:
+            continue
+        if parts[0] != str(record_id):
+            continue
+        while len(parts) <= 7:
+            parts.append("")
+        parts[7] = attrs_edit(parts[7], rotation_days=days) or "-"
+        lines[i] = "\t".join(parts)
+        return "\n".join(lines) + "\n", True
+    return plaintext, False
+
+
+def rotation_overrides(plaintext):
+    """[{id, service, rotation_days}] for the passwords that set their own
+    window (roadmap 29), in stored order. Secret-free."""
+    out = []
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if not parts or not parts[0].isdigit() or len(parts) < 6:
+            continue
+        override = attrs_rotation_days(parts[7] if len(parts) > 7 else "")
+        if override is not None:
+            out.append({"id": parts[0], "service": parts[1],
+                        "rotation_days": override})
+    return out
+
+
 def purge_trash(plaintext, older_than_days=0, today=None):
     """Permanently remove trashed rows. Returns (plaintext, removed_count).
 
@@ -4096,6 +4157,28 @@ def remove_hardware_key(vault_path, credential_id):
                if entry.get("credential_id") != credential_id]
     write_hardware(vault_path, current["salt"], entries)
     return {"salt": current["salt"] if entries else "", "keys": entries}
+
+
+def reset_master_with_hardware(vault_path, credential_id, secret, new_master):
+    """Reset the master password using a registered security key (roadmap 2).
+
+    Hardware-backed recovery of the ability to set a new master, with no RSA
+    recovery file in the path. The vault key is recovered from the same
+    PRF-sealed envelope that has opened the vault without a master since 4.8.0,
+    then the key envelope is rewrapped under `new_master`. It never derives or
+    needs the old master, which is the point: a lost master is exactly when this
+    is reached. A `new_master` of "" is refused -- recovery sets a password, it
+    does not remove the one protecting the copies that leave this machine.
+    """
+    if not new_master:
+        raise VaultError("a new master password is required")
+    entry = next((k for k in read_hardware(vault_path)["keys"]
+                  if k.get("credential_id") == credential_id), None)
+    if entry is None:
+        raise VaultSecretError("that security key is not registered for this vault")
+    vault_key = hardware_unwrap_key(secret, entry["wrapped"])
+    rewrap_with_key(vault_path, vault_key, new_master)
+    return True
 
 
 # ----- the secret key on disk ------------------------------------------------
@@ -4567,6 +4650,116 @@ def delete_saved_search(plaintext, name):
     items = [i for i in saved_searches(plaintext)
              if i["name"].casefold() != name.casefold()]
     return _write_saved_searches(plaintext, items)
+
+
+# ----- advanced search grammar (roadmap 27) ----------------------------------
+# The search box already matches free text across every type. This adds the
+# structured operators the roadmap named: `type:`, `tag:` (or `#tag`), `folder:`,
+# `is:favorite`/`is:hidden`, and `expires:` for dated records. The parser is here,
+# pure and testable; the Dashboard search applies it because that is the surface
+# the grammar is typed into. An unknown prefix stays free text, so a value that
+# merely contains a colon is not mistaken for an operator.
+
+_TAG_RE = re.compile(r"#(\w+)")
+
+
+def _parse_expires_filter(value):
+    """A parsed `expires:` value, or None. Forms: <Nd / >Nd (days from now),
+    overdue, or <YYYY-MM-DD / >YYYY-MM-DD (an absolute date)."""
+    value = (value or "").strip().lower()
+    if not value:
+        return None
+    if value == "overdue":
+        return ("overdue", 0)
+    op = None
+    if value[0] in "<>":
+        op, value = ("within" if value[0] == "<" else "after"), value[1:]
+    else:
+        op = "within"
+    if value.endswith("d") and value[:-1].isdigit():
+        return (op, int(value[:-1]))
+    try:
+        stamp = time.mktime(time.strptime(value, "%Y-%m-%d"))
+        return (op, int((stamp - time.time()) / 86400.0))
+    except (ValueError, OverflowError):
+        return None
+
+
+def parse_search_query(query):
+    """Free-text terms and structured filters from a search query (roadmap 27).
+
+    Returns (terms, filters). `terms` are lowercase substrings that must all be
+    present. `filters` holds `type` (a kind or record-type token), `tags` (each a
+    hashtag or folder name that must be present), `folder`, `is` (favorite /
+    hidden), and `expires` (an operator, day-count pair).
+    """
+    terms = []
+    filters = {"type": None, "tags": [], "folder": None, "is": [], "expires": None}
+    for token in (query or "").split():
+        if token.startswith("#") and len(token) > 1:
+            filters["tags"].append(token[1:].lower())
+            continue
+        key, sep, value = token.partition(":")
+        key, value = key.lower(), value.strip()
+        if sep and value:
+            if key == "type":
+                filters["type"] = value.lower()
+                continue
+            if key == "tag":
+                filters["tags"].append(value.lower())
+                continue
+            if key == "folder":
+                filters["folder"] = value.lower()
+                continue
+            if key == "is" and value.lower() in ("favorite", "favourite", "fav", "hidden"):
+                filters["is"].append("hidden" if value.lower() == "hidden" else "favorite")
+                continue
+            if key == "expires":
+                parsed = _parse_expires_filter(value)
+                if parsed:
+                    filters["expires"] = parsed
+                    continue
+        terms.append(token.lower())
+    return terms, filters
+
+
+def query_is_advanced(filters):
+    """Whether a parsed query uses any structured operator."""
+    return bool(filters["type"] or filters["tags"] or filters["folder"]
+                or filters["is"] or filters["expires"])
+
+
+def query_record_matches(terms, filters, type_token, folder, hidden, favorite,
+                         expiry_days, haystack):
+    """Whether one record passes a parsed query. `haystack` is its lowercase
+    searchable text (no secrets); `expiry_days` is days until it expires
+    (negative = overdue) or None; `type_token` is a lowercase kind/type name."""
+    type_token = (type_token or "").lower()
+    folder = (folder or "").lower()
+    tags = set(_TAG_RE.findall(haystack))
+    if filters["type"] and filters["type"] not in type_token:
+        return False
+    for tag in filters["tags"]:
+        if tag not in tags and tag != folder:
+            return False
+    if filters["folder"] and filters["folder"] not in folder:
+        return False
+    for flag in filters["is"]:
+        if flag == "favorite" and not favorite:
+            return False
+        if flag == "hidden" and not hidden:
+            return False
+    if filters["expires"]:
+        op, days = filters["expires"]
+        if expiry_days is None:
+            return False
+        if op == "within" and not expiry_days <= days:
+            return False
+        if op == "after" and not expiry_days > days:
+            return False
+        if op == "overdue" and not expiry_days < 0:
+            return False
+    return all(term in haystack for term in terms)
 
 
 # ----- secret scopes (roadmap 48) --------------------------------------------
@@ -5325,6 +5518,155 @@ def bridge_save(plaintext, host, scheme, username, password):
                      "%s://%s" % (page_scheme, host), ""])
     lines.append(row)
     return "\n".join(lines) + "\n", "created"
+
+
+# ----- time-lock puzzle for emergency access (roadmap 5) ---------------------
+# A recipient holds the emergency kit offline, so a delay cannot be enforced by a
+# clock they control. What can be enforced is *work*: the kit's key is sealed
+# behind a sequential-squaring puzzle (Rivest-Shamir-Wagner). Recovering it needs
+# t squarings mod n done in order -- no shortcut, no parallelism -- so the
+# recipient cannot open the kit before spending roughly the intended time. The
+# owner seals it cheaply because they know n's factors and reduce the exponent
+# 2^t modulo phi(n); the recipient does not, and must iterate. Wall-clock depends
+# on the recipient's hardware, so this bounds the delay from below rather than
+# pinning it, which the kit says plainly.
+
+def _is_probable_prime(candidate, rounds=40):
+    small = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37)
+    if candidate < 2:
+        return False
+    for prime in small:
+        if candidate % prime == 0:
+            return candidate == prime
+    d, r = candidate - 1, 0
+    while d % 2 == 0:
+        d //= 2
+        r += 1
+    for _ in range(rounds):
+        a = 2 + int.from_bytes(os.urandom(16), "big") % (candidate - 3)
+        x = pow(a, d, candidate)
+        if x in (1, candidate - 1):
+            continue
+        for _ in range(r - 1):
+            x = x * x % candidate
+            if x == candidate - 1:
+                break
+        else:
+            return False
+    return True
+
+
+def _random_prime(bits):
+    while True:
+        candidate = int.from_bytes(os.urandom(bits // 8), "big")
+        candidate |= (1 << (bits - 1)) | 1
+        if _is_probable_prime(candidate):
+            return candidate
+
+
+def _timelock_rate(modulus):
+    """Squarings per second on this machine, measured briefly. Used to turn a
+    delay in seconds into a squaring count."""
+    x, count, start = 3, 0, time.time()
+    while time.time() - start < 0.05:
+        for _ in range(4000):
+            x = x * x % modulus
+        count += 4000
+    elapsed = time.time() - start
+    return count / elapsed if elapsed > 0 else 200000.0
+
+
+def timelock_seal(secret, seconds):
+    """Seal up to 32 bytes behind a ~`seconds` sequential-squaring puzzle.
+
+    Returns a dict {n, a, t, sealed} (all but `sealed` are ints; `sealed` is
+    hex). The owner computes the mask a^(2^t) mod n cheaply via phi(n).
+    """
+    if len(secret) > 32:
+        raise VaultError("time-lock secret is longer than 32 bytes")
+    p, q = _random_prime(1024), _random_prime(1024)
+    while p == q:
+        q = _random_prime(1024)
+    n, phi = p * q, (p - 1) * (q - 1)
+    a = 2 + int.from_bytes(os.urandom(32), "big") % (n - 4)
+    t = max(1, int(max(seconds, 0) * _timelock_rate(n)))
+    mask = pow(a, pow(2, t, phi), n)
+    stream = hashlib.sha256(str(mask).encode("ascii")).digest()
+    sealed = bytes(b ^ s for b, s in zip(secret, stream))
+    return {"n": n, "a": a, "t": t, "sealed": sealed.hex()}
+
+
+def timelock_unseal(puzzle):
+    """Recover the sealed bytes by doing t sequential squarings. Slow by design."""
+    n, a, t = int(puzzle["n"]), int(puzzle["a"]), int(puzzle["t"])
+    sealed = bytes.fromhex(puzzle["sealed"])
+    x = a
+    for _ in range(t):
+        x = x * x % n
+    stream = hashlib.sha256(str(x).encode("ascii")).digest()
+    return bytes(b ^ s for b, s in zip(sealed, stream))
+
+
+def totp_code(secret_b32, period=30, algo="sha1"):
+    """RFC 6238 TOTP for a base32 secret. "" if the secret is empty/unreadable.
+
+    A second, independent copy of the Dashboard's `totp_code`; the algorithm is
+    fixed by the RFC, so the two cannot drift, and a regression asserts they
+    agree. This one lets the browser bridge (roadmap 51) fill a one-time code
+    without the Dashboard.
+    """
+    secret = (secret_b32 or "").replace(" ", "").upper()
+    if not secret:
+        return ""
+    padded = secret + "=" * ((8 - len(secret) % 8) % 8)
+    key = base64.b32decode(padded, casefold=True)
+    counter = int(time.time() // max(period, 1))
+    algo = (algo or "sha1").lower()
+    digest_mod = {"sha1": hashlib.sha1, "sha256": hashlib.sha256,
+                  "sha512": hashlib.sha512}.get(algo, hashlib.sha1)
+    mac = hmac.new(key, counter.to_bytes(8, "big"), digest_mod).digest()
+    offset = mac[-1] & 0x0F
+    code_int = int.from_bytes(mac[offset:offset + 4], "big") & 0x7FFFFFFF
+    return str(code_int % 10 ** 6).zfill(6)
+
+
+def bridge_totp(plaintext, host):
+    """The current TOTP for a browser host (roadmap 51), or None.
+
+    Matches an authenticator whose label names the site -- the host's registrable
+    label appears in the authenticator's label, or the label appears in the host
+    -- and returns {code, seconds}. Exactly one match yields a code; zero or
+    several yield None, because a code typed into the wrong field is worse than
+    none. Secret-free but for the six digits it exists to return.
+    """
+    host = (host or "").lower().strip(".")
+    if not host:
+        return None
+    parts_host = host.split(".")
+    label_key = parts_host[-2] if len(parts_host) >= 2 else host
+    matches = []
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if not parts or parts[0] != "AUTH" or len(parts) < 4:
+            continue
+        auth_label = (parts[2] or "").lower()
+        secret = parts[3] or ""
+        period = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else 30
+        algo = parts[6] if len(parts) > 6 else "sha1"
+        if not secret:
+            continue
+        if label_key and (label_key in auth_label or (auth_label and auth_label in host)):
+            matches.append((secret, period, algo))
+    if len(matches) != 1:
+        return None
+    secret, period, algo = matches[0]
+    try:
+        code = totp_code(secret, period, algo)
+    except Exception:
+        return None
+    if not code:
+        return None
+    return {"code": code, "seconds": period - int(time.time()) % period}
 
 
 def tidy_proposals(plaintext):
@@ -6791,10 +7133,15 @@ def security_report(plaintext, rotation_days=365, check_breaches=False,
             weak.append(record_id)
         if not parts[1] or not parts[2]:
             incomplete.append(record_id)
+        # Roadmap 29: a record may set its own rotation window, overriding the
+        # vault-wide default. 0 means "never rotate" (opt out); absent means use
+        # the default.
+        override = attrs_rotation_days(parts[7] if len(parts) > 7 else "")
+        effective = rotation_days if override is None else override
         try:
             stamp = time.mktime(time.strptime(
                 parts[5].replace("Z", ""), "%Y-%m-%dT%H:%M:%S"))
-            if (now - stamp) / 86400.0 > rotation_days:
+            if effective and (now - stamp) / 86400.0 > effective:
                 old.append(record_id)
         except (IndexError, ValueError, OverflowError):
             pass
@@ -7926,6 +8273,27 @@ def main(argv):
             if not key:
                 raise VaultError("a vault key is required")
             rewrap_with_key(argv[2], key, new)
+        elif command == "hardware-reset":
+            # hardware-reset <vault> <credential_id> ; stdin: PRF secret\nnew
+            #   master (roadmap 2). Resets the master using a registered security
+            #   key -- the RSA recovery file is not in this path.
+            secret, new = _secrets(2)
+            reset_master_with_hardware(argv[2], argv[3], secret, new)
+        elif command == "timelock-seal":
+            # timelock-seal <seconds> ; stdin: secret as hex ; stdout: puzzle JSON
+            #   (roadmap 5). Cheap for the owner; slow to open.
+            secret = bytes.fromhex(sys.stdin.readline().strip())
+            sys.stdout.write(json.dumps(timelock_seal(secret, float(argv[2]))) + "\n")
+        elif command == "timelock-unseal":
+            # timelock-unseal <puzzlefile> ; stdout: secret as hex. Slow by
+            #   design -- t sequential squarings.
+            with open(argv[2], "r", encoding="utf-8") as handle:
+                sys.stdout.write(timelock_unseal(json.load(handle)).hex() + "\n")
+        elif command == "record-event":
+            # record-event <vault> <kind> <outcome> <detail> ; appends one
+            #   security-event line (never raises, never fails the caller).
+            record_event(argv[3], argv[4] if len(argv) > 4 else "ok",
+                         argv[5] if len(argv) > 5 else "", argv[2])
         elif command == "record":
             # record <op> [args] -- how the shell reads a schema. The
             # dashboard imports this module and calls the functions directly,
@@ -8360,6 +8728,25 @@ def main(argv):
                     handle.read(), days, check_breaches,
                     offline_source=offline_source, check_accounts=check_accounts)
             sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        elif command == "rotation-set":
+            # rotation-set <plainfile> <id> <days|default> ; writes plaintext,
+            # "changed"/"unchanged" on stderr (roadmap 29). "default" clears the
+            # per-record override.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                plaintext = handle.read()
+            spec = argv[4]
+            days = None if spec in ("default", "clear", "") else int(spec)
+            if days is not None and (days < 0 or days > 36500):
+                sys.exit("rotation window must be between 0 and 36500 days")
+            out, changed = set_rotation(plaintext, argv[3], days)
+            sys.stdout.write(out)
+            sys.stderr.write(("changed" if changed else "unchanged") + "\n")
+            return 0 if changed else 1
+        elif command == "rotation-list":
+            # rotation-list <plainfile> ; stdout: JSON of per-record overrides.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                sys.stdout.write(json.dumps(
+                    {"overrides": rotation_overrides(handle.read())}, indent=2) + "\n")
         elif command == "breach-list-refresh":
             # breach-list-refresh <url> <dest> ; stderr: count. Fetches a public
             # list only -- no account identifier is sent.
@@ -8726,6 +9113,21 @@ def main(argv):
                 plaintext, host, scheme, username, new_password)
             sys.stdout.write(new_plain)
             sys.stderr.write(outcome + "\n")
+        elif command == "bridge-totp":
+            # bridge-totp <plainfile> <host> ; stdout: JSON {ok, code, seconds}
+            #   or {ok:false} (roadmap 51). A one-time code for a matching
+            #   authenticator, computed for the browser to fill an OTP field.
+            host = (argv[3] or "").lower().strip(".") if len(argv) > 3 else ""
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                result = bridge_totp(handle.read(), host)
+            if result:
+                sys.stdout.write(json.dumps(
+                    {"ok": True, "code": result["code"],
+                     "seconds": result["seconds"]}) + "\n")
+            else:
+                sys.stdout.write(json.dumps(
+                    {"ok": False, "error": "no matching authenticator"}) + "\n")
+                return 1
         elif command == "records-summary":
             # records-summary <plainfile> ; stdout: JSON {records:[{id,label,
             #   username,url}]}. Secret-free by construction -- the password
@@ -8740,6 +9142,54 @@ def main(argv):
                                     "username": parts[2],
                                     "url": parts[6] if len(parts) > 6 else ""})
             sys.stdout.write(json.dumps({"records": records}) + "\n")
+        elif command == "list-json":
+            # list-json <plainfile> ; stdout: JSON {passwords:[...]} matching the
+            # CLI `list` table (id, service, username, url, created) plus the
+            # attrs-derived state a script needs to filter. Secret-free: the
+            # password column is never read.
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                passwords = []
+                for line in handle:
+                    parts = line.rstrip("\n").split("\t")
+                    if not parts or not parts[0].isdigit() or len(parts) < 6:
+                        continue
+                    attrs = parts[7] if len(parts) > 7 else ""
+                    folder, _fields, hidden, favorite, trashed_at = decode_attrs(attrs)
+                    passwords.append({
+                        "id": parts[0], "service": parts[1], "username": parts[2],
+                        "url": parts[6] if len(parts) > 6 else "",
+                        "created": parts[5] if len(parts) > 5 else "",
+                        "folder": folder, "hidden": bool(hidden),
+                        "favorite": bool(favorite),
+                        "trashed": bool(trashed_at),
+                        "archived": bool(attrs_archived(attrs))})
+            sys.stdout.write(json.dumps({"passwords": passwords}) + "\n")
+        elif command == "get-json":
+            # get-json <plainfile> <id> ; stdout: one password as JSON, password
+            # included -- `get` already shows it to the caller, and --json is the
+            # same reveal in a form a script can read.
+            rid = argv[3]
+            with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    parts = line.rstrip("\n").split("\t")
+                    if parts and parts[0] == rid and parts[0].isdigit() and len(parts) >= 6:
+                        attrs = parts[7] if len(parts) > 7 else ""
+                        folder, fields, hidden, favorite, trashed_at = decode_attrs(attrs)
+                        sys.stdout.write(json.dumps({
+                            "id": parts[0], "service": parts[1],
+                            "username": parts[2], "password": parts[3],
+                            "notes": parts[4] if len(parts) > 4 else "",
+                            "created": parts[5] if len(parts) > 5 else "",
+                            "url": parts[6] if len(parts) > 6 else "",
+                            "folder": folder, "fields": fields,
+                            "hidden": bool(hidden), "favorite": bool(favorite),
+                            "trashed": bool(trashed_at),
+                            "archived": bool(attrs_archived(attrs))},
+                            ensure_ascii=False) + "\n")
+                        break
+                else:
+                    sys.stdout.write(json.dumps({"ok": False, "error": "record not found"}) + "\n")
+                    return 1
         elif command == "phishing-check":
             # phishing-check <plainfile> <host> ; stdout: JSON verdict (roadmap 35)
             host = (argv[3] or "").lower().strip(".") if len(argv) > 3 else ""
@@ -9750,19 +10200,27 @@ cmd_add() {
 }
 
 cmd_list() {
+	local as_json=0
+	[ "${1:-}" = "--json" ] && { as_json=1; shift; }
 	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
 
 	local tmp
 	tmp="$(make_tmp)"
 	decrypt_vault_to_file "$tmp"
 
-	print_vault_table "$tmp"
+	if [ "$as_json" -eq 1 ]; then
+		core list-json "$tmp"
+	else
+		print_vault_table "$tmp"
+	fi
 
 	secure_wipe "$tmp"
 }
 
 cmd_get() {
-	[ $# -ge 1 ] || die "Usage: $0 get <id | search-pattern>"
+	local as_json=0
+	[ "${1:-}" = "--json" ] && { as_json=1; shift; }
+	[ $# -ge 1 ] || die "Usage: $0 get [--json] <id | search-pattern>"
 
 	local query="$1"
 
@@ -9771,6 +10229,18 @@ cmd_get() {
 	local tmp
 	tmp="$(make_tmp)"
 	decrypt_vault_to_file "$tmp"
+
+	# --json answers for one record by id: the same reveal `get` gives a person,
+	# in a form a script can read. It never runs the clipboard countdown and
+	# never falls through to a human-readable search.
+	if [ "$as_json" -eq 1 ]; then
+		printf '%s' "$query" | grep -Eq '^[0-9]+$' \
+			|| { secure_wipe "$tmp"; die "get --json takes a numeric record id."; }
+		local status=0
+		core get-json "$tmp" "$query" || status=$?
+		secure_wipe "$tmp"
+		return "$status"
+	fi
 
 	if printf '%s' "$query" | grep -Eq '^[0-9]+$'; then
 		local line
@@ -10689,6 +11159,55 @@ for i in items:
 		*)
 			secure_wipe "$tmp"
 			printf 'Usage: %s archive <list|set|unset> [args]\n' "$0" >&2
+			exit 1 ;;
+	esac
+}
+
+# ----- per-record rotation windows (roadmap 29) ------------------------------
+# One vault has a default rotation window (SPM_ROTATION_DAYS); a single record can
+# override it -- a shorter window for a high-value login, or 'never' for a
+# credential that is not meant to rotate. The override lives in the record's
+# attributes and feeds the same aging check the security score reads.
+cmd_rotation() {
+	local op="${1:-list}"; [ $# -gt 0 ] && shift
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp out; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	case "$op" in
+		list)
+			core rotation-list "$tmp" | python3 -c '
+import sys, json
+o = json.load(sys.stdin)["overrides"]
+if not o:
+    print("No per-record rotation windows. Every password uses the vault default.")
+    sys.exit(0)
+print("%-6s %-24s %s" % ("ID", "SERVICE", "ROTATION"))
+for i in o:
+    d = i["rotation_days"]
+    print("%-6s %-24s %s" % (i["id"], i["service"][:24],
+                             "never" if d == 0 else ("every %d days" % d)))
+'
+			secure_wipe "$tmp" ;;
+		set)
+			local id="${1:-}" days="${2:-}"
+			[ -n "$id" ] && [ -n "$days" ] || { secure_wipe "$tmp"; die "Usage: $0 rotation set <id> <days|never>"; }
+			[ "$days" = never ] && days=0
+			printf '%s' "$days" | grep -Eq '^[0-9]+$' || { secure_wipe "$tmp"; die "Days must be a number, or 'never'."; }
+			out="$(make_tmp)"
+			if core rotation-set "$tmp" "$id" "$days" >"$out" 2>/dev/null; then
+				mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+				[ "$days" = 0 ] && printf 'Record %s set to never rotate.\n' "$id" \
+					|| printf 'Record %s will rotate every %s days.\n' "$id" "$days"
+			else secure_wipe "$out"; secure_wipe "$tmp"; die "No password with id $id."; fi ;;
+		clear)
+			local id="${1:-}"; [ -n "$id" ] || { secure_wipe "$tmp"; die "Usage: $0 rotation clear <id>"; }
+			out="$(make_tmp)"
+			if core rotation-set "$tmp" "$id" default >"$out" 2>/dev/null; then
+				mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+				printf 'Record %s uses the vault default rotation window again.\n' "$id"
+			else secure_wipe "$out"; secure_wipe "$tmp"; die "No rotation override on id $id."; fi ;;
+		*)
+			secure_wipe "$tmp"
+			printf 'Usage: %s rotation <list|set|clear> [args]\n' "$0" >&2
 			exit 1 ;;
 	esac
 }
@@ -15139,7 +15658,18 @@ cmd_sync() {
 }
 
 cmd_emergency_create() {
-	local id="${1:-}" public_key="${2:-}" activation="${3:-}" output="${4:-}" tmp payload key_file kit_dir
+	local id="${1:-}" public_key="${2:-}" activation="${3:-}" output="" delay_hours="" tmp payload key_file kit_dir
+	shift 3 2>/dev/null || true
+	# Roadmap 5: an optional --delay-hours seals the payload behind a sequential
+	# time-lock, so an offline recipient cannot open it early however they set
+	# their clock. Any bare argument is the output path (backward compatible).
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--delay-hours) shift; delay_hours="${1:-}" ;;
+			*) [ -z "$output" ] && output="$1" || die "Unexpected argument: $1" ;;
+		esac
+		shift
+	done
 	printf '%s' "$id" | grep -Eq '^[0-9]+$' || die "Numeric password ID required."
 	[ -f "$public_key" ] || die "Recipient RSA public key not found."
 	[ -n "$activation" ] || die "Activation date required (YYYY-MM-DD)."
@@ -15147,6 +15677,7 @@ cmd_emergency_create() {
 import datetime,sys
 datetime.date.fromisoformat(sys.argv[1])
 PY
+	[ -z "$delay_hours" ] || printf '%s' "$delay_hours" | grep -Eq '^[0-9]+([.][0-9]+)?$' || die "--delay-hours takes a number."
 	[ -n "$output" ] || output="emergency-$id-$activation.tar.gz"; [ ! -e "$output" ] || die "Emergency archive already exists."
 	tmp="$(make_tmp)"; payload="$(make_tmp)"; key_file="$(make_tmp)"; kit_dir="$(mktemp -d "${TMPDIR:-/tmp}/spm-emergency.XXXXXX")"; chmod 700 "$kit_dir"
 	decrypt_vault_to_file "$tmp"
@@ -15159,17 +15690,44 @@ for line in open(sys.argv[1],encoding="utf-8"):
 else: raise SystemExit("record not found")
 PY
 	openssl rand -hex 32 > "$key_file"
-	openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -pass file:"$key_file" -in "$payload" -out "$kit_dir/payload.enc"
+	# The pass that encrypts the payload. Without a delay it is the RSA-wrapped
+	# key, exactly as before. With one, it is that key mixed with a token sealed
+	# behind the time-lock, so the payload cannot be decrypted until the recipient
+	# has done the work -- even though they hold the RSA key immediately.
+	local pass_file="$key_file" files_line="key.enc,payload.enc,payload.hmac" notice="Activation is advisory; offline recipients can decrypt early."
+	if [ -n "$delay_hours" ]; then
+		local token_file seconds; token_file="$(make_tmp)"; pass_file="$(make_tmp)"
+		openssl rand -hex 32 > "$token_file"
+		seconds="$(python3 -c 'import sys;print(float(sys.argv[1])*3600)' "$delay_hours")"
+		python3 "$(core_script_path)" timelock-seal "$seconds" < "$token_file" > "$kit_dir/timelock.json" \
+			|| { secure_wipe "$tmp"; secure_wipe "$payload"; secure_wipe "$key_file"; secure_wipe "$token_file"; rm -rf "$kit_dir"; die "Could not build the time-lock."; }
+		python3 -c 'import hashlib,sys
+k=open(sys.argv[1]).read().strip(); tok=open(sys.argv[2]).read().strip()
+open(sys.argv[3],"w").write(hashlib.sha256((k+tok).encode()).hexdigest())' "$key_file" "$token_file" "$pass_file"
+		secure_wipe "$token_file"
+		files_line="key.enc,payload.enc,payload.hmac,timelock.json"
+		notice="Payload is time-locked for ~$delay_hours h of sequential work; the recipient cannot open it earlier by changing a clock. Wall-clock depends on their hardware."
+	fi
+	openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -pass file:"$pass_file" -in "$payload" -out "$kit_dir/payload.enc"
 	openssl pkeyutl -encrypt -pubin -inkey "$public_key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$key_file" -out "$kit_dir/key.enc"
-	printf 'SPM emergency kit\nactivation=%s\ncreated=%s\nnotice=Activation is advisory; offline recipients can decrypt early.\nfiles=key.enc,payload.enc,payload.hmac\n' "$activation" "$(now_iso)" > "$kit_dir/manifest.txt"
+	printf 'SPM emergency kit\nactivation=%s\ncreated=%s\nnotice=%s\nfiles=%s\n' "$activation" "$(now_iso)" "$notice" "$files_line" > "$kit_dir/manifest.txt"
 	python3 - "$key_file" "$kit_dir/manifest.txt" "$kit_dir/payload.enc" "$kit_dir/payload.hmac" <<'PY'
 import hashlib,hmac,sys
 key=bytes.fromhex(open(sys.argv[1],encoding="ascii").read().strip())
 data=open(sys.argv[2],"rb").read()+open(sys.argv[3],"rb").read()
 open(sys.argv[4],"w",encoding="ascii").write(hmac.new(key,data,hashlib.sha256).hexdigest()+"\n")
 PY
-	chmod 600 "$kit_dir"/*; tar -czf "$output" -C "$kit_dir" manifest.txt key.enc payload.enc payload.hmac
-	chmod 600 "$output" 2>/dev/null || true; secure_wipe "$tmp"; secure_wipe "$payload"; secure_wipe "$key_file"; secure_wipe "$kit_dir/key.enc"; secure_wipe "$kit_dir/payload.enc"; secure_wipe "$kit_dir/payload.hmac"; secure_wipe "$kit_dir/manifest.txt"; rmdir "$kit_dir"
+	local tar_extra=""; [ -n "$delay_hours" ] && tar_extra="timelock.json"
+	chmod 600 "$kit_dir"/*
+	# shellcheck disable=SC2086
+	tar -czf "$output" -C "$kit_dir" manifest.txt key.enc payload.enc payload.hmac $tar_extra
+	chmod 600 "$output" 2>/dev/null || true
+	# An owner-side audit record of the kit (roadmap 5): what was shared, to when,
+	# and whether it is time-locked -- kept in the security-event log beside the
+	# vault, never in the kit.
+	core record-event "$VAULT_FILE" emergency ok "" 2>/dev/null || true
+	secure_wipe "$tmp"; secure_wipe "$payload"; secure_wipe "$key_file"; [ "$pass_file" != "$key_file" ] && secure_wipe "$pass_file"
+	secure_wipe "$kit_dir/key.enc"; secure_wipe "$kit_dir/payload.enc"; secure_wipe "$kit_dir/payload.hmac"; secure_wipe "$kit_dir/manifest.txt"; [ -f "$kit_dir/timelock.json" ] && secure_wipe "$kit_dir/timelock.json"; rmdir "$kit_dir"
 	printf '%s\n' "$output"
 }
 
@@ -15201,8 +15759,25 @@ expected=open(sys.argv[4],encoding="ascii").read().strip()
 if not hmac.compare_digest(hmac.new(key,data,hashlib.sha256).hexdigest(),expected):
  raise SystemExit("emergency kit authentication failed")
 PY
-	openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:"$plain_key" -in "$payload_file" -out "$output" || { secure_wipe "$output"; die "Emergency payload decryption failed."; }
-	chmod 600 "$output" 2>/dev/null || true; secure_wipe "$key_file"; secure_wipe "$plain_key"; secure_wipe "$payload_file"; secure_wipe "$hmac_file"; secure_wipe "$manifest_file"; printf '%s\n' "$output"
+	# The decryption pass. A time-locked kit (roadmap 5) carries timelock.json;
+	# solving it -- t sequential squarings, slow by design -- yields the token
+	# that, mixed with the RSA-recovered key, is the pass. A kit without one opens
+	# with the RSA key exactly as before.
+	local pass_file="$plain_key" tl_file
+	tl_file="$(make_tmp)"
+	if tar -xOf "$archive" timelock.json > "$tl_file" 2>/dev/null && [ -s "$tl_file" ]; then
+		local token_file; token_file="$(make_tmp)"; pass_file="$(make_tmp)"
+		printf 'Opening the time-lock (this is meant to be slow)...\n' >&2
+		python3 "$(core_script_path)" timelock-unseal "$tl_file" > "$token_file" \
+			|| { secure_wipe "$key_file"; secure_wipe "$plain_key"; secure_wipe "$payload_file"; secure_wipe "$hmac_file"; secure_wipe "$manifest_file"; secure_wipe "$tl_file"; secure_wipe "$token_file"; die "Could not solve the time-lock."; }
+		python3 -c 'import hashlib,sys
+k=open(sys.argv[1]).read().strip(); tok=open(sys.argv[2]).read().strip()
+open(sys.argv[3],"w").write(hashlib.sha256((k+tok).encode()).hexdigest())' "$plain_key" "$token_file" "$pass_file"
+		secure_wipe "$token_file"
+	fi
+	secure_wipe "$tl_file"
+	openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:"$pass_file" -in "$payload_file" -out "$output" || { secure_wipe "$output"; die "Emergency payload decryption failed."; }
+	chmod 600 "$output" 2>/dev/null || true; secure_wipe "$key_file"; secure_wipe "$plain_key"; [ "$pass_file" != "$plain_key" ] && secure_wipe "$pass_file"; secure_wipe "$payload_file"; secure_wipe "$hmac_file"; secure_wipe "$manifest_file"; printf '%s\n' "$output"
 }
 
 cmd_bridge_get() {
@@ -15233,6 +15808,19 @@ cmd_bridge_list() {
 	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
 	local status=0
 	python3 "$(core_script_path)" bridge-list "$tmp" "$host" "$scheme" || status=$?
+	secure_wipe "$tmp"; MASTER_PW=""
+	return "$status"
+}
+
+# The current one-time code for a page host (roadmap 51), for the extension to
+# fill an OTP field. Master on stdin; one JSON line out, never the secret seed.
+cmd_bridge_totp() {
+	local host="${1:-}" tmp
+	[ -n "$host" ] || die "Browser hostname required."
+	IFS= read -r MASTER_PW || die "Master password required on stdin."
+	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	local status=0
+	python3 "$(core_script_path)" bridge-totp "$tmp" "$host" || status=$?
 	secure_wipe "$tmp"; MASTER_PW=""
 	return "$status"
 }
@@ -15486,7 +16074,7 @@ sys.exit(3)
 # The verbs a fresh shell should complete. One maintained list; the regression
 # suite checks that every verb here is one `main` actually dispatches.
 spm_command_names() {
-	printf '%s' 'init add list get edit delete generate change-master secret-key portable save restore update auto-update shares doctor password-history export import backup-now backup-auto vault-profile sync record trash archive expiring searches schema link unlink share collection ssh gpg notes-add notes-list notes-view notes-delete passphrase-add passphrase-list passphrase-view passphrase-delete authenticator-add authenticator-list authenticator-view authenticator-edit authenticator-delete backup-codes-add backup-codes-list backup-codes-view backup-codes-delete attachment-add attachment-list attachment-extract attachment-delete emergency-create emergency-open events scope run env plugin phishing-check completion web dashboard desktop help'
+	printf '%s' 'init add list get edit delete generate change-master secret-key portable save restore update auto-update shares doctor password-history export import backup-now backup-auto vault-profile sync record trash archive expiring rotation searches schema link unlink share collection ssh gpg notes-add notes-list notes-view notes-delete passphrase-add passphrase-list passphrase-view passphrase-delete authenticator-add authenticator-list authenticator-view authenticator-edit authenticator-delete backup-codes-add backup-codes-list backup-codes-view backup-codes-delete attachment-add attachment-list attachment-extract attachment-delete emergency-create emergency-open events scope run env plugin phishing-check extension completion web dashboard desktop help'
 }
 
 cmd_completion() {
@@ -15506,6 +16094,8 @@ _spm_complete() {
 	case "${COMP_WORDS[1]}" in
 		scope)      sub="list show add remove" ;;
 		plugin)     sub="list info install remove run" ;;
+		rotation)   sub="list set clear" ;;
+		extension)  sub="setup host manual path" ;;
 		record)     sub="types add list view delete favorite lock unlock" ;;
 		ssh)        sub="import list show public load unload agent" ;;
 		gpg)        sub="import list show" ;;
@@ -15797,6 +16387,113 @@ _plugin_unset_secrets() {
 '
 	for n in $names; do [ -n "$n" ] && unset "$n" 2>/dev/null || true; done
 	IFS="$oldifs"
+}
+
+# ----- browser extension setup (manual + guided) ----------------------------
+# The repo has always shipped a guided setup.sh; this adds a first-class `spm
+# extension` entry point that also documents and supports the manual path, and
+# the interactive menu and the Dashboard both route here so installing the
+# extension is one obvious step wherever you are.
+_extension_source_dir() {
+	# Where the extension's files live, if they are reachable from here. A
+	# single installed spm.sh does not carry them, so this may be empty -- in
+	# which case the manual guidance still applies, it just cannot run setup.sh.
+	local self candidate
+	self="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
+	for candidate in \
+			"${SPM_EXTENSION_DIR:-}" \
+			"$(dirname "$self")/browser-extension-universal" \
+			"${XDG_DATA_HOME:-$HOME/.local/share}/spm/browser-extension-universal" \
+			"./browser-extension-universal"; do
+		[ -n "$candidate" ] && [ -f "$candidate/setup.sh" ] && { printf '%s' "$candidate"; return 0; }
+	done
+	return 1
+}
+
+_extension_manual() {
+	local dir="${1:-<the browser-extension-universal directory from the SPM release>}"
+	local host_dir="${XDG_DATA_HOME:-$HOME/.local/share}/spm/browser-extension"
+	cat <<EOF
+Manual browser-extension installation
+=====================================
+
+The extension is a local add-on plus a native-messaging host that speaks to this
+SPM install. Nothing leaves your machine. Two steps: load the extension, then
+register the host so the extension can reach SPM.
+
+Extension files: $dir
+
+1. Build the unpacked extension for your browser:
+     $dir/build.sh chromium     # Chrome/Chromium/Edge/Brave/Vivaldi/Opera
+     $dir/build.sh firefox      # Firefox
+   Each prints the directory it built.
+
+2. Load it, unpacked:
+   - Chromium family: open chrome://extensions, turn on "Developer mode",
+     click "Load unpacked", and choose the dist/chromium directory from step 1.
+   - Firefox: open about:debugging#/runtime/this-firefox, click "Load Temporary
+     Add-on", and choose manifest.firefox.json in the dist/firefox directory.
+
+3. Note the extension's ID (shown on the extensions page), then register the
+   native host so the extension can talk to SPM:
+     $dir/install-host.sh <extension-id>
+   This writes native_host.py and the messaging manifest under:
+     $host_dir
+
+4. Open the extension's popup, unlock with your master password, and autofill,
+   capture, generate and one-time-code fill all work on your login pages.
+
+To let SPM do steps 1-3 for you on Linux or macOS, run:  $0 extension setup
+EOF
+}
+
+cmd_extension() {
+	local op="${1:-}" dir
+	dir="$(_extension_source_dir || true)"
+	case "$op" in
+		setup)
+			shift
+			[ -n "$dir" ] || die "The extension files are not next to this install. Get them from the SPM release, or run: $0 extension manual"
+			exec "$dir/setup.sh" "$@" ;;
+		host)
+			shift
+			[ -n "$dir" ] || die "The extension files are not next to this install. See: $0 extension manual"
+			exec "$dir/install-host.sh" "$@" ;;
+		manual)
+			_extension_manual "${dir:-}" ;;
+		path)
+			if [ -n "$dir" ]; then printf 'Extension files: %s\n' "$dir"; else printf 'Extension files: not bundled with this install (see "%s extension manual").\n' "$0"; fi
+			printf 'Native host dir: %s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/spm/browser-extension" ;;
+		-h|--help|"")
+			printf 'Usage: %s extension <setup|host|manual|path>\n' "$0"
+			printf '  setup   run the guided installer (Linux/macOS): builds, registers the host, opens the browser\n'
+			printf '  host    register just the native-messaging host for an extension ID\n'
+			printf '  manual  print step-by-step manual installation instructions\n'
+			printf '  path    show where the extension files and native host live\n'
+			[ "$op" = "" ] && return 1 || return 0 ;;
+		*)
+			printf 'Usage: %s extension <setup|host|manual|path>\n' "$0" >&2; return 1 ;;
+	esac
+}
+
+# The interactive-menu entry (option 24): the manual steps always, and -- when
+# the extension files are reachable -- an offer to run the guided installer.
+interactive_menu_extension() {
+	local dir; dir="$(_extension_source_dir || true)"
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "=== Pasang ekstensi browser ===\n\n"
+	else
+		printf "=== Browser extension setup ===\n\n"
+	fi
+	_extension_manual "${dir:-}"
+	if [ -n "$dir" ]; then
+		printf '\nRun the guided installer now (build, register the host, open the browser)? [y/N] '
+		local reply; read -r reply || reply=""
+		case "$reply" in
+			y|Y|yes|YES) "$dir/setup.sh" || printf 'Guided setup exited with an error; the manual steps above still work.\n' >&2 ;;
+			*) : ;;
+		esac
+	fi
 }
 
 cmd_help() {
@@ -17669,6 +18366,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "Sharing",
         "nav.sync": "Sync",
         "nav.transfer": "Export / Import",
+        "nav.extension": "Browser extension",
         "nav.trash": "Trash",
         "nav.unlock": "Biometric Unlock",
         "note.field.content": "Content",
@@ -18245,6 +18943,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u0627\u0644\u0645\u0634\u0627\u0631\u0643\u0629",
         "nav.sync": "\u0627\u0644\u0645\u0632\u0627\u0645\u0646\u0629",
         "nav.transfer": "\u062a\u0635\u062f\u064a\u0631 / \u0627\u0633\u062a\u064a\u0631\u0627\u062f",
+        "nav.extension": "\u0627\u0645\u062a\u062f\u0627\u062f \u0627\u0644\u0645\u062a\u0635\u0641\u062d",
         "nav.trash": "\u0627\u0644\u0645\u0647\u0645\u0644\u0627\u062a",
         "nav.unlock": "\u0641\u062a\u062d \u0627\u0644\u0642\u0641\u0644 \u0628\u0627\u0644\u0628\u0635\u0645\u0629",
         "note.field.content": "\u0627\u0644\u0645\u062d\u062a\u0648\u0649",
@@ -18821,6 +19520,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "Teilen",
         "nav.sync": "Synchronisierung",
         "nav.transfer": "Exportieren / Importieren",
+        "nav.extension": "Browser-Erweiterung",
         "nav.trash": "Papierkorb",
         "nav.unlock": "Biometrisches Entsperren",
         "note.field.content": "Inhalt",
@@ -19397,6 +20097,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "Compartir",
         "nav.sync": "Sincronizaci\u00f3n",
         "nav.transfer": "Exportar / Importar",
+        "nav.extension": "Extensi\u00f3n del navegador",
         "nav.trash": "Papelera",
         "nav.unlock": "Desbloqueo biom\u00e9trico",
         "note.field.content": "Contenido",
@@ -19973,6 +20674,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "Partage",
         "nav.sync": "Synchronisation",
         "nav.transfer": "Exporter / Importer",
+        "nav.extension": "Extension de navigateur",
         "nav.trash": "Corbeille",
         "nav.unlock": "D\u00e9verrouillage biom\u00e9trique",
         "note.field.content": "Contenu",
@@ -20549,6 +21251,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u0938\u093e\u091d\u093e\u0915\u0930\u0923",
         "nav.sync": "\u0938\u093f\u0902\u0915",
         "nav.transfer": "\u0928\u093f\u0930\u094d\u092f\u093e\u0924 / \u0906\u092f\u093e\u0924",
+        "nav.extension": "\u092c\u094d\u0930\u093e\u0909\u091c\u093c\u0930 \u090f\u0915\u094d\u0938\u091f\u0947\u0902\u0936\u0928",
         "nav.trash": "\u0915\u091a\u0930\u093e",
         "nav.unlock": "\u092c\u093e\u092f\u094b\u092e\u0947\u091f\u094d\u0930\u093f\u0915 \u0905\u0928\u0932\u0949\u0915",
         "note.field.content": "\u0938\u093e\u092e\u0917\u094d\u0930\u0940",
@@ -21125,6 +21828,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "Berbagi",
         "nav.sync": "Sinkronisasi",
         "nav.transfer": "Ekspor / Impor",
+        "nav.extension": "Ekstensi browser",
         "nav.trash": "Sampah",
         "nav.unlock": "Buka Biometrik",
         "note.field.content": "Konten",
@@ -21701,6 +22405,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u5171\u6709",
         "nav.sync": "\u540c\u671f",
         "nav.transfer": "\u30a8\u30af\u30b9\u30dd\u30fc\u30c8 / \u30a4\u30f3\u30dd\u30fc\u30c8",
+        "nav.extension": "\u30d6\u30e9\u30a6\u30b6\u62e1\u5f35\u6a5f\u80fd",
         "nav.trash": "\u30b4\u30df\u7bb1",
         "nav.unlock": "\u751f\u4f53\u8a8d\u8a3c\u30ed\u30c3\u30af\u89e3\u9664",
         "note.field.content": "\u5185\u5bb9",
@@ -22277,6 +22982,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "\uacf5\uc720",
         "nav.sync": "\ub3d9\uae30\ud654",
         "nav.transfer": "\ub0b4\ubcf4\ub0b4\uae30 / \uac00\uc838\uc624\uae30",
+        "nav.extension": "\ube0c\ub77c\uc6b0\uc800 \ud655\uc7a5",
         "nav.trash": "\ud734\uc9c0\ud1b5",
         "nav.unlock": "\uc0dd\uccb4 \uc778\uc2dd \uc7a0\uae08 \ud574\uc81c",
         "note.field.content": "\ub0b4\uc6a9",
@@ -22853,6 +23559,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "Compartilhamento",
         "nav.sync": "Sincroniza\u00e7\u00e3o",
         "nav.transfer": "Exportar / Importar",
+        "nav.extension": "Extens\u00e3o do navegador",
         "nav.trash": "Lixeira",
         "nav.unlock": "Desbloqueio biom\u00e9trico",
         "note.field.content": "Conte\u00fado",
@@ -23429,6 +24136,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u041e\u0431\u0449\u0438\u0439 \u0434\u043e\u0441\u0442\u0443\u043f",
         "nav.sync": "\u0421\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0430\u0446\u0438\u044f",
         "nav.transfer": "\u042d\u043a\u0441\u043f\u043e\u0440\u0442 / \u0418\u043c\u043f\u043e\u0440\u0442",
+        "nav.extension": "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043d\u0438\u0435 \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0430",
         "nav.trash": "\u041a\u043e\u0440\u0437\u0438\u043d\u0430",
         "nav.unlock": "\u0411\u0438\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u0440\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430",
         "note.field.content": "\u0421\u043e\u0434\u0435\u0440\u0436\u0438\u043c\u043e\u0435",
@@ -24005,6 +24713,7 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u5171\u4eab",
         "nav.sync": "\u540c\u6b65",
         "nav.transfer": "\u5bfc\u51fa / \u5bfc\u5165",
+        "nav.extension": "Browser extension",
         "nav.trash": "\u56de\u6536\u7ad9",
         "nav.unlock": "\u751f\u7269\u8bc6\u522b\u89e3\u9501",
         "note.field.content": "\u5185\u5bb9",
@@ -26363,6 +27072,7 @@ NAV_SECTIONS = [
         ("events",    "/events",    "shield", "nav.events",    "Security Events", None),
         ("generator", "/generator", "generator", "nav.generator", "Generator",       None),
         ("transfer",  "/transfer",  "transfer", "nav.transfer",  "Export / Import", None),
+        ("extension", "/extension", "record", "nav.extension", "Browser extension", None),
         ("sharing",   "/sharing",   "share",  "nav.sharing",   "Sharing",         None),
         ("sync",      "/sync",      "sync",   "nav.sync",      "Sync",            None),
         ("archive",   "/archive",   "archive", "nav.archive",  "Archive",         "__archive__"),
@@ -28429,6 +29139,23 @@ def login_page(version, message=""):
       <div id="hardware-unlock" hidden style="margin-top:var(--sp-4)">
         <button class="btn btn-ghost btn-block" type="button" id="hardware-btn"
                 data-i18n="login.hardware">Unlock with a security key</button>
+        <button class="btn btn-ghost btn-block" type="button" id="hardware-reset-toggle"
+                style="margin-top:var(--sp-2)">Reset master with a security key</button>
+        <div id="hardware-reset-form" hidden style="margin-top:var(--sp-3)">
+          <div class="input-reveal" style="margin-bottom:var(--sp-2)">
+            <input class="input" type="password" id="hardware-reset-new"
+                   placeholder="New master password (12+ characters)" autocomplete="new-password">
+            <button class="icon-btn reveal-btn" type="button" data-act="reveal-input"
+                    data-target="hardware-reset-new" aria-label="Show" aria-pressed="false"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-view"></use></svg></button>
+          </div>
+          <div class="input-reveal" style="margin-bottom:var(--sp-2)">
+            <input class="input" type="password" id="hardware-reset-confirm"
+                   placeholder="Confirm new master password" autocomplete="new-password">
+            <button class="icon-btn reveal-btn" type="button" data-act="reveal-input"
+                    data-target="hardware-reset-confirm" aria-label="Show" aria-pressed="false"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-view"></use></svg></button>
+          </div>
+          <button class="btn btn-block" type="button" id="hardware-reset-go">Touch key and reset</button>
+        </div>
         <div class="faint" id="hardware-status" role="status" aria-live="polite"
              style="margin-top:var(--sp-3);min-height:1.2em"></div>
       </div>
@@ -28719,6 +29446,60 @@ HARDWARE_UNLOCK_SCRIPT = """
       btn.disabled = false;
     });
   });
+
+  /* Roadmap 2: reset the master with a security key. The same PRF ceremony as
+     unlock, but the secret it derives resets the master rather than opening a
+     session -- so a lost master is recoverable from the key alone, with no RSA
+     recovery file. */
+  var resetToggle = document.getElementById("hardware-reset-toggle");
+  var resetForm = document.getElementById("hardware-reset-form");
+  var resetGo = document.getElementById("hardware-reset-go");
+  if (resetToggle && resetForm && resetGo) {
+    resetToggle.addEventListener("click", function () {
+      resetForm.hidden = !resetForm.hidden;
+    });
+    resetGo.addEventListener("click", function () {
+      var next = document.getElementById("hardware-reset-new").value || "";
+      var confirmValue = document.getElementById("hardware-reset-confirm").value || "";
+      if (next.length < 12) {
+        status.textContent = "The new master password must be at least 12 characters.";
+        return;
+      }
+      if (next !== confirmValue) {
+        status.textContent = "The two new passwords do not match.";
+        return;
+      }
+      resetGo.disabled = true;
+      status.textContent = t("hardware.waiting", "Touch your security key...");
+      var challenge = new Uint8Array(32);
+      crypto.getRandomValues(challenge);
+      navigator.credentials.get({publicKey: {
+        challenge: challenge, rpId: conf.rp_id, userVerification: "required",
+        timeout: 60000, extensions: {prf: {eval: {first: b64ToBytes(conf.salt)}}}
+      }}).then(function (cred) {
+        if (!cred) throw new Error(t("hardware.failed", "That security key does not open this vault."));
+        var secret = prfSecret(cred);
+        if (!secret) throw new Error(t("hardware.noprf", "This security key cannot derive a vault secret."));
+        return fetch("/hardware/reset", {
+          method: "POST", credentials: "same-origin",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({credential_id: cred.id, secret: bytesToB64(secret), new_master: next})
+        }).then(function (r) {
+          return r.json().catch(function () { return {}; }).then(function (j) {
+            if (!r.ok) throw new Error(j.error || t("hardware.failed", "That security key does not open this vault."));
+            return j;
+          });
+        });
+      }).then(function () {
+        status.textContent = "Master reset. Sign in with your new password.";
+        setTimeout(function () { window.location.replace("/login"); }, 1500);
+      }).catch(function (err) {
+        status.textContent = (err && err.message) ? err.message
+          : t("hardware.failed", "That security key does not open this vault.");
+        resetGo.disabled = false;
+      });
+    });
+  }
 })();
 </script>
 """
@@ -29512,6 +30293,53 @@ def generator_page():
 
 EXPORT_FORMATS = ["csv", "json", "tsv", "ndjson", "jsonl", "md", "html", "txt", "yaml", "yml",
                   "xml", "sql", "ini", "psv", "rst", "toml", "org", "scsv", "csv-noheader", "jsonc"]
+
+
+def extension_page():
+    """The browser-extension setup page: manual steps that work anywhere, plus
+    the exact commands the CLI offers. The Dashboard cannot register a native
+    host in the viewer's browser -- that is a local step -- so it documents it."""
+    host_dir = os.path.join(
+        os.environ.get("SPM_DATA_DIR") or os.path.join(
+            os.environ.get("XDG_DATA_HOME") or os.path.join(
+                os.path.expanduser("~"), ".local", "share"), "spm"),
+        "browser-extension")
+    content = f"""
+<div class="page-head"><div>
+  <h1 class="page-title">Browser extension</h1>
+  <div class="page-sub">Install the local extension and its native host. Nothing leaves this machine.</div>
+</div></div>
+<div class="card"><div class="card-body">
+  <p>The extension autofills logins, captures new passwords, generates strong ones,
+  fills one-time codes and warns about look-alike sites &mdash; talking to this SPM
+  install over a local native-messaging host.</p>
+  <h2 style="margin-top:var(--sp-4)">Guided (Linux/macOS)</h2>
+  <pre>spm extension setup</pre>
+  <p class="faint">Builds the extension, registers the native host, detects a browser and opens the install page.</p>
+  <h2 style="margin-top:var(--sp-4)">Manual (any platform)</h2>
+  <ol>
+    <li>Build the unpacked extension on the machine running SPM:
+      <pre>&lt;spm&gt;/browser-extension-universal/build.sh chromium   # or: firefox</pre></li>
+    <li>Load it unpacked:
+      <ul>
+        <li><strong>Chromium / Chrome / Edge / Brave / Vivaldi / Opera:</strong> open
+        <code>chrome://extensions</code>, enable Developer mode, click
+        &ldquo;Load unpacked&rdquo; and choose the built <code>dist/chromium</code> folder.</li>
+        <li><strong>Firefox:</strong> open <code>about:debugging#/runtime/this-firefox</code>,
+        click &ldquo;Load Temporary Add-on&rdquo; and choose <code>manifest.firefox.json</code>
+        in <code>dist/firefox</code>.</li>
+      </ul></li>
+    <li>Register the native host for the extension&rsquo;s ID (shown on the extensions page):
+      <pre>spm extension host &lt;extension-id&gt;</pre>
+      It installs the host under:
+      <pre>{html.escape(host_dir)}</pre></li>
+    <li>Open the extension&rsquo;s popup, unlock with your master password, and use it on your login pages.</li>
+  </ol>
+  <p class="faint">In a terminal, <code>spm extension manual</code> prints these steps and
+  <code>spm extension path</code> shows where everything lives.</p>
+</div></div>
+"""
+    return render_shell(content, "extension", VERSION, VAULT_PATH, title="Browser extension")
 
 
 def transfer_page():
@@ -31658,22 +32486,53 @@ def search_vault(plaintext, term):
     needle = (term or "").strip().lower()
     if not needle:
         return []
+    # Roadmap 27: the structured grammar (type:, tag:/#tag, folder:, is:, expires:)
+    # parsed in the trusted core. A plain query -- no operator -- takes the exact
+    # substring path it always did, so nothing about ordinary search changes; an
+    # advanced query filters each record through core.query_record_matches on a
+    # richer, still secret-free haystack (label, username, url, folder, notes and
+    # non-secret typed values, from which its #tags are read).
+    terms, filters = core.parse_search_query(term)
+    advanced = core.query_is_advanced(filters)
+    expiry_by_id = {}
+    if filters["expires"]:
+        try:
+            rotation = int(os.environ.get("SPM_ROTATION_DAYS", "0") or 0)
+        except ValueError:
+            rotation = 0
+        for entry in core.expiry_scan(plaintext, horizon_days=36500, rotation_days=rotation):
+            expiry_by_id[(entry["kind"], entry["type"], entry["id"])] = entry["days_left"]
     out = []
     _, entries = parse_entries(plaintext)
     for _, p in entries:
         url = p[6] if len(p) > 6 else ""
-        if needle in " ".join((p[0], p[1], p[2], url)).lower():
+        base = " ".join((p[0], p[1], p[2], url)).lower()
+        if not advanced:
+            keep = needle in base
+        else:
+            folder, _f, hidden, favorite, _t = core.decode_attrs(p[7] if len(p) > 7 else "")
+            hay = " ".join((base, folder, p[4] if len(p) > 4 else "")).lower()
+            keep = core.query_record_matches(
+                terms, filters, "password", folder, hidden, favorite,
+                expiry_by_id.get(("password", "password", p[0])), hay)
+        if keep:
             out.append(("nav.passwords", "Password", p[0], p[1], f"/view?id={urllib.parse.quote(p[0])}"))
-    for kind_key, kind, parser, href in (
-            ("nav.notes", "Note", parse_notes, "/notes-view?id="),
-            ("nav.passphrases", "Passphrase", parse_passphrases, "/passphrase-view?id="),
-            ("nav.backup_codes", "Backup codes", parse_backup_codes, "/backup-codes-view?id="),
-            ("nav.authenticators", "Authenticator", parse_authenticators, "/authenticator-view?id=")):
+    for kind_key, kind, kind_token, parser, href in (
+            ("nav.notes", "Note", "note", parse_notes, "/notes-view?id="),
+            ("nav.passphrases", "Passphrase", "passphrase", parse_passphrases, "/passphrase-view?id="),
+            ("nav.backup_codes", "Backup codes", "backup-codes", parse_backup_codes, "/backup-codes-view?id="),
+            ("nav.authenticators", "Authenticator", "authenticator", parse_authenticators, "/authenticator-view?id=")):
         _, items = parser(plaintext)
         for _, p in items:
             rid = p[1] if len(p) > 1 else ""
             label = p[2] if len(p) > 2 else ""
-            if needle in (rid + " " + label).lower():
+            base = (rid + " " + label).lower()
+            if not advanced:
+                keep = needle in base
+            else:
+                keep = core.query_record_matches(
+                    terms, filters, kind_token, "", False, False, None, base)
+            if keep:
                 out.append((kind_key, kind, rid, label, href + urllib.parse.quote(rid)))
     # Typed records. This page says it looks "across every record type", and
     # until they were listed here it did not -- a wifi record could not be
@@ -31689,12 +32548,19 @@ def search_vault(plaintext, term):
     # way it does on the security page, rather than making search the one
     # place a hidden name can be read.
     for _index, parsed in core.iter_records(plaintext):
-        record_type, rid, label, values, _created, folder, custom, hidden, _fav, _trash = parsed
+        record_type, rid, label, values, _created, folder, custom, hidden, favorite, _trash = parsed
         secrets_of = core.record_secret_fields(record_type)
         haystack = [rid, label, folder]
         haystack += [v for k, v in values.items() if k not in secrets_of]
         haystack += [n for n, _v in custom or []]
-        if needle in " ".join(haystack).lower():
+        base = " ".join(haystack).lower()
+        if not advanced:
+            keep = needle in base
+        else:
+            keep = core.query_record_matches(
+                terms, filters, record_type, folder, hidden, favorite,
+                expiry_by_id.get(("record", record_type, rid)), base)
+        if keep:
             # The kind column carries the type's own key, not a generic
             # "Records": every other page names the type, and a translated
             # locale is the one place where a wrong key is invisible in
@@ -32355,7 +33221,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         none to subvert.
         """
         if path not in ("/hardware/unlock", "/hardware/salt",
-                        "/hardware/enroll", "/hardware/forget"):
+                        "/hardware/enroll", "/hardware/forget", "/hardware/reset"):
             return False
         if not HARDWARE_ENABLED:
             self._send_json(400, {"error": "security keys are not configured"})
@@ -32440,6 +33306,52 @@ class Handler(http.server.BaseHTTPRequestHandler):
                              f"spm_session={token}; {self._session_cookie_attrs()}")
             self.end_headers()
             self.wfile.write(body)
+            return True
+
+        if path == "/hardware/reset":
+            # Roadmap 2: reset the master with a registered security key. Pre-auth
+            # like /hardware/unlock -- a lost master is exactly when this is
+            # reached, so it cannot require the master or a session -- and
+            # rate-limited by the same counter. The RSA recovery file is not in
+            # this path; the security key alone authorises a new master.
+            if self._login_lockout_remaining() > 0:
+                self._send_json(429, {"error": "too many attempts"})
+                return True
+            raw = self._read_body(limit=8192)
+            if raw is None:
+                return True
+            try:
+                payload = jsonlib.loads(raw.decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("not an object")
+            except (UnicodeDecodeError, ValueError):
+                self._send_json(400, {"error": "malformed request"})
+                return True
+            credential = str(payload.get("credential_id") or "")
+            secret = self._hardware_secret(payload)
+            new_master = str(payload.get("new_master") or "")
+            if len(new_master) < 12:
+                self._send_json(400, {"error": "the new master password must be at least 12 characters"})
+                return True
+            entry = next((item for item in core.read_hardware(VAULT_PATH)["keys"]
+                          if item.get("credential_id") == credential), None)
+
+            def reset_refuse():
+                self._record_login_failure()
+                core.record_event("hardware", "fail", "reason=reset-bad-secret", VAULT_PATH)
+                self._send_json(403, {"error": "that security key does not open this vault"})
+
+            if entry is None or not secret:
+                reset_refuse()
+                return True
+            try:
+                core.reset_master_with_hardware(VAULT_PATH, credential, secret, new_master)
+            except (core.VaultError, OSError):
+                reset_refuse()
+                return True
+            self._clear_login_failures()
+            core.record_event("hardware", "ok", "reason=master-reset", VAULT_PATH)
+            self._send_json(200, {"ok": True})
             return True
 
         _, session = self._session_record()
@@ -33261,6 +34173,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/generator":
             page = generator_page()
             self._send_html(200, page)
+            return
+
+        if path == "/extension":
+            self._send_html(200, extension_page())
             return
 
         query = urllib.parse.parse_qs(parsed.query)
@@ -36012,6 +36928,7 @@ interactive_menu() {
 			printf " 21) Restore vault dari bundle portable/save\n"
 			printf " 22) Pengaturan update otomatis [%s]\n" "$(autoupdate_mode)"
 			printf " 23) Riwayat vault (snapshot)\n"
+			printf " 24) Pasang ekstensi browser\n"
 			printf "  0) Keluar\n\n"
 			printf "Pilih menu: "
 		else
@@ -36046,6 +36963,7 @@ interactive_menu() {
 			printf " 21) Restore vault from bundle\n"
 			printf " 22) Auto-update settings [%s]\n" "$(autoupdate_mode)"
 			printf " 23) Vault history (snapshots)\n"
+			printf " 24) Browser extension setup\n"
 			printf "  0) Exit\n\n"
 			printf "Choose an option: "
 		fi
@@ -36185,6 +37103,7 @@ interactive_menu() {
 			21) clear; cmd_restore || true; pause_menu ;;
 			22) interactive_menu_autoupdate ;;
 			23) interactive_menu_history ;;
+			24) clear; interactive_menu_extension; pause_menu ;;
 			0)
 				if [ "$SPM_LANG" = "id" ]; then
 					printf "Keluar...\n"
@@ -36211,7 +37130,7 @@ main() {
 	# Native messaging is a machine-readable protocol: never emit language or
 	# consent prompts before its single JSON response.
 	if [ "${1:-}" = "bridge-get" ] || [ "${1:-}" = "bridge-list" ] \
-			|| [ "${1:-}" = "bridge-save" ]; then
+			|| [ "${1:-}" = "bridge-save" ] || [ "${1:-}" = "bridge-totp" ]; then
 		local bridge_cmd="$1"
 		shift
 		acquire_cli_vault_lock
@@ -36219,6 +37138,7 @@ main() {
 			bridge-get) cmd_bridge_get "$@" ;;
 			bridge-list) cmd_bridge_list "$@" ;;
 			bridge-save) cmd_bridge_save "$@" ;;
+			bridge-totp) cmd_bridge_totp "$@" ;;
 		esac
 		return
 	fi
@@ -36280,7 +37200,7 @@ main() {
 	local cmd="$1"
 	shift || true
 	case "$cmd" in
-		update|auto-update|generate|password-generate|web|web-mode|desktop|help|-h|--help|vault-profile|completion) ;;
+		update|auto-update|generate|password-generate|web|web-mode|desktop|help|-h|--help|vault-profile|completion|extension) ;;
 		*) acquire_cli_vault_lock ;;
 	esac
 
@@ -36328,6 +37248,7 @@ main() {
 		trash)            cmd_trash "$@" ;;
 		archive)          cmd_archive "$@" ;;
 		expiring)         cmd_expiring "$@" ;;
+		rotation)         cmd_rotation "$@" ;;
 		searches)         cmd_searches "$@" ;;
 		schema)           cmd_schema "$@" ;;
 		link)             cmd_link "$@" ;;
@@ -36358,6 +37279,7 @@ main() {
 		# interface now goes by, not a replacement verb.
 		web|web-mode|dashboard) start_web_mode "$@" ;;
 		desktop) cmd_desktop "$@" ;;
+		extension) cmd_extension "$@" ;;
 		scope)            cmd_scope "$@" ;;
 		run)              cmd_run "$@" ;;
 		env)              cmd_env "$@" ;;
