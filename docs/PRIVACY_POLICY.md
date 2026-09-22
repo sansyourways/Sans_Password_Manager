@@ -12,9 +12,11 @@ keys, usage analytics, crash reports, or device identifiers from the app.
 ## Local vault data
 
 Passwords, notes, authenticators, backup codes, attachments, passkey metadata,
-history, and configuration are processed on the user's device. Vault data is
-stored in user-controlled files and encrypted locally. Maintainers cannot
-access or recover a user's encrypted vault or master password.
+secret scopes, history, and configuration are processed on the user's device.
+The browser extension processes autofill, capture, generation and one-time-code
+fill locally, through a native-messaging host on the same device. Vault data is
+stored in user-controlled files and encrypted locally. Maintainers cannot access
+or recover a user's encrypted vault or master password.
 
 Users control their vault location, backups, portable archives, filesystem sync
 targets, and recovery material. Those files may contain sensitive information
