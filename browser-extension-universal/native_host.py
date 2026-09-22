@@ -106,6 +106,9 @@ ACTIONS = {
     # `warning` is the look-alike caution (roadmap 35): a page bound to no record
     # that resembles one the vault knows. Projected to two strings, never a secret.
     "list": ("matches", "warning"),
+    # A one-time code for an OTP field (roadmap 51): the six digits and how long
+    # they last, never the seed that made them.
+    "totp": ("code", "seconds"),
     "get": ("username", "password"),
     # Session state, and nothing that depends on the vault: whether a session
     # is open, the window it was opened with, and how long is left. A popup
@@ -256,6 +259,16 @@ def handle(message):
         if response.get("ok"):
             last_used = time.monotonic()
         return project("save", response)
+    if action == "totp":
+        # Roadmap 51: the current one-time code for a matching authenticator, so
+        # the extension can fill an OTP field. Open session only; the seed never
+        # leaves the host -- only the six digits it computes do.
+        if not is_unlocked():
+            return {"ok":False,"error":"SPM is locked or the session expired"}
+        host = valid_host(message.get("host"))
+        response = run_spm("bridge-totp", host, password=master)
+        if response.get("ok"): last_used = time.monotonic()
+        return project("totp", response)
     if action in ("list", "get"):
         if not is_unlocked():
             return {"ok":False,"error":"SPM is locked or the session expired"}

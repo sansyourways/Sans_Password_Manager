@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.6.0"
+VERSION="5.7.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -1759,19 +1759,27 @@ cmd_add() {
 }
 
 cmd_list() {
+	local as_json=0
+	[ "${1:-}" = "--json" ] && { as_json=1; shift; }
 	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
 
 	local tmp
 	tmp="$(make_tmp)"
 	decrypt_vault_to_file "$tmp"
 
-	print_vault_table "$tmp"
+	if [ "$as_json" -eq 1 ]; then
+		core list-json "$tmp"
+	else
+		print_vault_table "$tmp"
+	fi
 
 	secure_wipe "$tmp"
 }
 
 cmd_get() {
-	[ $# -ge 1 ] || die "Usage: $0 get <id | search-pattern>"
+	local as_json=0
+	[ "${1:-}" = "--json" ] && { as_json=1; shift; }
+	[ $# -ge 1 ] || die "Usage: $0 get [--json] <id | search-pattern>"
 
 	local query="$1"
 
@@ -1780,6 +1788,18 @@ cmd_get() {
 	local tmp
 	tmp="$(make_tmp)"
 	decrypt_vault_to_file "$tmp"
+
+	# --json answers for one record by id: the same reveal `get` gives a person,
+	# in a form a script can read. It never runs the clipboard countdown and
+	# never falls through to a human-readable search.
+	if [ "$as_json" -eq 1 ]; then
+		printf '%s' "$query" | grep -Eq '^[0-9]+$' \
+			|| { secure_wipe "$tmp"; die "get --json takes a numeric record id."; }
+		local status=0
+		core get-json "$tmp" "$query" || status=$?
+		secure_wipe "$tmp"
+		return "$status"
+	fi
 
 	if printf '%s' "$query" | grep -Eq '^[0-9]+$'; then
 		local line
@@ -2698,6 +2718,55 @@ for i in items:
 		*)
 			secure_wipe "$tmp"
 			printf 'Usage: %s archive <list|set|unset> [args]\n' "$0" >&2
+			exit 1 ;;
+	esac
+}
+
+# ----- per-record rotation windows (roadmap 29) ------------------------------
+# One vault has a default rotation window (SPM_ROTATION_DAYS); a single record can
+# override it -- a shorter window for a high-value login, or 'never' for a
+# credential that is not meant to rotate. The override lives in the record's
+# attributes and feeds the same aging check the security score reads.
+cmd_rotation() {
+	local op="${1:-list}"; [ $# -gt 0 ] && shift
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local tmp out; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	case "$op" in
+		list)
+			core rotation-list "$tmp" | python3 -c '
+import sys, json
+o = json.load(sys.stdin)["overrides"]
+if not o:
+    print("No per-record rotation windows. Every password uses the vault default.")
+    sys.exit(0)
+print("%-6s %-24s %s" % ("ID", "SERVICE", "ROTATION"))
+for i in o:
+    d = i["rotation_days"]
+    print("%-6s %-24s %s" % (i["id"], i["service"][:24],
+                             "never" if d == 0 else ("every %d days" % d)))
+'
+			secure_wipe "$tmp" ;;
+		set)
+			local id="${1:-}" days="${2:-}"
+			[ -n "$id" ] && [ -n "$days" ] || { secure_wipe "$tmp"; die "Usage: $0 rotation set <id> <days|never>"; }
+			[ "$days" = never ] && days=0
+			printf '%s' "$days" | grep -Eq '^[0-9]+$' || { secure_wipe "$tmp"; die "Days must be a number, or 'never'."; }
+			out="$(make_tmp)"
+			if core rotation-set "$tmp" "$id" "$days" >"$out" 2>/dev/null; then
+				mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+				[ "$days" = 0 ] && printf 'Record %s set to never rotate.\n' "$id" \
+					|| printf 'Record %s will rotate every %s days.\n' "$id" "$days"
+			else secure_wipe "$out"; secure_wipe "$tmp"; die "No password with id $id."; fi ;;
+		clear)
+			local id="${1:-}"; [ -n "$id" ] || { secure_wipe "$tmp"; die "Usage: $0 rotation clear <id>"; }
+			out="$(make_tmp)"
+			if core rotation-set "$tmp" "$id" default >"$out" 2>/dev/null; then
+				mv -f "$out" "$tmp"; encrypt_file_to_vault "$tmp"; secure_wipe "$tmp"
+				printf 'Record %s uses the vault default rotation window again.\n' "$id"
+			else secure_wipe "$out"; secure_wipe "$tmp"; die "No rotation override on id $id."; fi ;;
+		*)
+			secure_wipe "$tmp"
+			printf 'Usage: %s rotation <list|set|clear> [args]\n' "$0" >&2
 			exit 1 ;;
 	esac
 }
@@ -7148,7 +7217,18 @@ cmd_sync() {
 }
 
 cmd_emergency_create() {
-	local id="${1:-}" public_key="${2:-}" activation="${3:-}" output="${4:-}" tmp payload key_file kit_dir
+	local id="${1:-}" public_key="${2:-}" activation="${3:-}" output="" delay_hours="" tmp payload key_file kit_dir
+	shift 3 2>/dev/null || true
+	# Roadmap 5: an optional --delay-hours seals the payload behind a sequential
+	# time-lock, so an offline recipient cannot open it early however they set
+	# their clock. Any bare argument is the output path (backward compatible).
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--delay-hours) shift; delay_hours="${1:-}" ;;
+			*) [ -z "$output" ] && output="$1" || die "Unexpected argument: $1" ;;
+		esac
+		shift
+	done
 	printf '%s' "$id" | grep -Eq '^[0-9]+$' || die "Numeric password ID required."
 	[ -f "$public_key" ] || die "Recipient RSA public key not found."
 	[ -n "$activation" ] || die "Activation date required (YYYY-MM-DD)."
@@ -7156,6 +7236,7 @@ cmd_emergency_create() {
 import datetime,sys
 datetime.date.fromisoformat(sys.argv[1])
 PY
+	[ -z "$delay_hours" ] || printf '%s' "$delay_hours" | grep -Eq '^[0-9]+([.][0-9]+)?$' || die "--delay-hours takes a number."
 	[ -n "$output" ] || output="emergency-$id-$activation.tar.gz"; [ ! -e "$output" ] || die "Emergency archive already exists."
 	tmp="$(make_tmp)"; payload="$(make_tmp)"; key_file="$(make_tmp)"; kit_dir="$(mktemp -d "${TMPDIR:-/tmp}/spm-emergency.XXXXXX")"; chmod 700 "$kit_dir"
 	decrypt_vault_to_file "$tmp"
@@ -7168,17 +7249,44 @@ for line in open(sys.argv[1],encoding="utf-8"):
 else: raise SystemExit("record not found")
 PY
 	openssl rand -hex 32 > "$key_file"
-	openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -pass file:"$key_file" -in "$payload" -out "$kit_dir/payload.enc"
+	# The pass that encrypts the payload. Without a delay it is the RSA-wrapped
+	# key, exactly as before. With one, it is that key mixed with a token sealed
+	# behind the time-lock, so the payload cannot be decrypted until the recipient
+	# has done the work -- even though they hold the RSA key immediately.
+	local pass_file="$key_file" files_line="key.enc,payload.enc,payload.hmac" notice="Activation is advisory; offline recipients can decrypt early."
+	if [ -n "$delay_hours" ]; then
+		local token_file seconds; token_file="$(make_tmp)"; pass_file="$(make_tmp)"
+		openssl rand -hex 32 > "$token_file"
+		seconds="$(python3 -c 'import sys;print(float(sys.argv[1])*3600)' "$delay_hours")"
+		python3 "$(core_script_path)" timelock-seal "$seconds" < "$token_file" > "$kit_dir/timelock.json" \
+			|| { secure_wipe "$tmp"; secure_wipe "$payload"; secure_wipe "$key_file"; secure_wipe "$token_file"; rm -rf "$kit_dir"; die "Could not build the time-lock."; }
+		python3 -c 'import hashlib,sys
+k=open(sys.argv[1]).read().strip(); tok=open(sys.argv[2]).read().strip()
+open(sys.argv[3],"w").write(hashlib.sha256((k+tok).encode()).hexdigest())' "$key_file" "$token_file" "$pass_file"
+		secure_wipe "$token_file"
+		files_line="key.enc,payload.enc,payload.hmac,timelock.json"
+		notice="Payload is time-locked for ~$delay_hours h of sequential work; the recipient cannot open it earlier by changing a clock. Wall-clock depends on their hardware."
+	fi
+	openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -pass file:"$pass_file" -in "$payload" -out "$kit_dir/payload.enc"
 	openssl pkeyutl -encrypt -pubin -inkey "$public_key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$key_file" -out "$kit_dir/key.enc"
-	printf 'SPM emergency kit\nactivation=%s\ncreated=%s\nnotice=Activation is advisory; offline recipients can decrypt early.\nfiles=key.enc,payload.enc,payload.hmac\n' "$activation" "$(now_iso)" > "$kit_dir/manifest.txt"
+	printf 'SPM emergency kit\nactivation=%s\ncreated=%s\nnotice=%s\nfiles=%s\n' "$activation" "$(now_iso)" "$notice" "$files_line" > "$kit_dir/manifest.txt"
 	python3 - "$key_file" "$kit_dir/manifest.txt" "$kit_dir/payload.enc" "$kit_dir/payload.hmac" <<'PY'
 import hashlib,hmac,sys
 key=bytes.fromhex(open(sys.argv[1],encoding="ascii").read().strip())
 data=open(sys.argv[2],"rb").read()+open(sys.argv[3],"rb").read()
 open(sys.argv[4],"w",encoding="ascii").write(hmac.new(key,data,hashlib.sha256).hexdigest()+"\n")
 PY
-	chmod 600 "$kit_dir"/*; tar -czf "$output" -C "$kit_dir" manifest.txt key.enc payload.enc payload.hmac
-	chmod 600 "$output" 2>/dev/null || true; secure_wipe "$tmp"; secure_wipe "$payload"; secure_wipe "$key_file"; secure_wipe "$kit_dir/key.enc"; secure_wipe "$kit_dir/payload.enc"; secure_wipe "$kit_dir/payload.hmac"; secure_wipe "$kit_dir/manifest.txt"; rmdir "$kit_dir"
+	local tar_extra=""; [ -n "$delay_hours" ] && tar_extra="timelock.json"
+	chmod 600 "$kit_dir"/*
+	# shellcheck disable=SC2086
+	tar -czf "$output" -C "$kit_dir" manifest.txt key.enc payload.enc payload.hmac $tar_extra
+	chmod 600 "$output" 2>/dev/null || true
+	# An owner-side audit record of the kit (roadmap 5): what was shared, to when,
+	# and whether it is time-locked -- kept in the security-event log beside the
+	# vault, never in the kit.
+	core record-event "$VAULT_FILE" emergency ok "" 2>/dev/null || true
+	secure_wipe "$tmp"; secure_wipe "$payload"; secure_wipe "$key_file"; [ "$pass_file" != "$key_file" ] && secure_wipe "$pass_file"
+	secure_wipe "$kit_dir/key.enc"; secure_wipe "$kit_dir/payload.enc"; secure_wipe "$kit_dir/payload.hmac"; secure_wipe "$kit_dir/manifest.txt"; [ -f "$kit_dir/timelock.json" ] && secure_wipe "$kit_dir/timelock.json"; rmdir "$kit_dir"
 	printf '%s\n' "$output"
 }
 
@@ -7210,8 +7318,25 @@ expected=open(sys.argv[4],encoding="ascii").read().strip()
 if not hmac.compare_digest(hmac.new(key,data,hashlib.sha256).hexdigest(),expected):
  raise SystemExit("emergency kit authentication failed")
 PY
-	openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:"$plain_key" -in "$payload_file" -out "$output" || { secure_wipe "$output"; die "Emergency payload decryption failed."; }
-	chmod 600 "$output" 2>/dev/null || true; secure_wipe "$key_file"; secure_wipe "$plain_key"; secure_wipe "$payload_file"; secure_wipe "$hmac_file"; secure_wipe "$manifest_file"; printf '%s\n' "$output"
+	# The decryption pass. A time-locked kit (roadmap 5) carries timelock.json;
+	# solving it -- t sequential squarings, slow by design -- yields the token
+	# that, mixed with the RSA-recovered key, is the pass. A kit without one opens
+	# with the RSA key exactly as before.
+	local pass_file="$plain_key" tl_file
+	tl_file="$(make_tmp)"
+	if tar -xOf "$archive" timelock.json > "$tl_file" 2>/dev/null && [ -s "$tl_file" ]; then
+		local token_file; token_file="$(make_tmp)"; pass_file="$(make_tmp)"
+		printf 'Opening the time-lock (this is meant to be slow)...\n' >&2
+		python3 "$(core_script_path)" timelock-unseal "$tl_file" > "$token_file" \
+			|| { secure_wipe "$key_file"; secure_wipe "$plain_key"; secure_wipe "$payload_file"; secure_wipe "$hmac_file"; secure_wipe "$manifest_file"; secure_wipe "$tl_file"; secure_wipe "$token_file"; die "Could not solve the time-lock."; }
+		python3 -c 'import hashlib,sys
+k=open(sys.argv[1]).read().strip(); tok=open(sys.argv[2]).read().strip()
+open(sys.argv[3],"w").write(hashlib.sha256((k+tok).encode()).hexdigest())' "$plain_key" "$token_file" "$pass_file"
+		secure_wipe "$token_file"
+	fi
+	secure_wipe "$tl_file"
+	openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:"$pass_file" -in "$payload_file" -out "$output" || { secure_wipe "$output"; die "Emergency payload decryption failed."; }
+	chmod 600 "$output" 2>/dev/null || true; secure_wipe "$key_file"; secure_wipe "$plain_key"; [ "$pass_file" != "$plain_key" ] && secure_wipe "$pass_file"; secure_wipe "$payload_file"; secure_wipe "$hmac_file"; secure_wipe "$manifest_file"; printf '%s\n' "$output"
 }
 
 cmd_bridge_get() {
@@ -7242,6 +7367,19 @@ cmd_bridge_list() {
 	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
 	local status=0
 	python3 "$(core_script_path)" bridge-list "$tmp" "$host" "$scheme" || status=$?
+	secure_wipe "$tmp"; MASTER_PW=""
+	return "$status"
+}
+
+# The current one-time code for a page host (roadmap 51), for the extension to
+# fill an OTP field. Master on stdin; one JSON line out, never the secret seed.
+cmd_bridge_totp() {
+	local host="${1:-}" tmp
+	[ -n "$host" ] || die "Browser hostname required."
+	IFS= read -r MASTER_PW || die "Master password required on stdin."
+	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	local status=0
+	python3 "$(core_script_path)" bridge-totp "$tmp" "$host" || status=$?
 	secure_wipe "$tmp"; MASTER_PW=""
 	return "$status"
 }
@@ -7495,7 +7633,7 @@ sys.exit(3)
 # The verbs a fresh shell should complete. One maintained list; the regression
 # suite checks that every verb here is one `main` actually dispatches.
 spm_command_names() {
-	printf '%s' 'init add list get edit delete generate change-master secret-key portable save restore update auto-update shares doctor password-history export import backup-now backup-auto vault-profile sync record trash archive expiring searches schema link unlink share collection ssh gpg notes-add notes-list notes-view notes-delete passphrase-add passphrase-list passphrase-view passphrase-delete authenticator-add authenticator-list authenticator-view authenticator-edit authenticator-delete backup-codes-add backup-codes-list backup-codes-view backup-codes-delete attachment-add attachment-list attachment-extract attachment-delete emergency-create emergency-open events scope run env plugin phishing-check completion web dashboard desktop help'
+	printf '%s' 'init add list get edit delete generate change-master secret-key portable save restore update auto-update shares doctor password-history export import backup-now backup-auto vault-profile sync record trash archive expiring rotation searches schema link unlink share collection ssh gpg notes-add notes-list notes-view notes-delete passphrase-add passphrase-list passphrase-view passphrase-delete authenticator-add authenticator-list authenticator-view authenticator-edit authenticator-delete backup-codes-add backup-codes-list backup-codes-view backup-codes-delete attachment-add attachment-list attachment-extract attachment-delete emergency-create emergency-open events scope run env plugin phishing-check extension completion web dashboard desktop help'
 }
 
 cmd_completion() {
@@ -7515,6 +7653,8 @@ _spm_complete() {
 	case "${COMP_WORDS[1]}" in
 		scope)      sub="list show add remove" ;;
 		plugin)     sub="list info install remove run" ;;
+		rotation)   sub="list set clear" ;;
+		extension)  sub="setup host manual path" ;;
 		record)     sub="types add list view delete favorite lock unlock" ;;
 		ssh)        sub="import list show public load unload agent" ;;
 		gpg)        sub="import list show" ;;
@@ -7806,6 +7946,113 @@ _plugin_unset_secrets() {
 '
 	for n in $names; do [ -n "$n" ] && unset "$n" 2>/dev/null || true; done
 	IFS="$oldifs"
+}
+
+# ----- browser extension setup (manual + guided) ----------------------------
+# The repo has always shipped a guided setup.sh; this adds a first-class `spm
+# extension` entry point that also documents and supports the manual path, and
+# the interactive menu and the Dashboard both route here so installing the
+# extension is one obvious step wherever you are.
+_extension_source_dir() {
+	# Where the extension's files live, if they are reachable from here. A
+	# single installed spm.sh does not carry them, so this may be empty -- in
+	# which case the manual guidance still applies, it just cannot run setup.sh.
+	local self candidate
+	self="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
+	for candidate in \
+			"${SPM_EXTENSION_DIR:-}" \
+			"$(dirname "$self")/browser-extension-universal" \
+			"${XDG_DATA_HOME:-$HOME/.local/share}/spm/browser-extension-universal" \
+			"./browser-extension-universal"; do
+		[ -n "$candidate" ] && [ -f "$candidate/setup.sh" ] && { printf '%s' "$candidate"; return 0; }
+	done
+	return 1
+}
+
+_extension_manual() {
+	local dir="${1:-<the browser-extension-universal directory from the SPM release>}"
+	local host_dir="${XDG_DATA_HOME:-$HOME/.local/share}/spm/browser-extension"
+	cat <<EOF
+Manual browser-extension installation
+=====================================
+
+The extension is a local add-on plus a native-messaging host that speaks to this
+SPM install. Nothing leaves your machine. Two steps: load the extension, then
+register the host so the extension can reach SPM.
+
+Extension files: $dir
+
+1. Build the unpacked extension for your browser:
+     $dir/build.sh chromium     # Chrome/Chromium/Edge/Brave/Vivaldi/Opera
+     $dir/build.sh firefox      # Firefox
+   Each prints the directory it built.
+
+2. Load it, unpacked:
+   - Chromium family: open chrome://extensions, turn on "Developer mode",
+     click "Load unpacked", and choose the dist/chromium directory from step 1.
+   - Firefox: open about:debugging#/runtime/this-firefox, click "Load Temporary
+     Add-on", and choose manifest.firefox.json in the dist/firefox directory.
+
+3. Note the extension's ID (shown on the extensions page), then register the
+   native host so the extension can talk to SPM:
+     $dir/install-host.sh <extension-id>
+   This writes native_host.py and the messaging manifest under:
+     $host_dir
+
+4. Open the extension's popup, unlock with your master password, and autofill,
+   capture, generate and one-time-code fill all work on your login pages.
+
+To let SPM do steps 1-3 for you on Linux or macOS, run:  $0 extension setup
+EOF
+}
+
+cmd_extension() {
+	local op="${1:-}" dir
+	dir="$(_extension_source_dir || true)"
+	case "$op" in
+		setup)
+			shift
+			[ -n "$dir" ] || die "The extension files are not next to this install. Get them from the SPM release, or run: $0 extension manual"
+			exec "$dir/setup.sh" "$@" ;;
+		host)
+			shift
+			[ -n "$dir" ] || die "The extension files are not next to this install. See: $0 extension manual"
+			exec "$dir/install-host.sh" "$@" ;;
+		manual)
+			_extension_manual "${dir:-}" ;;
+		path)
+			if [ -n "$dir" ]; then printf 'Extension files: %s\n' "$dir"; else printf 'Extension files: not bundled with this install (see "%s extension manual").\n' "$0"; fi
+			printf 'Native host dir: %s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/spm/browser-extension" ;;
+		-h|--help|"")
+			printf 'Usage: %s extension <setup|host|manual|path>\n' "$0"
+			printf '  setup   run the guided installer (Linux/macOS): builds, registers the host, opens the browser\n'
+			printf '  host    register just the native-messaging host for an extension ID\n'
+			printf '  manual  print step-by-step manual installation instructions\n'
+			printf '  path    show where the extension files and native host live\n'
+			[ "$op" = "" ] && return 1 || return 0 ;;
+		*)
+			printf 'Usage: %s extension <setup|host|manual|path>\n' "$0" >&2; return 1 ;;
+	esac
+}
+
+# The interactive-menu entry (option 24): the manual steps always, and -- when
+# the extension files are reachable -- an offer to run the guided installer.
+interactive_menu_extension() {
+	local dir; dir="$(_extension_source_dir || true)"
+	if [ "$SPM_LANG" = "id" ]; then
+		printf "=== Pasang ekstensi browser ===\n\n"
+	else
+		printf "=== Browser extension setup ===\n\n"
+	fi
+	_extension_manual "${dir:-}"
+	if [ -n "$dir" ]; then
+		printf '\nRun the guided installer now (build, register the host, open the browser)? [y/N] '
+		local reply; read -r reply || reply=""
+		case "$reply" in
+			y|Y|yes|YES) "$dir/setup.sh" || printf 'Guided setup exited with an error; the manual steps above still work.\n' >&2 ;;
+			*) : ;;
+		esac
+	fi
 }
 
 cmd_help() {
@@ -9916,6 +10163,7 @@ interactive_menu() {
 			printf " 21) Restore vault dari bundle portable/save\n"
 			printf " 22) Pengaturan update otomatis [%s]\n" "$(autoupdate_mode)"
 			printf " 23) Riwayat vault (snapshot)\n"
+			printf " 24) Pasang ekstensi browser\n"
 			printf "  0) Keluar\n\n"
 			printf "Pilih menu: "
 		else
@@ -9950,6 +10198,7 @@ interactive_menu() {
 			printf " 21) Restore vault from bundle\n"
 			printf " 22) Auto-update settings [%s]\n" "$(autoupdate_mode)"
 			printf " 23) Vault history (snapshots)\n"
+			printf " 24) Browser extension setup\n"
 			printf "  0) Exit\n\n"
 			printf "Choose an option: "
 		fi
@@ -10089,6 +10338,7 @@ interactive_menu() {
 			21) clear; cmd_restore || true; pause_menu ;;
 			22) interactive_menu_autoupdate ;;
 			23) interactive_menu_history ;;
+			24) clear; interactive_menu_extension; pause_menu ;;
 			0)
 				if [ "$SPM_LANG" = "id" ]; then
 					printf "Keluar...\n"
@@ -10115,7 +10365,7 @@ main() {
 	# Native messaging is a machine-readable protocol: never emit language or
 	# consent prompts before its single JSON response.
 	if [ "${1:-}" = "bridge-get" ] || [ "${1:-}" = "bridge-list" ] \
-			|| [ "${1:-}" = "bridge-save" ]; then
+			|| [ "${1:-}" = "bridge-save" ] || [ "${1:-}" = "bridge-totp" ]; then
 		local bridge_cmd="$1"
 		shift
 		acquire_cli_vault_lock
@@ -10123,6 +10373,7 @@ main() {
 			bridge-get) cmd_bridge_get "$@" ;;
 			bridge-list) cmd_bridge_list "$@" ;;
 			bridge-save) cmd_bridge_save "$@" ;;
+			bridge-totp) cmd_bridge_totp "$@" ;;
 		esac
 		return
 	fi
@@ -10184,7 +10435,7 @@ main() {
 	local cmd="$1"
 	shift || true
 	case "$cmd" in
-		update|auto-update|generate|password-generate|web|web-mode|desktop|help|-h|--help|vault-profile|completion) ;;
+		update|auto-update|generate|password-generate|web|web-mode|desktop|help|-h|--help|vault-profile|completion|extension) ;;
 		*) acquire_cli_vault_lock ;;
 	esac
 
@@ -10232,6 +10483,7 @@ main() {
 		trash)            cmd_trash "$@" ;;
 		archive)          cmd_archive "$@" ;;
 		expiring)         cmd_expiring "$@" ;;
+		rotation)         cmd_rotation "$@" ;;
 		searches)         cmd_searches "$@" ;;
 		schema)           cmd_schema "$@" ;;
 		link)             cmd_link "$@" ;;
@@ -10262,6 +10514,7 @@ main() {
 		# interface now goes by, not a replacement verb.
 		web|web-mode|dashboard) start_web_mode "$@" ;;
 		desktop) cmd_desktop "$@" ;;
+		extension) cmd_extension "$@" ;;
 		scope)            cmd_scope "$@" ;;
 		run)              cmd_run "$@" ;;
 		env)              cmd_env "$@" ;;

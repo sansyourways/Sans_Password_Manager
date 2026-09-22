@@ -185,10 +185,23 @@ async function handleMenu(action, message, sender) {
     return {ok: Boolean(response?.ok)};
   }
 
+  if (action === "menu-totp") {
+    // Roadmap 51: the current one-time code for this page's host, so the content
+    // script can fill an OTP field. Host from the browser's view of the frame,
+    // never the message; unlocked session only; only the six digits come back.
+    const page = pageContext(sender);
+    if (!page || !unlocked) return {ok: false};
+    const response = await nativeRequest({action: "totp", host: page.host});
+    if (response?.error === LOCKED) unlocked = false;
+    return response?.ok
+      ? {ok: true, code: String(response.code || ""), seconds: Number(response.seconds) || 0}
+      : {ok: false};
+  }
+
   return {ok: false, error: REFUSED};
 }
 
-const MENU_ACTIONS = new Set(["menu-open", "menu-rows", "menu-choose", "menu-key", "menu-commit", "menu-close", "menu-save"]);
+const MENU_ACTIONS = new Set(["menu-open", "menu-rows", "menu-choose", "menu-key", "menu-commit", "menu-close", "menu-save", "menu-totp"]);
 
 api.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || message.channel !== "spm") return false;
