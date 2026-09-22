@@ -91,7 +91,9 @@ SPM may not be a good fit when you need:
 - Passphrases, backup codes, authenticator/TOTP entries, and biometric unlock where supported.
 - Security keys that open the vault outright: the vault key is sealed under the bytes a WebAuthn PRF credential derives, so there is no master password in that path at all.
 - Import and export across common and advanced text formats.
-- Browser extensions for Chromium and Firefox with a local native host: an in-field account picker rendered at the extension's own origin so the page cannot read your account list, save-on-submit password capture, on-device password generation, a session lock you set, and a non-blocking look-alike/phishing caution when a page resembles a site you use.
+- Browser extensions for Chromium and Firefox with a local native host: an in-field account picker rendered at the extension's own origin so the page cannot read your account list, save-on-submit password capture, on-device password generation, one-time-code fill for a matching authenticator, a session lock you set, and a non-blocking look-alike/phishing caution when a page resembles a site you use. Install it from the terminal (`spm extension setup`), the interactive menu, or the Dashboard.
+- Advanced Dashboard search with a `type:`/`tag:`/`folder:`/`is:`/`expires:` grammar, plus per-record password-rotation windows and machine-readable `--json` output for scripting.
+- Hardware-backed recovery: reset your master password with a registered security key, and time-locked emergency-access kits that an offline recipient cannot open before the intended delay.
 - Secret scopes and injection for automation: name a least-privilege set of records and hand them to a command with `spm run` (in its environment, never on disk or argv) or `spm env` — without exposing the rest of the vault.
 - A capability-sandboxed plugin SDK: extend SPM with separate programs that declare a `plugin.json` capability manifest, run only after explicit consent, and never see the vault key.
 - A native desktop launcher (`spm desktop`) that opens the Dashboard in your browser, plus generated Linux/macOS/Windows launchers — no bundled browser engine.
@@ -144,7 +146,10 @@ Paths can differ when you select another vault or override XDG directories. Trea
 | `spm init` | Initialize a vault and recovery material |
 | `spm add` | Add an entry |
 | `spm list` | List entries |
-| `spm get <id>` | Retrieve an entry |
+| `spm get <id>` | Retrieve an entry (`--json` for scripts) |
+| `spm list --json` | List entries as JSON (secret-free) |
+| `spm rotation set <id> <days>` | Give one record its own password-rotation window |
+| `spm extension setup` | Install the browser extension (guided or `manual`) |
 | `spm scope add <name> --secret VAR=<id>` | Define a least-privilege secret scope |
 | `spm run --scope <name> -- <cmd>` | Run a command with a scope's secrets in its environment |
 | `spm plugin run <name>` | Run a capability-sandboxed plugin |

@@ -7,7 +7,44 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
-## [5.6.0] - 2026-09-20
+## [5.7.0] - 2026-09-22
+
+The six partial roadmap items completed, plus first-class browser-extension
+installation. No vault format change (format 6, additive only).
+
+### Added
+- **Machine-readable CLI output (roadmap 47).** `spm list --json` and `spm get
+  <id> --json` emit the same data as the human commands in a form scripts can
+  read — `list` secret-free, `get` including the password it already shows.
+- **Per-record password expiration (roadmap 29).** `spm rotation set <id>
+  <days|never>`, `spm rotation clear <id>` and `spm rotation list` give a single
+  record its own rotation window (or opt it out), overriding the vault-wide
+  default; the security score reads it.
+- **Advanced search grammar (roadmap 27).** The Dashboard search box now
+  understands `type:`, `tag:`/`#tag`, `folder:`, `is:favorite`/`is:hidden` and
+  `expires:<30d`/`expires:overdue`, combinable with free text. A plain query
+  behaves exactly as before.
+- **Enhanced form matching (roadmap 51).** The extension recognises username and
+  email fields by their hints (not only a sibling password box), new and confirm
+  password fields, and one-time-code fields — and can **fill a TOTP code** for a
+  matching authenticator through a new secret-free `totp` bridge action.
+- **Hardware-backed recovery (roadmap 2).** Reset the master password with a
+  registered security key — the same WebAuthn PRF path that opens the vault since
+  4.8.0 — with no RSA recovery file in the path. `spm` exposes the core
+  primitive; the Dashboard unlock page offers "Reset master with a security key".
+- **Emergency-access time-lock (roadmap 5).** `spm emergency-create … --delay-hours
+  N` seals the payload behind a sequential-squaring time-lock puzzle, so an
+  offline recipient cannot open it early however they set their clock; kit
+  creation is recorded in the security-event log. Kits without a delay are
+  unchanged.
+- **Browser-extension installation, first-class.** `spm extension
+  <setup|host|manual|path>` documents and runs both the guided and the manual
+  install; the interactive menu gains a "Browser extension setup" entry; and the
+  Dashboard gains a **Browser extension** page with the same steps.
+
+### Changed
+- README refreshed to the new version and features; `rotation`, `run`, `env`,
+  `plugin`, `extension` and the JSON flags are in the command reference.
 
 Look-alike warnings, scoped secret access and injection, shell completion, and a
 capability-sandboxed plugin SDK. No vault format change (format 6, additive only).

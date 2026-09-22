@@ -3543,6 +3543,91 @@ def t_secret_scopes_round_trip_and_resolve():
     eq([s["name"] for s in core.secret_scopes(pruned)], ["other"])
 
 
+def t_per_record_rotation_overrides_the_default():
+    # Roadmap 29. A record sets its own window (or opts out) and the aging check
+    # honours it over the vault default.
+    plain = ("1\tOld\ta\tp\tn\t2020-01-01T00:00:00Z\thttps://x\t\n"
+             "2\tAlso\tb\tp\t\t2020-01-01T00:00:00Z\thttps://y\t\n")
+    one, changed = core.set_rotation(plain, "1", 0)      # never rotate
+    assert changed
+    two, changed = core.set_rotation(one, "2", 30)       # 30-day window
+    assert changed
+    eq(core.attrs_rotation_days(two.splitlines()[0].split("\t")[7]), 0)
+    over = {o["id"]: o["rotation_days"] for o in core.rotation_overrides(two)}
+    eq(over, {"1": 0, "2": 30})
+    # With a 365-day default, record 1 (never) is spared and record 2 (30d) is old.
+    eq(core.security_report(two, rotation_days=365)["old"], ["2"])
+    cleared, changed = core.set_rotation(two, "2", None)  # back to default
+    assert changed
+    eq([o["id"] for o in core.rotation_overrides(cleared)], ["1"])
+    raises(core.VaultError, lambda: core.encode_attrs(rotation_days=-1))
+
+
+def t_search_query_grammar_parses_and_matches():
+    # Roadmap 27. The structured operators and the free-text terms.
+    terms, filters = core.parse_search_query("type:ssh-key #work folder:Personal is:favorite prod")
+    eq(terms, ["prod"])
+    eq(filters["type"], "ssh-key")
+    eq(filters["tags"], ["work"])
+    eq(filters["folder"], "personal")
+    eq(filters["is"], ["favorite"])
+    assert core.query_is_advanced(filters)
+    assert not core.query_is_advanced(core.parse_search_query("just text")[1])
+    # A record that satisfies every clause matches; one that fails any does not.
+    t, f = core.parse_search_query("type:password is:favorite #work github")
+    assert core.query_record_matches(t, f, "password", "work", False, True, None,
+                                     "github login #work user")
+    assert not core.query_record_matches(t, f, "note", "work", False, True, None,
+                                         "github #work")
+    t, f = core.parse_search_query("expires:<30d")
+    assert core.query_record_matches(t, f, "api-token", "", False, False, 10, "tok")
+    assert not core.query_record_matches(t, f, "api-token", "", False, False, 90, "tok")
+    assert not core.query_record_matches(t, f, "note", "", False, False, None, "n")
+
+
+def t_totp_and_bridge_match_by_host():
+    # Roadmap 51. The code is six digits; the bridge matches one authenticator to
+    # a host, and refuses zero or several.
+    code = core.totp_code("JBSWY3DPEHPK3PXP", 30, "sha1")
+    assert len(code) == 6 and code.isdigit()
+    plain = "AUTH\t1\tGitHub\tJBSWY3DPEHPK3PXP\t30\t2025-01-01T00:00:00Z\tsha1\n"
+    hit = core.bridge_totp(plain, "github.com")
+    assert hit and len(hit["code"]) == 6 and 0 < hit["seconds"] <= 30
+    eq(core.bridge_totp(plain, "example.org"), None)
+    two = plain + "AUTH\t2\tGitHub backup\tKBSWY3DPEHPK3PXP\t30\t2025-01-01T00:00:00Z\tsha1\n"
+    eq(core.bridge_totp(two, "github.com"), None)   # ambiguous
+
+
+def t_hardware_reset_rewraps_under_a_new_master():
+    # Roadmap 2. A registered security key resets the master; the old master, a
+    # wrong PRF secret, an unknown credential and an empty new master are refused.
+    path = fresh("hwreset")
+    key = core.write_vault(path, MASTER, sample(), core.new_vault_key())
+    secret = os.urandom(core.HARDWARE_SECRET_BYTES)
+    core.add_hardware_key(path, "cred-1", core.hardware_wrap_key(secret, key),
+                          "localhost", "Key", "2024-01-01T00:00:00Z")
+    core.reset_master_with_hardware(path, "cred-1", secret, "a-brand-new-master")
+    plaintext, _ = core.read_vault(path, "a-brand-new-master")
+    assert "CoreSecret42" in plaintext
+    raises(core.VaultError, lambda: core.read_vault(path, MASTER))
+    raises(core.VaultError,
+           lambda: core.reset_master_with_hardware(path, "cred-1", os.urandom(core.HARDWARE_SECRET_BYTES), "x"))
+    raises(core.VaultError,
+           lambda: core.reset_master_with_hardware(path, "nope", secret, "x"))
+    raises(core.VaultError,
+           lambda: core.reset_master_with_hardware(path, "cred-1", secret, ""))
+
+
+def t_timelock_seals_cheaply_and_opens_by_work():
+    # Roadmap 5. The round trip recovers the secret; a tiny delay keeps the test
+    # fast, and the puzzle is the same shape a real (hours-long) one is.
+    secret = os.urandom(32)
+    puzzle = core.timelock_seal(secret, 0.2)
+    assert set(puzzle) == {"n", "a", "t", "sealed"} and puzzle["t"] >= 1
+    eq(core.timelock_unseal(puzzle), secret)
+    raises(core.VaultError, lambda: core.timelock_seal(b"x" * 33, 0.1))
+
+
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):
         check(name[2:], fn)

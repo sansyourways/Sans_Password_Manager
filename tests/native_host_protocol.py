@@ -15,6 +15,7 @@ case "$1" in
    esac ;;
  bridge-get) printf '{"ok":true,"username":"alice","password":"test-secret"}\\n' ;;
  bridge-save) read newpw; printf '{"ok":true}\\n' ;;
+ bridge-totp) printf '{"ok":true,"code":"123456","seconds":12,"secret":"JBSWY3DPEHPK3PXP"}\\n' ;;
 esac
 """, encoding="utf-8")
     fake.chmod(0o700)
@@ -57,6 +58,11 @@ esac
     # A save with no password is refused before anything is written.
     assert request({"id":"5t","action":"save","host":"example.invalid",
                     "username":"alice","password":""})["ok"] is False
+    # Roadmap 51: a one-time code for an OTP field, from an open session only,
+    # projected to the digits and their lifetime -- never the seed.
+    otp = request({"id":"5u","action":"totp","host":"example.invalid"})
+    assert otp["ok"] is True and otp["code"] == "123456" and otp["seconds"] == 12, otp
+    assert "JBSWY3DPEHPK3PXP" not in json.dumps(otp), otp
     # Roadmap 38: the extension's "Lock SPM" control. A lock from an open session
     # must clear it outright -- status locked, nothing left to expire.
     assert request({"id":"6","action":"lock"})["ok"] is True
@@ -92,6 +98,8 @@ esac
     # A locked session cannot write either.
     assert request({"id":"19s","action":"save","host":"example.invalid",
                     "username":"alice","password":"nope"})["ok"] is False
+    # ...and a locked session yields no one-time code either.
+    assert request({"id":"19t","action":"totp","host":"example.invalid"})["ok"] is False
     process.stdin.close(); process.wait(timeout=5)
     assert process.returncode == 0
 print("Native host regression: unlock, secret-free list, get, lock, "

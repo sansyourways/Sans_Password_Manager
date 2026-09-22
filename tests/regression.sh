@@ -1427,6 +1427,39 @@ if ( cmd_plugin_install "$TEST_ROOT/badplug" ) >/dev/null 2>&1; then
 fi
 printf '  scopes/injection/completion/plugins: phishing caution, scoped run/env, completion verbs, and a capability-sandboxed plugin all wired\n'
 
+# 5.7.0: the six partials completed, plus first-class extension install.
+# -- 47: list --json is secret-free; get --json includes the password by id.
+cmd_list --json | python3 -c 'import sys,json
+d=json.load(sys.stdin)["passwords"]
+assert d and "password" not in d[0], "list --json leaked a field"
+assert d[0]["service"], "list --json missing service"' \
+	|| { printf 'list --json is wrong\n' >&2; exit 1; }
+cmd_get --json 1 | python3 -c 'import sys,json
+d=json.load(sys.stdin); assert d["password"]=="DemoSecret42", d' \
+	|| { printf 'get --json did not return the record\n' >&2; exit 1; }
+# -- 29: a per-record rotation window round-trips through the CLI.
+cmd_rotation set 1 7 >/dev/null || { printf 'rotation set failed\n' >&2; exit 1; }
+cmd_rotation list | grep -q 'every 7 days' || { printf 'rotation list wrong\n' >&2; exit 1; }
+cmd_rotation clear 1 >/dev/null || { printf 'rotation clear failed\n' >&2; exit 1; }
+cmd_rotation list | grep -q 'Every 7 days' && { printf 'rotation clear did not clear\n' >&2; exit 1; } || true
+# -- extension install seam works without a vault, and names the host dir.
+cmd_extension manual | grep -q 'Manual browser-extension installation' \
+	|| { printf 'extension manual missing\n' >&2; exit 1; }
+cmd_extension path | grep -q 'browser-extension' \
+	|| { printf 'extension path missing\n' >&2; exit 1; }
+# -- 5: an emergency kit built with a tiny --delay-hours carries a time-lock and
+#    still opens (the payload behind sequential work); one without is unchanged.
+em_dir="$TEST_ROOT/emergency"; mkdir -p "$em_dir"
+openssl genrsa -out "$em_dir/recip.pem" 2048 >/dev/null 2>&1
+openssl rsa -in "$em_dir/recip.pem" -pubout -out "$em_dir/recip.pub" >/dev/null 2>&1
+em_kit="$(cmd_emergency_create 1 "$em_dir/recip.pub" 2020-01-01 "$em_dir/kit.tgz" --delay-hours 0.0002)"
+tar -tzf "$em_kit" | grep -q timelock.json || { printf 'time-locked kit has no timelock.json\n' >&2; exit 1; }
+( cmd_emergency_open "$em_kit" "$em_dir/recip.pem" "$em_dir/out.json" >/dev/null 2>&1 )
+grep -q 'DemoSecret42' "$em_dir/out.json" || { printf 'time-locked kit did not open\n' >&2; exit 1; }
+core events "$VAULT_FILE" 40 2>/dev/null | grep -q '"kind": "emergency"' \
+	|| { printf 'emergency kit creation was not audited\n' >&2; exit 1; }
+printf '  partials/extension: list/get --json, per-record rotation, extension setup seam, and a time-locked audited emergency kit all wired\n'
+
 # Global search covers every record type by label, and must NOT search secret
 # fields -- a query that could match a password turns the result count into a
 # confirmation oracle.
@@ -2379,12 +2412,20 @@ if project("get", {"ok": False, "error": "record not found"})["error"] != "recor
 if project("some-new-action", {"ok": True, "password": "p"}) != {"ok": True}:
     sys.exit("an undeclared action returned fields")
 
-if set(actions) != {"unlock", "lock", "list", "get", "status", "save"}:
+if set(actions) != {"unlock", "lock", "list", "get", "status", "save", "totp"}:
     sys.exit("the action table changed without this test changing: %r" % sorted(actions))
 # save (roadmap 39) is the one write, and it must return only a verdict -- never
 # the credential it stored.
 if project("save", {"ok": True, "password": "p"}) != {"ok": True}:
     sys.exit("the save action can expose fields")
+# totp (roadmap 51) returns the six digits and how long they last -- never the
+# seed that made them, however much the layer below hands over.
+one_time = project("totp", {"ok": True, "code": "123456", "seconds": 12,
+                            "secret": "JBSWY3DPEHPK3PXP", "password": "p"})
+if set(one_time) != {"ok", "code", "seconds"}:
+    sys.exit("a totp response carried %r" % sorted(set(one_time) - {"ok", "code", "seconds"}))
+if "JBSWY3DPEHPK3PXP" in repr(one_time):
+    sys.exit("a totp seed crossed the boundary")
 
 # Every refusal the core's matcher can produce must be declared here. A
 # refusal the host has not been told about is projected onto the generic one,
@@ -3950,7 +3991,8 @@ done
 # leak or a bug, and both matter.
 PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$events_log" <<'PYEVENTS'
 import re, sys
-KINDS = {"unlock", "write", "rewrap", "recover", "restore", "archive"}
+KINDS = {"unlock", "write", "rewrap", "recover", "restore", "archive",
+         "hardware", "secret-key", "sync-serve", "emergency"}
 OUTCOMES = {"ok", "fail"}
 KEYS = {"records", "format", "scope", "reason"}
 seen = set()
