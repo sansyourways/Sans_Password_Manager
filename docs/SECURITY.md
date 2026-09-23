@@ -1,6 +1,6 @@
 # Security Policy for Sans Password Manager (SPM)
-Version 2.3 — © 2025–2026 Sansyourways
-Last Updated: August 2026
+Version 2.4 — © 2025–2026 Sansyourways
+Last Updated: September 2026
 
 SPM (Sans Password Manager) is a privacy-focused, offline, fully client-side encrypted application.
 This document contains the security policy for vulnerability reporting, responsible disclosure, and usage expectations.
@@ -16,6 +16,14 @@ SPM is designed around the following core principles:
   authenticated with HMAC-SHA256 (encrypt-then-MAC). The master password is
   stretched with scrypt (n=65536, r=8, p=1); the vault key it unwraps is 256
   random bits and is not stretched, because it has nothing to stretch.
+  A vault may instead be sealed with **Argon2id** (m=65536 KiB, t=3, p=1) where
+  a backend is present that keeps the master password off the argument vector —
+  the argon2 reference CLI (password on stdin) or the argon2-cffi module (in
+  process); this is opt-in per vault (`spm kdf argon2id`) and recorded in the
+  vault header, and scrypt remains the default because it is reachable on every
+  platform SPM supports. SPM never puts the password on argv to derive a key
+  (openssl's `kdf` app is not used for that reason), and never silently reseals
+  an Argon2id vault under scrypt.
   Vaults written before 4.0.0 are GnuPG symmetric AES-256 and are still read;
   they upgrade in place on their next write, keeping the same vault key.
 - **User-controlled keys** — the user is the sole owner of all keys and passwords.

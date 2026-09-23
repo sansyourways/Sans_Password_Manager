@@ -429,13 +429,15 @@ def t_command_interface_answers_for_both_backends():
     modern = fresh("cli-backends")
     core.write_vault(modern, MASTER, sample(), core.new_vault_key())
     run(["is-container", modern], "")
+    # Fields are appended, never inserted: the shell cuts fields one to five
+    # (backend, KDF, and its three cost parameters) out of this line, then sk
+    # (field 6) and the Argon2id-availability field (field 7). A reader written
+    # before either field existed keeps getting the same answers for one to
+    # five. A scrypt vault reports availability "yes" -- it needs no backend.
     eq(run(["seal-info", modern], "").split("\t"),
        ["openssl", core.KDF_NAME, str(core.KDF_N), str(core.KDF_R),
-        str(core.KDF_P), "0\n"])
+        str(core.KDF_P), "0", "yes\n"])
 
-    # The Secret Key field is appended, never inserted: the shell cuts fields
-    # one to five out of this line, and a reader written before the field
-    # existed has to keep getting the same answers.
     bound = fresh("cli-backends-sk")
     core.write_vault(bound, MASTER, sample(), core.new_vault_key())
     secret = core.new_secret_key()
@@ -443,7 +445,7 @@ def t_command_interface_answers_for_both_backends():
                          secret=secret)
     eq(run(["seal-info", bound], "").split("\t"),
        ["openssl", core.KDF_NAME, str(core.KDF_N), str(core.KDF_R),
-        str(core.KDF_P), "1\n"])
+        str(core.KDF_P), "1", "yes\n"])
 
     legacy = fresh("cli-backends-gpg")
     key = core.new_vault_key()
@@ -3626,6 +3628,77 @@ def t_timelock_seals_cheaply_and_opens_by_work():
     assert set(puzzle) == {"n", "a", "t", "sealed"} and puzzle["t"] >= 1
     eq(core.timelock_unseal(puzzle), secret)
     raises(core.VaultError, lambda: core.timelock_seal(b"x" * 33, 0.1))
+
+
+def t_argon2id_roundtrips_where_a_backend_is_present():
+    # Roadmap 3. Argon2id is capability-gated: where a backend exists, the raw
+    # derivation matches the published PHC test vector and a vault can be moved
+    # to Argon2id and back with its key and contents intact. Where none exists
+    # this is a no-op, which IS the feature -- Argon2id is only ever used where
+    # it can be derived without putting the password on argv.
+    if not core.argon2id_available():
+        return
+    kat = bytes.fromhex(
+        "09316115d5cf24ed5a15a31a3ba326e5cf32edc24702987c02b6566f61913cf7")
+    eq(core._argon2id_raw(b"password", b"somesalt", 1 << 16, 2, 1, 32), kat)
+    path = fresh("argon2")
+    key = core.write_vault(path, MASTER, sample(), core.new_vault_key())
+    name, changed = core.set_vault_kdf(path, MASTER, core.KDF_ARGON2_NAME)
+    assert changed and name == core.KDF_ARGON2_NAME
+    eq(core.current_vault_kdf_name(path), core.KDF_ARGON2_NAME)
+    _, kdf = core.vault_seal_summary(path)
+    eq((kdf["name"], kdf["m"], kdf["t"], kdf["p"]),
+       (core.KDF_ARGON2_NAME, core.KDF_ARGON2_M, core.KDF_ARGON2_T, core.KDF_ARGON2_P))
+    plaintext, back = core.read_vault(path, MASTER)
+    assert "CoreSecret42" in plaintext and back == key
+    raises(core.VaultError, lambda: core.read_vault(path, OTHER))
+    # A no-op switch reports unchanged, and moving back to scrypt keeps the key.
+    _, again = core.set_vault_kdf(path, MASTER, core.KDF_ARGON2_NAME)
+    assert not again
+    core.set_vault_kdf(path, MASTER, core.KDF_NAME)
+    eq(core.current_vault_kdf_name(path), core.KDF_NAME)
+    plaintext2, back2 = core.read_vault(path, MASTER)
+    assert "CoreSecret42" in plaintext2 and back2 == key
+
+
+def t_argon2id_header_parses_and_refuses_without_a_backend():
+    # The Argon2id header round-trips through the parser regardless of backend
+    # (so `doctor` can report such a vault), and with no backend it refuses to
+    # open with a message that names the fix -- never a wrong-password error,
+    # which would send the owner hunting for a mistake that is not there. The
+    # backend is forced off so this path is deterministic even where argon2 is
+    # installed.
+    saved = core._ARGON2_BACKEND
+    try:
+        core._ARGON2_BACKEND = ""      # probe result "none", cached
+        assert not core.argon2id_available()
+        salt = core.argon2id_salt()
+        eq(len(salt), core.KDF_SALT_BYTES * 2)      # hex, argv-safe
+        container = core.build_container_aead(salt, b"ENV", b"CID",
+                                              name=core.KDF_ARGON2_NAME)
+        kdf, envelope, cipher = core.parse_container_aead(container)
+        eq(kdf["name"], core.KDF_ARGON2_NAME)
+        eq((kdf["m"], kdf["t"], kdf["p"]),
+           (core.KDF_ARGON2_M, core.KDF_ARGON2_T, core.KDF_ARGON2_P))
+        try:
+            core.unwrap_key_aead(kdf, envelope, "pw")
+            raise AssertionError("expected a no-backend refusal")
+        except core.VaultSecretError:
+            raise AssertionError("no-backend refusal was masked as wrong secret")
+        except core.VaultError as exc:
+            assert "argon2" in str(exc), exc
+        # Switching a real vault to Argon2id is refused up front too, so no vault
+        # this machine cannot reopen is ever written.
+        path = fresh("argon2-none")
+        core.write_vault(path, MASTER, sample(), core.new_vault_key())
+        raises(core.VaultError,
+               lambda: core.set_vault_kdf(path, MASTER, core.KDF_ARGON2_NAME))
+        # A scrypt vault is entirely unaffected by the missing backend.
+        eq(core.current_vault_kdf_name(path), core.KDF_NAME)
+        plaintext, _ = core.read_vault(path, MASTER)
+        assert "CoreSecret42" in plaintext
+    finally:
+        core._ARGON2_BACKEND = saved
 
 
 for name, fn in sorted(globals().items()):

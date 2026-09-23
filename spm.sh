@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.7.2"
+VERSION="5.8.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -1035,6 +1035,31 @@ KDF_DKLEN = 32
 # stated rather than inherited: 128 * n * r is the working set.
 KDF_MAXMEM = 128 * KDF_N * KDF_R * 2
 
+# Argon2id is the memory-hard KDF the roadmap named as scrypt's eventual
+# successor. It ships capability-gated: the line that records the KDF by name
+# and parameter (see build_container_aead) was put there for exactly this, so a
+# vault sealed with Argon2id is a value the reader dispatches on, not another
+# format version. scrypt stays the portable default; Argon2id is used only where
+# a backend is present that keeps the master password OFF the argument vector --
+# the argon2 reference CLI, which reads the password on stdin, or the argon2-cffi
+# module, which never leaves the process. openssl's `kdf` app is excluded on
+# purpose: it accepts the password only as a `-kdfopt pass:` argv value that `ps`
+# can read, and no KDF path in SPM has ever put a password there. Where no safe
+# backend exists the vault stays on scrypt, and an Argon2id vault carried to such
+# a machine refuses to open with a message that says why rather than reporting a
+# wrong password.
+#
+# m is kibibytes -- argon2-cffi's memory_cost and 2**(argon2 CLI's -m) -- kept a
+# power of two so both backends express it identically. 64 MiB / t=3 / p=1
+# mirrors the scrypt choice: costly to an offline guesser, still openable on a
+# phone under Termux. The salt is argv-safe hex rather than raw bytes, because
+# the reference CLI takes the salt as a command-line argument and a raw salt can
+# hold a NUL that argv cannot carry; both backends receive the identical bytes.
+KDF_ARGON2_NAME = "argon2id"
+KDF_ARGON2_M = 1 << 16      # KiB -> 64 MiB
+KDF_ARGON2_T = 3
+KDF_ARGON2_P = 1
+
 # ----- hardware-held wrapping ------------------------------------------------
 # A security key can derive a stable secret from a credential and a salt --
 # WebAuthn calls it the PRF extension, CTAP2 calls it hmac-secret. That secret
@@ -1195,6 +1220,163 @@ def derive_kek(master, salt, n=KDF_N, r=KDF_R, p=KDF_P, secret=""):
     return base64.b64encode(raw).decode("ascii")
 
 
+# ----- Argon2id (capability-gated) -------------------------------------------
+
+_ARGON2_BACKEND = None  # "" once probed and none found; a name once found
+
+
+def argon2id_backend(refresh=False):
+    """Name of an Argon2id backend that keeps the password off argv, or None.
+
+    Probed once and cached. The in-process argon2-cffi module is preferred over
+    the argon2 CLI only because it saves a fork, not for any security
+    difference: both take the password without argv. `refresh=True` re-probes,
+    which the tests use after putting a fake CLI on PATH.
+    """
+    global _ARGON2_BACKEND
+    if _ARGON2_BACKEND is not None and not refresh:
+        return _ARGON2_BACKEND or None
+    found = ""
+    try:
+        import argon2 as _argon2  # noqa: F401
+        if hasattr(_argon2, "low_level"):
+            found = "argon2-cffi"
+    except Exception:
+        pass
+    if not found and shutil.which("argon2"):
+        found = "argon2-cli"
+    _ARGON2_BACKEND = found
+    return found or None
+
+
+def argon2id_available():
+    """True where a vault may be sealed with, or opened from, Argon2id."""
+    return argon2id_backend() is not None
+
+
+def argon2id_salt():
+    """An argv-safe Argon2id salt: 16 random bytes as 32 hex ASCII characters.
+
+    Hex rather than raw bytes because the argon2 CLI takes the salt as an argv
+    argument, which cannot carry a NUL; the entropy (128 bits) is unchanged and
+    both backends receive these same 32 bytes.
+    """
+    return os.urandom(KDF_SALT_BYTES).hex().encode("ascii")
+
+
+def _argon2id_raw(pw, salt, m, t, p, dklen):
+    """dklen raw Argon2id bytes, via whichever safe backend is present.
+
+    Raises VaultError when no backend is available, so the caller can report
+    that rather than deriving a wrong key.
+    """
+    if m <= 0 or (m & (m - 1)):
+        raise VaultError("Argon2id memory must be a power of two in KiB")
+    backend = argon2id_backend()
+    if backend == "argon2-cffi":
+        from argon2.low_level import hash_secret_raw, Type
+        return hash_secret_raw(pw, salt, time_cost=t, memory_cost=m,
+                               parallelism=p, hash_len=dklen, type=Type.ID)
+    if backend == "argon2-cli":
+        # -m is the log2 of the memory in KiB; -r prints the raw hash as hex;
+        # the password arrives on stdin, the (argv-safe) salt as an argument.
+        exponent = m.bit_length() - 1
+        try:
+            out = subprocess.run(
+                ["argon2", salt.decode("ascii"), "-id",
+                 "-t", str(t), "-m", str(exponent), "-p", str(p),
+                 "-l", str(dklen), "-r"],
+                input=pw, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                timeout=120, check=True).stdout
+        except UnicodeDecodeError as exc:
+            raise VaultError("Argon2id salt must be ASCII") from exc
+        except (subprocess.SubprocessError, OSError) as exc:
+            raise VaultError("the argon2 CLI failed to derive the key") from exc
+        try:
+            raw = bytes.fromhex(out.decode("ascii").strip())
+        except ValueError as exc:
+            raise VaultError("the argon2 CLI returned unreadable output") from exc
+        if len(raw) != dklen:
+            raise VaultError("the argon2 CLI returned the wrong key length")
+        return raw
+    raise VaultError(
+        "this vault is sealed with Argon2id, which needs the argon2 CLI or the "
+        "argon2-cffi module, and this system has neither; install one (for "
+        "example `apt install argon2` or `pip install argon2-cffi`) or open the "
+        "vault on a machine that has it")
+
+
+def derive_kek_argon2id(master, salt, m=KDF_ARGON2_M, t=KDF_ARGON2_T,
+                        p=KDF_ARGON2_P, secret=""):
+    """The Argon2id key-encryption key, as openssl-safe base64 text.
+
+    Same shape as derive_kek: a Secret Key, when present, is folded in with one
+    HMAC before the stretch, so the memory-hard step sees the same bound
+    password scrypt would.
+    """
+    if secret:
+        master = bind_secret_key(master, secret)
+    raw = _argon2id_raw(master.encode("utf-8"), salt, m, t, p, KDF_DKLEN)
+    return base64.b64encode(raw).decode("ascii")
+
+
+def derive_kek_named(name, master, salt, secret=""):
+    """A fresh KEK for a named KDF at this build's default parameters."""
+    if name == KDF_ARGON2_NAME:
+        return derive_kek_argon2id(master, salt, secret=secret)
+    return derive_kek(master, salt, secret=secret)
+
+
+def derive_kek_for(kdf, master, secret=""):
+    """The KEK for a parsed KDF dict, using the vault's own recorded parameters."""
+    if kdf["name"] == KDF_ARGON2_NAME:
+        return derive_kek_argon2id(master, kdf["salt"], kdf["m"], kdf["t"],
+                                   kdf["p"], secret=secret)
+    return derive_kek(master, kdf["salt"], kdf["n"], kdf["r"], kdf["p"],
+                      secret=secret)
+
+
+def kdf_salt_for(name):
+    """The salt bytes a fresh envelope for `name` should be written with."""
+    if name == KDF_ARGON2_NAME:
+        return argon2id_salt()
+    return os.urandom(KDF_SALT_BYTES)
+
+
+def preferred_kdf():
+    """The KDF a brand-new vault should use.
+
+    scrypt unless the environment asks for Argon2id (SPM_KDF=argon2id) AND a
+    backend is present -- a portable default that never silently writes a vault
+    the same machine could not reopen. An existing vault keeps whatever KDF its
+    header already names; only `init` and an explicit `spm kdf` change consult
+    this.
+    """
+    want = os.environ.get("SPM_KDF", "").strip().lower()
+    if want in (KDF_ARGON2_NAME, "argon2") and argon2id_available():
+        return KDF_ARGON2_NAME
+    return KDF_NAME
+
+
+def current_vault_kdf_name(vault_path):
+    """The KDF an on-disk vault is sealed with, or None for gpg/new/unreadable.
+
+    Reporting-only: it never fails on a missing Argon2id backend, so a write on
+    a machine that cannot derive Argon2id can still see that the vault uses it
+    and refuse deliberately rather than silently reseal it under scrypt.
+    """
+    try:
+        with open(vault_path, "rb") as handle:
+            raw = handle.read()
+    except OSError:
+        return None
+    try:
+        modern = parse_container_aead(raw)
+    except VaultError:
+        return None
+    return modern[0]["name"] if modern else None
+
+
 # ----- container -------------------------------------------------------------
 # A format-3 vault is one file: a header line, the vault key sealed under the
 # master password, then the vault ciphertext sealed under that key. Keeping it
@@ -1253,7 +1435,8 @@ def new_vault_key():
 # reader already knows how to dispatch on.
 
 def build_container_aead(kdf_salt, envelope, cipher, n=KDF_N, r=KDF_R, p=KDF_P,
-                         secret_key=False):
+                         secret_key=False, name=KDF_NAME, m=KDF_ARGON2_M,
+                         t=KDF_ARGON2_T):
     # sk announces that a Secret Key was mixed into the derivation. It is a
     # field on a line that already carries the KDF's parameters, because that
     # is what it is: without it the reader would derive from the password alone
@@ -1265,9 +1448,17 @@ def build_container_aead(kdf_salt, envelope, cipher, n=KDF_N, r=KDF_R, p=KDF_P,
     # different KEK, the envelope's tag rejects it, and the reader says the
     # secret does not open this vault. There is no weaker-but-working state to
     # push a vault into.
+    #
+    # The parameter names differ by KDF -- scrypt records n/r/p, Argon2id
+    # records m/t/p -- and the reader keys off the KDF name, so an Argon2id
+    # header is not a format change but a different value on a line the format
+    # already carries.
+    if name == KDF_ARGON2_NAME:
+        params = b"m=%d t=%d p=%d salt=" % (m, t, p)
+    else:
+        params = b"n=%d r=%d p=%d salt=" % (n, r, p)
     return (CONTAINER_MAGIC_AEAD +
-            b"\nKDF " + KDF_NAME.encode("ascii") +
-            b" n=%d r=%d p=%d salt=" % (n, r, p) +
+            b"\nKDF " + name.encode("ascii") + b" " + params +
             base64.b64encode(kdf_salt) +
             (b" sk=1" if secret_key else b"") +
             b"\nKEY " + base64.b64encode(envelope) +
@@ -1289,9 +1480,8 @@ def parse_container_aead(raw):
         _, kdf_line, key_line = header.split(b"\n", 2)
         name, params = kdf_line[len(b"KDF "):].split(b" ", 1)
         fields = dict(item.split(b"=", 1) for item in params.split(b" "))
-        kdf = {"name": name.decode("ascii"),
-               "n": int(fields[b"n"]), "r": int(fields[b"r"]),
-               "p": int(fields[b"p"]),
+        name = name.decode("ascii")
+        kdf = {"name": name,
                # Absent means no, which is what every vault written before
                # 4.10.0 says by saying nothing. Read by name out of the same
                # dict as the cost parameters, so an old reader meeting a new
@@ -1299,20 +1489,32 @@ def parse_container_aead(raw):
                # the right answer without a format bump.
                "sk": fields.get(b"sk") == b"1",
                "salt": base64.b64decode(fields[b"salt"])}
+        if name == KDF_NAME:
+            kdf["n"] = int(fields[b"n"])
+            kdf["r"] = int(fields[b"r"])
+            kdf["p"] = int(fields[b"p"])
+        elif name == KDF_ARGON2_NAME:
+            kdf["m"] = int(fields[b"m"])
+            kdf["t"] = int(fields[b"t"])
+            kdf["p"] = int(fields[b"p"])
+        else:
+            # Named, not guessed. A vault written by a build that adopted a
+            # different stretching function must refuse here rather than derive
+            # the wrong key and report a wrong master password. Availability of
+            # a known KDF's backend is checked later, at derive time, so this
+            # parse still succeeds for reporting.
+            raise VaultError(
+                "this vault was written with the %s key derivation and this SPM "
+                "implements %s and %s; upgrade SPM rather than guessing"
+                % (name, KDF_NAME, KDF_ARGON2_NAME))
         envelope = base64.b64decode(key_line[len(b"KEY "):])
         cipher = base64.b64decode(data)
+    except VaultError:
+        raise
     except Exception as exc:
         raise VaultError("vault key container is corrupt") from exc
     if not envelope or not cipher or not kdf["salt"]:
         raise VaultError("vault key container is incomplete")
-    if kdf["name"] != KDF_NAME:
-        # Named, not guessed. A vault written by a build that adopted a
-        # different stretching function must refuse here rather than derive
-        # the wrong key and report a wrong master password.
-        raise VaultError(
-            "this vault was written with the %s key derivation and this SPM "
-            "implements %s; upgrade SPM rather than guessing"
-            % (kdf["name"], KDF_NAME))
     return kdf, envelope, cipher
 
 
@@ -1336,8 +1538,11 @@ def vault_seal_summary(vault_path):
 
 
 def unwrap_key_aead(kdf, envelope, master, secret=""):
-    kek = derive_kek(master, kdf["salt"], kdf["n"], kdf["r"], kdf["p"],
-                     secret=secret)
+    # Derived before the try: a missing Argon2id backend raises a VaultError
+    # that names the problem, and converting that to "wrong secret" would send
+    # the user hunting for a password mistake that is not there. Only the
+    # unseal below -- an actual wrong key -- becomes VaultSecretError.
+    kek = derive_kek_for(kdf, master, secret=secret)
     try:
         return unseal(kek, envelope).decode("utf-8")
     except VaultError:
@@ -6233,15 +6438,31 @@ def write_vault(vault_path, master, plaintext, vault_key=None):
             if existing is None:
                 raise VaultError("this vault has no key envelope to keep")
             kdf, envelope, _ = existing
-            container = build_container_aead(kdf["salt"], envelope, cipher,
-                                             kdf["n"], kdf["r"], kdf["p"])
+            # Re-emit the vault's own header verbatim -- same KDF name, its own
+            # parameters and its own sk flag -- so keeping an envelope never
+            # rewrites it under a different derivation.
+            if kdf["name"] == KDF_ARGON2_NAME:
+                container = build_container_aead(
+                    kdf["salt"], envelope, cipher, secret_key=kdf["sk"],
+                    name=KDF_ARGON2_NAME, m=kdf["m"], t=kdf["t"], p=kdf["p"])
+            else:
+                container = build_container_aead(
+                    kdf["salt"], envelope, cipher, kdf["n"], kdf["r"], kdf["p"],
+                    secret_key=kdf["sk"])
         else:
-            kdf_salt = os.urandom(KDF_SALT_BYTES)
+            # A rewrite keeps whatever KDF the vault already names; only a brand
+            # new or migrating vault (no AEAD header yet) consults the preferred
+            # default, which is scrypt unless the environment opted into
+            # Argon2id and a backend is present.
+            existing_name = current_vault_kdf_name(vault_path)
+            name = (existing_name if existing_name in (KDF_NAME, KDF_ARGON2_NAME)
+                    else preferred_kdf())
+            kdf_salt = kdf_salt_for(name)
             secret = secret_key_for_write(vault_path)
-            envelope = seal(derive_kek(master, kdf_salt, secret=secret),
+            envelope = seal(derive_kek_named(name, master, kdf_salt, secret=secret),
                             vault_key.encode("utf-8"))
             container = build_container_aead(kdf_salt, envelope, cipher,
-                                             secret_key=bool(secret))
+                                             secret_key=bool(secret), name=name)
         with open(tmp_path, "wb") as handle:
             handle.write(container)
 
@@ -6291,7 +6512,38 @@ def rewrap(vault_path, old_master, new_master):
     return rewrap_with_key(vault_path, key, new_master)
 
 
-def rewrap_with_key(vault_path, vault_key, new_master, secret=None):
+def set_vault_kdf(vault_path, master, name):
+    """Move a vault to a named KDF, keeping the same master password.
+
+    The vault key and ciphertext do not change: this rewraps only the
+    master-password envelope under the new derivation, exactly as a password
+    change does, so switching costs one rewrap. Choosing Argon2id on a machine
+    without a backend is refused up front -- writing a vault this same machine
+    could not reopen would be the worst possible outcome.
+    """
+    if name not in (KDF_NAME, KDF_ARGON2_NAME):
+        raise VaultError("unknown key derivation %r; choose %s or %s"
+                         % (name, KDF_NAME, KDF_ARGON2_NAME))
+    if name == KDF_ARGON2_NAME and not argon2id_available():
+        raise VaultError(
+            "Argon2id needs the argon2 CLI or the argon2-cffi module, and this "
+            "system has neither; install one (for example `apt install argon2` "
+            "or `pip install argon2-cffi`) before switching")
+    if current_vault_kdf_name(vault_path) == name:
+        return name, False   # already there; nothing to rewrite
+    key = unwrap_key(vault_path, master)
+    if key is None:
+        raise VaultError("vault must be migrated before its KDF can be changed")
+    if not key:
+        raise VaultError("vault key envelope decrypted to nothing")
+    rewrap_with_key(vault_path, key, master, kdf_name=name)
+    record_event("rewrap", "ok", "kdf=%s,scope=%s"
+                 % (name, _scope_of(vault_path)))
+    return name, True
+
+
+def rewrap_with_key(vault_path, vault_key, new_master, secret=None,
+                    kdf_name=None):
     """Change only the master-password envelope, given the vault key.
 
     `secret` is what the rewrapped vault should be bound to: None keeps
@@ -6300,6 +6552,12 @@ def rewrap_with_key(vault_path, vault_key, new_master, secret=None):
     is how enabling and disabling one are expressed. Both are a rewrap of the
     envelope and nothing else, so turning a Secret Key on costs the same as
     changing a password rather than re-encrypting the vault.
+
+    `kdf_name` is the derivation the rewrapped envelope should use: None keeps
+    whatever the vault already names (so a password change never quietly moves
+    a vault off Argon2id), and an explicit "scrypt"/"argon2id" is how `spm kdf`
+    switches it. Only the envelope changes; the vault key and ciphertext do
+    not, so switching KDFs costs one rewrap, not a re-encryption.
 
     The vault ciphertext stays byte-identical -- for a vault already on the
     current format -- and the recovery file is not touched at all, because
@@ -6318,13 +6576,17 @@ def rewrap_with_key(vault_path, vault_key, new_master, secret=None):
         secret = secret_key_for_write(vault_path)
     elif secret:
         secret_key_bytes(secret)
-    kdf_salt = os.urandom(KDF_SALT_BYTES)
-    envelope = seal(derive_kek(new_master, kdf_salt, secret=secret),
+    if kdf_name is None:
+        kdf_name = current_vault_kdf_name(vault_path) or KDF_NAME
+    if kdf_name not in (KDF_NAME, KDF_ARGON2_NAME):
+        raise VaultError("unknown key derivation %r" % kdf_name)
+    kdf_salt = kdf_salt_for(kdf_name)
+    envelope = seal(derive_kek_named(kdf_name, new_master, kdf_salt, secret=secret),
                     key.encode("utf-8"))
     modern = parse_container_aead(raw)
     if modern is not None:
         updated = build_container_aead(kdf_salt, envelope, modern[2],
-                                       secret_key=bool(secret))
+                                       secret_key=bool(secret), name=kdf_name)
     else:
         parts = parse_container(raw)
         if parts is None:
@@ -6340,7 +6602,7 @@ def rewrap_with_key(vault_path, vault_key, new_master, secret=None):
         updated = build_container_aead(
             kdf_salt, envelope,
             seal(key, gpg_decrypt(key, parts[1])),
-            secret_key=bool(secret))
+            secret_key=bool(secret), name=kdf_name)
 
     vault_dir = os.path.dirname(os.path.abspath(vault_path)) or "."
     fd, staged = tempfile.mkstemp(
@@ -8279,6 +8541,18 @@ def main(argv):
             #   key -- the RSA recovery file is not in this path.
             secret, new = _secrets(2)
             reset_master_with_hardware(argv[2], argv[3], secret, new)
+        elif command == "kdf-backend":
+            # kdf-backend ; stdout: the available Argon2id backend or "none".
+            #   No vault, no secret -- a capability probe `doctor` and `kdf`
+            #   read to decide whether Argon2id is on the table (roadmap 3).
+            sys.stdout.write((argon2id_backend() or "none") + "\n")
+        elif command == "kdf-set":
+            # kdf-set <vault> <scrypt|argon2id> ; stdin: master password.
+            #   Rewraps only the envelope under the chosen derivation; the vault
+            #   key and ciphertext do not change.
+            (master,) = _secrets(1)
+            name, changed = set_vault_kdf(argv[2], master, argv[3])
+            sys.stdout.write("%s\t%s\n" % (name, "changed" if changed else "unchanged"))
         elif command == "timelock-seal":
             # timelock-seal <seconds> ; stdin: secret as hex ; stdout: puzzle JSON
             #   (roadmap 5). Cheap for the owner; slow to open.
@@ -8666,12 +8940,22 @@ def main(argv):
             # appended rather than inserted so a reader cutting fields 1-5
             # keeps working.
             backend, kdf = vault_seal_summary(argv[2])
-            if kdf:
-                sys.stdout.write("%s\t%s\t%d\t%d\t%d\t%d\n" % (
+            if kdf and kdf["name"] == KDF_ARGON2_NAME:
+                # Fields 3-5 are the three cost parameters in header order, which
+                # are m/t/p here and n/r/p for scrypt; the reader relabels by the
+                # KDF name in field 2. Field 7 reports whether this machine can
+                # actually derive Argon2id, so `doctor` can warn before an unlock
+                # fails rather than after.
+                sys.stdout.write("%s\t%s\t%d\t%d\t%d\t%d\t%s\n" % (
+                    backend, kdf["name"], kdf["m"], kdf["t"], kdf["p"],
+                    1 if kdf["sk"] else 0,
+                    "yes" if argon2id_available() else "no"))
+            elif kdf:
+                sys.stdout.write("%s\t%s\t%d\t%d\t%d\t%d\tyes\n" % (
                     backend, kdf["name"], kdf["n"], kdf["r"], kdf["p"],
                     1 if kdf["sk"] else 0))
             else:
-                sys.stdout.write("%s\t-\t-\t-\t-\t0\n" % (backend or "legacy"))
+                sys.stdout.write("%s\t-\t-\t-\t-\t0\tyes\n" % (backend or "legacy"))
         elif command == "format-version":
             with open(argv[2], "r", encoding="utf-8", errors="ignore") as handle:
                 sys.stdout.write("%d\n" % format_version(handle.read()))
@@ -11208,6 +11492,66 @@ for i in o:
 		*)
 			secure_wipe "$tmp"
 			printf 'Usage: %s rotation <list|set|clear> [args]\n' "$0" >&2
+			exit 1 ;;
+	esac
+}
+
+# ----- key derivation: scrypt <-> Argon2id (roadmap 3) -----------------------
+# Argon2id is capability-gated: it is offered only where a backend that keeps
+# the master password off argv is present (the argon2 CLI, or the argon2-cffi
+# module). scrypt stays the portable default. Switching KDFs rewraps only the
+# master-password envelope -- the vault key and contents do not change -- so it
+# costs one rewrap, like a password change.
+cmd_kdf() {
+	local op="${1:-status}"; [ $# -gt 0 ] && shift
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local backend res
+	backend="$(core kdf-backend 2>/dev/null || printf 'none')"
+	case "$op" in
+		status)
+			local info kdf a b p avail
+			info="$(core seal-info "$VAULT_FILE" 2>/dev/null || true)"
+			kdf="$(printf '%s' "$info" | cut -f2)"
+			a="$(printf '%s' "$info" | cut -f3)"
+			b="$(printf '%s' "$info" | cut -f4)"
+			p="$(printf '%s' "$info" | cut -f5)"
+			avail="$(printf '%s' "$info" | cut -f7)"
+			case "$kdf" in
+				argon2id)
+					printf 'This vault uses Argon2id (m=%s KiB, t=%s, p=%s) -- memory-hard.\n' "$a" "$b" "$p"
+					[ "$avail" = no ] && printf '[!] No Argon2id backend on this machine: the vault will not open here.\n' ;;
+				scrypt)
+					printf 'This vault uses scrypt (n=%s, r=%s, p=%s).\n' "$a" "$b" "$p" ;;
+				*)
+					printf 'This vault predates the recorded-KDF format (still gpg-sealed).\n' ;;
+			esac
+			if [ "$backend" = none ]; then
+				printf 'Argon2id backend: none installed. Install the argon2 CLI (e.g. `apt install argon2`)\n'
+				printf '                  or the argon2-cffi module (`pip install argon2-cffi`) to enable it.\n'
+			else
+				printf 'Argon2id backend: %s available -- run `%s kdf argon2id` to switch.\n' "$backend" "$0"
+			fi ;;
+		argon2id|argon2|upgrade)
+			[ "$backend" != none ] || die "No Argon2id backend. Install the argon2 CLI ('apt install argon2') or argon2-cffi ('pip install argon2-cffi') first."
+			ensure_master_password_loaded
+			res="$(printf '%s' "$MASTER_PW" | core kdf-set "$VAULT_FILE" argon2id)" \
+				|| die "Could not switch to Argon2id. The vault was not changed."
+			case "$res" in
+				*changed)
+					printf 'Vault re-wrapped with Argon2id (memory-hard). Its key and contents are unchanged.\n'
+					printf 'Note: this vault now opens only where an Argon2id backend is present.\n' ;;
+				*) printf 'This vault already uses Argon2id.\n' ;;
+			esac ;;
+		scrypt)
+			ensure_master_password_loaded
+			res="$(printf '%s' "$MASTER_PW" | core kdf-set "$VAULT_FILE" scrypt)" \
+				|| die "Could not switch to scrypt. The vault was not changed."
+			case "$res" in
+				*changed) printf 'Vault re-wrapped with scrypt (n=65536). It opens on any SPM.\n' ;;
+				*) printf 'This vault already uses scrypt.\n' ;;
+			esac ;;
+		*)
+			printf 'Usage: %s kdf <status|argon2id|scrypt>\n' "$0" >&2
 			exit 1 ;;
 	esac
 }
@@ -14052,7 +14396,7 @@ cmd_doctor() {
 	# Report what actually seals the file, which is not the same question as
 	# which format the records are in -- a vault upgraded to format 4 by a
 	# release before 4.0.0 is still gpg-sealed until its next write.
-	local seal_info seal_backend seal_kdf seal_n seal_r seal_p
+	local seal_info seal_backend seal_kdf seal_n seal_r seal_p seal_avail
 	seal_info="$(core seal-info "$VAULT_FILE" 2>/dev/null || true)"
 	seal_backend="$(printf '%s' "$seal_info" | cut -f1)"
 	seal_kdf="$(printf '%s' "$seal_info" | cut -f2)"
@@ -14060,9 +14404,26 @@ cmd_doctor() {
 	seal_r="$(printf '%s' "$seal_info" | cut -f4)"
 	seal_p="$(printf '%s' "$seal_info" | cut -f5)"
 	seal_sk="$(printf '%s' "$seal_info" | cut -f6)"
+	seal_avail="$(printf '%s' "$seal_info" | cut -f7)"
 	case "$seal_backend" in
 	openssl)
-		if [ "$SPM_LANG" = "id" ]; then
+		if [ "$seal_kdf" = "argon2id" ]; then
+			# Argon2id records m (memory, KiB) and t (passes); relabel rather
+			# than printing scrypt's n/r against the wrong meaning.
+			if [ "$SPM_LANG" = "id" ]; then
+				printf "[✔] Vault disegel dengan AES-256-CTR + HMAC-SHA256.\n"
+				printf "    Derivasi kunci argon2id m=%s t=%s p=%s (memory-hard).\n" \
+					"$seal_n" "$seal_r" "$seal_p"
+			else
+				printf "[✔] Vault sealed with AES-256-CTR and HMAC-SHA256.\n"
+				printf "    Key derivation argon2id m=%s t=%s p=%s (memory-hard).\n" \
+					"$seal_n" "$seal_r" "$seal_p"
+			fi
+			if [ "$seal_avail" = "no" ]; then
+				printf "    [!] This machine has no Argon2id backend: install the argon2 CLI\n"
+				printf "        or the argon2-cffi module, or this vault will not open here.\n"
+			fi
+		elif [ "$SPM_LANG" = "id" ]; then
 			printf "[✔] Vault disegel dengan AES-256-CTR + HMAC-SHA256.\n"
 			printf "    Derivasi kunci %s n=%s r=%s p=%s.\n" \
 				"$seal_kdf" "$seal_n" "$seal_r" "$seal_p"
@@ -16074,7 +16435,7 @@ sys.exit(3)
 # The verbs a fresh shell should complete. One maintained list; the regression
 # suite checks that every verb here is one `main` actually dispatches.
 spm_command_names() {
-	printf '%s' 'init add list get edit delete generate change-master secret-key portable save restore update auto-update shares doctor password-history export import backup-now backup-auto vault-profile sync record trash archive expiring rotation searches schema link unlink share collection ssh gpg notes-add notes-list notes-view notes-delete passphrase-add passphrase-list passphrase-view passphrase-delete authenticator-add authenticator-list authenticator-view authenticator-edit authenticator-delete backup-codes-add backup-codes-list backup-codes-view backup-codes-delete attachment-add attachment-list attachment-extract attachment-delete emergency-create emergency-open events scope run env plugin phishing-check extension completion web dashboard desktop help'
+	printf '%s' 'init add list get edit delete generate change-master secret-key portable save restore update auto-update shares doctor password-history export import backup-now backup-auto vault-profile sync record trash archive expiring rotation kdf searches schema link unlink share collection ssh gpg notes-add notes-list notes-view notes-delete passphrase-add passphrase-list passphrase-view passphrase-delete authenticator-add authenticator-list authenticator-view authenticator-edit authenticator-delete backup-codes-add backup-codes-list backup-codes-view backup-codes-delete attachment-add attachment-list attachment-extract attachment-delete emergency-create emergency-open events scope run env plugin phishing-check extension completion web dashboard desktop help'
 }
 
 cmd_completion() {
@@ -16095,6 +16456,7 @@ _spm_complete() {
 		scope)      sub="list show add remove" ;;
 		plugin)     sub="list info install remove run" ;;
 		rotation)   sub="list set clear" ;;
+		kdf)        sub="status argon2id scrypt" ;;
 		extension)  sub="setup host manual path" ;;
 		record)     sub="types add list view delete favorite lock unlock" ;;
 		ssh)        sub="import list show public load unload agent" ;;
@@ -16123,6 +16485,7 @@ _spm() {
 	case "${words[2]}" in
 		scope)      compadd -- list show add remove ;;
 		plugin)     compadd -- list info install remove run ;;
+		kdf)        compadd -- status argon2id scrypt ;;
 		completion) compadd -- bash zsh fish ;;
 	esac
 }
@@ -16136,6 +16499,7 @@ complete -c spm -f
 complete -c spm -n __fish_use_subcommand -a "@@CMDS@@"
 complete -c spm -n "__fish_seen_subcommand_from scope" -a "list show add remove"
 complete -c spm -n "__fish_seen_subcommand_from plugin" -a "list info install remove run"
+complete -c spm -n "__fish_seen_subcommand_from kdf" -a "status argon2id scrypt"
 complete -c spm -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"
 FISHDONE
 			;;
@@ -16516,6 +16880,7 @@ Perintah utama (CLI):
   ./spm.sh delete <id>     → Hapus entry password
   ./spm.sh change-master   → Ganti kata sandi utama (re-encrypt vault)
   ./spm.sh secret-key      → Secret Key: status|enable|rotate|disable|show|import|forget
+  ./spm.sh kdf             → Key derivation: status|argon2id|scrypt (Argon2id jika tersedia)
   ./spm.sh portable [nama] → Buat bundle portable (script + vault + file pemulihan)
   ./spm.sh save [nama]     → Buat bundle portable lalu hapus vault lokal
   ./spm.sh restore         → Pindahkan vault bundle ke lokasi default (~/.spm_vault.gpg)
@@ -16661,6 +17026,7 @@ Main commands (CLI):
   ./spm.sh delete <id>     → Delete a password entry
   ./spm.sh change-master   → Change master password (re-encrypt vault)
   ./spm.sh secret-key      → Secret Key: status|enable|rotate|disable|show|import|forget
+  ./spm.sh kdf             → Key derivation: status|argon2id|scrypt (Argon2id where available)
   ./spm.sh portable [name] → Create portable bundle (script + vault + recovery files)
   ./spm.sh save [name]     → Create portable bundle and wipe local vault
   ./spm.sh restore         → Move bundle vault back to default location (~/.spm_vault.gpg)
@@ -37376,6 +37742,7 @@ main() {
 		archive)          cmd_archive "$@" ;;
 		expiring)         cmd_expiring "$@" ;;
 		rotation)         cmd_rotation "$@" ;;
+		kdf)              cmd_kdf "$@" ;;
 		searches)         cmd_searches "$@" ;;
 		schema)           cmd_schema "$@" ;;
 		link)             cmd_link "$@" ;;

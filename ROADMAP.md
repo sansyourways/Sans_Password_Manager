@@ -10,6 +10,22 @@ and cryptography in the smallest auditable component, and make the CLI, the SPM
 Dashboard, sync and the browser extension clients of that core rather than
 co-owners of it. That review is a design concept, not a formal security audit.
 
+## Shipped in 5.8.0 — Argon2id, the last blocked item
+
+- **Argon2id key derivation — completed in 5.8.0 (item 3).** A vault can be
+  sealed with Argon2id (m=65536 KiB, t=3, p=1 — 64 MiB, memory-hard) instead of
+  scrypt, capability-gated: it is used only where a backend keeps the master
+  password off the argument vector — the argon2 reference CLI (password on
+  stdin) or the argon2-cffi module (in process). scrypt (n=65536) stays the
+  portable default because it is reachable everywhere; Argon2id is opt-in per
+  vault via `spm kdf argon2id`. Switching rewraps only the master-password
+  envelope, so it costs one rewrap, not a re-encryption. No vault format change:
+  the header already recorded the KDF by name and parameter, so this is a value
+  the reader dispatches on, exactly as that line was designed for. An Argon2id
+  vault carried to a machine without a backend refuses to open with a message
+  that names the fix, and openssl's `kdf` app is deliberately not used as a
+  backend because it takes the password only as an argv value.
+
 ## Shipped in 5.7.0 — the six partial items completed, and first-class extension install
 
 The remaining partials finished, plus first-class browser-extension installation.
@@ -576,9 +592,14 @@ as such below rather than quietly dropped.
   at the maximum count, so the concrete change is the digest, which defaults to
   **SHA1**.
 
-  **Argon2id was not adopted, and is not reachable on any platform SPM
-  supports.** Two separate walls, and the second was found only after the
-  first was blamed for everything. GnuPG cannot express it: OpenPGP
+  **Argon2id shipped in 5.8.0, capability-gated — see the 5.8.0 section
+  above.** The wall this paragraph described was real and is why it is not the
+  default: no SPM-supported runtime provides Argon2id without a third-party
+  dependency. 5.8.0 resolves that by using Argon2id only where a backend is
+  already present that keeps the password off argv (the argon2 CLI, or the
+  argon2-cffi module), and keeping scrypt everywhere else. The reasoning below
+  is retained because it is why scrypt is the floor and Argon2id is opt-in.
+  GnuPG cannot express it: OpenPGP
   string-to-key is hash-iteration by construction, `gpg --symmetric` offers
   only `--s2k-mode`, `--s2k-digest-algo`, `--s2k-cipher-algo` and
   `--s2k-count`, and GnuPG's own Argon2id support covers its private keys from
@@ -595,9 +616,10 @@ as such below rather than quietly dropped.
   data-layer replacement below. What that release also added is the part that
   makes the rest cheap: the vault records its KDF **by name and parameters**,
   and the unwrap uses the vault's numbers rather than the running build's. So
-  Argon2id is no longer a format change waiting on a platform floor -- it is a
-  value the reader dispatches on, once a floor makes it testable rather than
-  merely writable.
+  Argon2id was never a format change waiting on a platform floor -- it is a
+  value the reader dispatches on, which is exactly how 5.8.0 added it: a new
+  KDF name and its parameters on the line the format already carried, with no
+  format bump.
 
 - **Wrap a vault key rather than the master password.** *(#37)* Format 3 seals
   the vault under a random 256-bit vault key and seals only that key under the
