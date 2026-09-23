@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **5.8.0**
+Current release: **5.8.1**
 
 ---
 
@@ -1935,6 +1935,12 @@ refuses to open with a message that names the fix — the argon2 CLI or
 argon2-cffi — rather than reporting a wrong password, and `doctor` warns about
 it before an unlock is attempted. The Argon2id salt is stored as hex because the
 reference CLI takes the salt as a command-line argument that cannot carry a NUL.
+
+The cost parameters on that `KDF` line are read before the vault's MAC is
+checked (they derive the key that does the checking), so they are bounded the
+way scrypt's are: Argon2id memory above 1 GiB, or a time or parallelism cost
+outside 1..16, is refused before any memory is reserved, so a tampered header
+cannot drive an unbounded allocation on open (5.8.1).
 
 | | scrypt (default) | Argon2id (opt-in, 5.8.0) |
 |---|---|---|

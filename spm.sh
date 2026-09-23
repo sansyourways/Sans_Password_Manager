@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.8.0"
+VERSION="5.8.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -1059,6 +1059,17 @@ KDF_ARGON2_NAME = "argon2id"
 KDF_ARGON2_M = 1 << 16      # KiB -> 64 MiB
 KDF_ARGON2_T = 3
 KDF_ARGON2_P = 1
+# Upper bounds on the cost parameters a vault header may name. The header is
+# unauthenticated -- the KDF line is read to derive the key that then checks the
+# MAC -- so a tampered `KDF argon2id m=<huge>` line would otherwise drive an
+# unbounded allocation (the argon2-cffi backend reserves memory_cost KiB with no
+# timeout) and OOM the process before any authentication fails. scrypt is bounded
+# by a fixed maxmem for the same reason; these bound Argon2id the same way, and a
+# header past them is refused before a byte is reserved. Generous over SPM's own
+# 64 MiB / t=3 / p=1 so a future raise is not stranded, but far below a denial.
+KDF_ARGON2_MAX_M = 1 << 20  # KiB -> 1 GiB
+KDF_ARGON2_MAX_T = 16
+KDF_ARGON2_MAX_P = 16
 
 # ----- hardware-held wrapping ------------------------------------------------
 # A security key can derive a stable secret from a credential and a salt --
@@ -1272,6 +1283,12 @@ def _argon2id_raw(pw, salt, m, t, p, dklen):
     """
     if m <= 0 or (m & (m - 1)):
         raise VaultError("Argon2id memory must be a power of two in KiB")
+    # Refuse absurd cost parameters from an untrusted header before any memory is
+    # reserved or any pass is run -- the bound is what stops a crafted vault from
+    # OOM-ing or pinning the process on open. Fails closed, like scrypt's maxmem.
+    if m > KDF_ARGON2_MAX_M or not (1 <= t <= KDF_ARGON2_MAX_T) \
+            or not (1 <= p <= KDF_ARGON2_MAX_P):
+        raise VaultError("Argon2id parameters are outside the supported range")
     backend = argon2id_backend()
     if backend == "argon2-cffi":
         from argon2.low_level import hash_secret_raw, Type
@@ -1280,6 +1297,12 @@ def _argon2id_raw(pw, salt, m, t, p, dklen):
     if backend == "argon2-cli":
         # -m is the log2 of the memory in KiB; -r prints the raw hash as hex;
         # the password arrives on stdin, the (argv-safe) salt as an argument.
+        # The salt is the first positional argument, so one that began with "-"
+        # would be read as an option rather than the salt. SPM's own Argon2id
+        # salts are hex and never do, but a crafted header is refused here rather
+        # than left to the CLI to misparse.
+        if salt[:1] == b"-":
+            raise VaultError("Argon2id salt is not argv-safe")
         exponent = m.bit_length() - 1
         try:
             out = subprocess.run(

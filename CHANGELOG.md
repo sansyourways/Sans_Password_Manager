@@ -7,6 +7,24 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.8.1] - 2026-09-23
+
+A hardening fix found by auditing 5.8.0. No vault format change.
+
+### Security
+- **Bound the Argon2id cost parameters read from a vault header.** The `KDF`
+  line is unauthenticated — it is read to derive the key that then checks the
+  MAC — so a tampered `KDF argon2id m=<huge>` line could drive an unbounded
+  allocation (the argon2-cffi backend reserves `memory_cost` KiB with no
+  timeout) and OOM the process on open, before authentication failed. scrypt was
+  already bounded by a fixed `maxmem`; Argon2id now is too: `m` above 1 GiB, or
+  `t`/`p` outside 1..16, are refused before a byte is reserved. SPM's own
+  defaults (64 MiB, t=3, p=1) sit well inside the range.
+- **Refuse an Argon2id salt that is not argv-safe on the CLI backend.** SPM's
+  own salts are hex and never begin with `-`; a crafted one that did is rejected
+  rather than left for the argon2 CLI to read as an option (defense in depth —
+  it already failed closed).
+
 ## [5.8.0] - 2026-09-23
 
 Argon2id as a capability-gated key-derivation option (roadmap 3, the last
