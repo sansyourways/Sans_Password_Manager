@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **5.7.0**
+Current release: **5.7.2**
 
 ---
 
@@ -358,11 +358,21 @@ offline recipient cannot open before the intended delay.
 
 Installing the **browser extension** is now one step wherever you are: `spm
 extension setup` (guided) or `manual`, an interactive-menu entry, and a Dashboard
-**Browser extension** page.
+**Browser extension** page. On a local Dashboard (5.7.1+), that page has an
+**Install now** button that builds the extension and registers the native host
+for you — leaving only the one step the browser reserves for itself, the
+Load-unpacked confirmation that no page can perform. The button is offered only
+to a local viewer: a Dashboard published behind a proxy shows the manual steps,
+because the extension talks to a same-machine native host and cannot work across
+one (5.7.2).
 
 | Per-record rotation and `--json` | Installing the extension |
 | --- | --- |
 | ![Terminal: spm rotation set gives a record a 90-day window or 'never', spm rotation list shows them, and spm list --json prints a secret-free record](docs/screenshots/web-v2.13.0/56-rotation.png) | ![Terminal: spm extension path, setup, manual and host — installing the browser extension and its native host from the command line, the menu or the Dashboard](docs/screenshots/web-v2.13.0/57-extension.png) |
+
+| The Dashboard's Browser extension page, with one-click "Install now" |
+| --- |
+| ![The SPM Dashboard Browser extension page: an "Install now (this machine)" section with a "Build & register on this machine" button that builds the extension and registers the native host, above the manual steps for any platform](docs/screenshots/web-v2.13.0/58-extension-dashboard.png) |
 
 <details>
 <summary><strong>Complete web interface gallery</strong></summary>
