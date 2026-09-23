@@ -232,7 +232,7 @@ SPM intentionally has no automatic “delete everything” command because vault
 ## Known limitations
 
 - Security depends on the endpoint, GnuPG, OpenSSL, Python, and correct recovery-key handling.
-- Native Windows is not supported; WSL operation is best effort.
+- Native Windows (without WSL or Git-Bash) is not supported. On Windows the browser extension and native host are unavailable, and there is no Windows CI coverage.
 - Browser integration requires local native-host setup and is not available in Termux.
 - The dashboard binds locally by default. Remote exposure changes the threat model and requires correctly configured TLS, authentication, proxy, and firewall controls.
 - Sync transports can copy encrypted files but do not make an untrusted endpoint safe. SPM operates no service; every transport is infrastructure you already run.
