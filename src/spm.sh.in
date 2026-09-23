@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.7.2"
+VERSION="5.8.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -2767,6 +2767,66 @@ for i in o:
 		*)
 			secure_wipe "$tmp"
 			printf 'Usage: %s rotation <list|set|clear> [args]\n' "$0" >&2
+			exit 1 ;;
+	esac
+}
+
+# ----- key derivation: scrypt <-> Argon2id (roadmap 3) -----------------------
+# Argon2id is capability-gated: it is offered only where a backend that keeps
+# the master password off argv is present (the argon2 CLI, or the argon2-cffi
+# module). scrypt stays the portable default. Switching KDFs rewraps only the
+# master-password envelope -- the vault key and contents do not change -- so it
+# costs one rewrap, like a password change.
+cmd_kdf() {
+	local op="${1:-status}"; [ $# -gt 0 ] && shift
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	local backend res
+	backend="$(core kdf-backend 2>/dev/null || printf 'none')"
+	case "$op" in
+		status)
+			local info kdf a b p avail
+			info="$(core seal-info "$VAULT_FILE" 2>/dev/null || true)"
+			kdf="$(printf '%s' "$info" | cut -f2)"
+			a="$(printf '%s' "$info" | cut -f3)"
+			b="$(printf '%s' "$info" | cut -f4)"
+			p="$(printf '%s' "$info" | cut -f5)"
+			avail="$(printf '%s' "$info" | cut -f7)"
+			case "$kdf" in
+				argon2id)
+					printf 'This vault uses Argon2id (m=%s KiB, t=%s, p=%s) -- memory-hard.\n' "$a" "$b" "$p"
+					[ "$avail" = no ] && printf '[!] No Argon2id backend on this machine: the vault will not open here.\n' ;;
+				scrypt)
+					printf 'This vault uses scrypt (n=%s, r=%s, p=%s).\n' "$a" "$b" "$p" ;;
+				*)
+					printf 'This vault predates the recorded-KDF format (still gpg-sealed).\n' ;;
+			esac
+			if [ "$backend" = none ]; then
+				printf 'Argon2id backend: none installed. Install the argon2 CLI (e.g. `apt install argon2`)\n'
+				printf '                  or the argon2-cffi module (`pip install argon2-cffi`) to enable it.\n'
+			else
+				printf 'Argon2id backend: %s available -- run `%s kdf argon2id` to switch.\n' "$backend" "$0"
+			fi ;;
+		argon2id|argon2|upgrade)
+			[ "$backend" != none ] || die "No Argon2id backend. Install the argon2 CLI ('apt install argon2') or argon2-cffi ('pip install argon2-cffi') first."
+			ensure_master_password_loaded
+			res="$(printf '%s' "$MASTER_PW" | core kdf-set "$VAULT_FILE" argon2id)" \
+				|| die "Could not switch to Argon2id. The vault was not changed."
+			case "$res" in
+				*changed)
+					printf 'Vault re-wrapped with Argon2id (memory-hard). Its key and contents are unchanged.\n'
+					printf 'Note: this vault now opens only where an Argon2id backend is present.\n' ;;
+				*) printf 'This vault already uses Argon2id.\n' ;;
+			esac ;;
+		scrypt)
+			ensure_master_password_loaded
+			res="$(printf '%s' "$MASTER_PW" | core kdf-set "$VAULT_FILE" scrypt)" \
+				|| die "Could not switch to scrypt. The vault was not changed."
+			case "$res" in
+				*changed) printf 'Vault re-wrapped with scrypt (n=65536). It opens on any SPM.\n' ;;
+				*) printf 'This vault already uses scrypt.\n' ;;
+			esac ;;
+		*)
+			printf 'Usage: %s kdf <status|argon2id|scrypt>\n' "$0" >&2
 			exit 1 ;;
 	esac
 }
@@ -5611,7 +5671,7 @@ cmd_doctor() {
 	# Report what actually seals the file, which is not the same question as
 	# which format the records are in -- a vault upgraded to format 4 by a
 	# release before 4.0.0 is still gpg-sealed until its next write.
-	local seal_info seal_backend seal_kdf seal_n seal_r seal_p
+	local seal_info seal_backend seal_kdf seal_n seal_r seal_p seal_avail
 	seal_info="$(core seal-info "$VAULT_FILE" 2>/dev/null || true)"
 	seal_backend="$(printf '%s' "$seal_info" | cut -f1)"
 	seal_kdf="$(printf '%s' "$seal_info" | cut -f2)"
@@ -5619,9 +5679,26 @@ cmd_doctor() {
 	seal_r="$(printf '%s' "$seal_info" | cut -f4)"
 	seal_p="$(printf '%s' "$seal_info" | cut -f5)"
 	seal_sk="$(printf '%s' "$seal_info" | cut -f6)"
+	seal_avail="$(printf '%s' "$seal_info" | cut -f7)"
 	case "$seal_backend" in
 	openssl)
-		if [ "$SPM_LANG" = "id" ]; then
+		if [ "$seal_kdf" = "argon2id" ]; then
+			# Argon2id records m (memory, KiB) and t (passes); relabel rather
+			# than printing scrypt's n/r against the wrong meaning.
+			if [ "$SPM_LANG" = "id" ]; then
+				printf "[✔] Vault disegel dengan AES-256-CTR + HMAC-SHA256.\n"
+				printf "    Derivasi kunci argon2id m=%s t=%s p=%s (memory-hard).\n" \
+					"$seal_n" "$seal_r" "$seal_p"
+			else
+				printf "[✔] Vault sealed with AES-256-CTR and HMAC-SHA256.\n"
+				printf "    Key derivation argon2id m=%s t=%s p=%s (memory-hard).\n" \
+					"$seal_n" "$seal_r" "$seal_p"
+			fi
+			if [ "$seal_avail" = "no" ]; then
+				printf "    [!] This machine has no Argon2id backend: install the argon2 CLI\n"
+				printf "        or the argon2-cffi module, or this vault will not open here.\n"
+			fi
+		elif [ "$SPM_LANG" = "id" ]; then
 			printf "[✔] Vault disegel dengan AES-256-CTR + HMAC-SHA256.\n"
 			printf "    Derivasi kunci %s n=%s r=%s p=%s.\n" \
 				"$seal_kdf" "$seal_n" "$seal_r" "$seal_p"
@@ -7633,7 +7710,7 @@ sys.exit(3)
 # The verbs a fresh shell should complete. One maintained list; the regression
 # suite checks that every verb here is one `main` actually dispatches.
 spm_command_names() {
-	printf '%s' 'init add list get edit delete generate change-master secret-key portable save restore update auto-update shares doctor password-history export import backup-now backup-auto vault-profile sync record trash archive expiring rotation searches schema link unlink share collection ssh gpg notes-add notes-list notes-view notes-delete passphrase-add passphrase-list passphrase-view passphrase-delete authenticator-add authenticator-list authenticator-view authenticator-edit authenticator-delete backup-codes-add backup-codes-list backup-codes-view backup-codes-delete attachment-add attachment-list attachment-extract attachment-delete emergency-create emergency-open events scope run env plugin phishing-check extension completion web dashboard desktop help'
+	printf '%s' 'init add list get edit delete generate change-master secret-key portable save restore update auto-update shares doctor password-history export import backup-now backup-auto vault-profile sync record trash archive expiring rotation kdf searches schema link unlink share collection ssh gpg notes-add notes-list notes-view notes-delete passphrase-add passphrase-list passphrase-view passphrase-delete authenticator-add authenticator-list authenticator-view authenticator-edit authenticator-delete backup-codes-add backup-codes-list backup-codes-view backup-codes-delete attachment-add attachment-list attachment-extract attachment-delete emergency-create emergency-open events scope run env plugin phishing-check extension completion web dashboard desktop help'
 }
 
 cmd_completion() {
@@ -7654,6 +7731,7 @@ _spm_complete() {
 		scope)      sub="list show add remove" ;;
 		plugin)     sub="list info install remove run" ;;
 		rotation)   sub="list set clear" ;;
+		kdf)        sub="status argon2id scrypt" ;;
 		extension)  sub="setup host manual path" ;;
 		record)     sub="types add list view delete favorite lock unlock" ;;
 		ssh)        sub="import list show public load unload agent" ;;
@@ -7682,6 +7760,7 @@ _spm() {
 	case "${words[2]}" in
 		scope)      compadd -- list show add remove ;;
 		plugin)     compadd -- list info install remove run ;;
+		kdf)        compadd -- status argon2id scrypt ;;
 		completion) compadd -- bash zsh fish ;;
 	esac
 }
@@ -7695,6 +7774,7 @@ complete -c spm -f
 complete -c spm -n __fish_use_subcommand -a "@@CMDS@@"
 complete -c spm -n "__fish_seen_subcommand_from scope" -a "list show add remove"
 complete -c spm -n "__fish_seen_subcommand_from plugin" -a "list info install remove run"
+complete -c spm -n "__fish_seen_subcommand_from kdf" -a "status argon2id scrypt"
 complete -c spm -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"
 FISHDONE
 			;;
@@ -8075,6 +8155,7 @@ Perintah utama (CLI):
   ./spm.sh delete <id>     → Hapus entry password
   ./spm.sh change-master   → Ganti kata sandi utama (re-encrypt vault)
   ./spm.sh secret-key      → Secret Key: status|enable|rotate|disable|show|import|forget
+  ./spm.sh kdf             → Key derivation: status|argon2id|scrypt (Argon2id jika tersedia)
   ./spm.sh portable [nama] → Buat bundle portable (script + vault + file pemulihan)
   ./spm.sh save [nama]     → Buat bundle portable lalu hapus vault lokal
   ./spm.sh restore         → Pindahkan vault bundle ke lokasi default (~/.spm_vault.gpg)
@@ -8220,6 +8301,7 @@ Main commands (CLI):
   ./spm.sh delete <id>     → Delete a password entry
   ./spm.sh change-master   → Change master password (re-encrypt vault)
   ./spm.sh secret-key      → Secret Key: status|enable|rotate|disable|show|import|forget
+  ./spm.sh kdf             → Key derivation: status|argon2id|scrypt (Argon2id where available)
   ./spm.sh portable [name] → Create portable bundle (script + vault + recovery files)
   ./spm.sh save [name]     → Create portable bundle and wipe local vault
   ./spm.sh restore         → Move bundle vault back to default location (~/.spm_vault.gpg)
@@ -10484,6 +10566,7 @@ main() {
 		archive)          cmd_archive "$@" ;;
 		expiring)         cmd_expiring "$@" ;;
 		rotation)         cmd_rotation "$@" ;;
+		kdf)              cmd_kdf "$@" ;;
 		searches)         cmd_searches "$@" ;;
 		schema)           cmd_schema "$@" ;;
 		link)             cmd_link "$@" ;;

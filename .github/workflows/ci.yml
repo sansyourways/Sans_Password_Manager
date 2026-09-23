@@ -32,11 +32,16 @@ jobs:
 
       - name: Install system test dependencies
         run: |
+          # argon2 is the reference CLI backend for the capability-gated
+          # Argon2id KDF (roadmap 3). It is not a runtime dependency of SPM --
+          # scrypt is the default and needs nothing -- but installing it here
+          # makes both CI lanes exercise the Argon2id round-trip and known-answer
+          # test rather than only the no-backend skip path.
           if [ "$RUNNER_OS" = "Linux" ]; then
             sudo apt-get update
-            sudo apt-get install -y curl gnupg openssl shellcheck unzip zip
+            sudo apt-get install -y curl gnupg openssl shellcheck unzip zip argon2
           else
-            brew install coreutils gnupg shellcheck
+            brew install coreutils gnupg shellcheck argon2
           fi
 
       - name: Generated script is current

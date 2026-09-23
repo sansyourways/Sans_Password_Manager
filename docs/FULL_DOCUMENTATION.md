@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **5.7.2**
+Current release: **5.8.0**
 
 ---
 
@@ -1901,6 +1901,45 @@ The `KDF` line records the derivation **by name and by parameters**, and the
 unwrap uses the vault's own numbers rather than the running build's constants.
 That is what lets the cost parameter be raised, or the function replaced, without
 stranding vaults written before the change.
+
+### Argon2id, where a backend can provide it (5.8.0)
+
+Because the `KDF` line names the derivation, a vault can be sealed with
+**Argon2id** instead of scrypt, and the header simply says so:
+
+```text
+KDF argon2id m=65536 t=3 p=1 salt=<hex, base64-wrapped>
+```
+
+Argon2id (m=65536 KiB = 64 MiB, t=3 passes, p=1) is **capability-gated**: SPM
+uses it only where a backend is present that keeps the master password off the
+argument vector — the **argon2 reference CLI** (which reads the password on
+stdin) or the **argon2-cffi** module (which never leaves the process). scrypt
+stays the default because it is reachable on every platform SPM supports; opting
+a vault into Argon2id is a deliberate `spm kdf argon2id`, and it only succeeds
+where a backend exists. `openssl kdf` is not used as a backend: it takes the
+password only as an argv value, which `ps` can read.
+
+```
+spm kdf status      # this vault's KDF, and whether a backend is installed
+spm kdf argon2id    # rewrap to Argon2id (needs a backend)
+spm kdf scrypt      # rewrap back to scrypt (opens on any SPM)
+```
+
+Switching rewraps only the master-password envelope, so it costs one rewrap, not
+a re-encryption; the vault key, the ciphertext, the recovery file and every
+`.bak` are unchanged. An Argon2id vault carried to a machine with no backend
+refuses to open with a message that names the fix — the argon2 CLI or
+argon2-cffi — rather than reporting a wrong password, and `doctor` warns about
+it before an unlock is attempted. The Argon2id salt is stored as hex because the
+reference CLI takes the salt as a command-line argument that cannot carry a NUL.
+
+| | scrypt (default) | Argon2id (opt-in, 5.8.0) |
+|---|---|---|
+| parameters | n=65536, r=8, p=1 (64 MiB) | m=65536 KiB, t=3, p=1 (64 MiB) |
+| reachable on | every platform SPM supports | where the argon2 CLI or argon2-cffi is present |
+| password path | openssl `-pass fd:` / hashlib, never argv | argon2 CLI stdin, or argon2-cffi in-process |
+| header name | `scrypt` | `argon2id` |
 
 ### The vault is authenticated now
 

@@ -7,6 +7,34 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.8.0] - 2026-09-23
+
+Argon2id as a capability-gated key-derivation option (roadmap 3, the last
+blocked item). No vault format change: the header already records the KDF by
+name and parameter, so Argon2id is a value the reader dispatches on, not a new
+format.
+
+### Added
+- **Argon2id KDF (roadmap 3).** A vault can be sealed with Argon2id
+  (m=65536 KiB, t=3, p=1 -- 64 MiB, memory-hard) instead of scrypt, wherever a
+  backend is present that keeps the master password off the argument vector: the
+  **argon2 reference CLI** (password on stdin) or the **argon2-cffi** module
+  (in process). scrypt (n=65536) stays the portable default. `spm kdf status`
+  reports the vault's KDF and whether an Argon2id backend is installed;
+  `spm kdf argon2id` and `spm kdf scrypt` switch between them by rewrapping only
+  the master-password envelope -- the vault key and ciphertext do not change, so
+  a switch costs one rewrap, not a re-encryption. `doctor` names the KDF and
+  warns if an Argon2id vault is opened where no backend exists.
+- Shell completion, help, and the interactive command set learn `kdf`.
+
+### Security
+- Where no safe backend exists, SPM does not fall back to putting the password
+  on argv (openssl's `kdf` app is excluded for exactly that reason) and does not
+  silently reseal an Argon2id vault under scrypt. An Argon2id vault carried to a
+  machine without a backend refuses to open with a message that names the fix,
+  rather than reporting a wrong password. Choosing Argon2id is refused up front
+  on a machine that could not reopen the result.
+
 ## [5.7.2] - 2026-09-23
 
 ### Fixed

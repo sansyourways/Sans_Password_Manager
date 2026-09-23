@@ -63,7 +63,7 @@ See the [installation guide](https://spm-docs.silentprotocol.top/#installation) 
 
 ## Security at a glance
 
-SPM seals vault data with AES-256-CTR under an HMAC-SHA256 tag, unlocked through scrypt, and keeps routine vault operations inside a shared Python trusted core. Vaults written before 4.0.0 remain readable and upgrade in place. The CLI invokes that core as a subprocess; the dashboard imports the same implementation. Sensitive operations are local by default.
+SPM seals vault data with AES-256-CTR under an HMAC-SHA256 tag, unlocked through scrypt (or Argon2id, opt-in per vault where a safe backend is present), and keeps routine vault operations inside a shared Python trusted core. Vaults written before 4.0.0 remain readable and upgrade in place. The CLI invokes that core as a subprocess; the dashboard imports the same implementation. Sensitive operations are local by default.
 
 SPM assumes the host operating system is trustworthy. It cannot protect secrets from malware, root compromise, memory inspection, a compromised browser, or an already-compromised endpoint. The project has **not received an independent professional security audit**; repository review and automated tests are not substitutes for one.
 
@@ -94,6 +94,7 @@ SPM may not be a good fit when you need:
 - Browser extensions for Chromium and Firefox with a local native host: an in-field account picker rendered at the extension's own origin so the page cannot read your account list, save-on-submit password capture, on-device password generation, one-time-code fill for a matching authenticator, a session lock you set, and a non-blocking look-alike/phishing caution when a page resembles a site you use. Install it from the terminal (`spm extension setup`), the interactive menu, or the Dashboard.
 - Advanced Dashboard search with a `type:`/`tag:`/`folder:`/`is:`/`expires:` grammar, plus per-record password-rotation windows and machine-readable `--json` output for scripting.
 - Hardware-backed recovery: reset your master password with a registered security key, and time-locked emergency-access kits that an offline recipient cannot open before the intended delay.
+- Choice of key derivation: scrypt everywhere by default, or Argon2id (`spm kdf argon2id`) where a backend keeps the master password off the argument vector — the argon2 CLI or argon2-cffi — recorded in the vault header with no format change.
 - Secret scopes and injection for automation: name a least-privilege set of records and hand them to a command with `spm run` (in its environment, never on disk or argv) or `spm env` — without exposing the rest of the vault.
 - A capability-sandboxed plugin SDK: extend SPM with separate programs that declare a `plugin.json` capability manifest, run only after explicit consent, and never see the vault key.
 - A native desktop launcher (`spm desktop`) that opens the Dashboard in your browser, plus generated Linux/macOS/Windows launchers — no bundled browser engine.
@@ -149,6 +150,7 @@ Paths can differ when you select another vault or override XDG directories. Trea
 | `spm get <id>` | Retrieve an entry (`--json` for scripts) |
 | `spm list --json` | List entries as JSON (secret-free) |
 | `spm rotation set <id> <days>` | Give one record its own password-rotation window |
+| `spm kdf argon2id` | Switch the vault to Argon2id where a backend is present (`status`/`scrypt`) |
 | `spm extension setup` | Install the browser extension (guided or `manual`) |
 | `spm scope add <name> --secret VAR=<id>` | Define a least-privilege secret scope |
 | `spm run --scope <name> -- <cmd>` | Run a command with a scope's secrets in its environment |

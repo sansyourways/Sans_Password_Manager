@@ -1447,6 +1447,39 @@ printf '%s' "$rotation_out" | grep -q 'every 7 days' || { printf 'rotation list 
 cmd_rotation clear 1 >/dev/null || { printf 'rotation clear failed\n' >&2; exit 1; }
 rotation_out="$(cmd_rotation list)"
 printf '%s' "$rotation_out" | grep -q 'every 7 days' && { printf 'rotation clear did not clear\n' >&2; exit 1; } || true
+# -- 5.8.0 (roadmap 3): Argon2id is a capability-gated KDF. The plumbing is
+#    always present -- seal-info reports seven fields, the vault starts on scrypt
+#    -- while the round-trip runs only where a backend does, which is the gate
+#    itself: Argon2id is used only where the password stays off the argv.
+kdf_backend="$(core kdf-backend 2>/dev/null || printf none)"
+kdf_fields="$(core seal-info "$VAULT_FILE" | awk -F'\t' '{print NF}')"
+[ "$kdf_fields" = 7 ] || { printf 'seal-info is not seven fields (got %s)\n' "$kdf_fields" >&2; exit 1; }
+[ "$(core seal-info "$VAULT_FILE" | cut -f2)" = scrypt ] || { printf 'vault did not start on scrypt\n' >&2; exit 1; }
+cmd_kdf status | grep -q scrypt || { printf 'kdf status did not report scrypt\n' >&2; exit 1; }
+kdf_copy="$TEST_ROOT/kdf-vault.gpg"
+cp "$VAULT_FILE" "$kdf_copy"
+[ -f "$VAULT_FILE.recovery" ] && cp "$VAULT_FILE.recovery" "$kdf_copy.recovery"
+if [ "$kdf_backend" != none ]; then
+	(
+		export VAULT_FILE="$kdf_copy" RECOVERY_FILE="$kdf_copy.recovery" \
+			MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY=""
+		cmd_kdf argon2id >/dev/null || { printf 'kdf argon2id switch failed\n' >&2; exit 1; }
+		[ "$(core seal-info "$kdf_copy" | cut -f2)" = argon2id ] || { printf 'not argon2id after switch\n' >&2; exit 1; }
+		kdf_open="$(make_tmp)"; decrypt_vault_to_file "$kdf_open"
+		grep -q 'DemoSecret42' "$kdf_open" || { printf 'argon2id vault did not open\n' >&2; exit 1; }
+		secure_wipe "$kdf_open"
+		cmd_kdf scrypt >/dev/null || { printf 'kdf scrypt switch-back failed\n' >&2; exit 1; }
+		[ "$(core seal-info "$kdf_copy" | cut -f2)" = scrypt ] || { printf 'not scrypt after switch back\n' >&2; exit 1; }
+	) || exit 1
+	printf '  kdf: Argon2id round-trip via %s backend OK\n' "$kdf_backend"
+else
+	# No backend: switching must refuse, and refuse before writing anything.
+	( export VAULT_FILE="$kdf_copy" MASTER_PW="$AUDIT_PASSWORD" VAULT_KEY=""
+	  cmd_kdf argon2id >/dev/null 2>&1 ) \
+		&& { printf 'kdf argon2id should have refused without a backend\n' >&2; exit 1; } || true
+	[ "$(core seal-info "$kdf_copy" | cut -f2)" = scrypt ] || { printf 'a refused switch still changed the KDF\n' >&2; exit 1; }
+	printf '  kdf: no Argon2id backend present; switch correctly refused\n'
+fi
 # -- extension install seam works without a vault, and names the host dir.
 ext_out="$(cmd_extension manual)"
 printf '%s' "$ext_out" | grep -q 'Manual browser-extension installation' \
