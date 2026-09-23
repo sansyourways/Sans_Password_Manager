@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.7.1"
+VERSION="5.7.2"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -30295,6 +30295,23 @@ EXPORT_FORMATS = ["csv", "json", "tsv", "ndjson", "jsonl", "md", "html", "txt", 
                   "xml", "sql", "ini", "psv", "rst", "toml", "org", "scsv", "csv-noheader", "jsonc"]
 
 
+def _is_loopback_host(host):
+    """Whether a request's Host header names this machine (localhost / a loopback
+    IP), port stripped. This -- not the bind address -- is what says a viewer is
+    local: the documented deployment binds loopback behind a public reverse
+    proxy, so a proxied visitor to a domain has a loopback *bind* but a domain
+    *Host*, and the extension (native messaging is same-machine only) is useless
+    to them anyway. One-click install is offered only to a local viewer."""
+    host = (host or "").strip().lower()
+    if not host:
+        return False
+    if host.startswith("["):          # [::1]:port
+        host = host[1:].split("]", 1)[0]
+    elif host.count(":") == 1:         # name:port or ipv4:port
+        host = host.rsplit(":", 1)[0]
+    return _is_loopback_bind(host)
+
+
 def _extension_source_dir():
     """Where the extension's files live if this host holds them, else "". Checked
     so the Dashboard can offer a one-click install only when it can actually build
@@ -30312,13 +30329,13 @@ def _extension_source_dir():
     return ""
 
 
-def extension_page(csrf=""):
-    """The browser-extension setup page: a one-click guided install when this is
-    a loopback Dashboard that holds the extension files, plus manual steps that
+def extension_page(csrf="", host=""):
+    """The browser-extension setup page: a one-click guided install for a local
+    viewer of a Dashboard that holds the extension files, plus manual steps that
     work anywhere. The browser's own Load-unpacked/Add confirmation is the one
     step no software can perform -- browsers forbid a page from installing an
     extension, which is the boundary that keeps a page from pushing one on you."""
-    can_auto = bool(_extension_source_dir()) and _is_loopback_bind(BIND_ADDR)
+    can_auto = bool(_extension_source_dir()) and _is_loopback_host(host)
     host_dir = os.path.join(
         os.environ.get("SPM_DATA_DIR") or os.path.join(
             os.environ.get("XDG_DATA_HOME") or os.path.join(
@@ -34249,7 +34266,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/extension":
-            self._send_html(200, extension_page(self._session_csrf()))
+            self._send_html(200, extension_page(
+                self._session_csrf(), self.headers.get("Host", "")))
             return
 
         query = urllib.parse.parse_qs(parsed.query)
@@ -34781,11 +34799,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # One-click guided install (roadmap: browser-extension setup). Runs
             # the bundled setup.sh -- build the extension and register the native
             # host -- on this machine. Session + CSRF authenticated, and refused
-            # on a non-loopback bind: building files and touching the browser of a
-            # remote host is never what a domain visitor wants. The browser's own
-            # Load-unpacked confirmation is the one step no software can perform.
-            if not _is_loopback_bind(BIND_ADDR):
-                self._send_json(403, {"error": "automatic install is offered only on a loopback Dashboard"})
+            # unless the request's Host is loopback: a loopback bind behind a
+            # public proxy still serves domain visitors, and building files and
+            # registering a host for a remote viewer (whose browser could never
+            # reach a same-machine native host anyway) is never what they want.
+            # The browser's own Load-unpacked confirmation is the one step no
+            # software can perform.
+            if not _is_loopback_host(self.headers.get("Host", "")):
+                self._send_json(403, {"error": "automatic install is offered only to a local viewer of the Dashboard"})
                 return
             payload = self._read_json_authorized()
             if payload is None:
