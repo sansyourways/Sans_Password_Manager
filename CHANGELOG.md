@@ -34,6 +34,8 @@ One-click browser-extension install from the Dashboard. No vault format change.
   (`~/.local/share/spm/browser-extension-universal`), so `spm extension setup`
   and the Dashboard one-click install work after a normal install.
 
+## [5.7.0] - 2026-09-22
+
 The six partial roadmap items completed, plus first-class browser-extension
 installation. No vault format change (format 6, additive only).
 
@@ -70,6 +72,8 @@ installation. No vault format change (format 6, additive only).
 ### Changed
 - README refreshed to the new version and features; `rotation`, `run`, `env`,
   `plugin`, `extension` and the JSON flags are in the command reference.
+
+## [5.6.0] - 2026-09-20
 
 Look-alike warnings, scoped secret access and injection, shell completion, and a
 capability-sandboxed plugin SDK. No vault format change (format 6, additive only).
