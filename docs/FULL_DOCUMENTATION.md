@@ -1926,6 +1926,8 @@ spm kdf argon2id    # rewrap to Argon2id (needs a backend)
 spm kdf scrypt      # rewrap back to scrypt (opens on any SPM)
 ```
 
+![Terminal: spm kdf status reports the vault on scrypt with an argon2-cffi backend available, spm kdf argon2id rewraps it to Argon2id noting the key and contents are unchanged, and spm kdf status then reports the vault memory-hard on Argon2id](docs/screenshots/web-v2.13.0/59-kdf.png)
+
 Switching rewraps only the master-password envelope, so it costs one rewrap, not
 a re-encryption; the vault key, the ciphertext, the recovery file and every
 `.bak` are unchanged. An Argon2id vault carried to a machine with no backend
