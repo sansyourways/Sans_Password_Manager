@@ -3661,6 +3661,25 @@ def t_argon2id_roundtrips_where_a_backend_is_present():
     assert "CoreSecret42" in plaintext2 and back2 == key
 
 
+def t_argon2id_refuses_out_of_range_cost_parameters():
+    # A tampered header must not drive an unbounded Argon2id allocation. The KDF
+    # line is unauthenticated -- it is read to derive the key that then checks
+    # the MAC -- so absurd m/t/p have to be refused BEFORE any memory is reserved
+    # or any pass is run, exactly as scrypt's fixed maxmem refuses a crafted n.
+    # The bound is backend-independent (checked ahead of backend dispatch), so
+    # this runs everywhere and never actually reserves the memory it rejects.
+    salt = core.argon2id_salt()
+    raises(core.VaultError, lambda: core._argon2id_raw(b"pw", salt, 1 << 30, 3, 1, 32))
+    raises(core.VaultError, lambda: core._argon2id_raw(b"pw", salt, 1 << 16, 10 ** 9, 1, 32))
+    raises(core.VaultError, lambda: core._argon2id_raw(b"pw", salt, 1 << 16, 3, 1 << 20, 32))
+    raises(core.VaultError, lambda: core._argon2id_raw(b"pw", salt, 1 << 16, 0, 1, 32))
+    # SPM's own defaults sit inside the range, so a normal vault is never caught
+    # by the bound the crafted ones hit.
+    assert core.KDF_ARGON2_M <= core.KDF_ARGON2_MAX_M
+    assert 1 <= core.KDF_ARGON2_T <= core.KDF_ARGON2_MAX_T
+    assert 1 <= core.KDF_ARGON2_P <= core.KDF_ARGON2_MAX_P
+
+
 def t_argon2id_header_parses_and_refuses_without_a_backend():
     # The Argon2id header round-trips through the parser regardless of backend
     # (so `doctor` can report such a vault), and with no backend it refuses to
