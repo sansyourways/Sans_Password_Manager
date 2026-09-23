@@ -1454,6 +1454,25 @@ printf '%s' "$ext_out" | grep -q 'Manual browser-extension installation' \
 ext_out="$(cmd_extension path)"
 printf '%s' "$ext_out" | grep -q 'browser-extension' \
 	|| { printf 'extension path missing\n' >&2; exit 1; }
+# -- 5.7.1: the Dashboard one-click install button renders on a loopback dashboard
+#    that holds the extension files, carries the csrf token and posts to
+#    /extension/setup; the route refuses a non-loopback bind (asserted below).
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" SPM_VAULT_PATH="$PASSWORD_VAULT" \
+	SPM_WEB_BIND=127.0.0.1 SPM_WEB_RP_ID=localhost \
+	SPM_EXTENSION_DIR="$ROOT_DIR/browser-extension-universal" \
+	python3 - "$web_script" <<'EXTPY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("spm_web_ext", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+assert mod._extension_source_dir(), "the extension source dir was not found"
+assert mod._is_loopback_bind(mod.BIND_ADDR), "127.0.0.1 was not read as loopback"
+assert not mod._is_loopback_bind("203.0.113.10"), "a public address was read as loopback"
+page = mod.extension_page("csrf-token-XYZ")
+for needle in ('id="ext-install"', "csrf-token-XYZ", "/extension/setup"):
+    assert needle in page, "one-click install page missing %r" % needle
+EXTPY
+printf '  extension one-click: install-now button renders on a loopback dashboard, csrf-bound, posting to /extension/setup\n'
 # -- 5: an emergency kit built with a tiny --delay-hours carries a time-lock and
 #    still opens (the payload behind sequential work); one without is unchanged.
 em_dir="$TEST_ROOT/emergency"; mkdir -p "$em_dir"

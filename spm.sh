@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.7.0"
+VERSION="5.7.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -30295,15 +30295,52 @@ EXPORT_FORMATS = ["csv", "json", "tsv", "ndjson", "jsonl", "md", "html", "txt", 
                   "xml", "sql", "ini", "psv", "rst", "toml", "org", "scsv", "csv-noheader", "jsonc"]
 
 
-def extension_page():
-    """The browser-extension setup page: manual steps that work anywhere, plus
-    the exact commands the CLI offers. The Dashboard cannot register a native
-    host in the viewer's browser -- that is a local step -- so it documents it."""
+def _extension_source_dir():
+    """Where the extension's files live if this host holds them, else "". Checked
+    so the Dashboard can offer a one-click install only when it can actually build
+    and register on this machine."""
+    data_dir = os.environ.get("SPM_DATA_DIR") or os.path.join(
+        os.environ.get("XDG_DATA_HOME") or os.path.join(
+            os.path.expanduser("~"), ".local", "share"), "spm")
+    here = os.path.dirname(os.path.abspath(__file__))
+    for candidate in (os.environ.get("SPM_EXTENSION_DIR", ""),
+                      os.path.join(data_dir, "browser-extension-universal"),
+                      os.path.join(here, "..", "browser-extension-universal"),
+                      os.path.join(here, "browser-extension-universal")):
+        if candidate and os.path.isfile(os.path.join(candidate, "setup.sh")):
+            return os.path.abspath(candidate)
+    return ""
+
+
+def extension_page(csrf=""):
+    """The browser-extension setup page: a one-click guided install when this is
+    a loopback Dashboard that holds the extension files, plus manual steps that
+    work anywhere. The browser's own Load-unpacked/Add confirmation is the one
+    step no software can perform -- browsers forbid a page from installing an
+    extension, which is the boundary that keeps a page from pushing one on you."""
+    can_auto = bool(_extension_source_dir()) and _is_loopback_bind(BIND_ADDR)
     host_dir = os.path.join(
         os.environ.get("SPM_DATA_DIR") or os.path.join(
             os.environ.get("XDG_DATA_HOME") or os.path.join(
                 os.path.expanduser("~"), ".local", "share"), "spm"),
         "browser-extension")
+    if can_auto:
+        auto = f"""
+  <h2 style="margin-top:var(--sp-4)">Install now (this machine)</h2>
+  <p>One click builds the extension and registers the native host on this
+  computer. Your browser then makes you confirm the last step &mdash; that click
+  is the browser's own rule, and no page can perform it for you.</p>
+  <button class="btn btn-primary" type="button" id="ext-install"
+          data-csrf="{html.escape(csrf, quote=True)}">Build &amp; register on this machine</button>
+  <pre id="ext-out" hidden style="margin-top:var(--sp-3);max-height:280px;overflow:auto"></pre>
+  <div id="ext-next" hidden style="margin-top:var(--sp-3)"></div>
+"""
+    else:
+        auto = """
+  <h2 style="margin-top:var(--sp-4)">Guided (Linux/macOS)</h2>
+  <pre>spm extension setup</pre>
+  <p class="faint">On the machine running SPM: builds the extension, registers the native host, detects a browser and opens the install page. (One-click install from here is offered only on a loopback Dashboard that holds the extension files.)</p>
+"""
     content = f"""
 <div class="page-head"><div>
   <h1 class="page-title">Browser extension</h1>
@@ -30313,9 +30350,7 @@ def extension_page():
   <p>The extension autofills logins, captures new passwords, generates strong ones,
   fills one-time codes and warns about look-alike sites &mdash; talking to this SPM
   install over a local native-messaging host.</p>
-  <h2 style="margin-top:var(--sp-4)">Guided (Linux/macOS)</h2>
-  <pre>spm extension setup</pre>
-  <p class="faint">Builds the extension, registers the native host, detects a browser and opens the install page.</p>
+  {auto}
   <h2 style="margin-top:var(--sp-4)">Manual (any platform)</h2>
   <ol>
     <li>Build the unpacked extension on the machine running SPM:
@@ -30338,6 +30373,44 @@ def extension_page():
   <p class="faint">In a terminal, <code>spm extension manual</code> prints these steps and
   <code>spm extension path</code> shows where everything lives.</p>
 </div></div>
+"""
+    if can_auto:
+        content += """
+<script>
+(function () {
+  var btn = document.getElementById("ext-install");
+  if (!btn) return;
+  var out = document.getElementById("ext-out");
+  var next = document.getElementById("ext-next");
+  btn.addEventListener("click", function () {
+    btn.disabled = true;
+    out.hidden = false; out.textContent = "Building the extension and registering the native host…";
+    fetch("/extension/setup", {
+      method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({csrf: btn.getAttribute("data-csrf")})
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { return {ok: r.ok, j: j}; });
+    }).then(function (res) {
+      out.textContent = (res.j && res.j.output) ? res.j.output
+        : (res.ok ? "Done." : ((res.j && res.j.error) || "Setup failed."));
+      if (res.ok && res.j) {
+        next.hidden = false;
+        var dir = res.j.dist ? (" <code>" + res.j.dist + "</code>") : " the built dist folder";
+        next.innerHTML = "<strong>Last step (your browser requires it):</strong> open "
+          + "<code>chrome://extensions</code>, turn on Developer mode, click "
+          + "&ldquo;Load unpacked&rdquo; and choose" + dir + ". Then register the host for the "
+          + "extension&rsquo;s id if it changed: <code>spm extension host &lt;id&gt;</code>.";
+      } else {
+        btn.disabled = false;
+      }
+    }).catch(function () {
+      out.textContent = "Could not reach the Dashboard to run setup.";
+      btn.disabled = false;
+    });
+  });
+})();
+</script>
 """
     return render_shell(content, "extension", VERSION, VAULT_PATH, title="Browser extension")
 
@@ -34176,7 +34249,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/extension":
-            self._send_html(200, extension_page())
+            self._send_html(200, extension_page(self._session_csrf()))
             return
 
         query = urllib.parse.parse_qs(parsed.query)
@@ -34703,6 +34776,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
             handled = self._handle_hardware_post(path)
             if handled:
                 return
+
+        if path == "/extension/setup":
+            # One-click guided install (roadmap: browser-extension setup). Runs
+            # the bundled setup.sh -- build the extension and register the native
+            # host -- on this machine. Session + CSRF authenticated, and refused
+            # on a non-loopback bind: building files and touching the browser of a
+            # remote host is never what a domain visitor wants. The browser's own
+            # Load-unpacked confirmation is the one step no software can perform.
+            if not _is_loopback_bind(BIND_ADDR):
+                self._send_json(403, {"error": "automatic install is offered only on a loopback Dashboard"})
+                return
+            payload = self._read_json_authorized()
+            if payload is None:
+                return
+            ext_dir = _extension_source_dir()
+            if not ext_dir:
+                self._send_json(400, {"error": "the extension files are not on this host; use the manual steps below"})
+                return
+            try:
+                result = subprocess.run(
+                    ["bash", os.path.join(ext_dir, "setup.sh"), "--no-open"],
+                    cwd=ext_dir, capture_output=True, text=True, timeout=180,
+                    env={**os.environ, "NO_COLOR": "1"})
+            except Exception:
+                self._send_json(500, {"ok": False, "error": "the guided setup did not run"})
+                return
+            output = (result.stdout + result.stderr).strip()[-6000:]
+            if result.returncode == 0:
+                self._send_json(200, {"ok": True, "output": output,
+                                      "dist": os.path.join(ext_dir, "dist", "chromium")})
+            else:
+                self._send_json(500, {"ok": False, "output": output or "the guided setup failed"})
+            return
 
         master = self._get_cookie_session()
         if not master:

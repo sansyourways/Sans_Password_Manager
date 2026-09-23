@@ -7,7 +7,21 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
-## [5.7.0] - 2026-09-22
+## [5.7.1] - 2026-09-23
+
+One-click browser-extension install from the Dashboard. No vault format change.
+
+### Added
+- **Dashboard "Install now" for the browser extension.** On a loopback Dashboard
+  that holds the extension files, the Browser extension page offers a one-click
+  install: a session- and CSRF-authenticated `/extension/setup` route runs the
+  bundled `setup.sh` on this machine (build the extension + register the native
+  host), then shows the one step the browser reserves for itself — the
+  Load-unpacked confirmation, which no page can perform. The button is refused on
+  a non-loopback bind.
+- **`install.sh` places the extension files** under the user's data dir
+  (`~/.local/share/spm/browser-extension-universal`), so `spm extension setup`
+  and the Dashboard one-click install work after a normal install.
 
 The six partial roadmap items completed, plus first-class browser-extension
 installation. No vault format change (format 6, additive only).
