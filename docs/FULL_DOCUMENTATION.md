@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **5.6.0**
+Current release: **5.7.0**
 
 ---
 
@@ -339,6 +339,30 @@ answers the same question from the shell. No blocklist, no network.
 | A look-alike / phishing warning |
 | --- |
 | ![Terminal: spm phishing-check flags paypa1.com as a swapped-character copy of paypal.com where you have an account, and reports no warning for the genuine github.com](docs/screenshots/web-v2.13.0/55-phishing.png) |
+
+### Per-record rotation, JSON output, and installing the extension
+
+New in 5.7.0, alongside the completed partials.
+
+A single record can set its own **password-rotation window** (or opt out), over
+the vault-wide default, and the security score reads it. `spm list --json` and
+`spm get <id> --json` print the vault in a form scripts can read — `list`
+secret-free, `get` including the password it already shows. The **Dashboard
+search** gained a grammar: `type:`, `tag:`/`#tag`, `folder:`, `is:favorite`/
+`is:hidden`, and `expires:<30d`/`expires:overdue`, combinable with free text.
+
+Two more completed this release don't screenshot as a terminal: **hardware-backed
+recovery** — reset the master with a registered security key, offered on the
+Dashboard unlock page — and a **time-locked emergency kit** (`--delay-hours`) an
+offline recipient cannot open before the intended delay.
+
+Installing the **browser extension** is now one step wherever you are: `spm
+extension setup` (guided) or `manual`, an interactive-menu entry, and a Dashboard
+**Browser extension** page.
+
+| Per-record rotation and `--json` | Installing the extension |
+| --- | --- |
+| ![Terminal: spm rotation set gives a record a 90-day window or 'never', spm rotation list shows them, and spm list --json prints a secret-free record](docs/screenshots/web-v2.13.0/56-rotation.png) | ![Terminal: spm extension path, setup, manual and host — installing the browser extension and its native host from the command line, the menu or the Dashboard](docs/screenshots/web-v2.13.0/57-extension.png) |
 
 <details>
 <summary><strong>Complete web interface gallery</strong></summary>

@@ -1,5 +1,5 @@
 # Security Policy for Sans Password Manager (SPM)
-Version 2.2 — © 2025–2026 Sansyourways
+Version 2.3 — © 2025–2026 Sansyourways
 Last Updated: August 2026
 
 SPM (Sans Password Manager) is a privacy-focused, offline, fully client-side encrypted application.
@@ -19,7 +19,7 @@ SPM is designed around the following core principles:
   Vaults written before 4.0.0 are GnuPG symmetric AES-256 and are still read;
   they upgrade in place on their next write, keeping the same vault key.
 - **User-controlled keys** — the user is the sole owner of all keys and passwords.
-- **User-controlled recovery** — recovery requires the locally generated RSA private key and recovery blob; the developer cannot recover either.
+- **User-controlled recovery** — recovery requires either the locally generated RSA private key and recovery blob, or a registered hardware security key (which resets the master password through the same WebAuthn PRF secret that opens the vault); the developer can recover neither.
 - **Crash-safe writes** — ciphertext is staged and atomically installed, with a last-known-good encrypted backup.
 - **Concurrent-write protection** — CLI and web mutations share one advisory
   lock on every supported platform. `flock(1)` is used where it exists; macOS
@@ -27,7 +27,7 @@ SPM is designed around the following core principles:
   which is the primitive the dashboard has always used, so the two exclude
   each other. The kernel releases the lock when the last holder exits, so a
   killed process leaves nothing to clean up.
-- **Local-first extensions** — history, backups, attachments, and sync contain encrypted vault material; browser autofill is explicit and hostname-bound.
+- **Local-first extensions** — history, backups, attachments, and sync contain encrypted vault material; the browser extension talks only to a local native-messaging host, and its autofill, password capture, password generation, one-time-code fill, and look-alike/phishing warning are all explicit, hostname-bound, and gated to an unlocked session.
 - **Platform-owned passkeys** — SPM stores passkey metadata, never private passkey key material.
 
 Core vault operations are offline. The optional updater contacts GitHub Releases,
