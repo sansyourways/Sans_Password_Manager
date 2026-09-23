@@ -325,3 +325,22 @@ installed="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' "$target")"
 [ "$installed" = "$VERSION" ] || { printf 'Installed version verification failed.\n' >&2; exit 1; }
 printf 'Installed SPM %s at %s\n' "$installed" "$target"
 ensure_on_path "$target_dir"
+
+# Place the browser-extension source under the user's data dir so `spm extension
+# setup` and the Dashboard's one-click install can build and register from it --
+# the installed spm.sh is a single file and does not carry them otherwise. This
+# copy goes to the invoking user's data dir, never root's, even when the binary
+# above needed sudo.
+ext_src="$workdir/extract/browser-extension-universal"
+if [ -d "$ext_src" ]; then
+	data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/spm"
+	ext_dest="$data_dir/browser-extension-universal"
+	if mkdir -p "$data_dir" 2>/dev/null; then
+		rm -rf "$ext_dest" 2>/dev/null || true
+		if cp -R "$ext_src" "$ext_dest" 2>/dev/null; then
+			chmod +x "$ext_dest"/*.sh 2>/dev/null || true
+			printf 'Browser extension files installed at %s\n' "$ext_dest"
+			printf 'Set up the extension any time with: spm extension setup\n'
+		fi
+	fi
+fi
