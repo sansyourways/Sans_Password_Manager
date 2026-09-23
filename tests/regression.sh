@@ -1466,13 +1466,18 @@ spec = importlib.util.spec_from_file_location("spm_web_ext", sys.argv[1])
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 assert mod._extension_source_dir(), "the extension source dir was not found"
-assert mod._is_loopback_bind(mod.BIND_ADDR), "127.0.0.1 was not read as loopback"
-assert not mod._is_loopback_bind("203.0.113.10"), "a public address was read as loopback"
-page = mod.extension_page("csrf-token-XYZ")
+# The Host header, not the bind, decides -- a loopback bind behind a public proxy
+# still serves domain visitors.
+assert mod._is_loopback_host("localhost:8777"), "localhost:8777 was not read as local"
+assert mod._is_loopback_host("127.0.0.1"), "127.0.0.1 was not read as local"
+assert not mod._is_loopback_host("spm.example.com"), "a domain Host was read as local"
+local = mod.extension_page("csrf-token-XYZ", "localhost:8777")
 for needle in ('id="ext-install"', "csrf-token-XYZ", "/extension/setup"):
-    assert needle in page, "one-click install page missing %r" % needle
+    assert needle in local, "one-click install page missing %r" % needle
+remote = mod.extension_page("csrf-token-XYZ", "spm.example.com")
+assert 'id="ext-install"' not in remote, "install-now button shown to a proxied domain visitor"
 EXTPY
-printf '  extension one-click: install-now button renders on a loopback dashboard, csrf-bound, posting to /extension/setup\n'
+printf '  extension one-click: install-now renders for a local viewer, hidden from a proxied domain visitor, csrf-bound to /extension/setup\n'
 # -- 5: an emergency kit built with a tiny --delay-hours carries a time-lock and
 #    still opens (the payload behind sequential work); one without is unchanged.
 em_dir="$TEST_ROOT/emergency"; mkdir -p "$em_dir"

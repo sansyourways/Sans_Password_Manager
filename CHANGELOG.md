@@ -7,6 +7,17 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.7.2] - 2026-09-23
+
+### Fixed
+- **The Dashboard's one-click extension install is now gated on the request Host,
+  not the bind address.** The documented deployment binds the Dashboard to
+  loopback behind a public reverse proxy, so a bind-based check showed "Install
+  now" to domain visitors too — for whom it is useless (native messaging is
+  same-machine only) and wrong (it would build and register on the server). The
+  button now appears, and `/extension/setup` runs, only when the request's Host
+  is loopback (a local viewer).
+
 ## [5.7.1] - 2026-09-23
 
 One-click browser-extension install from the Dashboard. No vault format change.
