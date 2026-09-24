@@ -1455,7 +1455,11 @@ kdf_backend="$(core kdf-backend 2>/dev/null || printf none)"
 kdf_fields="$(core seal-info "$VAULT_FILE" | awk -F'\t' '{print NF}')"
 [ "$kdf_fields" = 7 ] || { printf 'seal-info is not seven fields (got %s)\n' "$kdf_fields" >&2; exit 1; }
 [ "$(core seal-info "$VAULT_FILE" | cut -f2)" = scrypt ] || { printf 'vault did not start on scrypt\n' >&2; exit 1; }
-cmd_kdf status | grep -q scrypt || { printf 'kdf status did not report scrypt\n' >&2; exit 1; }
+# Captured before matching: piping a multi-line producer into `grep -q` lets
+# grep close the pipe after the first line and, under `set -o pipefail`, the
+# still-writing cmd_kdf takes a SIGPIPE that fails the pipeline (macOS-only).
+kdf_status_out="$(cmd_kdf status)"
+printf '%s' "$kdf_status_out" | grep -q scrypt || { printf 'kdf status did not report scrypt\n' >&2; exit 1; }
 kdf_copy="$TEST_ROOT/kdf-vault.gpg"
 cp "$VAULT_FILE" "$kdf_copy"
 [ -f "$VAULT_FILE.recovery" ] && cp "$VAULT_FILE.recovery" "$kdf_copy.recovery"
