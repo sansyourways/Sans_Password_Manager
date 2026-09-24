@@ -3630,6 +3630,22 @@ def t_timelock_seals_cheaply_and_opens_by_work():
     raises(core.VaultError, lambda: core.timelock_seal(b"x" * 33, 0.1))
 
 
+def t_timelock_unseal_rejects_crafted_puzzles():
+    # A puzzle comes from an untrusted kit file. An enormous work factor or
+    # modulus would otherwise let a crafted kit run effectively forever; each is
+    # bounded before any squaring begins, so these refusals are immediate.
+    base = core.timelock_seal(os.urandom(16), 0.05)
+    crafted_t = dict(base, t=core.TIMELOCK_MAX_T + 1)
+    raises(core.VaultError, lambda: core.timelock_unseal(crafted_t))
+    crafted_n = dict(base, n=(1 << (core.TIMELOCK_MAX_N_BITS + 1)) | 1)
+    raises(core.VaultError, lambda: core.timelock_unseal(crafted_n))
+    crafted_sealed = dict(base, sealed="ab" * (core.TIMELOCK_MAX_SEALED + 1))
+    raises(core.VaultError, lambda: core.timelock_unseal(crafted_sealed))
+    raises(core.VaultError, lambda: core.timelock_unseal(dict(base, t=0)))
+    # The legitimate puzzle still opens: the bound never touches a real kit.
+    eq(core.timelock_unseal(base), core.timelock_unseal(base))
+
+
 def t_argon2id_roundtrips_where_a_backend_is_present():
     # Roadmap 3. Argon2id is capability-gated: where a backend exists, the raw
     # derivation matches the published PHC test vector and a vault can be moved

@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.8.1"
+VERSION="5.8.2"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -5804,6 +5804,17 @@ def _timelock_rate(modulus):
     return count / elapsed if elapsed > 0 else 200000.0
 
 
+# A time-lock puzzle is opened by a recipient from a file they were handed, so
+# its parameters are untrusted at unseal time -- the same position the vault KDF
+# line is in. t is a sequential-squaring count and n a modulus each squaring
+# runs against, so a crafted kit with an enormous t or n makes opening it never
+# finish (a denial of service). These bound both: a legitimate kit uses a
+# ~2048-bit modulus and a t set from the requested delay, both far inside these.
+TIMELOCK_MAX_T = 1 << 46          # ~7e13 squarings; generous vs any real delay
+TIMELOCK_MAX_N_BITS = 4096        # a real modulus is p*q of two 1024-bit primes
+TIMELOCK_MAX_SEALED = 256         # the sealed payload is <= 32 bytes in practice
+
+
 def timelock_seal(secret, seconds):
     """Seal up to 32 bytes behind a ~`seconds` sequential-squaring puzzle.
 
@@ -5817,7 +5828,9 @@ def timelock_seal(secret, seconds):
         q = _random_prime(1024)
     n, phi = p * q, (p - 1) * (q - 1)
     a = 2 + int.from_bytes(os.urandom(32), "big") % (n - 4)
-    t = max(1, int(max(seconds, 0) * _timelock_rate(n)))
+    # Clamped so SPM never writes a kit whose work factor exceeds what the
+    # opener is willing to accept below; a real delay never reaches the bound.
+    t = max(1, min(int(max(seconds, 0) * _timelock_rate(n)), TIMELOCK_MAX_T))
     mask = pow(a, pow(2, t, phi), n)
     stream = hashlib.sha256(str(mask).encode("ascii")).digest()
     sealed = bytes(b ^ s for b, s in zip(secret, stream))
@@ -5825,9 +5838,23 @@ def timelock_seal(secret, seconds):
 
 
 def timelock_unseal(puzzle):
-    """Recover the sealed bytes by doing t sequential squarings. Slow by design."""
+    """Recover the sealed bytes by doing t sequential squarings. Slow by design.
+
+    The puzzle comes from an untrusted file, so its parameters are bounded
+    before any work begins: an enormous t or modulus would otherwise let a
+    crafted kit run effectively forever. Slow is the design; unbounded is not.
+    """
     n, a, t = int(puzzle["n"]), int(puzzle["a"]), int(puzzle["t"])
-    sealed = bytes.fromhex(puzzle["sealed"])
+    if not 1 <= t <= TIMELOCK_MAX_T:
+        raise VaultError("time-lock work factor is outside the supported range")
+    if n < 2 or n.bit_length() > TIMELOCK_MAX_N_BITS:
+        raise VaultError("time-lock modulus is outside the supported range")
+    if not 1 < a < n:
+        raise VaultError("time-lock base is outside the supported range")
+    sealed_hex = str(puzzle["sealed"])
+    if len(sealed_hex) > TIMELOCK_MAX_SEALED * 2:
+        raise VaultError("time-lock payload is too large")
+    sealed = bytes.fromhex(sealed_hex)
     x = a
     for _ in range(t):
         x = x * x % n
@@ -15996,8 +16023,17 @@ cmd_sync() {
 			if [ -n "$remote_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then
 				die "Initial sync conflict: remote differs; pull or set SPM_SYNC_FORCE_INITIAL=1 after verification."
 			fi
-			if [ -n "$remote_sha" ] && [ -n "$base_sha" ] && [ "$remote_sha" != "$base_sha" ] && [ "$local_sha" != "$base_sha" ]; then
-				die "Sync conflict: local and remote both changed."
+			# Push is fast-forward only. If the remote moved since the base this
+			# device recorded, pushing the local copy would overwrite whatever
+			# advanced it -- another device's push -- so refuse whether or not
+			# the local side also changed. Only remote == base is safe to push
+			# over. SPM_SYNC_FORCE=1 is the deliberate "make the remote match my
+			# local, discarding the remote" override.
+			if [ -n "$remote_sha" ] && [ -n "$base_sha" ] && [ "$remote_sha" != "$base_sha" ] && [ "${SPM_SYNC_FORCE:-0}" != 1 ]; then
+				if [ "$local_sha" != "$base_sha" ]; then
+					die "Sync conflict: local and remote both changed since the last sync; reconcile before pushing."
+				fi
+				die "The remote advanced since the last sync; pull before pushing (your local copy is behind, and pushing would overwrite the newer remote)."
 			fi
 			sync_transport_publish "$transport" "$SYNC_REMOTE" "$VAULT_FILE"
 			# Read it back rather than trust the write. A transport that
@@ -16018,8 +16054,17 @@ cmd_sync() {
 			if [ -n "$local_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then
 				die "Initial sync conflict: local differs; set SPM_SYNC_FORCE_INITIAL=1 only after verification."
 			fi
-			if [ -n "$local_sha" ] && [ -n "$base_sha" ] && [ "$local_sha" != "$base_sha" ] && [ "$remote_sha" != "$base_sha" ]; then
-				die "Sync conflict: local and remote both changed."
+			# Pull is fast-forward only. If the local copy moved since the base
+			# this device recorded, replacing it with the remote would discard
+			# those unpushed changes, so refuse. When both moved it is a genuine
+			# conflict; when only the local side moved there is simply nothing to
+			# pull and the local edits must be kept. SPM_SYNC_FORCE=1 is the
+			# deliberate "discard my local changes and take the remote" override.
+			if [ -n "$local_sha" ] && [ -n "$base_sha" ] && [ "$local_sha" != "$base_sha" ] && [ "${SPM_SYNC_FORCE:-0}" != 1 ]; then
+				if [ "$remote_sha" != "$base_sha" ]; then
+					die "Sync conflict: local and remote both changed since the last sync; reconcile before pulling."
+				fi
+				die "Local has unpushed changes and the remote has nothing newer to pull; push instead (pulling would discard your changes)."
 			fi
 			tmp="$(make_tmp)"; ensure_master_password_loaded
 			# Prove the fetched vault opens before the local one is touched.
@@ -25887,101 +25932,6 @@ DESIGN_CSS = """
   --rail-w: 68px;
 }
 
-/* ---- Theme: dark (default) ---- */
-body, body.theme-dark {
-  --bg:        #0d1017;
-  --bg-grad:   radial-gradient(1200px 600px at 15% -10%, #1b2540 0%, transparent 60%), #0d1017;
-  --surface:   #151a24;
-  --surface-2: #1c2230;
-  --surface-3: #232b3b;
-  --border:    #262e3d;
-  --border-hi: #364157;
-  --text:      #e8ecf5;
-  --text-dim:  #98a3b8;
-  --text-faint:#6b7688;
-  --accent:    #5b8cff;
-  --accent-hi: #7aa2ff;
-  --accent-fg: #ffffff;
-  --accent-soft:rgba(91,140,255,.14);
-  --ok:        #3ecf8e;
-  --ok-soft:   rgba(62,207,142,.14);
-  --warn:      #f5b544;
-  --warn-soft: rgba(245,181,68,.14);
-  --danger:    #f2555a;
-  --danger-soft:rgba(242,85,90,.14);
-  --shadow:    0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.28);
-  --shadow-lg: 0 12px 40px rgba(0,0,0,.5);
-}
-
-/* ---- Theme: AMOLED ---- */
-body.theme-amoled {
-  --bg:        #000000;
-  --bg-grad:   radial-gradient(900px 500px at 20% -15%, #0d1424 0%, transparent 62%), #000000;
-  --surface:   #08090c;
-  --surface-2: #101319;
-  --surface-3: #171b23;
-  --border:    #1b1f28;
-  --border-hi: #2b3140;
-  --text:      #f2f5fa;
-  --text-dim:  #94a0b4;
-  --text-faint:#636d7e;
-  --accent:    #4f8bff;
-  --accent-hi: #74a6ff;
-  --accent-soft:rgba(79,139,255,.16);
-  --shadow:    0 1px 2px rgba(0,0,0,.9), 0 4px 18px rgba(0,0,0,.7);
-  --shadow-lg: 0 14px 44px rgba(0,0,0,.85);
-}
-
-/* ---- Theme: cyberpunk ---- */
-body.theme-cyberpunk {
-  --bg:        #0a0713;
-  --bg-grad:   radial-gradient(1000px 520px at 12% -10%, #2a0f47 0%, transparent 58%), radial-gradient(800px 400px at 95% 8%, #06303a 0%, transparent 55%), #0a0713;
-  --surface:   #140d22;
-  --surface-2: #1c1230;
-  --surface-3: #26193f;
-  --border:    #33204f;
-  --border-hi: #4b2f70;
-  --text:      #f6ecff;
-  --text-dim:  #b19ad0;
-  --text-faint:#8875a3;
-  --accent:    #f637d4;
-  --accent-hi: #ff6ae0;
-  --accent-fg: #ffffff;
-  --accent-soft:rgba(246,55,212,.16);
-  --ok:        #35f0c0;
-  --ok-soft:   rgba(53,240,192,.14);
-  --warn:      #ffcc4d;
-  --danger:    #ff4d6d;
-  --shadow:    0 1px 2px rgba(0,0,0,.6), 0 4px 20px rgba(120,20,140,.3);
-  --shadow-lg: 0 14px 46px rgba(140,20,160,.42);
-}
-
-/* ---- Theme: light ---- */
-body.theme-light {
-  --bg:        #f4f6fa;
-  --bg-grad:   radial-gradient(1100px 560px at 12% -12%, #e2eaff 0%, transparent 60%), #f4f6fa;
-  --surface:   #ffffff;
-  --surface-2: #f7f9fc;
-  --surface-3: #eef2f8;
-  --border:    #dfe5ee;
-  --border-hi: #c4cede;
-  --text:      #131822;
-  --text-dim:  #5a6577;
-  --text-faint:#8b95a6;
-  --accent:    #2f6bf0;
-  --accent-hi: #1d55d4;
-  --accent-fg: #ffffff;
-  --accent-soft:rgba(47,107,240,.10);
-  --ok:        #14915c;
-  --ok-soft:   rgba(20,145,92,.12);
-  --warn:      #b57611;
-  --warn-soft: rgba(181,118,17,.12);
-  --danger:    #d3323b;
-  --danger-soft:rgba(211,50,59,.10);
-  --shadow:    0 1px 2px rgba(16,24,40,.06), 0 4px 14px rgba(16,24,40,.07);
-  --shadow-lg: 0 14px 40px rgba(16,24,40,.16);
-}
-
 /* ---- Base ---- */
 html, body { height: 100%; }
 body {
@@ -25990,7 +25940,7 @@ body {
   font-size: var(--fs-base);
   line-height: 1.55;
   color: var(--text);
-  background: var(--bg-grad, var(--bg));
+  background: var(--bg);
   background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   transition: background-color .25s var(--ease), color .25s var(--ease);
@@ -26678,7 +26628,7 @@ body.theme-cyberpunk .nav-item.active { box-shadow:inset -3px 0 var(--warn); }
 body.theme-cyberpunk .btn:hover, body.theme-cyberpunk .nav-item:hover { transform:translateX(2px); text-shadow:0 0 10px currentColor; }
 body.theme-edgerunner .page-title { text-transform:uppercase; letter-spacing:.08em; }
 body.theme-edgerunner .page-title::before { content:"// "; }
-body.theme-edgerunner .card, body.theme-edgerunner .stat { border-left-width:4px; }
+body.theme-edgerunner .card, body.theme-edgerunner .stat { border-inline-start-width:4px; }
 body.theme-edgerunner .nav-item.active, body.theme-edgerunner .btn-primary { clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,0 100%); }
 body.theme-edgerunner .btn:hover, body.theme-edgerunner .nav-item:hover { transform:translateY(-1px); }
 
