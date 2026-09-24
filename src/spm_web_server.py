@@ -7520,101 +7520,6 @@ DESIGN_CSS = """
   --rail-w: 68px;
 }
 
-/* ---- Theme: dark (default) ---- */
-body, body.theme-dark {
-  --bg:        #0d1017;
-  --bg-grad:   radial-gradient(1200px 600px at 15% -10%, #1b2540 0%, transparent 60%), #0d1017;
-  --surface:   #151a24;
-  --surface-2: #1c2230;
-  --surface-3: #232b3b;
-  --border:    #262e3d;
-  --border-hi: #364157;
-  --text:      #e8ecf5;
-  --text-dim:  #98a3b8;
-  --text-faint:#6b7688;
-  --accent:    #5b8cff;
-  --accent-hi: #7aa2ff;
-  --accent-fg: #ffffff;
-  --accent-soft:rgba(91,140,255,.14);
-  --ok:        #3ecf8e;
-  --ok-soft:   rgba(62,207,142,.14);
-  --warn:      #f5b544;
-  --warn-soft: rgba(245,181,68,.14);
-  --danger:    #f2555a;
-  --danger-soft:rgba(242,85,90,.14);
-  --shadow:    0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.28);
-  --shadow-lg: 0 12px 40px rgba(0,0,0,.5);
-}
-
-/* ---- Theme: AMOLED ---- */
-body.theme-amoled {
-  --bg:        #000000;
-  --bg-grad:   radial-gradient(900px 500px at 20% -15%, #0d1424 0%, transparent 62%), #000000;
-  --surface:   #08090c;
-  --surface-2: #101319;
-  --surface-3: #171b23;
-  --border:    #1b1f28;
-  --border-hi: #2b3140;
-  --text:      #f2f5fa;
-  --text-dim:  #94a0b4;
-  --text-faint:#636d7e;
-  --accent:    #4f8bff;
-  --accent-hi: #74a6ff;
-  --accent-soft:rgba(79,139,255,.16);
-  --shadow:    0 1px 2px rgba(0,0,0,.9), 0 4px 18px rgba(0,0,0,.7);
-  --shadow-lg: 0 14px 44px rgba(0,0,0,.85);
-}
-
-/* ---- Theme: cyberpunk ---- */
-body.theme-cyberpunk {
-  --bg:        #0a0713;
-  --bg-grad:   radial-gradient(1000px 520px at 12% -10%, #2a0f47 0%, transparent 58%), radial-gradient(800px 400px at 95% 8%, #06303a 0%, transparent 55%), #0a0713;
-  --surface:   #140d22;
-  --surface-2: #1c1230;
-  --surface-3: #26193f;
-  --border:    #33204f;
-  --border-hi: #4b2f70;
-  --text:      #f6ecff;
-  --text-dim:  #b19ad0;
-  --text-faint:#8875a3;
-  --accent:    #f637d4;
-  --accent-hi: #ff6ae0;
-  --accent-fg: #ffffff;
-  --accent-soft:rgba(246,55,212,.16);
-  --ok:        #35f0c0;
-  --ok-soft:   rgba(53,240,192,.14);
-  --warn:      #ffcc4d;
-  --danger:    #ff4d6d;
-  --shadow:    0 1px 2px rgba(0,0,0,.6), 0 4px 20px rgba(120,20,140,.3);
-  --shadow-lg: 0 14px 46px rgba(140,20,160,.42);
-}
-
-/* ---- Theme: light ---- */
-body.theme-light {
-  --bg:        #f4f6fa;
-  --bg-grad:   radial-gradient(1100px 560px at 12% -12%, #e2eaff 0%, transparent 60%), #f4f6fa;
-  --surface:   #ffffff;
-  --surface-2: #f7f9fc;
-  --surface-3: #eef2f8;
-  --border:    #dfe5ee;
-  --border-hi: #c4cede;
-  --text:      #131822;
-  --text-dim:  #5a6577;
-  --text-faint:#8b95a6;
-  --accent:    #2f6bf0;
-  --accent-hi: #1d55d4;
-  --accent-fg: #ffffff;
-  --accent-soft:rgba(47,107,240,.10);
-  --ok:        #14915c;
-  --ok-soft:   rgba(20,145,92,.12);
-  --warn:      #b57611;
-  --warn-soft: rgba(181,118,17,.12);
-  --danger:    #d3323b;
-  --danger-soft:rgba(211,50,59,.10);
-  --shadow:    0 1px 2px rgba(16,24,40,.06), 0 4px 14px rgba(16,24,40,.07);
-  --shadow-lg: 0 14px 40px rgba(16,24,40,.16);
-}
-
 /* ---- Base ---- */
 html, body { height: 100%; }
 body {
@@ -7623,7 +7528,7 @@ body {
   font-size: var(--fs-base);
   line-height: 1.55;
   color: var(--text);
-  background: var(--bg-grad, var(--bg));
+  background: var(--bg);
   background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   transition: background-color .25s var(--ease), color .25s var(--ease);
@@ -8311,7 +8216,7 @@ body.theme-cyberpunk .nav-item.active { box-shadow:inset -3px 0 var(--warn); }
 body.theme-cyberpunk .btn:hover, body.theme-cyberpunk .nav-item:hover { transform:translateX(2px); text-shadow:0 0 10px currentColor; }
 body.theme-edgerunner .page-title { text-transform:uppercase; letter-spacing:.08em; }
 body.theme-edgerunner .page-title::before { content:"// "; }
-body.theme-edgerunner .card, body.theme-edgerunner .stat { border-left-width:4px; }
+body.theme-edgerunner .card, body.theme-edgerunner .stat { border-inline-start-width:4px; }
 body.theme-edgerunner .nav-item.active, body.theme-edgerunner .btn-primary { clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,0 100%); }
 body.theme-edgerunner .btn:hover, body.theme-edgerunner .nav-item:hover { transform:translateY(-1px); }
 

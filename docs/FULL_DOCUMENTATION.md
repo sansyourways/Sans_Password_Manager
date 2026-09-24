@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **5.8.1**
+Current release: **5.8.2**
 
 ---
 

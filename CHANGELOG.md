@@ -7,6 +7,36 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.8.2] - 2026-09-24
+
+Four bug fixes found by a post-release audit, in one release. No vault format
+change.
+
+### Fixed
+- **Sync is now fast-forward only, in both directions (data-loss fix).** The
+  three-way check refused only when *both* local and remote had changed since
+  the recorded base, so a one-sided advance was silently overwritten: `pull`
+  with unpushed local edits and an unchanged remote discarded those edits, and
+  `push` with an advanced remote and an unchanged local reverted the remote
+  (losing another device's update). Both are now refused with a message that
+  says which way to sync; only a true fast-forward proceeds. `SPM_SYNC_FORCE=1`
+  is the explicit override for a deliberate one-directional overwrite.
+- **Time-lock open bounds its work factor.** `timelock_unseal` read the
+  squaring count `t` and modulus `n` straight from an untrusted kit file, so a
+  crafted or tampered emergency kit could make opening it never finish. `t`,
+  the modulus size and the payload size are now bounded before any squaring
+  begins (a real kit is far inside the limits), and `--delay-hours` is clamped
+  to the same ceiling.
+- **Removed leftover pre-migration theme CSS.** The stylesheet still carried the
+  old `theme-dark`/`theme-amoled`/`theme-light` blocks (never applied) and a
+  duplicate `theme-cyberpunk`, and defined a dark `--bg-grad` on the bare
+  `body` that a later rule masked. The dead blocks are gone and the body
+  background reads `var(--bg)` directly, so the dark gradient can no longer leak
+  onto the light themes.
+- **Edgerunner theme border is now logical, not physical.** The card/stat accent
+  border used `border-left-width`, which landed on the wrong side in
+  right-to-left Arabic; it now uses `border-inline-start-width`.
+
 ## [5.8.1] - 2026-09-23
 
 A hardening fix found by auditing 5.8.0. No vault format change.

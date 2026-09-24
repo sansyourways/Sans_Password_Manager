@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.8.1"
+VERSION="5.8.2"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -7248,8 +7248,17 @@ cmd_sync() {
 			if [ -n "$remote_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then
 				die "Initial sync conflict: remote differs; pull or set SPM_SYNC_FORCE_INITIAL=1 after verification."
 			fi
-			if [ -n "$remote_sha" ] && [ -n "$base_sha" ] && [ "$remote_sha" != "$base_sha" ] && [ "$local_sha" != "$base_sha" ]; then
-				die "Sync conflict: local and remote both changed."
+			# Push is fast-forward only. If the remote moved since the base this
+			# device recorded, pushing the local copy would overwrite whatever
+			# advanced it -- another device's push -- so refuse whether or not
+			# the local side also changed. Only remote == base is safe to push
+			# over. SPM_SYNC_FORCE=1 is the deliberate "make the remote match my
+			# local, discarding the remote" override.
+			if [ -n "$remote_sha" ] && [ -n "$base_sha" ] && [ "$remote_sha" != "$base_sha" ] && [ "${SPM_SYNC_FORCE:-0}" != 1 ]; then
+				if [ "$local_sha" != "$base_sha" ]; then
+					die "Sync conflict: local and remote both changed since the last sync; reconcile before pushing."
+				fi
+				die "The remote advanced since the last sync; pull before pushing (your local copy is behind, and pushing would overwrite the newer remote)."
 			fi
 			sync_transport_publish "$transport" "$SYNC_REMOTE" "$VAULT_FILE"
 			# Read it back rather than trust the write. A transport that
@@ -7270,8 +7279,17 @@ cmd_sync() {
 			if [ -n "$local_sha" ] && [ -z "$base_sha" ] && [ "$local_sha" != "$remote_sha" ] && [ "${SPM_SYNC_FORCE_INITIAL:-0}" != 1 ]; then
 				die "Initial sync conflict: local differs; set SPM_SYNC_FORCE_INITIAL=1 only after verification."
 			fi
-			if [ -n "$local_sha" ] && [ -n "$base_sha" ] && [ "$local_sha" != "$base_sha" ] && [ "$remote_sha" != "$base_sha" ]; then
-				die "Sync conflict: local and remote both changed."
+			# Pull is fast-forward only. If the local copy moved since the base
+			# this device recorded, replacing it with the remote would discard
+			# those unpushed changes, so refuse. When both moved it is a genuine
+			# conflict; when only the local side moved there is simply nothing to
+			# pull and the local edits must be kept. SPM_SYNC_FORCE=1 is the
+			# deliberate "discard my local changes and take the remote" override.
+			if [ -n "$local_sha" ] && [ -n "$base_sha" ] && [ "$local_sha" != "$base_sha" ] && [ "${SPM_SYNC_FORCE:-0}" != 1 ]; then
+				if [ "$remote_sha" != "$base_sha" ]; then
+					die "Sync conflict: local and remote both changed since the last sync; reconcile before pulling."
+				fi
+				die "Local has unpushed changes and the remote has nothing newer to pull; push instead (pulling would discard your changes)."
 			fi
 			tmp="$(make_tmp)"; ensure_master_password_loaded
 			# Prove the fetched vault opens before the local one is touched.

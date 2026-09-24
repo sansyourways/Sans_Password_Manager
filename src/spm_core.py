@@ -4993,6 +4993,17 @@ def _timelock_rate(modulus):
     return count / elapsed if elapsed > 0 else 200000.0
 
 
+# A time-lock puzzle is opened by a recipient from a file they were handed, so
+# its parameters are untrusted at unseal time -- the same position the vault KDF
+# line is in. t is a sequential-squaring count and n a modulus each squaring
+# runs against, so a crafted kit with an enormous t or n makes opening it never
+# finish (a denial of service). These bound both: a legitimate kit uses a
+# ~2048-bit modulus and a t set from the requested delay, both far inside these.
+TIMELOCK_MAX_T = 1 << 46          # ~7e13 squarings; generous vs any real delay
+TIMELOCK_MAX_N_BITS = 4096        # a real modulus is p*q of two 1024-bit primes
+TIMELOCK_MAX_SEALED = 256         # the sealed payload is <= 32 bytes in practice
+
+
 def timelock_seal(secret, seconds):
     """Seal up to 32 bytes behind a ~`seconds` sequential-squaring puzzle.
 
@@ -5006,7 +5017,9 @@ def timelock_seal(secret, seconds):
         q = _random_prime(1024)
     n, phi = p * q, (p - 1) * (q - 1)
     a = 2 + int.from_bytes(os.urandom(32), "big") % (n - 4)
-    t = max(1, int(max(seconds, 0) * _timelock_rate(n)))
+    # Clamped so SPM never writes a kit whose work factor exceeds what the
+    # opener is willing to accept below; a real delay never reaches the bound.
+    t = max(1, min(int(max(seconds, 0) * _timelock_rate(n)), TIMELOCK_MAX_T))
     mask = pow(a, pow(2, t, phi), n)
     stream = hashlib.sha256(str(mask).encode("ascii")).digest()
     sealed = bytes(b ^ s for b, s in zip(secret, stream))
@@ -5014,9 +5027,23 @@ def timelock_seal(secret, seconds):
 
 
 def timelock_unseal(puzzle):
-    """Recover the sealed bytes by doing t sequential squarings. Slow by design."""
+    """Recover the sealed bytes by doing t sequential squarings. Slow by design.
+
+    The puzzle comes from an untrusted file, so its parameters are bounded
+    before any work begins: an enormous t or modulus would otherwise let a
+    crafted kit run effectively forever. Slow is the design; unbounded is not.
+    """
     n, a, t = int(puzzle["n"]), int(puzzle["a"]), int(puzzle["t"])
-    sealed = bytes.fromhex(puzzle["sealed"])
+    if not 1 <= t <= TIMELOCK_MAX_T:
+        raise VaultError("time-lock work factor is outside the supported range")
+    if n < 2 or n.bit_length() > TIMELOCK_MAX_N_BITS:
+        raise VaultError("time-lock modulus is outside the supported range")
+    if not 1 < a < n:
+        raise VaultError("time-lock base is outside the supported range")
+    sealed_hex = str(puzzle["sealed"])
+    if len(sealed_hex) > TIMELOCK_MAX_SEALED * 2:
+        raise VaultError("time-lock payload is too large")
+    sealed = bytes.fromhex(sealed_hex)
     x = a
     for _ in range(t):
         x = x * x % n

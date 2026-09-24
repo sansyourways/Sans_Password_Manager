@@ -1455,7 +1455,11 @@ kdf_backend="$(core kdf-backend 2>/dev/null || printf none)"
 kdf_fields="$(core seal-info "$VAULT_FILE" | awk -F'\t' '{print NF}')"
 [ "$kdf_fields" = 7 ] || { printf 'seal-info is not seven fields (got %s)\n' "$kdf_fields" >&2; exit 1; }
 [ "$(core seal-info "$VAULT_FILE" | cut -f2)" = scrypt ] || { printf 'vault did not start on scrypt\n' >&2; exit 1; }
-cmd_kdf status | grep -q scrypt || { printf 'kdf status did not report scrypt\n' >&2; exit 1; }
+# Captured before matching: piping a multi-line producer into `grep -q` lets
+# grep close the pipe after the first line and, under `set -o pipefail`, the
+# still-writing cmd_kdf takes a SIGPIPE that fails the pipeline (macOS-only).
+kdf_status_out="$(cmd_kdf status)"
+printf '%s' "$kdf_status_out" | grep -q scrypt || { printf 'kdf status did not report scrypt\n' >&2; exit 1; }
 kdf_copy="$TEST_ROOT/kdf-vault.gpg"
 cp "$VAULT_FILE" "$kdf_copy"
 [ -f "$VAULT_FILE.recovery" ] && cp "$VAULT_FILE.recovery" "$kdf_copy.recovery"
@@ -5085,6 +5089,39 @@ for sync_t in $sync_available; do
 		fi
 		cp "$sync_local_backup" "$PASSWORD_VAULT"
 
+		# AUD-6: sync is fast-forward only. A one-sided advance must never be
+		# silently overwritten. Reset to a clean baseline first (the divergence
+		# test above left a drifted remote), then check each direction.
+		sync_transport_publish "$sync_t" "$sync_target/spm-chan.gpg" "$PASSWORD_VAULT"
+		cmd_sync push "$sync_target" chan --transport "$sync_t" >/dev/null
+		# (a) remote advanced, local unchanged: push must refuse and leave the
+		#     remote intact rather than reverting it to the stale local.
+		ff_remote="$sync_root/ff-remote-$sync_t"
+		sync_transport_fetch "$sync_t" "$sync_target/spm-chan.gpg" "$ff_remote" >/dev/null
+		printf 'ff' >> "$ff_remote"
+		ff_sha="$(sha256sum "$ff_remote" | awk '{print $1}')"
+		sync_transport_publish "$sync_t" "$sync_target/spm-chan.gpg" "$ff_remote"
+		if ( cmd_sync push "$sync_target" chan --transport "$sync_t" ) >/dev/null 2>&1; then
+			printf '%s: push over an advanced remote was allowed\n' "$sync_t" >&2; exit 1
+		fi
+		ff_after="$sync_root/ff-after-$sync_t"
+		sync_transport_fetch "$sync_t" "$sync_target/spm-chan.gpg" "$ff_after" >/dev/null
+		[ "$(sha256sum "$ff_after" | awk '{print $1}')" = "$ff_sha" ] || {
+			printf '%s: an advanced remote was overwritten by a stale push\n' "$sync_t" >&2; exit 1
+		}
+		# (b) local advanced, remote unchanged: pull must refuse and keep the
+		#     local edits rather than discarding them for the older remote.
+		sync_transport_publish "$sync_t" "$sync_target/spm-chan.gpg" "$PASSWORD_VAULT"
+		printf 'll' >> "$PASSWORD_VAULT"
+		ll_sha="$(sha256sum "$PASSWORD_VAULT" | awk '{print $1}')"
+		if ( cmd_sync pull "$sync_target" chan --transport "$sync_t" ) >/dev/null 2>&1; then
+			printf '%s: pull over unpushed local changes was allowed\n' "$sync_t" >&2; exit 1
+		fi
+		[ "$(sha256sum "$PASSWORD_VAULT" | awk '{print $1}')" = "$ll_sha" ] || {
+			printf '%s: unpushed local changes were discarded by a pull\n' "$sync_t" >&2; exit 1
+		}
+		cp "$sync_local_backup" "$PASSWORD_VAULT"
+
 		# A remote that does not decrypt must never reach the vault file, and
 		# the local copy must survive the refusal untouched.
 		mkdir -p "$sync_root/$sync_t-bad"
@@ -5661,7 +5698,10 @@ vk_new_legacy_vault() {
 	printf '3\tThird\tuser@example.invalid\tLocalOnly77\t-\t2025-01-03T00:00:00Z\n' \
 		>> "$VK_ROOT/f-plain2"
 	encrypt_file_to_vault "$VK_ROOT/f-plain2"
-	VAULT_KEY="" SPM_SYNC_FORCE_INITIAL=1 cmd_sync pull "$VK_ROOT/syncdir" >/dev/null
+	# A deliberate overwrite of the diverged local copy with the remote needs
+	# the explicit force added in 5.8.2 (fast-forward-only pull otherwise keeps
+	# the local edits -- AUD-6).
+	VAULT_KEY="" SPM_SYNC_FORCE=1 cmd_sync pull "$VK_ROOT/syncdir" >/dev/null
 	VAULT_KEY="" decrypt_vault_container "$VAULT_FILE" "$VK_ROOT/f-pulled" "$VK_OLD" \
 		|| { printf 'the pulled vault does not open\n' >&2; exit 1; }
 	if grep -q 'LocalOnly77' "$VK_ROOT/f-pulled"; then
