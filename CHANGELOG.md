@@ -7,6 +7,33 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.9.0] - 2026-09-25
+
+Three high-priority enhancements from the audit backlog, in one release. No
+vault format change.
+
+### Added
+- **Export a stored TOTP as an `otpauth://` QR (roadmap 9).** A code kept in
+  SPM can be moved to a phone without retyping the base32 secret.
+  `spm authenticator-qr <id>` prints a scannable QR and the `otpauth://` URI,
+  and the Dashboard's authenticator page gains a "Show QR" reveal (gated like
+  the secret reveal, and served only to the unlocked session). The QR encodes
+  the raw secret, so it is revealed on demand and never rendered up front.
+- **Dedicated importers for LastPass, Chrome/Edge and 1Password (roadmap 3).**
+  The Export / Import page reads each manager's own CSV export directly, and a
+  file picked as plain CSV autodetects rather than importing a partial file.
+  TOTP secrets are carried across as authenticators, folders/tags and secure
+  notes are preserved rather than dropped. Import-only, like the Bitwarden
+  importers; the field mapping lives in the shared core so the CLI and the
+  Dashboard read a given export identically.
+- **On-device 2FA-availability audit (roadmap 9 companion).** The security
+  review can flag password records for a service that supports two-factor
+  authentication but has no matching authenticator in the vault, so a 2FA you
+  could turn on but have not stands out. `spm security --twofa` on the CLI and a
+  "Check for missing 2FA" action on the Dashboard's Security page. On-device
+  against a small bundled list (extendable with `SPM_TWOFA_DOMAINS`); nothing
+  leaves the device.
+
 ## [5.8.2] - 2026-09-24
 
 Four bug fixes found by a post-release audit, in one release. No vault format

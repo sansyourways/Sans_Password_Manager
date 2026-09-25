@@ -1345,6 +1345,25 @@ cmd_security_dashboard --account-breaches | grep -q 'Breached-service accounts:'
 	|| { printf 'security dashboard did not run the account-breach check\n' >&2; exit 1; }
 printf '  security: archive round-trips, offline password check and on-device account check run through the CLI\n'
 
+# 5.9.0: on-device 2FA-availability audit (roadmap 9 companion). A record on a
+# 2FA-supporting domain with no matching authenticator is flagged; a covered
+# one is not. Plaintext fixture through the core CLI, then the shell dashboard.
+twofa_plain="$TEST_ROOT/twofa.plain"
+printf '1\tGitHub\talice\tpw1\tnote\t2024-01-01T00:00:00Z\thttps://github.com\t\n2\tGoogle\tbob\tpw2\tnote\t2024-01-01T00:00:00Z\thttps://accounts.google.com\t\nAUTH\t1\tGitHub\tJBSWY3DPEHPK3PXP\t30\t2024-01-01T00:00:00Z\tsha1\n' > "$twofa_plain"
+core security-report "$twofa_plain" 365 --twofa | python3 -c '
+import json, sys
+rep = json.load(sys.stdin)
+assert rep["twofa_status"] == "checked", rep["twofa_status"]
+ids = sorted(f["id"] for f in rep["twofa_findings"])
+assert ids == ["2"], ("expected only the Google record flagged, got %r" % ids)
+' || { printf '2FA-gap check did not flag the uncovered record\n' >&2; exit 1; }
+# The shell dashboard prints the 2FA line only when the check is requested.
+cmd_security_dashboard | grep -q '2FA available, not enabled: not checked' \
+	|| { printf 'security dashboard ran the 2FA check without being asked\n' >&2; exit 1; }
+cmd_security_dashboard --twofa | grep -q '2FA available, not enabled:' \
+	|| { printf 'security dashboard did not run the 2FA check on request\n' >&2; exit 1; }
+printf '  security: on-device 2FA-availability audit flags uncovered 2FA-capable records\n'
+
 # 5.5.0: the extension's save-on-submit write path (roadmap 39) at the core CLI,
 # and the desktop launcher (roadmap 41). Plaintext fixtures; no vault disturbed.
 bs_plain="$TEST_ROOT/bridge.plain"
@@ -1367,6 +1386,27 @@ grep -q '^updated$' "$TEST_ROOT/bridge.outcome2" \
 cmd_desktop --help | grep -q 'desktop \[--port' \
 	|| { printf 'spm desktop --help did not print usage\n' >&2; exit 1; }
 printf '  extension/desktop: bridge-save creates and updates a bound password on stdin; the desktop launcher is wired\n'
+
+# 5.9.0: export a stored TOTP as an otpauth:// QR (roadmap 9). Core CLI on a
+# plaintext fixture, then the shell command wiring through against the vault.
+otp_plain="$TEST_ROOT/otp.plain"
+printf 'AUTH\t3\tGitHub\tJBSWY3DPEHPK3PXP\t30\t2024-01-01T00:00:00Z\tsha1\n' > "$otp_plain"
+otp_uri="$(core authenticator-otpauth "$otp_plain" 3)"
+case "$otp_uri" in
+	otpauth://totp/GitHub\?*secret=JBSWY3DPEHPK3PXP*) ;;
+	*) printf 'authenticator-otpauth produced the wrong URI: %s\n' "$otp_uri" >&2; exit 1 ;;
+esac
+# A missing id is refused rather than emitting an empty URI.
+if core authenticator-otpauth "$otp_plain" 99 >/dev/null 2>&1; then
+	printf 'authenticator-otpauth accepted a missing id\n' >&2; exit 1
+fi
+# The shell command wires through: it re-verifies, decrypts and prints both a
+# scannable QR and the URI. Authenticator id 1 lives in the seeded vault.
+printf '%s\n' "$MASTER_PW" | cmd_authenticator_qr 1 > "$TEST_ROOT/authqr.out" 2>&1 \
+	|| { printf 'cmd_authenticator_qr failed\n' >&2; cat "$TEST_ROOT/authqr.out" >&2; exit 1; }
+grep -q 'otpauth://totp/OTP?.*secret=JBSWY3DPEHPK3PXP' "$TEST_ROOT/authqr.out" \
+	|| { printf 'authenticator-qr did not print the otpauth URI\n' >&2; exit 1; }
+printf '  authenticator: a stored TOTP exports as an otpauth QR through the core CLI and the shell command\n'
 
 # 5.6.0: look-alike warnings (35), secret scopes (48), secret injection (52),
 # shell completion (49) and the plugin SDK (50).
@@ -3532,6 +3572,46 @@ else:
     sys.exit("an Argon2id export was accepted")
 
 print("  bitwarden: json, csv, protected, autodetect, and four refusals verified")
+
+# 5.9.0: dedicated importers for LastPass, Chrome/Edge and 1Password (roadmap 3).
+# Each is checked both when picked explicitly and when picked as plain csv, so a
+# wrong dropdown choice autodetects rather than importing a partial file.
+LASTPASS = ("url,username,password,totp,extra,name,grouping,fav\n"
+            "https://github.com,dev@example.invalid,s3cr3t-pw,JBSWY3DPEHPK3PXP,"
+            "note text,GitHub,Work,0\n"
+            "http://sn,,,,\"line one\\nline two\",Recovery notes,Personal,0\n")
+CHROME = ("name,url,username,password,note\n"
+          "GitHub,https://github.com,dev@example.invalid,s3cr3t-pw,note text\n")
+ONEPASS = ("Title,Url,Username,Password,OTPAuth,Tags,Notes\n"
+           "GitHub,https://github.com,dev@example.invalid,s3cr3t-pw,"
+           "otpauth://totp/GitHub?secret=JBSWY3DPEHPK3PXP&period=30,Work,note text\n")
+
+def importer_check(name, fmt, content, want_auth):
+    plain, stats = web._apply_import(fmt, content, BASE, "")
+    joined = "\n".join(rows_of(plain))
+    if stats["passwords"] != 1:
+        sys.exit("%s: expected 1 password, got %s" % (name, stats))
+    if want_auth and stats["authenticators"] != 1:
+        sys.exit("%s: expected 1 authenticator, got %s" % (name, stats))
+    for needle in ("s3cr3t-pw", "dev@example.invalid", "https://github.com"):
+        if needle not in joined:
+            sys.exit("%s: %r was not imported" % (name, needle))
+    if want_auth:
+        auth = [l for l in rows_of(plain) if l.startswith("AUTH\t")][0].split("\t")
+        if auth[3] != "JBSWY3DPEHPK3PXP":
+            sys.exit("%s: authenticator secret is %r" % (name, auth[3]))
+
+importer_check("lastpass explicit", "lastpass-csv", LASTPASS, True)
+importer_check("lastpass autodetect", "csv", LASTPASS, True)
+importer_check("chrome explicit", "chrome-csv", CHROME, False)
+importer_check("chrome autodetect", "csv", CHROME, False)
+importer_check("1password explicit", "onepassword-csv", ONEPASS, True)
+importer_check("1password autodetect", "csv", ONEPASS, True)
+# A LastPass secure note (url http://sn) imports as a note, not a login.
+lp_plain, lp_stats = web._apply_import("lastpass-csv", LASTPASS, BASE, "")
+if lp_stats["notes"] != 1:
+    sys.exit("lastpass: the secure note was not imported as a note: %s" % lp_stats)
+print("  importers: LastPass, Chrome/Edge and 1Password CSV exports map and autodetect")
 BWPY
 
 printf 'Portability regression: platform-specific command behaviour\n'
