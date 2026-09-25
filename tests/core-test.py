@@ -3736,6 +3736,115 @@ def t_argon2id_header_parses_and_refuses_without_a_backend():
         core._ARGON2_BACKEND = saved
 
 
+def t_otpauth_export_roundtrips():
+    # build_otpauth is the inverse of parse_otpauth: what it emits must parse
+    # back to the same secret/period/algorithm, so a scanned code matches SPM's.
+    uri = core.build_otpauth("GitHub", "JBSWY3DPEHPK3PXP", "30", "sha1")
+    assert uri.startswith("otpauth://totp/GitHub?"), uri
+    assert "issuer=GitHub" in uri and "digits=6" in uri, uri
+    secret, period, algo = core.parse_otpauth(uri)
+    eq(secret, "JBSWY3DPEHPK3PXP", "secret survives the round trip")
+    eq(period, "30", "period survives the round trip")
+    eq(algo, "sha1", "algorithm survives the round trip")
+    # A non-default period/algorithm is carried, and the exported secret still
+    # produces a six-digit code (the only width SPM emits).
+    uri2 = core.build_otpauth("Work Acct", "GEZDGNBVGY3TQOJQ", "60", "sha256")
+    s2, p2, a2 = core.parse_otpauth(uri2)
+    eq((p2, a2), ("60", "sha256"))
+    code = core.totp_code(s2, int(p2), a2)
+    assert code is not None and len(code) == 6 and code.isdigit(), code
+    # A secretless authenticator cannot be exported.
+    raises(core.VaultError, lambda: core.build_otpauth("Empty", ""))
+
+
+def t_importers_map_lastpass_chrome_onepassword():
+    import csv as csvlib, io
+    def rows(text):
+        return list(csvlib.DictReader(io.StringIO(text)))
+    # LastPass: a login with a TOTP becomes a password + an authenticator; a
+    # secure note (url "http://sn") becomes a note; the folder is kept.
+    lp = ("url,username,password,totp,extra,name,grouping,fav\n"
+          "https://github.com,octocat,pw1,JBSWY3DPEHPK3PXP,hello,GitHub,Dev,0\n"
+          "http://sn,,,,secret memo,My Note,Personal,0\n")
+    assert core.looks_like_lastpass_csv_header(["url", "username", "password",
+                                                "totp", "extra", "name", "grouping", "fav"])
+    out = core.lastpass_csv_rows(rows(lp))
+    kinds = [r["type"] for r in out]
+    eq(kinds, ["password", "authenticator", "note"], kinds)
+    eq(out[0]["secret"], "pw1")
+    eq(out[0]["url"], "https://github.com")
+    assert "folder: Dev" in out[0]["notes"], out[0]["notes"]
+    eq(out[1]["secret"], "JBSWY3DPEHPK3PXP")
+    assert "secret memo" in out[2]["secret"], out[2]["secret"]
+    # Chrome/Edge: name,url,username,password[,note]; no TOTP.
+    ch = ("name,url,username,password,note\n"
+          "Example,https://example.com,alice,pw2,a note\n")
+    assert core.looks_like_chrome_csv_header(["name", "url", "username", "password", "note"])
+    assert not core.looks_like_chrome_csv_header(["url", "username", "password", "grouping"])
+    cout = core.chrome_csv_rows(rows(ch))
+    eq([r["type"] for r in cout], ["password"])
+    eq((cout[0]["label"], cout[0]["username"], cout[0]["secret"], cout[0]["notes"]),
+       ("Example", "alice", "pw2", "a note"))
+    # 1Password: Title-cased headers, OTPAuth carried to an authenticator.
+    op = ("Title,Url,Username,Password,OTPAuth,Tags,Notes\n"
+          "Bank,https://bank.example,bob,pw3,"
+          "otpauth://totp/Bank?secret=GEZDGNBVGY3TQOJQ&period=30,Finance,keep safe\n")
+    assert core.looks_like_onepassword_csv_header(["Title", "Url", "Username", "Password"])
+    oout = core.onepassword_csv_rows(rows(op))
+    eq([r["type"] for r in oout], ["password", "authenticator"])
+    eq(oout[0]["label"], "Bank")
+    eq(oout[0]["secret"], "pw3")
+    assert "tags: Finance" in oout[0]["notes"], oout[0]["notes"]
+    eq(oout[1]["secret"], "GEZDGNBVGY3TQOJQ")
+    # The three detectors are mutually exclusive on each other's headers.
+    assert not core.looks_like_lastpass_csv_header(["title", "url", "username", "password"])
+    assert not core.looks_like_onepassword_csv_header(["name", "url", "username", "password"])
+
+
+def t_twofa_gap_flags_only_the_uncovered():
+    # A record on a 2FA-supporting domain with no matching authenticator is a
+    # gap; one with a matching authenticator (loose label match) is covered; a
+    # domain absent from the catalogue is never flagged.
+    plaintext = (
+        "1\tGitHub\talice\tpw1\tnote\t2024-01-01T00:00:00Z\thttps://github.com\t\n"
+        "2\tGoogle\tbob\tpw2\tnote\t2024-01-01T00:00:00Z\thttps://accounts.google.com\t\n"
+        "3\tCorner Store\tcarol\tpw3\tnote\t2024-01-01T00:00:00Z\thttps://corner.example\t\n"
+        "AUTH\t1\tGitHub\tJBSWY3DPEHPK3PXP\t30\t2024-01-01T00:00:00Z\tsha1\n"
+    )
+    gaps = core.twofa_gap_findings(plaintext)
+    ids = sorted(g["id"] for g in gaps)
+    eq(ids, ["2"], "only the Google record (2FA-capable, no authenticator) is a gap")
+    google = [g for g in gaps if g["id"] == "2"][0]
+    eq(google["domain"], "google.com")
+    eq(google["name"], "Google")
+    # An email domain counts even without a URL.
+    only_email = "5\tMail\tuser@proton.me\tpw\tnote\t2024-01-01T00:00:00Z\t\t\n"
+    eq(sorted(g["id"] for g in core.twofa_gap_findings(only_email)), ["5"])
+    # security_report carries the finding only when the check is requested.
+    rep_off = core.security_report(plaintext)
+    eq(rep_off["twofa_status"], "not_checked")
+    eq(rep_off["twofa_findings"], [])
+    rep_on = core.security_report(plaintext, check_twofa=True)
+    eq(rep_on["twofa_status"], "checked")
+    eq(sorted(g["id"] for g in rep_on["twofa_findings"]), ["2"])
+
+
+def t_authenticator_otpauth_reads_the_vault_line():
+    # authenticator_otpauth resolves an AUTH row by id and refuses a missing id.
+    plaintext = (
+        "1\tExample\tuser@example.invalid\tDemoSecret42\thttps://x\t2025-01-01T00:00:00Z\n"
+        "AUTH\t7\tGitHub\tJBSWY3DPEHPK3PXP\t30\t2025-01-01T00:00:00Z\tsha1\n"
+        "AUTH\t8\tWork\tGEZDGNBVGY3TQOJQ\t60\t2025-01-01T00:00:00Z\tsha256\n"
+    )
+    uri = core.authenticator_otpauth(plaintext, "7")
+    secret, period, algo = core.parse_otpauth(uri)
+    eq((secret, period, algo), ("JBSWY3DPEHPK3PXP", "30", "sha1"))
+    uri8 = core.authenticator_otpauth(plaintext, 8)  # id may be int or str
+    _, p8, a8 = core.parse_otpauth(uri8)
+    eq((p8, a8), ("60", "sha256"))
+    raises(core.VaultError, lambda: core.authenticator_otpauth(plaintext, "99"))
+
+
 for name, fn in sorted(globals().items()):
     if name.startswith("t_") and callable(fn):
         check(name[2:], fn)

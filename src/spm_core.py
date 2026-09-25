@@ -6096,6 +6096,47 @@ def parse_otpauth(value):
     return secret, period, algorithm
 
 
+def build_otpauth(label, secret, period="30", algo="sha1", digits=6, issuer=""):
+    """An otpauth://totp URI for one authenticator (roadmap 9).
+
+    The inverse of parse_otpauth: it turns SPM's stored fields back into the URI
+    an authenticator app imports, so a code can be moved to a phone without
+    retyping the base32 secret. digits is 6 -- the only width SPM's totp_code
+    produces -- so a scanned code matches SPM's.
+    """
+    secret = (secret or "").replace(" ", "").upper()
+    if not secret:
+        raise VaultError("this authenticator has no secret to export")
+    label = (label or "SPM").strip() or "SPM"
+    issuer = (issuer or label).strip()
+    algo = (algo or "sha1").lower()
+    if algo not in ("sha1", "sha256", "sha512"):
+        algo = "sha1"
+    try:
+        period_i = int(period)
+    except (TypeError, ValueError):
+        period_i = 30
+    query = urllib.parse.urlencode({
+        "secret": secret, "issuer": issuer, "algorithm": algo.upper(),
+        "digits": int(digits), "period": max(1, period_i)})
+    return "otpauth://totp/%s?%s" % (urllib.parse.quote(label), query)
+
+
+def authenticator_otpauth(plaintext, auth_id):
+    """The otpauth URI for the AUTH record `auth_id`, or a refusal (roadmap 9).
+
+    AUTH rows are id, label, base32 secret, period, created, algorithm.
+    """
+    auth_id = str(auth_id)
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 4 and parts[0] == "AUTH" and parts[1] == auth_id:
+            period = parts[4] if len(parts) > 4 and parts[4] else "30"
+            algo = parts[6] if len(parts) > 6 and parts[6] else "sha1"
+            return build_otpauth(parts[2], parts[3], period, algo)
+    raise VaultError("no authenticator with id %s" % auth_id)
+
+
 def bitwarden_rows(payload):
     """Bitwarden's JSON export as rows in SPM's import schema.
 
@@ -6173,6 +6214,110 @@ def bitwarden_csv_rows(records):
         else:
             rows.append({"type": "note", "label": name, "secret": notes,
                          "notes": "", "created": ""})
+    return rows
+
+
+# ----- other password managers' CSV exports (roadmap 3 importers) ------------
+# LastPass, Chrome/Edge and 1Password each export a CSV with its own column
+# names. Like the Bitwarden mappers above, the file-shape detection and the
+# field mapping live here so the CLI and the dashboard read a given export the
+# same way, and a TOTP is preserved as an authenticator rather than dropped.
+
+def _csv_header_set(fieldnames):
+    return {(name or "").strip().lower() for name in (fieldnames or ())}
+
+
+def looks_like_lastpass_csv_header(fieldnames):
+    # LastPass always emits a "grouping" column, which the others do not.
+    names = _csv_header_set(fieldnames)
+    return "grouping" in names and "url" in names and "password" in names
+
+
+def looks_like_onepassword_csv_header(fieldnames):
+    # 1Password labels the service column "title"; LastPass and Chrome use "name".
+    names = _csv_header_set(fieldnames)
+    return "title" in names and "password" in names
+
+
+def looks_like_chrome_csv_header(fieldnames):
+    # Chrome/Edge: name,url,username,password[,note]. Disambiguated from the two
+    # above by the absence of their signature columns.
+    names = _csv_header_set(fieldnames)
+    return ({"name", "url", "username", "password"} <= names
+            and "grouping" not in names and "title" not in names)
+
+
+def _lower_keyed(record):
+    return {(k or "").strip().lower(): (v or "") for k, v in record.items()}
+
+
+def lastpass_csv_rows(records):
+    """LastPass's CSV export as rows in SPM's import schema."""
+    rows = []
+    for record in records:
+        rec = _lower_keyed(record)
+        def field(key):
+            return (rec.get(key) or "").strip()
+        name = field("name")
+        url = field("url")
+        extras = [rec.get("extra") or ""]
+        if field("grouping"):
+            extras.append("folder: %s" % field("grouping"))
+        notes = "\n".join(n for n in extras if n)
+        # A LastPass secure note has the sentinel URL "http://sn".
+        if url.lower() in ("http://sn", "https://sn"):
+            rows.append({"type": "note", "label": name, "secret": notes,
+                         "notes": "", "created": ""})
+            continue
+        rows.append({"type": "password", "label": name,
+                     "username": field("username"),
+                     "secret": rec.get("password") or "",
+                     "notes": notes, "created": "", "url": url})
+        secret, period, algorithm = parse_otpauth(field("totp"))
+        if secret:
+            rows.append({"type": "authenticator", "label": name,
+                         "secret": secret, "period": period,
+                         "algorithm": algorithm, "notes": "", "created": ""})
+    return rows
+
+
+def chrome_csv_rows(records):
+    """Chrome/Edge's password CSV export as rows in SPM's import schema."""
+    rows = []
+    for record in records:
+        rec = _lower_keyed(record)
+        def field(key):
+            return (rec.get(key) or "").strip()
+        notes = (rec.get("note") or rec.get("notes") or "").strip()
+        rows.append({"type": "password", "label": field("name"),
+                     "username": field("username"),
+                     "secret": rec.get("password") or "",
+                     "notes": notes, "created": "", "url": field("url")})
+    return rows
+
+
+def onepassword_csv_rows(records):
+    """1Password's CSV export as rows in SPM's import schema."""
+    rows = []
+    for record in records:
+        rec = _lower_keyed(record)
+        def field(key):
+            return (rec.get(key) or "").strip()
+        name = field("title")
+        extras = [rec.get("notes") or ""]
+        if field("tags"):
+            extras.append("tags: %s" % field("tags"))
+        notes = "\n".join(n for n in extras if n)
+        rows.append({"type": "password", "label": name,
+                     "username": field("username"),
+                     "secret": rec.get("password") or "",
+                     "notes": notes, "created": "", "url": field("url")})
+        otp = field("otpauth") or field("one-time password") or field("otp")
+        secret, period, algorithm = parse_otpauth(otp)
+        if secret:
+            rows.append({"type": "authenticator", "label": name,
+                         "secret": secret, "period": period,
+                         "algorithm": algorithm, "notes": "", "created": ""})
     return rows
 
 
@@ -6572,6 +6717,132 @@ def breached_account_domains(rows, catalogue=None):
     return findings
 
 
+# ----- 2FA-availability audit (roadmap 9 companion) --------------------------
+# Which well-known services offer TOTP/2FA. Like BREACHED_DOMAINS_DEFAULT this
+# is a small bundled, on-device list -- never a network lookup -- extendable
+# with a user file. A password record on one of these domains that has no
+# matching authenticator is a 2FA the user could turn on but has not.
+TWOFA_DOMAINS_DEFAULT = {
+    "google.com": "Google",
+    "github.com": "GitHub",
+    "gitlab.com": "GitLab",
+    "microsoft.com": "Microsoft",
+    "live.com": "Microsoft",
+    "amazon.com": "Amazon",
+    "apple.com": "Apple",
+    "facebook.com": "Facebook",
+    "instagram.com": "Instagram",
+    "twitter.com": "Twitter / X",
+    "x.com": "Twitter / X",
+    "linkedin.com": "LinkedIn",
+    "dropbox.com": "Dropbox",
+    "paypal.com": "PayPal",
+    "stripe.com": "Stripe",
+    "coinbase.com": "Coinbase",
+    "binance.com": "Binance",
+    "cloudflare.com": "Cloudflare",
+    "digitalocean.com": "DigitalOcean",
+    "aws.amazon.com": "Amazon Web Services",
+    "protonmail.com": "Proton",
+    "proton.me": "Proton",
+    "reddit.com": "Reddit",
+    "discord.com": "Discord",
+    "slack.com": "Slack",
+    "twitch.tv": "Twitch",
+    "steampowered.com": "Steam",
+    "nintendo.com": "Nintendo",
+    "npmjs.com": "npm",
+    "pypi.org": "PyPI",
+}
+
+
+def load_twofa_catalogue(path=None):
+    """The 2FA-supporting-domain catalogue: the bundled default merged with an
+    optional user file. The file is `domain[<TAB>name]` per line, '#' comments
+    allowed; a user entry overrides the default. Env `SPM_TWOFA_DOMAINS`."""
+    catalogue = dict(TWOFA_DOMAINS_DEFAULT)
+    path = path if path is not None else os.environ.get("SPM_TWOFA_DOMAINS", "")
+    if path and os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    cols = line.split("\t")
+                    domain = _normalise_domain(cols[0])
+                    if not domain:
+                        continue
+                    name = cols[1].strip() if len(cols) > 1 else domain
+                    catalogue[domain] = name
+        except OSError:
+            pass
+    return catalogue
+
+
+def _registrable_label(domain):
+    """The second-level label of a host, alnum-only: github.com -> "github"."""
+    domain = _normalise_domain(domain)
+    parts = [p for p in domain.split(".") if p]
+    label = parts[-2] if len(parts) >= 2 else (parts[0] if parts else "")
+    return re.sub(r"[^a-z0-9]", "", label.lower())
+
+
+def _authenticator_tokens(plaintext):
+    """The alnum-folded labels of every AUTH row, for loose service matching."""
+    tokens = set()
+    for line in (plaintext or "").splitlines():
+        cols = line.split("\t")
+        if len(cols) >= 3 and cols[0] == "AUTH":
+            tok = re.sub(r"[^a-z0-9]", "", (cols[2] or "").lower())
+            if tok:
+                tokens.add(tok)
+    return tokens
+
+
+def twofa_gap_findings(plaintext, catalogue=None):
+    """[{id, domain, name}] for password records on a 2FA-supporting domain that
+    have no matching authenticator (roadmap 9 companion). An authenticator is
+    taken to cover a record when its folded label and the domain's registrable
+    label share a substring (GitHub <-> github.com). On-device; nothing sent."""
+    if catalogue is None:
+        catalogue = load_twofa_catalogue()
+    rows, _ = _password_security_rows(plaintext)
+    auth_tokens = _authenticator_tokens(plaintext)
+    findings = []
+    seen = set()
+    for parts in rows:
+        record_id = parts[0]
+        if record_id in seen:
+            continue
+        username = parts[2] if len(parts) > 2 else ""
+        url = parts[6] if len(parts) > 6 else ""
+        candidates = []
+        if url:
+            try:
+                host = urllib.parse.urlsplit(
+                    url if "//" in url else "//" + url).hostname or ""
+            except ValueError:
+                host = ""
+            if host:
+                candidates.append(host)
+        if "@" in username:
+            candidates.append(username.rsplit("@", 1)[-1])
+        for candidate in candidates:
+            key = _match_breached_domain(candidate, catalogue)
+            if not key:
+                continue
+            label = _registrable_label(key)
+            covered = bool(label) and any(
+                label in tok or tok in label for tok in auth_tokens)
+            if not covered:
+                findings.append({"id": record_id, "domain": key,
+                                 "name": catalogue[key]})
+                seen.add(record_id)
+            break
+    return findings
+
+
 def refresh_breach_catalogue(url, dest, timeout=10, opener=None):
     """Download an updated public breach-domain list to `dest` (roadmap 33).
 
@@ -6618,7 +6889,8 @@ def refresh_breach_catalogue(url, dest, timeout=10, opener=None):
 
 def security_report(plaintext, rotation_days=365, check_breaches=False,
                     timeout=5, opener=None, offline_source=None,
-                    check_accounts=False, catalogue=None):
+                    check_accounts=False, catalogue=None,
+                    check_twofa=False, twofa_catalogue=None):
     """One secret-free security report shared by CLI and Dashboard."""
     rows, malformed = _password_security_rows(plaintext)
     now = time.time()
@@ -6656,6 +6928,7 @@ def security_report(plaintext, rotation_days=365, check_breaches=False,
         "old": old, "incomplete": incomplete, "malformed": malformed,
         "rotation_days": rotation_days, "breach_status": "not_checked",
         "breached": [], "account_status": "not_checked", "account_findings": [],
+        "twofa_status": "not_checked", "twofa_findings": [],
     }
     if check_breaches:
         try:
@@ -6670,6 +6943,11 @@ def security_report(plaintext, rotation_days=365, check_breaches=False,
         # against the bundled default, never a network fallback.
         report["account_findings"] = breached_account_domains(rows, catalogue)
         report["account_status"] = "checked"
+    if check_twofa:
+        # On-device only: a record on a 2FA-supporting domain with no matching
+        # authenticator is a 2FA the user could enable but has not.
+        report["twofa_findings"] = twofa_gap_findings(plaintext, twofa_catalogue)
+        report["twofa_status"] = "checked"
     return report
 
 
@@ -8235,12 +8513,13 @@ def main(argv):
                     sys.stdout.write(name + "\n")
         elif command == "security-report":
             # security-report <plainfile> [rotation-days] [--breaches]
-            #   [--account-breaches] [--offline-hashes PATH]
+            #   [--account-breaches] [--twofa] [--offline-hashes PATH]
             # stdout is secret-free JSON; breach checking is explicit opt-in.
             opts = argv[4:]
             days = int(argv[3]) if len(argv) > 3 and argv[3] else 365
             check_breaches = "--breaches" in opts
             check_accounts = "--account-breaches" in opts
+            check_twofa = "--twofa" in opts
             offline_source = None
             if "--offline-hashes" in opts:
                 offline_source = opts[opts.index("--offline-hashes") + 1]
@@ -8249,7 +8528,8 @@ def main(argv):
             with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
                 report = security_report(
                     handle.read(), days, check_breaches,
-                    offline_source=offline_source, check_accounts=check_accounts)
+                    offline_source=offline_source, check_accounts=check_accounts,
+                    check_twofa=check_twofa)
             sys.stdout.write(json.dumps(report, indent=2) + "\n")
         elif command == "rotation-set":
             # rotation-set <plainfile> <id> <days|default> ; writes plaintext,
@@ -8737,6 +9017,13 @@ def main(argv):
             return sync_serve(argv[2], argv[3], int(argv[4]), argv[5],
                               channel=channel, once="--once" in opts,
                               idle_timeout=idle)
+        elif command == "authenticator-otpauth":
+            # authenticator-otpauth <plaintextfile> <id> ; stdout: the otpauth://
+            #   URI for that authenticator (roadmap 9). The shell renders it as a
+            #   QR with `qr`; both expose the secret, so this reads a decrypted
+            #   vault the caller already unlocked.
+            with open(argv[2], "r", encoding="utf-8") as handle:
+                sys.stdout.write(authenticator_otpauth(handle.read(), argv[3]) + "\n")
         elif command == "qr":
             # qr <text> [--svg|--pbm] ; stdout: a scannable QR rendering.
             # Default is Unicode half-blocks for a terminal; --svg for the web.

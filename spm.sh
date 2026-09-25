@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.8.2"
+VERSION="5.9.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -6907,6 +6907,47 @@ def parse_otpauth(value):
     return secret, period, algorithm
 
 
+def build_otpauth(label, secret, period="30", algo="sha1", digits=6, issuer=""):
+    """An otpauth://totp URI for one authenticator (roadmap 9).
+
+    The inverse of parse_otpauth: it turns SPM's stored fields back into the URI
+    an authenticator app imports, so a code can be moved to a phone without
+    retyping the base32 secret. digits is 6 -- the only width SPM's totp_code
+    produces -- so a scanned code matches SPM's.
+    """
+    secret = (secret or "").replace(" ", "").upper()
+    if not secret:
+        raise VaultError("this authenticator has no secret to export")
+    label = (label or "SPM").strip() or "SPM"
+    issuer = (issuer or label).strip()
+    algo = (algo or "sha1").lower()
+    if algo not in ("sha1", "sha256", "sha512"):
+        algo = "sha1"
+    try:
+        period_i = int(period)
+    except (TypeError, ValueError):
+        period_i = 30
+    query = urllib.parse.urlencode({
+        "secret": secret, "issuer": issuer, "algorithm": algo.upper(),
+        "digits": int(digits), "period": max(1, period_i)})
+    return "otpauth://totp/%s?%s" % (urllib.parse.quote(label), query)
+
+
+def authenticator_otpauth(plaintext, auth_id):
+    """The otpauth URI for the AUTH record `auth_id`, or a refusal (roadmap 9).
+
+    AUTH rows are id, label, base32 secret, period, created, algorithm.
+    """
+    auth_id = str(auth_id)
+    for line in (plaintext or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 4 and parts[0] == "AUTH" and parts[1] == auth_id:
+            period = parts[4] if len(parts) > 4 and parts[4] else "30"
+            algo = parts[6] if len(parts) > 6 and parts[6] else "sha1"
+            return build_otpauth(parts[2], parts[3], period, algo)
+    raise VaultError("no authenticator with id %s" % auth_id)
+
+
 def bitwarden_rows(payload):
     """Bitwarden's JSON export as rows in SPM's import schema.
 
@@ -6984,6 +7025,110 @@ def bitwarden_csv_rows(records):
         else:
             rows.append({"type": "note", "label": name, "secret": notes,
                          "notes": "", "created": ""})
+    return rows
+
+
+# ----- other password managers' CSV exports (roadmap 3 importers) ------------
+# LastPass, Chrome/Edge and 1Password each export a CSV with its own column
+# names. Like the Bitwarden mappers above, the file-shape detection and the
+# field mapping live here so the CLI and the dashboard read a given export the
+# same way, and a TOTP is preserved as an authenticator rather than dropped.
+
+def _csv_header_set(fieldnames):
+    return {(name or "").strip().lower() for name in (fieldnames or ())}
+
+
+def looks_like_lastpass_csv_header(fieldnames):
+    # LastPass always emits a "grouping" column, which the others do not.
+    names = _csv_header_set(fieldnames)
+    return "grouping" in names and "url" in names and "password" in names
+
+
+def looks_like_onepassword_csv_header(fieldnames):
+    # 1Password labels the service column "title"; LastPass and Chrome use "name".
+    names = _csv_header_set(fieldnames)
+    return "title" in names and "password" in names
+
+
+def looks_like_chrome_csv_header(fieldnames):
+    # Chrome/Edge: name,url,username,password[,note]. Disambiguated from the two
+    # above by the absence of their signature columns.
+    names = _csv_header_set(fieldnames)
+    return ({"name", "url", "username", "password"} <= names
+            and "grouping" not in names and "title" not in names)
+
+
+def _lower_keyed(record):
+    return {(k or "").strip().lower(): (v or "") for k, v in record.items()}
+
+
+def lastpass_csv_rows(records):
+    """LastPass's CSV export as rows in SPM's import schema."""
+    rows = []
+    for record in records:
+        rec = _lower_keyed(record)
+        def field(key):
+            return (rec.get(key) or "").strip()
+        name = field("name")
+        url = field("url")
+        extras = [rec.get("extra") or ""]
+        if field("grouping"):
+            extras.append("folder: %s" % field("grouping"))
+        notes = "\n".join(n for n in extras if n)
+        # A LastPass secure note has the sentinel URL "http://sn".
+        if url.lower() in ("http://sn", "https://sn"):
+            rows.append({"type": "note", "label": name, "secret": notes,
+                         "notes": "", "created": ""})
+            continue
+        rows.append({"type": "password", "label": name,
+                     "username": field("username"),
+                     "secret": rec.get("password") or "",
+                     "notes": notes, "created": "", "url": url})
+        secret, period, algorithm = parse_otpauth(field("totp"))
+        if secret:
+            rows.append({"type": "authenticator", "label": name,
+                         "secret": secret, "period": period,
+                         "algorithm": algorithm, "notes": "", "created": ""})
+    return rows
+
+
+def chrome_csv_rows(records):
+    """Chrome/Edge's password CSV export as rows in SPM's import schema."""
+    rows = []
+    for record in records:
+        rec = _lower_keyed(record)
+        def field(key):
+            return (rec.get(key) or "").strip()
+        notes = (rec.get("note") or rec.get("notes") or "").strip()
+        rows.append({"type": "password", "label": field("name"),
+                     "username": field("username"),
+                     "secret": rec.get("password") or "",
+                     "notes": notes, "created": "", "url": field("url")})
+    return rows
+
+
+def onepassword_csv_rows(records):
+    """1Password's CSV export as rows in SPM's import schema."""
+    rows = []
+    for record in records:
+        rec = _lower_keyed(record)
+        def field(key):
+            return (rec.get(key) or "").strip()
+        name = field("title")
+        extras = [rec.get("notes") or ""]
+        if field("tags"):
+            extras.append("tags: %s" % field("tags"))
+        notes = "\n".join(n for n in extras if n)
+        rows.append({"type": "password", "label": name,
+                     "username": field("username"),
+                     "secret": rec.get("password") or "",
+                     "notes": notes, "created": "", "url": field("url")})
+        otp = field("otpauth") or field("one-time password") or field("otp")
+        secret, period, algorithm = parse_otpauth(otp)
+        if secret:
+            rows.append({"type": "authenticator", "label": name,
+                         "secret": secret, "period": period,
+                         "algorithm": algorithm, "notes": "", "created": ""})
     return rows
 
 
@@ -7383,6 +7528,132 @@ def breached_account_domains(rows, catalogue=None):
     return findings
 
 
+# ----- 2FA-availability audit (roadmap 9 companion) --------------------------
+# Which well-known services offer TOTP/2FA. Like BREACHED_DOMAINS_DEFAULT this
+# is a small bundled, on-device list -- never a network lookup -- extendable
+# with a user file. A password record on one of these domains that has no
+# matching authenticator is a 2FA the user could turn on but has not.
+TWOFA_DOMAINS_DEFAULT = {
+    "google.com": "Google",
+    "github.com": "GitHub",
+    "gitlab.com": "GitLab",
+    "microsoft.com": "Microsoft",
+    "live.com": "Microsoft",
+    "amazon.com": "Amazon",
+    "apple.com": "Apple",
+    "facebook.com": "Facebook",
+    "instagram.com": "Instagram",
+    "twitter.com": "Twitter / X",
+    "x.com": "Twitter / X",
+    "linkedin.com": "LinkedIn",
+    "dropbox.com": "Dropbox",
+    "paypal.com": "PayPal",
+    "stripe.com": "Stripe",
+    "coinbase.com": "Coinbase",
+    "binance.com": "Binance",
+    "cloudflare.com": "Cloudflare",
+    "digitalocean.com": "DigitalOcean",
+    "aws.amazon.com": "Amazon Web Services",
+    "protonmail.com": "Proton",
+    "proton.me": "Proton",
+    "reddit.com": "Reddit",
+    "discord.com": "Discord",
+    "slack.com": "Slack",
+    "twitch.tv": "Twitch",
+    "steampowered.com": "Steam",
+    "nintendo.com": "Nintendo",
+    "npmjs.com": "npm",
+    "pypi.org": "PyPI",
+}
+
+
+def load_twofa_catalogue(path=None):
+    """The 2FA-supporting-domain catalogue: the bundled default merged with an
+    optional user file. The file is `domain[<TAB>name]` per line, '#' comments
+    allowed; a user entry overrides the default. Env `SPM_TWOFA_DOMAINS`."""
+    catalogue = dict(TWOFA_DOMAINS_DEFAULT)
+    path = path if path is not None else os.environ.get("SPM_TWOFA_DOMAINS", "")
+    if path and os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    cols = line.split("\t")
+                    domain = _normalise_domain(cols[0])
+                    if not domain:
+                        continue
+                    name = cols[1].strip() if len(cols) > 1 else domain
+                    catalogue[domain] = name
+        except OSError:
+            pass
+    return catalogue
+
+
+def _registrable_label(domain):
+    """The second-level label of a host, alnum-only: github.com -> "github"."""
+    domain = _normalise_domain(domain)
+    parts = [p for p in domain.split(".") if p]
+    label = parts[-2] if len(parts) >= 2 else (parts[0] if parts else "")
+    return re.sub(r"[^a-z0-9]", "", label.lower())
+
+
+def _authenticator_tokens(plaintext):
+    """The alnum-folded labels of every AUTH row, for loose service matching."""
+    tokens = set()
+    for line in (plaintext or "").splitlines():
+        cols = line.split("\t")
+        if len(cols) >= 3 and cols[0] == "AUTH":
+            tok = re.sub(r"[^a-z0-9]", "", (cols[2] or "").lower())
+            if tok:
+                tokens.add(tok)
+    return tokens
+
+
+def twofa_gap_findings(plaintext, catalogue=None):
+    """[{id, domain, name}] for password records on a 2FA-supporting domain that
+    have no matching authenticator (roadmap 9 companion). An authenticator is
+    taken to cover a record when its folded label and the domain's registrable
+    label share a substring (GitHub <-> github.com). On-device; nothing sent."""
+    if catalogue is None:
+        catalogue = load_twofa_catalogue()
+    rows, _ = _password_security_rows(plaintext)
+    auth_tokens = _authenticator_tokens(plaintext)
+    findings = []
+    seen = set()
+    for parts in rows:
+        record_id = parts[0]
+        if record_id in seen:
+            continue
+        username = parts[2] if len(parts) > 2 else ""
+        url = parts[6] if len(parts) > 6 else ""
+        candidates = []
+        if url:
+            try:
+                host = urllib.parse.urlsplit(
+                    url if "//" in url else "//" + url).hostname or ""
+            except ValueError:
+                host = ""
+            if host:
+                candidates.append(host)
+        if "@" in username:
+            candidates.append(username.rsplit("@", 1)[-1])
+        for candidate in candidates:
+            key = _match_breached_domain(candidate, catalogue)
+            if not key:
+                continue
+            label = _registrable_label(key)
+            covered = bool(label) and any(
+                label in tok or tok in label for tok in auth_tokens)
+            if not covered:
+                findings.append({"id": record_id, "domain": key,
+                                 "name": catalogue[key]})
+                seen.add(record_id)
+            break
+    return findings
+
+
 def refresh_breach_catalogue(url, dest, timeout=10, opener=None):
     """Download an updated public breach-domain list to `dest` (roadmap 33).
 
@@ -7429,7 +7700,8 @@ def refresh_breach_catalogue(url, dest, timeout=10, opener=None):
 
 def security_report(plaintext, rotation_days=365, check_breaches=False,
                     timeout=5, opener=None, offline_source=None,
-                    check_accounts=False, catalogue=None):
+                    check_accounts=False, catalogue=None,
+                    check_twofa=False, twofa_catalogue=None):
     """One secret-free security report shared by CLI and Dashboard."""
     rows, malformed = _password_security_rows(plaintext)
     now = time.time()
@@ -7467,6 +7739,7 @@ def security_report(plaintext, rotation_days=365, check_breaches=False,
         "old": old, "incomplete": incomplete, "malformed": malformed,
         "rotation_days": rotation_days, "breach_status": "not_checked",
         "breached": [], "account_status": "not_checked", "account_findings": [],
+        "twofa_status": "not_checked", "twofa_findings": [],
     }
     if check_breaches:
         try:
@@ -7481,6 +7754,11 @@ def security_report(plaintext, rotation_days=365, check_breaches=False,
         # against the bundled default, never a network fallback.
         report["account_findings"] = breached_account_domains(rows, catalogue)
         report["account_status"] = "checked"
+    if check_twofa:
+        # On-device only: a record on a 2FA-supporting domain with no matching
+        # authenticator is a 2FA the user could enable but has not.
+        report["twofa_findings"] = twofa_gap_findings(plaintext, twofa_catalogue)
+        report["twofa_status"] = "checked"
     return report
 
 
@@ -9046,12 +9324,13 @@ def main(argv):
                     sys.stdout.write(name + "\n")
         elif command == "security-report":
             # security-report <plainfile> [rotation-days] [--breaches]
-            #   [--account-breaches] [--offline-hashes PATH]
+            #   [--account-breaches] [--twofa] [--offline-hashes PATH]
             # stdout is secret-free JSON; breach checking is explicit opt-in.
             opts = argv[4:]
             days = int(argv[3]) if len(argv) > 3 and argv[3] else 365
             check_breaches = "--breaches" in opts
             check_accounts = "--account-breaches" in opts
+            check_twofa = "--twofa" in opts
             offline_source = None
             if "--offline-hashes" in opts:
                 offline_source = opts[opts.index("--offline-hashes") + 1]
@@ -9060,7 +9339,8 @@ def main(argv):
             with open(argv[2], "r", encoding="utf-8", errors="replace") as handle:
                 report = security_report(
                     handle.read(), days, check_breaches,
-                    offline_source=offline_source, check_accounts=check_accounts)
+                    offline_source=offline_source, check_accounts=check_accounts,
+                    check_twofa=check_twofa)
             sys.stdout.write(json.dumps(report, indent=2) + "\n")
         elif command == "rotation-set":
             # rotation-set <plainfile> <id> <days|default> ; writes plaintext,
@@ -9548,6 +9828,13 @@ def main(argv):
             return sync_serve(argv[2], argv[3], int(argv[4]), argv[5],
                               channel=channel, once="--once" in opts,
                               idle_timeout=idle)
+        elif command == "authenticator-otpauth":
+            # authenticator-otpauth <plaintextfile> <id> ; stdout: the otpauth://
+            #   URI for that authenticator (roadmap 9). The shell renders it as a
+            #   QR with `qr`; both expose the secret, so this reads a decrypted
+            #   vault the caller already unlocked.
+            with open(argv[2], "r", encoding="utf-8") as handle:
+                sys.stdout.write(authenticator_otpauth(handle.read(), argv[3]) + "\n")
         elif command == "qr":
             # qr <text> [--svg|--pbm] ; stdout: a scannable QR rendering.
             # Default is Unicode half-blocks for a terminal; --svg for the web.
@@ -12766,6 +13053,30 @@ EOF
 	done
 }
 
+# Roadmap 9: export a stored authenticator as an otpauth:// QR so it can be
+# moved to a phone app. This reveals the secret (in the URI and the QR), so it
+# unlocks the vault exactly like authenticator-view.
+cmd_authenticator_qr() {
+	[ $# -ge 1 ] || die "Usage: $0 authenticator-qr <id>"
+	local target="$1"
+	[ -f "$VAULT_FILE" ] || die "Vault not found. Run '$0 init' first."
+	re_verify_master_password
+	local tmp uri; tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
+	uri="$(core authenticator-otpauth "$tmp" "$target")" || {
+		secure_wipe "$tmp"
+		if [ "$SPM_LANG" = "id" ]; then die "Tidak ada authenticator dengan ID $target."
+		else die "No authenticator found with ID $target."; fi
+	}
+	secure_wipe "$tmp"
+	if [ "$SPM_LANG" = "id" ]; then
+		printf 'Pindai QR ini di aplikasi authenticator untuk memindahkan kodenya:\n\n'
+	else
+		printf 'Scan this in an authenticator app to move the code there:\n\n'
+	fi
+	core qr "$uri"
+	printf '\n%s\n' "$uri"
+}
+
 cmd_authenticator_edit() {
 	[ $# -ge 1 ] || die "Usage: $0 authenticator-edit <id>"
 	local target="$1"
@@ -15402,7 +15713,7 @@ PY
 
 cmd_security_dashboard() {
 	[ -f "$VAULT_FILE" ] || die "Vault not found."
-	local tmp report breaches="" accounts="" offline="" days="${SPM_ROTATION_DAYS:-365}" status=0
+	local tmp report breaches="" accounts="" twofa="" offline="" days="${SPM_ROTATION_DAYS:-365}" status=0
 	case "$days" in ''|*[!0-9]*) days=365 ;; esac
 	[ "$days" -gt 0 ] 2>/dev/null || days=365
 	[ -n "${SPM_PWNED_OFFLINE:-}" ] && offline="--offline-hashes $SPM_PWNED_OFFLINE"
@@ -15410,6 +15721,7 @@ cmd_security_dashboard() {
 		case "$1" in
 			--breaches) breaches="--breaches" ;;
 			--account-breaches) accounts="--account-breaches" ;;
+			--twofa|--2fa) twofa="--twofa" ;;
 			--offline)
 				[ "$#" -ge 2 ] || die "Missing path for --offline."
 				offline="--offline-hashes $2"; shift ;;
@@ -15427,7 +15739,7 @@ cmd_security_dashboard() {
 	tmp="$(make_tmp)"; decrypt_vault_to_file "$tmp"
 	report="$(make_tmp)"
 	# shellcheck disable=SC2086
-	core security-report "$tmp" "$days" $breaches $accounts $offline > "$report" || status=$?
+	core security-report "$tmp" "$days" $breaches $accounts $twofa $offline > "$report" || status=$?
 	secure_wipe "$tmp"
 	[ "$status" -eq 0 ] || { secure_wipe "$report"; die "Security review failed."; }
 	python3 - "$report" <<'PY'
@@ -15456,6 +15768,12 @@ if audit.get("account_status") == "checked":
     print("Breached-service accounts:", hits or "none")
 else:
     print("Breached-service accounts: not checked (use --account-breaches, on-device)")
+if audit.get("twofa_status") == "checked":
+    gaps = "; ".join("%s (%s)" % (f["id"], f["name"] or f["domain"])
+                     for f in audit["twofa_findings"])
+    print("2FA available, not enabled:", gaps or "none")
+else:
+    print("2FA available, not enabled: not checked (use --twofa, on-device)")
 print("Passwords and full hashes are never sent, printed, or persisted.")
 print("The account check runs on-device from an open breach-domain list; no account identifier leaves it.")
 PY
@@ -16503,7 +16821,7 @@ sys.exit(3)
 # The verbs a fresh shell should complete. One maintained list; the regression
 # suite checks that every verb here is one `main` actually dispatches.
 spm_command_names() {
-	printf '%s' 'init add list get edit delete generate change-master secret-key portable save restore update auto-update shares doctor password-history export import backup-now backup-auto vault-profile sync record trash archive expiring rotation kdf searches schema link unlink share collection ssh gpg notes-add notes-list notes-view notes-delete passphrase-add passphrase-list passphrase-view passphrase-delete authenticator-add authenticator-list authenticator-view authenticator-edit authenticator-delete backup-codes-add backup-codes-list backup-codes-view backup-codes-delete attachment-add attachment-list attachment-extract attachment-delete emergency-create emergency-open events scope run env plugin phishing-check extension completion web dashboard desktop help'
+	printf '%s' 'init add list get edit delete generate change-master secret-key portable save restore update auto-update shares doctor password-history export import backup-now backup-auto vault-profile sync record trash archive expiring rotation kdf searches schema link unlink share collection ssh gpg notes-add notes-list notes-view notes-delete passphrase-add passphrase-list passphrase-view passphrase-delete authenticator-add authenticator-list authenticator-view authenticator-qr authenticator-edit authenticator-delete backup-codes-add backup-codes-list backup-codes-view backup-codes-delete attachment-add attachment-list attachment-extract attachment-delete emergency-create emergency-open events scope run env plugin phishing-check extension completion web dashboard desktop help'
 }
 
 cmd_completion() {
@@ -17031,6 +17349,7 @@ Authenticator (TOTP):
   ./spm.sh authenticator-add        → Tambah kode authenticator (Base32 secret + interval)
   ./spm.sh authenticator-list       → List authenticator
   ./spm.sh authenticator-view <id>  → Lihat detail + kode OTP
+  ./spm.sh authenticator-qr <id>    → Tampilkan QR otpauth:// untuk memindahkan kode ke aplikasi lain
   ./spm.sh authenticator-edit <id>  → Edit label/secret/interval
   ./spm.sh authenticator-delete <id>→ Hapus authenticator
 
@@ -17115,7 +17434,8 @@ Main commands (CLI):
   ./spm.sh help            → Show this help
 
 Local-first 2.10 capabilities:
-  ./spm.sh security [--breaches]        → Local dashboard; optional k-anonymous breach check
+  ./spm.sh security [--breaches] [--account-breaches] [--twofa]
+                                        → Local dashboard; opt-in breach + on-device 2FA-gap checks
   ./spm.sh history-list                 → List encrypted vault history
   ./spm.sh history-restore <snapshot>   → Restore after confirmation
   ./spm.sh backup-now [dir]             → Verified encrypted backup
@@ -17179,6 +17499,7 @@ Authenticator (TOTP):
   ./spm.sh authenticator-add        → Add an authenticator (Base32 secret + interval)
   ./spm.sh authenticator-list       → List authenticators
   ./spm.sh authenticator-view <id>  → View details + OTP code
+  ./spm.sh authenticator-qr <id>    → Show an otpauth:// QR to move the code to another app
   ./spm.sh authenticator-edit <id>  → Edit label/secret/interval
   ./spm.sh authenticator-delete <id>→ Delete an authenticator
 
@@ -18553,6 +18874,9 @@ WEB_CATALOGUES = {
         "auth.view.created": "Created",
         "auth.view.interval": "Interval",
         "auth.view.label": "Label",
+        "auth.view.move": "Move to another app",
+        "auth.view.move_hint": "Reveal a QR to scan this code into another authenticator app.",
+        "auth.view.qr_error": "Could not render QR.",
         "auth.view.seconds_label": "seconds",
         "auth.view.secret": "Base32 Secret",
         "auth.view.title": "Authenticator",
@@ -18578,9 +18902,11 @@ WEB_CATALOGUES = {
         "btn.delete": "Delete",
         "btn.edit": "Edit",
         "btn.hide": "Hide",
+        "btn.hide_qr": "Hide QR",
         "btn.open_generator": "Open Generator",
         "btn.restore": "Restore",
         "btn.show": "Show",
+        "btn.show_qr": "Show QR",
         "btn.view": "View",
         "cert.algorithm": "Signature",
         "cert.derived.d": "Read from the certificate rather than typed beside it, so it cannot disagree with the certificate it describes.",
@@ -18782,6 +19108,7 @@ WEB_CATALOGUES = {
         "nav.events": "Security Events",
         "nav.expand": "Expand sidebar",
         "nav.expiring": "Expiring",
+        "nav.extension": "Browser extension",
         "nav.generator": "Generator",
         "nav.group.settings": "Settings",
         "nav.group.tools": "Tools",
@@ -18800,7 +19127,6 @@ WEB_CATALOGUES = {
         "nav.sharing": "Sharing",
         "nav.sync": "Sync",
         "nav.transfer": "Export / Import",
-        "nav.extension": "Browser extension",
         "nav.trash": "Trash",
         "nav.unlock": "Biometric Unlock",
         "note.field.content": "Content",
@@ -18922,6 +19248,7 @@ WEB_CATALOGUES = {
         "security.account_optin": "On-device check against an open breach-domain list. No account identifier leaves this device.",
         "security.accounts": "Breached services",
         "security.accounts_d": "Records that belong to a service in an open breach-domain list. On-device; no account identifier leaves this device.",
+        "security.act_add_2fa": "Add authenticator",
         "security.act_change": "Change password",
         "security.act_complete": "Add the details",
         "security.act_fix": "Fix this entry",
@@ -18951,6 +19278,10 @@ WEB_CATALOGUES = {
         "security.tally_old": "aging",
         "security.tally_reused": "reused",
         "security.tally_weak": "weak",
+        "security.twofa": "2FA available, not enabled",
+        "security.twofa_check": "Check for missing 2FA",
+        "security.twofa_d": "Records for a service that supports two-factor authentication but has no authenticator in this vault. On-device; nothing leaves this device.",
+        "security.twofa_optin": "On-device check against a bundled list of services that support 2FA. Nothing leaves this device.",
         "security.weak": "Weak passwords",
         "security.weak_d": "Shorter than 12 characters, or using fewer than three character classes.",
         "settings.confirm": "Confirm new master password",
@@ -19130,6 +19461,9 @@ WEB_CATALOGUES = {
         "auth.view.created": "\u0623\u064f\u0646\u0634\u0626\u062a",
         "auth.view.interval": "\u0627\u0644\u0645\u062f\u0629",
         "auth.view.label": "\u0627\u0644\u062a\u0633\u0645\u064a\u0629",
+        "auth.view.move": "\u0627\u0644\u0646\u0642\u0644 \u0625\u0644\u0649 \u062a\u0637\u0628\u064a\u0642 \u0622\u062e\u0631",
+        "auth.view.move_hint": "\u0623\u0638\u0647\u0650\u0631 \u0631\u0645\u0632 QR \u0644\u0645\u0633\u062d \u0647\u0630\u0627 \u0627\u0644\u0631\u0645\u0632 \u0641\u064a \u062a\u0637\u0628\u064a\u0642 \u0645\u0635\u0627\u062f\u0642\u0629 \u0622\u062e\u0631.",
+        "auth.view.qr_error": "\u062a\u0639\u0630\u0651\u0631 \u0625\u0646\u0634\u0627\u0621 \u0631\u0645\u0632 QR.",
         "auth.view.seconds_label": "\u062b\u0627\u0646\u064a\u0629",
         "auth.view.secret": "\u0633\u0631 Base32",
         "auth.view.title": "\u0623\u062f\u0627\u0629 \u0627\u0644\u0645\u0635\u0627\u062f\u0642\u0629",
@@ -19155,9 +19489,11 @@ WEB_CATALOGUES = {
         "btn.delete": "\u062d\u0630\u0641",
         "btn.edit": "\u062a\u0639\u062f\u064a\u0644",
         "btn.hide": "\u0625\u062e\u0641\u0627\u0621",
+        "btn.hide_qr": "\u0625\u062e\u0641\u0627\u0621 \u0631\u0645\u0632 QR",
         "btn.open_generator": "\u0627\u0641\u062a\u062d \u0627\u0644\u0645\u0648\u0644\u0651\u062f",
         "btn.restore": "\u0627\u0633\u062a\u0639\u0627\u062f\u0629",
         "btn.show": "\u0625\u0638\u0647\u0627\u0631",
+        "btn.show_qr": "\u0625\u0638\u0647\u0627\u0631 \u0631\u0645\u0632 QR",
         "btn.view": "\u0639\u0631\u0636",
         "cert.algorithm": "\u0627\u0644\u062a\u0648\u0642\u064a\u0639",
         "cert.derived.d": "\u064a\u064f\u0642\u0631\u0623 \u0645\u0646 \u0627\u0644\u0634\u0647\u0627\u062f\u0629 \u0628\u062f\u0644\u0627\u064b \u0645\u0646 \u0643\u062a\u0627\u0628\u062a\u0647 \u0628\u062c\u0627\u0646\u0628\u0647\u0627\u060c \u0644\u0630\u0627 \u0644\u0627 \u064a\u0645\u0643\u0646 \u0623\u0646 \u064a\u062a\u0639\u0627\u0631\u0636 \u0645\u0639 \u0627\u0644\u0634\u0647\u0627\u062f\u0629 \u0627\u0644\u062a\u064a \u064a\u0635\u0641\u0647\u0627.",
@@ -19359,6 +19695,7 @@ WEB_CATALOGUES = {
         "nav.events": "\u0623\u062d\u062f\u0627\u062b \u0627\u0644\u0623\u0645\u0627\u0646",
         "nav.expand": "\u062a\u0648\u0633\u064a\u0639 \u0627\u0644\u0634\u0631\u064a\u0637 \u0627\u0644\u062c\u0627\u0646\u0628\u064a",
         "nav.expiring": "\u062a\u0646\u062a\u0647\u064a \u0642\u0631\u064a\u0628\u064b\u0627",
+        "nav.extension": "\u0627\u0645\u062a\u062f\u0627\u062f \u0627\u0644\u0645\u062a\u0635\u0641\u062d",
         "nav.generator": "\u0627\u0644\u0645\u0648\u0644\u0651\u062f",
         "nav.group.settings": "\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a",
         "nav.group.tools": "\u0623\u062f\u0648\u0627\u062a",
@@ -19377,7 +19714,6 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u0627\u0644\u0645\u0634\u0627\u0631\u0643\u0629",
         "nav.sync": "\u0627\u0644\u0645\u0632\u0627\u0645\u0646\u0629",
         "nav.transfer": "\u062a\u0635\u062f\u064a\u0631 / \u0627\u0633\u062a\u064a\u0631\u0627\u062f",
-        "nav.extension": "\u0627\u0645\u062a\u062f\u0627\u062f \u0627\u0644\u0645\u062a\u0635\u0641\u062d",
         "nav.trash": "\u0627\u0644\u0645\u0647\u0645\u0644\u0627\u062a",
         "nav.unlock": "\u0641\u062a\u062d \u0627\u0644\u0642\u0641\u0644 \u0628\u0627\u0644\u0628\u0635\u0645\u0629",
         "note.field.content": "\u0627\u0644\u0645\u062d\u062a\u0648\u0649",
@@ -19499,6 +19835,7 @@ WEB_CATALOGUES = {
         "security.account_optin": "\u0641\u062d\u0635 \u0639\u0644\u0649 \u0627\u0644\u062c\u0647\u0627\u0632 \u0645\u0642\u0627\u0628\u0644 \u0642\u0627\u0626\u0645\u0629 \u0645\u0641\u062a\u0648\u062d\u0629 \u0644\u0646\u0637\u0627\u0642\u0627\u062a \u0645\u062e\u062a\u0631\u064e\u0642\u0629. \u0644\u0627 \u064a\u063a\u0627\u062f\u0631 \u0627\u0644\u062c\u0647\u0627\u0632 \u0623\u064a \u0645\u0639\u0631\u0651\u0641 \u062d\u0633\u0627\u0628.",
         "security.accounts": "\u062e\u062f\u0645\u0627\u062a \u0645\u062e\u062a\u0631\u064e\u0642\u0629",
         "security.accounts_d": "\u0633\u062c\u0644\u0627\u062a \u062a\u0646\u062a\u0645\u064a \u0625\u0644\u0649 \u062e\u062f\u0645\u0629 \u0636\u0645\u0646 \u0642\u0627\u0626\u0645\u0629 \u0645\u0641\u062a\u0648\u062d\u0629 \u0644\u0646\u0637\u0627\u0642\u0627\u062a \u0645\u062e\u062a\u0631\u064e\u0642\u0629. \u0639\u0644\u0649 \u0627\u0644\u062c\u0647\u0627\u0632\u061b \u0648\u0644\u0627 \u064a\u063a\u0627\u062f\u0631\u0647 \u0623\u064a \u0645\u0639\u0631\u0651\u0641 \u062d\u0633\u0627\u0628.",
+        "security.act_add_2fa": "\u0625\u0636\u0627\u0641\u0629 \u0645\u064f\u0635\u0627\u062f\u0650\u0642",
         "security.act_change": "\u063a\u064a\u0651\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631",
         "security.act_complete": "\u0623\u0636\u0641 \u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644",
         "security.act_fix": "\u0623\u0635\u0644\u062d \u0647\u0630\u0627 \u0627\u0644\u0645\u062f\u062e\u0644",
@@ -19528,6 +19865,10 @@ WEB_CATALOGUES = {
         "security.tally_old": "\u0642\u062f\u064a\u0645\u0629",
         "security.tally_reused": "\u0645\u064f\u0639\u0627\u062f\u0629",
         "security.tally_weak": "\u0636\u0639\u064a\u0641\u0629",
+        "security.twofa": "\u0627\u0644\u0645\u0635\u0627\u062f\u0642\u0629 \u0627\u0644\u062b\u0646\u0627\u0626\u064a\u0629 \u0645\u062a\u0627\u062d\u0629 \u0648\u063a\u064a\u0631 \u0645\u064f\u0641\u0639\u0651\u0644\u0629",
+        "security.twofa_check": "\u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0645\u0635\u0627\u062f\u0642\u0629 \u0627\u0644\u062b\u0646\u0627\u0626\u064a\u0629 \u0627\u0644\u0645\u0641\u0642\u0648\u062f\u0629",
+        "security.twofa_d": "\u0633\u062c\u0644\u0627\u062a \u0644\u062e\u062f\u0645\u0629 \u062a\u062f\u0639\u0645 \u0627\u0644\u0645\u0635\u0627\u062f\u0642\u0629 \u0627\u0644\u062b\u0646\u0627\u0626\u064a\u0629 \u0644\u0643\u0646 \u0644\u0627 \u064a\u0648\u062c\u062f \u0644\u0647\u0627 \u0645\u064f\u0635\u0627\u062f\u0650\u0642 \u0641\u064a \u0647\u0630\u0647 \u0627\u0644\u062e\u0632\u0646\u0629. \u0639\u0644\u0649 \u0627\u0644\u062c\u0647\u0627\u0632\u061b \u0644\u0627 \u0634\u064a\u0621 \u064a\u063a\u0627\u062f\u0631\u0647.",
+        "security.twofa_optin": "\u0641\u062d\u0635 \u0639\u0644\u0649 \u0627\u0644\u062c\u0647\u0627\u0632 \u0645\u0642\u0627\u0628\u0644 \u0642\u0627\u0626\u0645\u0629 \u0645\u064f\u0636\u0645\u0651\u0646\u0629 \u0628\u0627\u0644\u062e\u062f\u0645\u0627\u062a \u0627\u0644\u062a\u064a \u062a\u062f\u0639\u0645 \u0627\u0644\u0645\u0635\u0627\u062f\u0642\u0629 \u0627\u0644\u062b\u0646\u0627\u0626\u064a\u0629. \u0644\u0627 \u0634\u064a\u0621 \u064a\u063a\u0627\u062f\u0631 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632.",
         "security.weak": "\u0643\u0644\u0645\u0627\u062a \u0645\u0631\u0648\u0631 \u0636\u0639\u064a\u0641\u0629",
         "security.weak_d": "\u0623\u0642\u0635\u0631 \u0645\u0646 12 \u062d\u0631\u0641\u064b\u0627\u060c \u0623\u0648 \u062a\u0633\u062a\u062e\u062f\u0645 \u0623\u0642\u0644 \u0645\u0646 \u062b\u0644\u0627\u062b \u0641\u0626\u0627\u062a \u0645\u0646 \u0627\u0644\u0645\u062d\u0627\u0631\u0641.",
         "settings.confirm": "\u0623\u0643\u0651\u062f \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629 \u0627\u0644\u062c\u062f\u064a\u062f\u0629",
@@ -19707,6 +20048,9 @@ WEB_CATALOGUES = {
         "auth.view.created": "Erstellt",
         "auth.view.interval": "Intervall",
         "auth.view.label": "Bezeichnung",
+        "auth.view.move": "In eine andere App \u00fcbertragen",
+        "auth.view.move_hint": "Einen QR-Code anzeigen, um diesen Code in eine andere Authenticator-App zu scannen.",
+        "auth.view.qr_error": "QR-Code konnte nicht erstellt werden.",
         "auth.view.seconds_label": "Sekunden",
         "auth.view.secret": "Base32-Geheimnis",
         "auth.view.title": "Authentifikator",
@@ -19732,9 +20076,11 @@ WEB_CATALOGUES = {
         "btn.delete": "L\u00f6schen",
         "btn.edit": "Bearbeiten",
         "btn.hide": "Verbergen",
+        "btn.hide_qr": "QR ausblenden",
         "btn.open_generator": "Generator \u00f6ffnen",
         "btn.restore": "Wiederherstellen",
         "btn.show": "Anzeigen",
+        "btn.show_qr": "QR anzeigen",
         "btn.view": "Ansehen",
         "cert.algorithm": "Signatur",
         "cert.derived.d": "Aus dem Zertifikat gelesen statt daneben eingetippt, sodass es nicht vom beschriebenen Zertifikat abweichen kann.",
@@ -19936,6 +20282,7 @@ WEB_CATALOGUES = {
         "nav.events": "Sicherheitsereignisse",
         "nav.expand": "Seitenleiste ausklappen",
         "nav.expiring": "Ablaufend",
+        "nav.extension": "Browser-Erweiterung",
         "nav.generator": "Generator",
         "nav.group.settings": "Einstellungen",
         "nav.group.tools": "Werkzeuge",
@@ -19954,7 +20301,6 @@ WEB_CATALOGUES = {
         "nav.sharing": "Teilen",
         "nav.sync": "Synchronisierung",
         "nav.transfer": "Exportieren / Importieren",
-        "nav.extension": "Browser-Erweiterung",
         "nav.trash": "Papierkorb",
         "nav.unlock": "Biometrisches Entsperren",
         "note.field.content": "Inhalt",
@@ -20076,6 +20422,7 @@ WEB_CATALOGUES = {
         "security.account_optin": "Pr\u00fcfung auf dem Ger\u00e4t anhand einer offenen Liste betroffener Domains. Keine Kontokennung verl\u00e4sst das Ger\u00e4t.",
         "security.accounts": "Betroffene Dienste",
         "security.accounts_d": "Datens\u00e4tze, die zu einem Dienst aus einer offenen Liste betroffener Domains geh\u00f6ren. Auf dem Ger\u00e4t; keine Kontokennung verl\u00e4sst es.",
+        "security.act_add_2fa": "Authenticator hinzuf\u00fcgen",
         "security.act_change": "Passwort \u00e4ndern",
         "security.act_complete": "Angaben erg\u00e4nzen",
         "security.act_fix": "Eintrag korrigieren",
@@ -20105,6 +20452,10 @@ WEB_CATALOGUES = {
         "security.tally_old": "veraltet",
         "security.tally_reused": "wiederverwendet",
         "security.tally_weak": "schwach",
+        "security.twofa": "2FA verf\u00fcgbar, nicht aktiviert",
+        "security.twofa_check": "Auf fehlende 2FA pr\u00fcfen",
+        "security.twofa_d": "Eintr\u00e4ge f\u00fcr einen Dienst, der Zwei-Faktor-Authentifizierung unterst\u00fctzt, aber keinen Authenticator in diesem Tresor hat. Lokal; nichts verl\u00e4sst dieses Ger\u00e4t.",
+        "security.twofa_optin": "Lokale Pr\u00fcfung anhand einer mitgelieferten Liste von Diensten mit 2FA-Unterst\u00fctzung. Nichts verl\u00e4sst dieses Ger\u00e4t.",
         "security.weak": "Schwache Passw\u00f6rter",
         "security.weak_d": "K\u00fcrzer als 12 Zeichen oder mit weniger als drei Zeichenklassen.",
         "settings.confirm": "Neues Hauptpasswort best\u00e4tigen",
@@ -20284,6 +20635,9 @@ WEB_CATALOGUES = {
         "auth.view.created": "Creado",
         "auth.view.interval": "Intervalo",
         "auth.view.label": "Etiqueta",
+        "auth.view.move": "Mover a otra app",
+        "auth.view.move_hint": "Muestra un QR para escanear este c\u00f3digo en otra app de autenticaci\u00f3n.",
+        "auth.view.qr_error": "No se pudo generar el QR.",
         "auth.view.seconds_label": "segundos",
         "auth.view.secret": "Secreto en Base32",
         "auth.view.title": "Autenticador",
@@ -20309,9 +20663,11 @@ WEB_CATALOGUES = {
         "btn.delete": "Eliminar",
         "btn.edit": "Editar",
         "btn.hide": "Ocultar",
+        "btn.hide_qr": "Ocultar QR",
         "btn.open_generator": "Abrir el generador",
         "btn.restore": "Restaurar",
         "btn.show": "Mostrar",
+        "btn.show_qr": "Mostrar QR",
         "btn.view": "Ver",
         "cert.algorithm": "Firma",
         "cert.derived.d": "Se lee del certificado en lugar de escribirse junto a \u00e9l, por lo que no puede contradecir al certificado que describe.",
@@ -20513,6 +20869,7 @@ WEB_CATALOGUES = {
         "nav.events": "Eventos de seguridad",
         "nav.expand": "Expandir la barra lateral",
         "nav.expiring": "Caducando",
+        "nav.extension": "Extensi\u00f3n del navegador",
         "nav.generator": "Generador",
         "nav.group.settings": "Ajustes",
         "nav.group.tools": "Herramientas",
@@ -20531,7 +20888,6 @@ WEB_CATALOGUES = {
         "nav.sharing": "Compartir",
         "nav.sync": "Sincronizaci\u00f3n",
         "nav.transfer": "Exportar / Importar",
-        "nav.extension": "Extensi\u00f3n del navegador",
         "nav.trash": "Papelera",
         "nav.unlock": "Desbloqueo biom\u00e9trico",
         "note.field.content": "Contenido",
@@ -20653,6 +21009,7 @@ WEB_CATALOGUES = {
         "security.account_optin": "Comprobaci\u00f3n en el dispositivo con una lista abierta de dominios filtrados. Ning\u00fan identificador de cuenta sale de este equipo.",
         "security.accounts": "Servicios filtrados",
         "security.accounts_d": "Registros que pertenecen a un servicio de una lista abierta de dominios filtrados. En el dispositivo; ning\u00fan identificador de cuenta sale de este equipo.",
+        "security.act_add_2fa": "A\u00f1adir autenticador",
         "security.act_change": "Cambiar contrase\u00f1a",
         "security.act_complete": "A\u00f1adir los datos",
         "security.act_fix": "Corregir esta entrada",
@@ -20682,6 +21039,10 @@ WEB_CATALOGUES = {
         "security.tally_old": "antiguas",
         "security.tally_reused": "reutilizadas",
         "security.tally_weak": "d\u00e9biles",
+        "security.twofa": "2FA disponible, sin activar",
+        "security.twofa_check": "Buscar 2FA sin activar",
+        "security.twofa_d": "Registros de un servicio que admite autenticaci\u00f3n en dos pasos pero que no tiene autenticador en esta b\u00f3veda. En el dispositivo; nada sale de \u00e9l.",
+        "security.twofa_optin": "Comprobaci\u00f3n en el dispositivo con una lista incluida de servicios que admiten 2FA. Nada sale de este dispositivo.",
         "security.weak": "Contrase\u00f1as d\u00e9biles",
         "security.weak_d": "De menos de 12 caracteres, o con menos de tres tipos de car\u00e1cter.",
         "settings.confirm": "Confirma la nueva contrase\u00f1a maestra",
@@ -20861,6 +21222,9 @@ WEB_CATALOGUES = {
         "auth.view.created": "Cr\u00e9\u00e9",
         "auth.view.interval": "Intervalle",
         "auth.view.label": "Libell\u00e9",
+        "auth.view.move": "Transf\u00e9rer vers une autre app",
+        "auth.view.move_hint": "Afficher un QR code pour scanner ce code dans une autre application d\u2019authentification.",
+        "auth.view.qr_error": "Impossible de g\u00e9n\u00e9rer le QR code.",
         "auth.view.seconds_label": "secondes",
         "auth.view.secret": "Secret Base32",
         "auth.view.title": "Authentificateur",
@@ -20886,9 +21250,11 @@ WEB_CATALOGUES = {
         "btn.delete": "Supprimer",
         "btn.edit": "Modifier",
         "btn.hide": "Masquer",
+        "btn.hide_qr": "Masquer le QR",
         "btn.open_generator": "Ouvrir le g\u00e9n\u00e9rateur",
         "btn.restore": "Restaurer",
         "btn.show": "Afficher",
+        "btn.show_qr": "Afficher le QR",
         "btn.view": "Consulter",
         "cert.algorithm": "Signature",
         "cert.derived.d": "Lu depuis le certificat au lieu d'\u00eatre saisi \u00e0 c\u00f4t\u00e9, il ne peut donc pas contredire le certificat qu'il d\u00e9crit.",
@@ -21090,6 +21456,7 @@ WEB_CATALOGUES = {
         "nav.events": "\u00c9v\u00e9nements de s\u00e9curit\u00e9",
         "nav.expand": "D\u00e9ployer la barre lat\u00e9rale",
         "nav.expiring": "Expiration",
+        "nav.extension": "Extension de navigateur",
         "nav.generator": "G\u00e9n\u00e9rateur",
         "nav.group.settings": "Param\u00e8tres",
         "nav.group.tools": "Outils",
@@ -21108,7 +21475,6 @@ WEB_CATALOGUES = {
         "nav.sharing": "Partage",
         "nav.sync": "Synchronisation",
         "nav.transfer": "Exporter / Importer",
-        "nav.extension": "Extension de navigateur",
         "nav.trash": "Corbeille",
         "nav.unlock": "D\u00e9verrouillage biom\u00e9trique",
         "note.field.content": "Contenu",
@@ -21230,6 +21596,7 @@ WEB_CATALOGUES = {
         "security.account_optin": "V\u00e9rification sur l'appareil \u00e0 partir d'une liste ouverte de domaines compromis. Aucun identifiant de compte ne quitte l'appareil.",
         "security.accounts": "Services compromis",
         "security.accounts_d": "Enregistrements appartenant \u00e0 un service figurant dans une liste ouverte de domaines compromis. Sur l'appareil ; aucun identifiant de compte ne le quitte.",
+        "security.act_add_2fa": "Ajouter un authentificateur",
         "security.act_change": "Changer le mot de passe",
         "security.act_complete": "Compl\u00e9ter les informations",
         "security.act_fix": "Corriger cette entr\u00e9e",
@@ -21259,6 +21626,10 @@ WEB_CATALOGUES = {
         "security.tally_old": "anciens",
         "security.tally_reused": "r\u00e9utilis\u00e9s",
         "security.tally_weak": "faibles",
+        "security.twofa": "2FA disponible, non activ\u00e9e",
+        "security.twofa_check": "Rechercher la 2FA manquante",
+        "security.twofa_d": "Entr\u00e9es pour un service qui prend en charge l\u2019authentification \u00e0 deux facteurs mais sans authentificateur dans ce coffre. Sur l\u2019appareil ; rien n\u2019en sort.",
+        "security.twofa_optin": "V\u00e9rification sur l\u2019appareil \u00e0 partir d\u2019une liste int\u00e9gr\u00e9e de services prenant en charge la 2FA. Rien ne quitte cet appareil.",
         "security.weak": "Mots de passe faibles",
         "security.weak_d": "Moins de 12 caract\u00e8res, ou moins de trois classes de caract\u00e8res.",
         "settings.confirm": "Confirmez le nouveau mot de passe ma\u00eetre",
@@ -21438,6 +21809,9 @@ WEB_CATALOGUES = {
         "auth.view.created": "\u092c\u0928\u093e\u092f\u093e \u0917\u092f\u093e",
         "auth.view.interval": "\u0905\u0902\u0924\u0930\u093e\u0932",
         "auth.view.label": "\u0932\u0947\u092c\u0932",
+        "auth.view.move": "\u0926\u0942\u0938\u0930\u0947 \u0910\u092a \u092e\u0947\u0902 \u0932\u0947 \u091c\u093e\u090f\u0901",
+        "auth.view.move_hint": "\u0907\u0938 \u0915\u094b\u0921 \u0915\u094b \u0915\u093f\u0938\u0940 \u0905\u0928\u094d\u092f \u0911\u0925\u0947\u0902\u091f\u093f\u0915\u0947\u091f\u0930 \u0910\u092a \u092e\u0947\u0902 \u0938\u094d\u0915\u0948\u0928 \u0915\u0930\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f QR \u0926\u093f\u0916\u093e\u090f\u0901\u0964",
+        "auth.view.qr_error": "QR \u0928\u0939\u0940\u0902 \u092c\u0928\u093e\u092f\u093e \u091c\u093e \u0938\u0915\u093e\u0964",
         "auth.view.seconds_label": "\u0938\u0947\u0915\u0902\u0921",
         "auth.view.secret": "Base32 \u0917\u094b\u092a\u0928\u0940\u092f \u092e\u093e\u0928",
         "auth.view.title": "\u092a\u094d\u0930\u092e\u093e\u0923\u0915",
@@ -21463,9 +21837,11 @@ WEB_CATALOGUES = {
         "btn.delete": "\u092e\u093f\u091f\u093e\u090f\u0901",
         "btn.edit": "\u0938\u0902\u092a\u093e\u0926\u093f\u0924 \u0915\u0930\u0947\u0902",
         "btn.hide": "\u091b\u093f\u092a\u093e\u090f\u0901",
+        "btn.hide_qr": "QR \u091b\u093f\u092a\u093e\u090f\u0901",
         "btn.open_generator": "\u091c\u0928\u0930\u0947\u091f\u0930 \u0916\u094b\u0932\u0947\u0902",
         "btn.restore": "\u092a\u0941\u0928\u0930\u094d\u0938\u094d\u0925\u093e\u092a\u093f\u0924 \u0915\u0930\u0947\u0902",
         "btn.show": "\u0926\u093f\u0916\u093e\u090f\u0901",
+        "btn.show_qr": "QR \u0926\u093f\u0916\u093e\u090f\u0901",
         "btn.view": "\u0926\u0947\u0916\u0947\u0902",
         "cert.algorithm": "\u0939\u0938\u094d\u0924\u093e\u0915\u094d\u0937\u0930",
         "cert.derived.d": "\u0907\u0938\u0947 \u092c\u0917\u0932 \u092e\u0947\u0902 \u091f\u093e\u0907\u092a \u0915\u0930\u0928\u0947 \u0915\u0947 \u092c\u091c\u093e\u092f \u092a\u094d\u0930\u092e\u093e\u0923\u092a\u0924\u094d\u0930 \u0938\u0947 \u092a\u0922\u093c\u093e \u091c\u093e\u0924\u093e \u0939\u0948, \u0907\u0938\u0932\u093f\u090f \u092f\u0939 \u0935\u0930\u094d\u0923\u093f\u0924 \u092a\u094d\u0930\u092e\u093e\u0923\u092a\u0924\u094d\u0930 \u0938\u0947 \u0905\u0938\u0939\u092e\u0924 \u0928\u0939\u0940\u0902 \u0939\u094b \u0938\u0915\u0924\u093e\u0964",
@@ -21667,6 +22043,7 @@ WEB_CATALOGUES = {
         "nav.events": "\u0938\u0941\u0930\u0915\u094d\u0937\u093e \u0918\u091f\u0928\u093e\u090f\u0901",
         "nav.expand": "\u0938\u093e\u0907\u0921\u092c\u093e\u0930 \u092b\u0948\u0932\u093e\u090f\u0901",
         "nav.expiring": "\u0938\u092e\u093e\u092a\u094d\u0924\u093f",
+        "nav.extension": "\u092c\u094d\u0930\u093e\u0909\u091c\u093c\u0930 \u090f\u0915\u094d\u0938\u091f\u0947\u0902\u0936\u0928",
         "nav.generator": "\u091c\u0928\u0930\u0947\u091f\u0930",
         "nav.group.settings": "\u0938\u0947\u091f\u093f\u0902\u0917",
         "nav.group.tools": "\u0909\u092a\u0915\u0930\u0923",
@@ -21685,7 +22062,6 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u0938\u093e\u091d\u093e\u0915\u0930\u0923",
         "nav.sync": "\u0938\u093f\u0902\u0915",
         "nav.transfer": "\u0928\u093f\u0930\u094d\u092f\u093e\u0924 / \u0906\u092f\u093e\u0924",
-        "nav.extension": "\u092c\u094d\u0930\u093e\u0909\u091c\u093c\u0930 \u090f\u0915\u094d\u0938\u091f\u0947\u0902\u0936\u0928",
         "nav.trash": "\u0915\u091a\u0930\u093e",
         "nav.unlock": "\u092c\u093e\u092f\u094b\u092e\u0947\u091f\u094d\u0930\u093f\u0915 \u0905\u0928\u0932\u0949\u0915",
         "note.field.content": "\u0938\u093e\u092e\u0917\u094d\u0930\u0940",
@@ -21807,6 +22183,7 @@ WEB_CATALOGUES = {
         "security.account_optin": "\u0916\u0941\u0932\u0940 breach-\u0921\u094b\u092e\u0947\u0928 \u0938\u0942\u091a\u0940 \u0915\u0947 \u0935\u093f\u0930\u0941\u0926\u094d\u0927 \u0921\u093f\u0935\u093e\u0907\u0938 \u092a\u0930 \u091c\u093e\u0901\u091a\u0964 \u0915\u094b\u0908 \u0916\u093e\u0924\u093e \u092a\u0939\u091a\u093e\u0928\u0915\u0930\u094d\u0924\u093e \u0921\u093f\u0935\u093e\u0907\u0938 \u0938\u0947 \u092c\u093e\u0939\u0930 \u0928\u0939\u0940\u0902 \u091c\u093e\u0924\u093e\u0964",
         "security.accounts": "\u092a\u094d\u0930\u092d\u093e\u0935\u093f\u0924 \u0938\u0947\u0935\u093e\u090f\u0901",
         "security.accounts_d": "\u0910\u0938\u0947 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u091c\u094b \u0915\u093f\u0938\u0940 \u0916\u0941\u0932\u0940 breach-\u0921\u094b\u092e\u0947\u0928 \u0938\u0942\u091a\u0940 \u0915\u0940 \u0938\u0947\u0935\u093e \u0938\u0947 \u0938\u0902\u092c\u0902\u0927\u093f\u0924 \u0939\u0948\u0902\u0964 \u0921\u093f\u0935\u093e\u0907\u0938 \u092a\u0930 \u0939\u0940; \u0915\u094b\u0908 \u0916\u093e\u0924\u093e \u092a\u0939\u091a\u093e\u0928\u0915\u0930\u094d\u0924\u093e \u0907\u0938 \u0921\u093f\u0935\u093e\u0907\u0938 \u0938\u0947 \u092c\u093e\u0939\u0930 \u0928\u0939\u0940\u0902 \u091c\u093e\u0924\u093e\u0964",
+        "security.act_add_2fa": "\u0911\u0925\u0947\u0902\u091f\u093f\u0915\u0947\u091f\u0930 \u091c\u094b\u0921\u093c\u0947\u0902",
         "security.act_change": "\u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u092c\u0926\u0932\u0947\u0902",
         "security.act_complete": "\u0935\u093f\u0935\u0930\u0923 \u091c\u094b\u0921\u093c\u0947\u0902",
         "security.act_fix": "\u092f\u0939 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0920\u0940\u0915 \u0915\u0930\u0947\u0902",
@@ -21836,6 +22213,10 @@ WEB_CATALOGUES = {
         "security.tally_old": "\u092a\u0941\u0930\u093e\u0928\u0947",
         "security.tally_reused": "\u0926\u094b\u0939\u0930\u093e\u090f \u0917\u090f",
         "security.tally_weak": "\u0915\u092e\u091c\u093c\u094b\u0930",
+        "security.twofa": "2FA \u0909\u092a\u0932\u092c\u094d\u0927, \u091a\u093e\u0932\u0942 \u0928\u0939\u0940\u0902",
+        "security.twofa_check": "\u0905\u0928\u0941\u092a\u0938\u094d\u0925\u093f\u0924 2FA \u091c\u093e\u0901\u091a\u0947\u0902",
+        "security.twofa_d": "\u0910\u0938\u0940 \u0938\u0947\u0935\u093e \u0915\u0947 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u091c\u094b \u0926\u094b-\u0915\u093e\u0930\u0915 \u092a\u094d\u0930\u092e\u093e\u0923\u0940\u0915\u0930\u0923 \u0915\u093e \u0938\u092e\u0930\u094d\u0925\u0928 \u0915\u0930\u0924\u0940 \u0939\u0948 \u092a\u0930 \u0907\u0938 \u0935\u0949\u0932\u094d\u091f \u092e\u0947\u0902 \u0915\u094b\u0908 \u0911\u0925\u0947\u0902\u091f\u093f\u0915\u0947\u091f\u0930 \u0928\u0939\u0940\u0902 \u0939\u0948\u0964 \u0921\u093f\u0935\u093e\u0907\u0938 \u092a\u0930 \u0939\u0940; \u0915\u0941\u091b \u092d\u0940 \u092c\u093e\u0939\u0930 \u0928\u0939\u0940\u0902 \u091c\u093e\u0924\u093e\u0964",
+        "security.twofa_optin": "2FA \u0938\u092e\u0930\u094d\u0925\u093f\u0924 \u0938\u0947\u0935\u093e\u0913\u0902 \u0915\u0940 \u0905\u0902\u0924\u0930\u094d\u0928\u093f\u0939\u093f\u0924 \u0938\u0942\u091a\u0940 \u0938\u0947 \u0921\u093f\u0935\u093e\u0907\u0938 \u092a\u0930 \u0939\u0940 \u091c\u093e\u0901\u091a\u0964 \u0907\u0938 \u0921\u093f\u0935\u093e\u0907\u0938 \u0938\u0947 \u0915\u0941\u091b \u092d\u0940 \u092c\u093e\u0939\u0930 \u0928\u0939\u0940\u0902 \u091c\u093e\u0924\u093e\u0964",
         "security.weak": "\u0915\u092e\u091c\u093c\u094b\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921",
         "security.weak_d": "12 \u0905\u0915\u094d\u0937\u0930\u094b\u0902 \u0938\u0947 \u091b\u094b\u091f\u0947, \u092f\u093e \u0924\u0940\u0928 \u0938\u0947 \u0915\u092e \u092a\u094d\u0930\u0915\u093e\u0930 \u0915\u0947 \u0905\u0915\u094d\u0937\u0930\u094b\u0902 \u0935\u093e\u0932\u0947\u0964",
         "settings.confirm": "\u0928\u090f \u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0915\u0940 \u092a\u0941\u0937\u094d\u091f\u093f \u0915\u0930\u0947\u0902",
@@ -22015,6 +22396,9 @@ WEB_CATALOGUES = {
         "auth.view.created": "Dibuat",
         "auth.view.interval": "Interval",
         "auth.view.label": "Label",
+        "auth.view.move": "Pindahkan ke aplikasi lain",
+        "auth.view.move_hint": "Tampilkan QR untuk memindai kode ini ke aplikasi authenticator lain.",
+        "auth.view.qr_error": "Tidak dapat membuat QR.",
         "auth.view.seconds_label": "detik",
         "auth.view.secret": "Rahasia Base32",
         "auth.view.title": "Autentikator",
@@ -22040,9 +22424,11 @@ WEB_CATALOGUES = {
         "btn.delete": "Hapus",
         "btn.edit": "Ubah",
         "btn.hide": "Sembunyikan",
+        "btn.hide_qr": "Sembunyikan QR",
         "btn.open_generator": "Buka Generator",
         "btn.restore": "Pulihkan",
         "btn.show": "Tampilkan",
+        "btn.show_qr": "Tampilkan QR",
         "btn.view": "Lihat",
         "cert.algorithm": "Tanda tangan",
         "cert.derived.d": "Dibaca dari sertifikat, bukan diketik di sampingnya, sehingga tidak bisa bertentangan dengan sertifikat yang dijelaskannya.",
@@ -22244,6 +22630,7 @@ WEB_CATALOGUES = {
         "nav.events": "Peristiwa Keamanan",
         "nav.expand": "Bentangkan bilah sisi",
         "nav.expiring": "Kedaluwarsa",
+        "nav.extension": "Ekstensi browser",
         "nav.generator": "Generator",
         "nav.group.settings": "Pengaturan",
         "nav.group.tools": "Alat",
@@ -22262,7 +22649,6 @@ WEB_CATALOGUES = {
         "nav.sharing": "Berbagi",
         "nav.sync": "Sinkronisasi",
         "nav.transfer": "Ekspor / Impor",
-        "nav.extension": "Ekstensi browser",
         "nav.trash": "Sampah",
         "nav.unlock": "Buka Biometrik",
         "note.field.content": "Konten",
@@ -22384,6 +22770,7 @@ WEB_CATALOGUES = {
         "security.account_optin": "Pemeriksaan di perangkat terhadap daftar domain bocor terbuka. Tidak ada pengenal akun yang keluar dari perangkat.",
         "security.accounts": "Layanan yang bocor",
         "security.accounts_d": "Catatan yang terkait dengan layanan dalam daftar domain bocor terbuka. Di perangkat; tidak ada pengenal akun yang keluar dari perangkat ini.",
+        "security.act_add_2fa": "Tambah authenticator",
         "security.act_change": "Ubah kata sandi",
         "security.act_complete": "Lengkapi detailnya",
         "security.act_fix": "Perbaiki entri ini",
@@ -22413,6 +22800,10 @@ WEB_CATALOGUES = {
         "security.tally_old": "menua",
         "security.tally_reused": "terpakai ulang",
         "security.tally_weak": "lemah",
+        "security.twofa": "2FA tersedia, belum diaktifkan",
+        "security.twofa_check": "Periksa 2FA yang belum aktif",
+        "security.twofa_d": "Catatan untuk layanan yang mendukung autentikasi dua faktor tetapi tidak punya authenticator di vault ini. Di perangkat; tidak ada yang keluar dari perangkat ini.",
+        "security.twofa_optin": "Pemeriksaan di perangkat terhadap daftar bawaan layanan yang mendukung 2FA. Tidak ada yang keluar dari perangkat ini.",
         "security.weak": "Password lemah",
         "security.weak_d": "Kurang dari 12 karakter, atau kurang dari tiga jenis karakter.",
         "settings.confirm": "Konfirmasi kata sandi utama baru",
@@ -22592,6 +22983,9 @@ WEB_CATALOGUES = {
         "auth.view.created": "\u4f5c\u6210\u65e5",
         "auth.view.interval": "\u9593\u9694",
         "auth.view.label": "\u30e9\u30d9\u30eb",
+        "auth.view.move": "\u5225\u306e\u30a2\u30d7\u30ea\u3078\u79fb\u52d5",
+        "auth.view.move_hint": "QR\u30b3\u30fc\u30c9\u3092\u8868\u793a\u3057\u3066\u3001\u3053\u306e\u30b3\u30fc\u30c9\u3092\u5225\u306e\u8a8d\u8a3c\u30a2\u30d7\u30ea\u306b\u8aad\u307f\u8fbc\u307f\u307e\u3059\u3002",
+        "auth.view.qr_error": "QR\u30b3\u30fc\u30c9\u3092\u751f\u6210\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002",
         "auth.view.seconds_label": "\u79d2",
         "auth.view.secret": "Base32\u30b7\u30fc\u30af\u30ec\u30c3\u30c8",
         "auth.view.title": "\u8a8d\u8a3c\u30a2\u30d7\u30ea",
@@ -22617,9 +23011,11 @@ WEB_CATALOGUES = {
         "btn.delete": "\u524a\u9664",
         "btn.edit": "\u7de8\u96c6",
         "btn.hide": "\u975e\u8868\u793a",
+        "btn.hide_qr": "QR\u3092\u96a0\u3059",
         "btn.open_generator": "\u30b8\u30a7\u30cd\u30ec\u30fc\u30bf\u30fc\u3092\u958b\u304f",
         "btn.restore": "\u5fa9\u5143",
         "btn.show": "\u8868\u793a",
+        "btn.show_qr": "QR\u3092\u8868\u793a",
         "btn.view": "\u8868\u793a",
         "cert.algorithm": "\u7f72\u540d",
         "cert.derived.d": "\u6a2a\u306b\u5165\u529b\u3059\u308b\u306e\u3067\u306f\u306a\u304f\u8a3c\u660e\u66f8\u304b\u3089\u8aad\u307f\u53d6\u308b\u305f\u3081\u3001\u8a18\u8ff0\u5bfe\u8c61\u306e\u8a3c\u660e\u66f8\u3068\u98df\u3044\u9055\u3046\u3053\u3068\u304c\u3042\u308a\u307e\u305b\u3093\u3002",
@@ -22821,6 +23217,7 @@ WEB_CATALOGUES = {
         "nav.events": "\u30bb\u30ad\u30e5\u30ea\u30c6\u30a3\u30a4\u30d9\u30f3\u30c8",
         "nav.expand": "\u30b5\u30a4\u30c9\u30d0\u30fc\u3092\u5c55\u958b",
         "nav.expiring": "\u6709\u52b9\u671f\u9650",
+        "nav.extension": "\u30d6\u30e9\u30a6\u30b6\u62e1\u5f35\u6a5f\u80fd",
         "nav.generator": "\u30b8\u30a7\u30cd\u30ec\u30fc\u30bf\u30fc",
         "nav.group.settings": "\u8a2d\u5b9a",
         "nav.group.tools": "\u30c4\u30fc\u30eb",
@@ -22839,7 +23236,6 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u5171\u6709",
         "nav.sync": "\u540c\u671f",
         "nav.transfer": "\u30a8\u30af\u30b9\u30dd\u30fc\u30c8 / \u30a4\u30f3\u30dd\u30fc\u30c8",
-        "nav.extension": "\u30d6\u30e9\u30a6\u30b6\u62e1\u5f35\u6a5f\u80fd",
         "nav.trash": "\u30b4\u30df\u7bb1",
         "nav.unlock": "\u751f\u4f53\u8a8d\u8a3c\u30ed\u30c3\u30af\u89e3\u9664",
         "note.field.content": "\u5185\u5bb9",
@@ -22961,6 +23357,7 @@ WEB_CATALOGUES = {
         "security.account_optin": "\u516c\u958b\u3055\u308c\u305f\u6f0f\u3048\u3044\u30c9\u30e1\u30a4\u30f3\u4e00\u89a7\u3092\u4f7f\u3063\u305f\u7aef\u672b\u5185\u30c1\u30a7\u30c3\u30af\u3002\u30a2\u30ab\u30a6\u30f3\u30c8\u8b58\u5225\u5b50\u306f\u7aef\u672b\u304b\u3089\u51fa\u307e\u305b\u3093\u3002",
         "security.accounts": "\u6f0f\u3048\u3044\u3057\u305f\u30b5\u30fc\u30d3\u30b9",
         "security.accounts_d": "\u516c\u958b\u3055\u308c\u305f\u6f0f\u3048\u3044\u30c9\u30e1\u30a4\u30f3\u4e00\u89a7\u306b\u3042\u308b\u30b5\u30fc\u30d3\u30b9\u306b\u5c5e\u3059\u308b\u30ec\u30b3\u30fc\u30c9\u3002\u7aef\u672b\u5185\u3067\u51e6\u7406\u3055\u308c\u3001\u30a2\u30ab\u30a6\u30f3\u30c8\u8b58\u5225\u5b50\u306f\u7aef\u672b\u304b\u3089\u51fa\u307e\u305b\u3093\u3002",
+        "security.act_add_2fa": "\u8a8d\u8a3c\u5668\u3092\u8ffd\u52a0",
         "security.act_change": "\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5909\u66f4",
         "security.act_complete": "\u4e0d\u8db3\u3092\u88dc\u3046",
         "security.act_fix": "\u3053\u306e\u30a8\u30f3\u30c8\u30ea\u30fc\u3092\u4fee\u6b63",
@@ -22990,6 +23387,10 @@ WEB_CATALOGUES = {
         "security.tally_old": "\u4ef6 \u671f\u9650\u8d85\u904e",
         "security.tally_reused": "\u4ef6 \u4f7f\u3044\u56de\u3057",
         "security.tally_weak": "\u4ef6 \u5f31\u3044",
+        "security.twofa": "2FA \u5229\u7528\u53ef\u80fd\u30fb\u672a\u8a2d\u5b9a",
+        "security.twofa_check": "\u672a\u8a2d\u5b9a\u306e 2FA \u3092\u78ba\u8a8d",
+        "security.twofa_d": "\u4e8c\u8981\u7d20\u8a8d\u8a3c\u306b\u5bfe\u5fdc\u3057\u3066\u3044\u308b\u30b5\u30fc\u30d3\u30b9\u306e\u8a18\u9332\u306e\u3046\u3061\u3001\u3053\u306e\u4fdd\u7ba1\u5eab\u306b\u8a8d\u8a3c\u5668\u304c\u306a\u3044\u3082\u306e\u3002\u7aef\u672b\u5185\u3067\u51e6\u7406\u3055\u308c\u3001\u5916\u90e8\u306b\u9001\u4fe1\u3055\u308c\u307e\u305b\u3093\u3002",
+        "security.twofa_optin": "2FA \u5bfe\u5fdc\u30b5\u30fc\u30d3\u30b9\u306e\u5185\u8535\u30ea\u30b9\u30c8\u3068\u7aef\u672b\u5185\u3067\u7167\u5408\u3057\u307e\u3059\u3002\u3053\u306e\u7aef\u672b\u304b\u3089\u4f55\u3082\u9001\u4fe1\u3055\u308c\u307e\u305b\u3093\u3002",
         "security.weak": "\u5f31\u3044\u30d1\u30b9\u30ef\u30fc\u30c9",
         "security.weak_d": "12\u6587\u5b57\u672a\u6e80\u3001\u307e\u305f\u306f\u6587\u5b57\u7a2e\u304c3\u7a2e\u985e\u672a\u6e80\u3002",
         "settings.confirm": "\u65b0\u3057\u3044\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\uff08\u78ba\u8a8d\uff09",
@@ -23169,6 +23570,9 @@ WEB_CATALOGUES = {
         "auth.view.created": "\ub9cc\ub4e0 \uc2dc\uac01",
         "auth.view.interval": "\uc8fc\uae30",
         "auth.view.label": "\uc774\ub984\ud45c",
+        "auth.view.move": "\ub2e4\ub978 \uc571\uc73c\ub85c \uc774\ub3d9",
+        "auth.view.move_hint": "QR \ucf54\ub4dc\ub97c \ud45c\uc2dc\ud574 \uc774 \ucf54\ub4dc\ub97c \ub2e4\ub978 \uc778\uc99d \uc571\uc73c\ub85c \uc2a4\uce94\ud569\ub2c8\ub2e4.",
+        "auth.view.qr_error": "QR \ucf54\ub4dc\ub97c \uc0dd\uc131\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.",
         "auth.view.seconds_label": "\ucd08",
         "auth.view.secret": "Base32 \ube44\ubc00 \uac12",
         "auth.view.title": "\uc778\uc99d\uae30",
@@ -23194,9 +23598,11 @@ WEB_CATALOGUES = {
         "btn.delete": "\uc0ad\uc81c",
         "btn.edit": "\ud3b8\uc9d1",
         "btn.hide": "\uc228\uae30\uae30",
+        "btn.hide_qr": "QR \uc228\uae30\uae30",
         "btn.open_generator": "\uc0dd\uc131\uae30 \uc5f4\uae30",
         "btn.restore": "\ubcf5\uc6d0",
         "btn.show": "\ud45c\uc2dc",
+        "btn.show_qr": "QR \ud45c\uc2dc",
         "btn.view": "\ubcf4\uae30",
         "cert.algorithm": "\uc11c\uba85",
         "cert.derived.d": "\uc606\uc5d0 \uc785\ub825\ud558\ub294 \ub300\uc2e0 \uc778\uc99d\uc11c\uc5d0\uc11c \uc77d\uc5b4\uc624\ubbc0\ub85c \uc124\uba85\ud558\ub294 \uc778\uc99d\uc11c\uc640 \uc5b4\uae0b\ub0a0 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.",
@@ -23398,6 +23804,7 @@ WEB_CATALOGUES = {
         "nav.events": "\ubcf4\uc548 \uc774\ubca4\ud2b8",
         "nav.expand": "\uc0ac\uc774\ub4dc\ubc14 \ud3bc\uce58\uae30",
         "nav.expiring": "\ub9cc\ub8cc \uc608\uc815",
+        "nav.extension": "\ube0c\ub77c\uc6b0\uc800 \ud655\uc7a5",
         "nav.generator": "\uc0dd\uc131\uae30",
         "nav.group.settings": "\uc124\uc815",
         "nav.group.tools": "\ub3c4\uad6c",
@@ -23416,7 +23823,6 @@ WEB_CATALOGUES = {
         "nav.sharing": "\uacf5\uc720",
         "nav.sync": "\ub3d9\uae30\ud654",
         "nav.transfer": "\ub0b4\ubcf4\ub0b4\uae30 / \uac00\uc838\uc624\uae30",
-        "nav.extension": "\ube0c\ub77c\uc6b0\uc800 \ud655\uc7a5",
         "nav.trash": "\ud734\uc9c0\ud1b5",
         "nav.unlock": "\uc0dd\uccb4 \uc778\uc2dd \uc7a0\uae08 \ud574\uc81c",
         "note.field.content": "\ub0b4\uc6a9",
@@ -23538,6 +23944,7 @@ WEB_CATALOGUES = {
         "security.account_optin": "\uacf5\uac1c\ub41c \uc720\ucd9c \ub3c4\uba54\uc778 \ubaa9\ub85d\uc744 \uc774\uc6a9\ud55c \uae30\uae30 \ub0b4 \ud655\uc778\uc785\ub2c8\ub2e4. \uacc4\uc815 \uc2dd\ubcc4\uc790\ub294 \uae30\uae30\ub97c \ub5a0\ub098\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
         "security.accounts": "\uc720\ucd9c\ub41c \uc11c\ube44\uc2a4",
         "security.accounts_d": "\uacf5\uac1c\ub41c \uc720\ucd9c \ub3c4\uba54\uc778 \ubaa9\ub85d\uc758 \uc11c\ube44\uc2a4\uc5d0 \uc18d\ud55c \ub808\ucf54\ub4dc\uc785\ub2c8\ub2e4. \uae30\uae30\uc5d0\uc11c \ucc98\ub9ac\ub418\uba70 \uacc4\uc815 \uc2dd\ubcc4\uc790\ub294 \uae30\uae30\ub97c \ub5a0\ub098\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
+        "security.act_add_2fa": "\uc778\uc99d\uae30 \ucd94\uac00",
         "security.act_change": "\ube44\ubc00\ubc88\ud638 \ubcc0\uacbd",
         "security.act_complete": "\uc138\ubd80 \uc815\ubcf4 \ucd94\uac00",
         "security.act_fix": "\uc774 \ud56d\ubaa9 \uc218\uc815",
@@ -23567,6 +23974,10 @@ WEB_CATALOGUES = {
         "security.tally_old": "\uac1c \ub178\ud6c4",
         "security.tally_reused": "\uac1c \uc7ac\uc0ac\uc6a9",
         "security.tally_weak": "\uac1c \ucde8\uc57d",
+        "security.twofa": "2FA \uc0ac\uc6a9 \uac00\ub2a5, \ubbf8\uc124\uc815",
+        "security.twofa_check": "\ub204\ub77d\ub41c 2FA \ud655\uc778",
+        "security.twofa_d": "2\ub2e8\uacc4 \uc778\uc99d\uc744 \uc9c0\uc6d0\ud558\uc9c0\ub9cc \uc774 \ubcf4\uad00\uc18c\uc5d0 \uc778\uc99d\uae30\uac00 \uc5c6\ub294 \uc11c\ube44\uc2a4\uc758 \uae30\ub85d\uc785\ub2c8\ub2e4. \uae30\uae30 \ub0b4\uc5d0\uc11c \ucc98\ub9ac\ub418\uba70 \uc544\ubb34\uac83\ub3c4 \uc678\ubd80\ub85c \ub098\uac00\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
+        "security.twofa_optin": "2FA\ub97c \uc9c0\uc6d0\ud558\ub294 \uc11c\ube44\uc2a4\uc758 \ub0b4\uc7a5 \ubaa9\ub85d\uacfc \uae30\uae30 \ub0b4\uc5d0\uc11c \ub300\uc870\ud569\ub2c8\ub2e4. \uc774 \uae30\uae30\uc5d0\uc11c \uc544\ubb34\uac83\ub3c4 \ub098\uac00\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
         "security.weak": "\ucde8\uc57d\ud55c \ube44\ubc00\ubc88\ud638",
         "security.weak_d": "12\uc790 \ubbf8\ub9cc\uc774\uac70\ub098, \uc0ac\uc6a9\ud55c \ubb38\uc790 \uc885\ub958\uac00 \uc138 \uac00\uc9c0 \ubbf8\ub9cc\uc785\ub2c8\ub2e4.",
         "settings.confirm": "\uc0c8 \ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638 \ud655\uc778",
@@ -23746,6 +24157,9 @@ WEB_CATALOGUES = {
         "auth.view.created": "Criado",
         "auth.view.interval": "Intervalo",
         "auth.view.label": "R\u00f3tulo",
+        "auth.view.move": "Mover para outro app",
+        "auth.view.move_hint": "Exiba um QR para escanear este c\u00f3digo em outro app autenticador.",
+        "auth.view.qr_error": "N\u00e3o foi poss\u00edvel gerar o QR.",
         "auth.view.seconds_label": "segundos",
         "auth.view.secret": "Segredo em Base32",
         "auth.view.title": "Autenticador",
@@ -23771,9 +24185,11 @@ WEB_CATALOGUES = {
         "btn.delete": "Excluir",
         "btn.edit": "Editar",
         "btn.hide": "Ocultar",
+        "btn.hide_qr": "Ocultar QR",
         "btn.open_generator": "Abrir o gerador",
         "btn.restore": "Restaurar",
         "btn.show": "Mostrar",
+        "btn.show_qr": "Mostrar QR",
         "btn.view": "Ver",
         "cert.algorithm": "Assinatura",
         "cert.derived.d": "Lido do certificado em vez de digitado ao lado, portanto n\u00e3o pode divergir do certificado que descreve.",
@@ -23975,6 +24391,7 @@ WEB_CATALOGUES = {
         "nav.events": "Eventos de seguran\u00e7a",
         "nav.expand": "Expandir a barra lateral",
         "nav.expiring": "Expirando",
+        "nav.extension": "Extens\u00e3o do navegador",
         "nav.generator": "Gerador",
         "nav.group.settings": "Configura\u00e7\u00f5es",
         "nav.group.tools": "Ferramentas",
@@ -23993,7 +24410,6 @@ WEB_CATALOGUES = {
         "nav.sharing": "Compartilhamento",
         "nav.sync": "Sincroniza\u00e7\u00e3o",
         "nav.transfer": "Exportar / Importar",
-        "nav.extension": "Extens\u00e3o do navegador",
         "nav.trash": "Lixeira",
         "nav.unlock": "Desbloqueio biom\u00e9trico",
         "note.field.content": "Conte\u00fado",
@@ -24115,6 +24531,7 @@ WEB_CATALOGUES = {
         "security.account_optin": "Verifica\u00e7\u00e3o no dispositivo com uma lista aberta de dom\u00ednios vazados. Nenhum identificador de conta sai do dispositivo.",
         "security.accounts": "Servi\u00e7os vazados",
         "security.accounts_d": "Registros que pertencem a um servi\u00e7o em uma lista aberta de dom\u00ednios vazados. No dispositivo; nenhum identificador de conta sai dele.",
+        "security.act_add_2fa": "Adicionar autenticador",
         "security.act_change": "Alterar senha",
         "security.act_complete": "Adicionar os dados",
         "security.act_fix": "Corrigir esta entrada",
@@ -24144,6 +24561,10 @@ WEB_CATALOGUES = {
         "security.tally_old": "antigas",
         "security.tally_reused": "reutilizadas",
         "security.tally_weak": "fracas",
+        "security.twofa": "2FA dispon\u00edvel, n\u00e3o ativado",
+        "security.twofa_check": "Procurar 2FA ausente",
+        "security.twofa_d": "Registros de um servi\u00e7o que oferece autentica\u00e7\u00e3o em duas etapas, mas sem autenticador neste cofre. No dispositivo; nada sai dele.",
+        "security.twofa_optin": "Verifica\u00e7\u00e3o no dispositivo com uma lista inclu\u00edda de servi\u00e7os que oferecem 2FA. Nada sai deste dispositivo.",
         "security.weak": "Senhas fracas",
         "security.weak_d": "Com menos de 12 caracteres, ou usando menos de tr\u00eas classes de caractere.",
         "settings.confirm": "Confirme a nova senha mestra",
@@ -24323,6 +24744,9 @@ WEB_CATALOGUES = {
         "auth.view.created": "\u0421\u043e\u0437\u0434\u0430\u043d",
         "auth.view.interval": "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b",
         "auth.view.label": "\u041c\u0435\u0442\u043a\u0430",
+        "auth.view.move": "\u041f\u0435\u0440\u0435\u043d\u0435\u0441\u0442\u0438 \u0432 \u0434\u0440\u0443\u0433\u043e\u0435 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0435",
+        "auth.view.move_hint": "\u041f\u043e\u043a\u0430\u0437\u0430\u0442\u044c QR-\u043a\u043e\u0434, \u0447\u0442\u043e\u0431\u044b \u043e\u0442\u0441\u043a\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u044d\u0442\u043e\u0442 \u043a\u043e\u0434 \u0432 \u0434\u0440\u0443\u0433\u043e\u043c \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0438-\u0430\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440\u0435.",
+        "auth.view.qr_error": "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u043e\u0437\u0434\u0430\u0442\u044c QR-\u043a\u043e\u0434.",
         "auth.view.seconds_label": "\u0441\u0435\u043a\u0443\u043d\u0434",
         "auth.view.secret": "\u0421\u0435\u043a\u0440\u0435\u0442 \u0432 Base32",
         "auth.view.title": "\u0410\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440",
@@ -24348,9 +24772,11 @@ WEB_CATALOGUES = {
         "btn.delete": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c",
         "btn.edit": "\u0418\u0437\u043c\u0435\u043d\u0438\u0442\u044c",
         "btn.hide": "\u0421\u043a\u0440\u044b\u0442\u044c",
+        "btn.hide_qr": "\u0421\u043a\u0440\u044b\u0442\u044c QR",
         "btn.open_generator": "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0433\u0435\u043d\u0435\u0440\u0430\u0442\u043e\u0440",
         "btn.restore": "\u0412\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c",
         "btn.show": "\u041f\u043e\u043a\u0430\u0437\u0430\u0442\u044c",
+        "btn.show_qr": "\u041f\u043e\u043a\u0430\u0437\u0430\u0442\u044c QR",
         "btn.view": "\u0421\u043c\u043e\u0442\u0440\u0435\u0442\u044c",
         "cert.algorithm": "\u041f\u043e\u0434\u043f\u0438\u0441\u044c",
         "cert.derived.d": "\u0421\u0447\u0438\u0442\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0438\u0437 \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u0430, \u0430 \u043d\u0435 \u0432\u0432\u043e\u0434\u0438\u0442\u0441\u044f \u0440\u044f\u0434\u043e\u043c, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u043f\u0440\u043e\u0442\u0438\u0432\u043e\u0440\u0435\u0447\u0438\u0442\u044c \u043e\u043f\u0438\u0441\u044b\u0432\u0430\u0435\u043c\u043e\u043c\u0443 \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u0443.",
@@ -24552,6 +24978,7 @@ WEB_CATALOGUES = {
         "nav.events": "\u0421\u043e\u0431\u044b\u0442\u0438\u044f \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438",
         "nav.expand": "\u0420\u0430\u0437\u0432\u0435\u0440\u043d\u0443\u0442\u044c \u0431\u043e\u043a\u043e\u0432\u0443\u044e \u043f\u0430\u043d\u0435\u043b\u044c",
         "nav.expiring": "\u0418\u0441\u0442\u0435\u043a\u0430\u044e\u0449\u0438\u0435",
+        "nav.extension": "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043d\u0438\u0435 \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0430",
         "nav.generator": "\u0413\u0435\u043d\u0435\u0440\u0430\u0442\u043e\u0440",
         "nav.group.settings": "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438",
         "nav.group.tools": "\u0418\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u044b",
@@ -24570,7 +24997,6 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u041e\u0431\u0449\u0438\u0439 \u0434\u043e\u0441\u0442\u0443\u043f",
         "nav.sync": "\u0421\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0430\u0446\u0438\u044f",
         "nav.transfer": "\u042d\u043a\u0441\u043f\u043e\u0440\u0442 / \u0418\u043c\u043f\u043e\u0440\u0442",
-        "nav.extension": "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043d\u0438\u0435 \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0430",
         "nav.trash": "\u041a\u043e\u0440\u0437\u0438\u043d\u0430",
         "nav.unlock": "\u0411\u0438\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u0440\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430",
         "note.field.content": "\u0421\u043e\u0434\u0435\u0440\u0436\u0438\u043c\u043e\u0435",
@@ -24692,6 +25118,7 @@ WEB_CATALOGUES = {
         "security.account_optin": "\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043d\u0430 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0435 \u043f\u043e \u043e\u0442\u043a\u0440\u044b\u0442\u043e\u043c\u0443 \u0441\u043f\u0438\u0441\u043a\u0443 \u0441\u043a\u043e\u043c\u043f\u0440\u043e\u043c\u0435\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0445 \u0434\u043e\u043c\u0435\u043d\u043e\u0432. \u0418\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u0430\u043a\u043a\u0430\u0443\u043d\u0442\u0430 \u043d\u0435 \u043f\u043e\u043a\u0438\u0434\u0430\u0435\u0442 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u043e.",
         "security.accounts": "\u0417\u0430\u0442\u0440\u043e\u043d\u0443\u0442\u044b\u0435 \u0441\u0435\u0440\u0432\u0438\u0441\u044b",
         "security.accounts_d": "\u0417\u0430\u043f\u0438\u0441\u0438, \u043e\u0442\u043d\u043e\u0441\u044f\u0449\u0438\u0435\u0441\u044f \u043a \u0441\u0435\u0440\u0432\u0438\u0441\u0443 \u0438\u0437 \u043e\u0442\u043a\u0440\u044b\u0442\u043e\u0433\u043e \u0441\u043f\u0438\u0441\u043a\u0430 \u0441\u043a\u043e\u043c\u043f\u0440\u043e\u043c\u0435\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0445 \u0434\u043e\u043c\u0435\u043d\u043e\u0432. \u041d\u0430 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0435; \u0438\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u0430\u043a\u043a\u0430\u0443\u043d\u0442\u0430 \u0435\u0433\u043e \u043d\u0435 \u043f\u043e\u043a\u0438\u0434\u0430\u0435\u0442.",
+        "security.act_add_2fa": "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0430\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440",
         "security.act_change": "\u0421\u043c\u0435\u043d\u0438\u0442\u044c \u043f\u0430\u0440\u043e\u043b\u044c",
         "security.act_complete": "\u0414\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u044c \u0434\u0430\u043d\u043d\u044b\u0435",
         "security.act_fix": "\u0418\u0441\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u044c",
@@ -24721,6 +25148,10 @@ WEB_CATALOGUES = {
         "security.tally_old": "\u0443\u0441\u0442\u0430\u0440\u0435\u043b\u0438",
         "security.tally_reused": "\u043f\u043e\u0432\u0442\u043e\u0440\u044f\u044e\u0442\u0441\u044f",
         "security.tally_weak": "\u0441\u043b\u0430\u0431\u044b\u0445",
+        "security.twofa": "2FA \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430, \u043d\u043e \u043d\u0435 \u0432\u043a\u043b\u044e\u0447\u0435\u043d\u0430",
+        "security.twofa_check": "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u044e\u0449\u0443\u044e 2FA",
+        "security.twofa_d": "\u0417\u0430\u043f\u0438\u0441\u0438 \u0434\u043b\u044f \u0441\u0435\u0440\u0432\u0438\u0441\u0430, \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u044e\u0449\u0435\u0433\u043e \u0434\u0432\u0443\u0445\u0444\u0430\u043a\u0442\u043e\u0440\u043d\u0443\u044e \u0430\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u044e, \u043d\u043e \u0431\u0435\u0437 \u0430\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440\u0430 \u0432 \u044d\u0442\u043e\u043c \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435. \u041d\u0430 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0435; \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043f\u043e\u043a\u0438\u0434\u0430\u0435\u0442 \u0435\u0433\u043e.",
+        "security.twofa_optin": "\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043d\u0430 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0435 \u043f\u043e \u0432\u0441\u0442\u0440\u043e\u0435\u043d\u043d\u043e\u043c\u0443 \u0441\u043f\u0438\u0441\u043a\u0443 \u0441\u0435\u0440\u0432\u0438\u0441\u043e\u0432 \u0441 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u043e\u0439 2FA. \u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043f\u043e\u043a\u0438\u0434\u0430\u0435\u0442 \u044d\u0442\u043e \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u043e.",
         "security.weak": "\u0421\u043b\u0430\u0431\u044b\u0435 \u043f\u0430\u0440\u043e\u043b\u0438",
         "security.weak_d": "\u041a\u043e\u0440\u043e\u0447\u0435 12 \u0441\u0438\u043c\u0432\u043e\u043b\u043e\u0432 \u0438\u043b\u0438 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u044e\u0442 \u043c\u0435\u043d\u044c\u0448\u0435 \u0442\u0440\u0451\u0445 \u043a\u043b\u0430\u0441\u0441\u043e\u0432 \u0441\u0438\u043c\u0432\u043e\u043b\u043e\u0432.",
         "settings.confirm": "\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u043d\u043e\u0432\u044b\u0439 \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044c",
@@ -24900,6 +25331,9 @@ WEB_CATALOGUES = {
         "auth.view.created": "\u521b\u5efa\u65f6\u95f4",
         "auth.view.interval": "\u95f4\u9694",
         "auth.view.label": "\u6807\u7b7e",
+        "auth.view.move": "\u8f6c\u79fb\u5230\u5176\u4ed6\u5e94\u7528",
+        "auth.view.move_hint": "\u663e\u793a\u4e8c\u7ef4\u7801\uff0c\u5c06\u6b64\u9a8c\u8bc1\u7801\u626b\u63cf\u5230\u5176\u4ed6\u9a8c\u8bc1\u5668\u5e94\u7528\u4e2d\u3002",
+        "auth.view.qr_error": "\u65e0\u6cd5\u751f\u6210\u4e8c\u7ef4\u7801\u3002",
         "auth.view.seconds_label": "\u79d2",
         "auth.view.secret": "Base32 \u5bc6\u94a5",
         "auth.view.title": "\u9a8c\u8bc1\u5668",
@@ -24925,9 +25359,11 @@ WEB_CATALOGUES = {
         "btn.delete": "\u5220\u9664",
         "btn.edit": "\u7f16\u8f91",
         "btn.hide": "\u9690\u85cf",
+        "btn.hide_qr": "\u9690\u85cf\u4e8c\u7ef4\u7801",
         "btn.open_generator": "\u6253\u5f00\u751f\u6210\u5668",
         "btn.restore": "\u6062\u590d",
         "btn.show": "\u663e\u793a",
+        "btn.show_qr": "\u663e\u793a\u4e8c\u7ef4\u7801",
         "btn.view": "\u67e5\u770b",
         "cert.algorithm": "\u7b7e\u540d",
         "cert.derived.d": "\u4ece\u8bc1\u4e66\u8bfb\u53d6\u800c\u975e\u5728\u65c1\u624b\u52a8\u8f93\u5165\uff0c\u56e0\u6b64\u4e0d\u4f1a\u4e0e\u6240\u63cf\u8ff0\u7684\u8bc1\u4e66\u4e0d\u4e00\u81f4\u3002",
@@ -25129,6 +25565,7 @@ WEB_CATALOGUES = {
         "nav.events": "\u5b89\u5168\u4e8b\u4ef6",
         "nav.expand": "\u5c55\u5f00\u4fa7\u8fb9\u680f",
         "nav.expiring": "\u5373\u5c06\u5230\u671f",
+        "nav.extension": "Browser extension",
         "nav.generator": "\u751f\u6210\u5668",
         "nav.group.settings": "\u8bbe\u7f6e",
         "nav.group.tools": "\u5de5\u5177",
@@ -25147,7 +25584,6 @@ WEB_CATALOGUES = {
         "nav.sharing": "\u5171\u4eab",
         "nav.sync": "\u540c\u6b65",
         "nav.transfer": "\u5bfc\u51fa / \u5bfc\u5165",
-        "nav.extension": "Browser extension",
         "nav.trash": "\u56de\u6536\u7ad9",
         "nav.unlock": "\u751f\u7269\u8bc6\u522b\u89e3\u9501",
         "note.field.content": "\u5185\u5bb9",
@@ -25269,6 +25705,7 @@ WEB_CATALOGUES = {
         "security.account_optin": "\u4f7f\u7528\u516c\u5f00\u6cc4\u9732\u57df\u540d\u5217\u8868\u5728\u672c\u673a\u68c0\u67e5\u3002\u6ca1\u6709\u8d26\u6237\u6807\u8bc6\u79bb\u5f00\u672c\u8bbe\u5907\u3002",
         "security.accounts": "\u5df2\u6cc4\u9732\u7684\u670d\u52a1",
         "security.accounts_d": "\u5c5e\u4e8e\u516c\u5f00\u6cc4\u9732\u57df\u540d\u5217\u8868\u4e2d\u67d0\u4e2a\u670d\u52a1\u7684\u8bb0\u5f55\u3002\u5728\u672c\u673a\u5904\u7406\uff1b\u6ca1\u6709\u8d26\u6237\u6807\u8bc6\u79bb\u5f00\u672c\u8bbe\u5907\u3002",
+        "security.act_add_2fa": "\u6dfb\u52a0\u9a8c\u8bc1\u5668",
         "security.act_change": "\u66f4\u6539\u5bc6\u7801",
         "security.act_complete": "\u8865\u5168\u4fe1\u606f",
         "security.act_fix": "\u4fee\u590d\u6b64\u6761\u76ee",
@@ -25298,6 +25735,10 @@ WEB_CATALOGUES = {
         "security.tally_old": "\u4e2a\u5df2\u8fc7\u671f",
         "security.tally_reused": "\u4e2a\u91cd\u590d\u4f7f\u7528",
         "security.tally_weak": "\u4e2a\u5f31\u5bc6\u7801",
+        "security.twofa": "\u53ef\u7528\u4f46\u672a\u542f\u7528\u7684\u4e24\u6b65\u9a8c\u8bc1",
+        "security.twofa_check": "\u68c0\u67e5\u7f3a\u5931\u7684\u4e24\u6b65\u9a8c\u8bc1",
+        "security.twofa_d": "\u5c5e\u4e8e\u652f\u6301\u4e24\u6b65\u9a8c\u8bc1\u7684\u670d\u52a1\u3001\u4f46\u6b64\u4fdd\u9669\u5e93\u4e2d\u6ca1\u6709\u9a8c\u8bc1\u5668\u7684\u8bb0\u5f55\u3002\u5728\u672c\u673a\u5904\u7406\uff0c\u4e0d\u4f1a\u79bb\u5f00\u672c\u8bbe\u5907\u3002",
+        "security.twofa_optin": "\u5728\u672c\u673a\u5bf9\u7167\u5185\u7f6e\u7684\u652f\u6301\u4e24\u6b65\u9a8c\u8bc1\u7684\u670d\u52a1\u5217\u8868\u8fdb\u884c\u68c0\u67e5\u3002\u4e0d\u4f1a\u79bb\u5f00\u672c\u8bbe\u5907\u3002",
         "security.weak": "\u5f31\u5bc6\u7801",
         "security.weak_d": "\u77ed\u4e8e 12 \u4e2a\u5b57\u7b26\uff0c\u6216\u4f7f\u7528\u7684\u5b57\u7b26\u7c7b\u522b\u5c11\u4e8e\u4e09\u79cd\u3002",
         "settings.confirm": "\u786e\u8ba4\u65b0\u7684\u4e3b\u5bc6\u7801",
@@ -28297,6 +28738,32 @@ def security_page(audit, entries):
             'against an open breach-domain list. No account identifier leaves this device.</div>'
             '<a class="btn btn-ghost btn-sm" href="/security?accounts=1" '
             'data-i18n="security.account_check">Check breached services</a>')
+    twofa_status = audit.get("twofa_status", "not_checked")
+    if twofa_status == "checked":
+        gaps = audit.get("twofa_findings", [])
+        if gaps:
+            grows = ""
+            for f in gaps:
+                name, _user, _ = lookup.get(f["id"], ("&mdash;", "&mdash;", False))
+                svc = _esc(f.get("name") or f.get("domain") or "")
+                grows += (
+                    '<tr><td class="num">%s</td><td class="strong">%s</td>'
+                    '<td class="muted">%s</td>'
+                    '<td class="actions"><a class="btn btn-primary btn-sm" '
+                    'href="/authenticator-add" '
+                    'data-i18n="security.act_add_2fa">Add authenticator</a></td></tr>'
+                    % (_esc(f["id"]), name, svc))
+            twofa_html = ('<div class="table-wrap"><table class="t"><tbody>'
+                          + grows + '</tbody></table></div>')
+        else:
+            twofa_html = ('<div class="hint" data-i18n="security.none">'
+                          'Nothing to fix here.</div>')
+    else:
+        twofa_html = (
+            '<div class="hint" data-i18n="security.twofa_optin">On-device check '
+            'against a bundled list of services that support 2FA. Nothing leaves this device.</div>'
+            '<a class="btn btn-ghost btn-sm" href="/security?twofa=1" '
+            'data-i18n="security.twofa_check">Check for missing 2FA</a>')
     days = audit["rotation_days"]
     return f"""
 <div class="page-head">
@@ -28342,6 +28809,10 @@ def security_page(audit, entries):
     <div class="field"><label data-i18n="security.accounts">Breached services</label>
       <div class="hint" data-i18n="security.accounts_d">Records that belong to a service in an open breach-domain list. On-device; no account identifier leaves this device.</div>
       {account_html}
+    </div>
+    <div class="field"><label data-i18n="security.twofa">2FA available, not enabled</label>
+      <div class="hint" data-i18n="security.twofa_d">Records for a service that supports two-factor authentication but has no authenticator in this vault. On-device; nothing leaves this device.</div>
+      {twofa_html}
     </div>
   </div>
 </div>"""
@@ -30778,14 +31249,17 @@ def transfer_page():
     )
     # The import picker carries the Bitwarden entries as well, labelled so it
     # is obvious which file each one wants.
-    bitwarden_labels = {
+    importer_labels = {
         "bitwarden-json": "Bitwarden — JSON export",
         "bitwarden-csv": "Bitwarden — CSV export",
         "bitwarden-protected": "Bitwarden — password-protected JSON",
+        "lastpass-csv": "LastPass — CSV export",
+        "chrome-csv": "Chrome / Edge — passwords CSV",
+        "onepassword-csv": "1Password — CSV export",
     }
     import_opts = opts + "".join(
-        f'<option value="{f}">{bitwarden_labels[f]}</option>'
-        for f in BITWARDEN_FORMATS
+        f'<option value="{f}">{importer_labels[f]}</option>'
+        for f in BITWARDEN_FORMATS + IMPORTER_CSV_FORMATS
     )
     content = f"""
 <div class="page-head">
@@ -31071,6 +31545,14 @@ def auth_view_page(aid, label, secret, period, algo, created):
   </div>
   <div class="card-body" style="border-top:1px solid var(--border)">
     {_secret_block(secret, "auth.view.secret", "Secret", "sec")}
+    <div class="field">
+      <label data-i18n="auth.view.move">Move to another app</label>
+      <div class="faint" data-i18n="auth.view.move_hint" style="margin-bottom:8px">
+        Reveal a QR to scan this code into another authenticator app.</div>
+      <button class="btn btn-sm" type="button" id="qr-toggle"
+              data-i18n="btn.show_qr">Show QR</button>
+      <div id="qr-box" hidden style="max-width:260px;margin:12px auto 0"></div>
+    </div>
     <div class="field"><label data-i18n="auth.view.created">Created</label>
       <div class="faint mono">{html.escape(created) or "&mdash;"}</div></div>
   </div>
@@ -31122,6 +31604,24 @@ def auth_view_page(aid, label, secret, period, algo, created):
     left -= 1;
     if (left <= 0) fetchCode(); else paint();
   }}, 1000);
+  var qrBtn = document.getElementById("qr-toggle"), qrBox = document.getElementById("qr-box");
+  var qrLoaded = false;
+  if (qrBtn && qrBox) qrBtn.addEventListener("click", function () {{
+    if (!qrBox.hidden) {{
+      qrBox.hidden = true;
+      qrBtn.textContent = t("btn.show_qr", "Show QR");
+      return;
+    }}
+    qrBox.hidden = false;
+    qrBtn.textContent = t("btn.hide_qr", "Hide QR");
+    if (qrLoaded) return;
+    fetch("/authenticator-otpauth-qr?id=" + encodeURIComponent(id), {{ credentials: "same-origin" }})
+      .then(function (r) {{ if (!r.ok) throw new Error("qr"); return r.text(); }})
+      .then(function (svg) {{ qrBox.innerHTML = svg; qrLoaded = true; }})
+      .catch(function () {{
+        qrBox.textContent = t("auth.view.qr_error", "Could not render QR.");
+      }});
+  }});
 }})();
 </script>"""
     return render_shell(content, "authenticators", VERSION, VAULT_PATH, title=label)
@@ -31929,11 +32429,16 @@ def totp_code(secret_b32: str, period: int = 30, algo: str = "sha1") -> str:
     return str(code_int % 10**6).zfill(6)
 
 SUPPORTED_FORMATS = ("csv","json","tsv","ndjson","jsonl","md","markdown","html","txt","yaml","yml","xml","sql","ini","psv","rst","toml","org","scsv","csv-noheader","jsonc",
-                     "bitwarden-json","bitwarden-csv","bitwarden-protected")
+                     "bitwarden-json","bitwarden-csv","bitwarden-protected",
+                     "lastpass-csv","chrome-csv","onepassword-csv")
 
 # Import-only. There is no exporting *to* Bitwarden, so these belong in the
 # import picker and nowhere else.
 BITWARDEN_FORMATS = ("bitwarden-json", "bitwarden-csv", "bitwarden-protected")
+
+# Other password managers' CSV exports (roadmap 3). Import-only, same as the
+# Bitwarden entries: SPM reads them, it does not write them.
+IMPORTER_CSV_FORMATS = ("lastpass-csv", "chrome-csv", "onepassword-csv")
 
 def _export_rows(plaintext: str):
     import base64, html as htmlmod
@@ -32220,11 +32725,36 @@ def _detect_bitwarden(fmt: str, content: str):
     if fmt == "csv":
         try:
             reader = csvlib.DictReader(io.StringIO(content))
-            if core.looks_like_bitwarden_csv_header(reader.fieldnames):
+            names = reader.fieldnames
+            if core.looks_like_bitwarden_csv_header(names):
                 return "bitwarden-csv"
+            if core.looks_like_lastpass_csv_header(names):
+                return "lastpass-csv"
+            if core.looks_like_onepassword_csv_header(names):
+                return "onepassword-csv"
+            if core.looks_like_chrome_csv_header(names):
+                return "chrome-csv"
         except Exception:
             return ""
     return ""
+
+
+def _importer_csv_rows(fmt: str, content: str):
+    """Rows in SPM's import schema from a non-Bitwarden manager's CSV export.
+
+    The mapping lives in the core, so a preview and the commit -- and the CLI and
+    the dashboard -- cannot disagree about what a given export contains.
+    """
+    import csv as csvlib
+    reader = csvlib.DictReader(io.StringIO(content))
+    records = list(reader)
+    if fmt == "lastpass-csv":
+        return core.lastpass_csv_rows(records)
+    if fmt == "chrome-csv":
+        return core.chrome_csv_rows(records)
+    if fmt == "onepassword-csv":
+        return core.onepassword_csv_rows(records)
+    raise ValueError("Unknown importer format %r." % fmt)
 
 
 def _bitwarden_import_rows(fmt: str, content: str, export_password: str = ""):
@@ -32292,14 +32822,20 @@ def _import_rows(fmt: str, content: str, export_password: str = ""):
     """
     if fmt in BITWARDEN_FORMATS:
         rows = _bitwarden_import_rows(fmt, content, export_password)
+    elif fmt in IMPORTER_CSV_FORMATS:
+        rows = _importer_csv_rows(fmt, content)
     elif fmt in ("json","jsonc","ndjson","jsonl","csv","csv-noheader","tsv","scsv","psv","txt","html","yaml","yml","xml","sql","ini","toml"):
-        # A Bitwarden file picked as plain json or csv is still a Bitwarden
+        # A manager's export picked as plain json or csv is still that manager's
         # file. Detecting it rather than failing means choosing the wrong entry
         # in the dropdown is not a silent, partial import -- which is what a
         # Bitwarden CSV used to produce: one empty note and every login lost.
         detected = _detect_bitwarden(fmt, content)
-        rows = (_bitwarden_import_rows(detected, content, export_password)
-                if detected else _parse_import_rows(fmt, content))
+        if detected in BITWARDEN_FORMATS:
+            rows = _bitwarden_import_rows(detected, content, export_password)
+        elif detected in IMPORTER_CSV_FORMATS:
+            rows = _importer_csv_rows(detected, content)
+        else:
+            rows = _parse_import_rows(fmt, content)
     else:
         rows = parse_plain_table(content)
     if not rows:
@@ -32854,7 +33390,7 @@ def _entry_age_days(created, now):
 
 
 def compute_security(entries, plaintext, check_breaches=False,
-                     check_accounts=False):
+                     check_accounts=False, check_twofa=False):
     """Score the vault and name the offending IDs.
 
     The CLI's `spm security-dashboard` and this function have to agree: two
@@ -32870,7 +33406,8 @@ def compute_security(entries, plaintext, check_breaches=False,
     offline = os.environ.get("SPM_PWNED_OFFLINE") or None
     return core.security_report(
         plaintext, rotation_days(), check_breaches=check_breaches,
-        offline_source=offline, check_accounts=check_accounts)
+        offline_source=offline, check_accounts=check_accounts,
+        check_twofa=check_twofa)
 
 
 # A tag is a #word in a plaintext field. The lookbehind keeps "C#" and the
@@ -34283,8 +34820,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             params = urllib.parse.parse_qs(parsed.query)
             check_breaches = (params.get("breaches") or [""])[0] == "1"
             check_accounts = (params.get("accounts") or [""])[0] == "1"
+            check_twofa = (params.get("twofa") or [""])[0] == "1"
             audit = compute_security(entries, plaintext, check_breaches,
-                                     check_accounts)
+                                     check_accounts, check_twofa)
             self._send_html(200, render_shell(
                 security_page(audit, entries), "security", VERSION, VAULT_PATH,
                 title="Security", counts=self._counts(plaintext)))
@@ -34998,6 +35536,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(body.encode("utf-8"))
+            return
+
+        if path == "/authenticator-otpauth-qr":
+            # An otpauth:// QR carries the raw shared secret, so it is revealed
+            # on demand from the view page (session-authorized) exactly like the
+            # secret block, never rendered into the page up front.
+            aid = (query.get("id") or [""])[0]
+            if not aid:
+                self.send_error(400, "Missing id")
+                return
+            plaintext = load_vault(master, self._session_rec)
+            try:
+                uri = core.authenticator_otpauth(plaintext, aid)
+            except Exception:
+                self.send_error(404, "Authenticator not found")
+                return
+            try:
+                svg = core.qr_svg(core.qr_encode(uri))
+            except Exception:
+                self.send_error(500, "Could not render QR")
+                return
+            body = svg.encode("utf-8")
+            self.send_response(200)
+            self._add_cors()
+            self.send_header("Content-Type", "image/svg+xml")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
             return
 
         if path == "/export":
@@ -37735,6 +38301,7 @@ main() {
 		authenticator-add) cmd_authenticator_add "$@" ;;
 		authenticator-list) cmd_authenticator_list "$@" ;;
 		authenticator-view) cmd_authenticator_view "$@" ;;
+		authenticator-qr) cmd_authenticator_qr "$@" ;;
 		authenticator-edit) cmd_authenticator_edit "$@" ;;
 		authenticator-delete) cmd_authenticator_delete "$@" ;;
 		backup-codes-add) cmd_backup_codes_add "$@" ;;

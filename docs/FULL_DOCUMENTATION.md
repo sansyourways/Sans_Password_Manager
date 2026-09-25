@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **5.8.2**
+Current release: **5.9.0**
 
 ---
 
@@ -1547,6 +1547,26 @@ export also needs the `cryptography` Python package for AES-256-CBC; where it
 is absent the import says so instead of failing obscurely. The unencrypted
 JSON and CSV paths need nothing beyond the standard library. Web mode overlays the entire Export/Import card with a loader during uploads. Status messages and overlay text follow the selected language (EN/ID/JP) so users get consistent feedback during uploads.
 
+### Importing from LastPass, Chrome/Edge and 1Password
+
+Since 5.9.0 web mode reads three more managers' CSV exports directly. Pick the
+matching entry in the import format list:
+
+| Export | Choose |
+|---|---|
+| LastPass `.csv` | **LastPass — CSV export** |
+| Chrome / Edge saved-passwords `.csv` | **Chrome / Edge — passwords CSV** |
+| 1Password `.csv` | **1Password — CSV export** |
+
+Logins become password entries with their username, URL and notes. A stored TOTP
+becomes an authenticator (its `otpauth://` URI or base32 secret is unpacked the
+same way a Bitwarden TOTP is). LastPass secure notes (the ones with the
+`http://sn` sentinel URL) become notes, and LastPass folders and 1Password tags
+are appended to each entry's notes rather than dropped. As with Bitwarden,
+choosing plain `csv` for one of these files also works — the format is detected,
+so a wrong dropdown choice imports correctly rather than partially. These paths
+are import-only and need nothing beyond the standard library.
+
 ### The review step
 
 Since 3.8.0 an upload in web mode is read and shown before anything is written.
@@ -2679,6 +2699,8 @@ consumed only after both the vault and its recovery file are installed.
 ```bash
 spm security
 spm security --breaches       # explicit online, k-anonymous check
+spm security --account-breaches  # on-device open-data account-breach check
+spm security --twofa          # on-device: flag 2FA-capable accounts with no authenticator
 spm history-list
 spm history-restore <snapshot-name>
 spm backup-now [directory]
