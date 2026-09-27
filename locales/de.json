@@ -103,6 +103,8 @@
     "empty.passwords.t": "Noch keine Passwörter",
     "empty.records.d": "API-Token, Datenbank-Zugänge, Karten, Ausweise, Lizenzen, WLAN und Server liegen hier.",
     "empty.records.t": "Noch keine Datensätze",
+    "empty.records_type.d": "Noch keine Einträge dieses Typs. Füge den ersten hinzu mit",
+    "empty.records_type.t": "Noch nichts hier",
     "empty.search.d": "Keine Bezeichnung, kein Name und kein Benutzername passt zu diesem Text.",
     "empty.search.t": "Nichts gefunden",
     "empty.vault.d": "Füge dein erstes Passwort hinzu, um loszulegen.",

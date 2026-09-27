@@ -103,6 +103,8 @@
     "empty.passwords.t": "아직 비밀번호가 없습니다",
     "empty.records.d": "API 토큰, 데이터베이스 자격 증명, 카드, 신분증, 라이선스, Wi-Fi, 서버가 여기에 저장됩니다.",
     "empty.records.t": "아직 레코드가 없습니다",
+    "empty.records_type.d": "이 유형의 기록이 아직 없습니다. 다음으로 첫 항목을 추가하세요:",
+    "empty.records_type.t": "아직 없습니다",
     "empty.search.d": "그 문자열과 일치하는 이름표, 이름, 사용자 이름이 없습니다.",
     "empty.search.t": "찾은 것이 없습니다",
     "empty.vault.d": "첫 비밀번호를 추가해 시작하세요.",

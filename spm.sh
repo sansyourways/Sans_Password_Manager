@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.10.0"
+VERSION="5.10.1"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -19167,6 +19167,8 @@ WEB_CATALOGUES = {
         "empty.passwords.t": "No passwords yet",
         "empty.records.d": "API tokens, database credentials, cards, identities, licences, Wi-Fi and servers live here.",
         "empty.records.t": "No records yet",
+        "empty.records_type.d": "No records of this type yet. Add the first with",
+        "empty.records_type.t": "Nothing here yet",
         "empty.search.d": "No label, name or username matches that text.",
         "empty.search.t": "Nothing found",
         "empty.vault.d": "Add your first password to get started.",
@@ -19763,6 +19765,8 @@ WEB_CATALOGUES = {
         "empty.passwords.t": "\u0644\u0627 \u062a\u0648\u062c\u062f \u0643\u0644\u0645\u0627\u062a \u0645\u0631\u0648\u0631 \u0628\u0639\u062f",
         "empty.records.d": "\u0631\u0645\u0648\u0632 API \u0648\u0628\u064a\u0627\u0646\u0627\u062a \u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0648\u0627\u0644\u0628\u0637\u0627\u0642\u0627\u062a \u0648\u0627\u0644\u0647\u0648\u064a\u0627\u062a \u0648\u0627\u0644\u062a\u0631\u0627\u062e\u064a\u0635 \u0648\u0634\u0628\u0643\u0627\u062a Wi-Fi \u0648\u0627\u0644\u062e\u0648\u0627\u062f\u0645 \u062a\u064f\u062d\u0641\u0638 \u0647\u0646\u0627.",
         "empty.records.t": "\u0644\u0627 \u062a\u0648\u062c\u062f \u0633\u062c\u0644\u0627\u062a \u0628\u0639\u062f",
+        "empty.records_type.d": "\u0644\u0627 \u062a\u0648\u062c\u062f \u0633\u062c\u0644\u0627\u062a \u0645\u0646 \u0647\u0630\u0627 \u0627\u0644\u0646\u0648\u0639 \u0628\u0639\u062f. \u0623\u0636\u0641 \u0627\u0644\u0623\u0648\u0644 \u0639\u0628\u0631",
+        "empty.records_type.t": "\u0644\u0627 \u0634\u064a\u0621 \u0647\u0646\u0627 \u0628\u0639\u062f",
         "empty.search.d": "\u0644\u0627 \u064a\u0648\u062c\u062f \u0639\u0646\u0648\u0627\u0646 \u0623\u0648 \u0627\u0633\u0645 \u0623\u0648 \u0627\u0633\u0645 \u0645\u0633\u062a\u062e\u062f\u0645 \u064a\u0637\u0627\u0628\u0642 \u0647\u0630\u0627 \u0627\u0644\u0646\u0635.",
         "empty.search.t": "\u0644\u0645 \u064a\u064f\u0639\u062b\u0631 \u0639\u0644\u0649 \u0634\u064a\u0621",
         "empty.vault.d": "\u0623\u0636\u0641 \u0623\u0648\u0644 \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0644\u062a\u0628\u062f\u0623.",
@@ -20359,6 +20363,8 @@ WEB_CATALOGUES = {
         "empty.passwords.t": "Noch keine Passw\u00f6rter",
         "empty.records.d": "API-Token, Datenbank-Zug\u00e4nge, Karten, Ausweise, Lizenzen, WLAN und Server liegen hier.",
         "empty.records.t": "Noch keine Datens\u00e4tze",
+        "empty.records_type.d": "Noch keine Eintr\u00e4ge dieses Typs. F\u00fcge den ersten hinzu mit",
+        "empty.records_type.t": "Noch nichts hier",
         "empty.search.d": "Keine Bezeichnung, kein Name und kein Benutzername passt zu diesem Text.",
         "empty.search.t": "Nichts gefunden",
         "empty.vault.d": "F\u00fcge dein erstes Passwort hinzu, um loszulegen.",
@@ -20955,6 +20961,8 @@ WEB_CATALOGUES = {
         "empty.passwords.t": "A\u00fan no hay contrase\u00f1as",
         "empty.records.d": "Aqu\u00ed viven tokens de API, credenciales de base de datos, tarjetas, identidades, licencias, Wi-Fi y servidores.",
         "empty.records.t": "A\u00fan no hay registros",
+        "empty.records_type.d": "A\u00fan no hay registros de este tipo. A\u00f1ade el primero con",
+        "empty.records_type.t": "A\u00fan no hay nada aqu\u00ed",
         "empty.search.d": "Ninguna etiqueta, nombre o usuario coincide con ese texto.",
         "empty.search.t": "No se ha encontrado nada",
         "empty.vault.d": "A\u00f1ade tu primera contrase\u00f1a para empezar.",
@@ -21551,6 +21559,8 @@ WEB_CATALOGUES = {
         "empty.passwords.t": "Aucun mot de passe pour l'instant",
         "empty.records.d": "Jetons d'API, identifiants de base de donn\u00e9es, cartes, pi\u00e8ces d'identit\u00e9, licences, Wi-Fi et serveurs vivent ici.",
         "empty.records.t": "Aucune fiche",
+        "empty.records_type.d": "Aucune fiche de ce type pour l\u2019instant. Ajoutez la premi\u00e8re avec",
+        "empty.records_type.t": "Rien ici pour l\u2019instant",
         "empty.search.d": "Aucun libell\u00e9, nom ou identifiant ne correspond \u00e0 ce texte.",
         "empty.search.t": "Aucun r\u00e9sultat",
         "empty.vault.d": "Ajoutez votre premier mot de passe pour commencer.",
@@ -22147,6 +22157,8 @@ WEB_CATALOGUES = {
         "empty.passwords.t": "\u0905\u092d\u0940 \u0915\u094b\u0908 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0928\u0939\u0940\u0902",
         "empty.records.d": "API \u091f\u094b\u0915\u0928, \u0921\u0947\u091f\u093e\u092c\u0947\u0938 \u0915\u094d\u0930\u0947\u0921\u0947\u0902\u0936\u093f\u092f\u0932, \u0915\u093e\u0930\u094d\u0921, \u092a\u0939\u091a\u093e\u0928, \u0932\u093e\u0907\u0938\u0947\u0902\u0938, Wi-Fi \u0914\u0930 \u0938\u0930\u094d\u0935\u0930 \u092f\u0939\u093e\u0901 \u0930\u0939\u0924\u0947 \u0939\u0948\u0902\u0964",
         "empty.records.t": "\u0905\u092d\u0940 \u0915\u094b\u0908 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0928\u0939\u0940\u0902",
+        "empty.records_type.d": "\u0907\u0938 \u092a\u094d\u0930\u0915\u093e\u0930 \u0915\u093e \u0915\u094b\u0908 \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u0905\u092d\u0940 \u0928\u0939\u0940\u0902 \u0939\u0948\u0964 \u092a\u0939\u0932\u093e \u091c\u094b\u0921\u093c\u0947\u0902",
+        "empty.records_type.t": "\u092f\u0939\u093e\u0901 \u0905\u092d\u0940 \u0915\u0941\u091b \u0928\u0939\u0940\u0902 \u0939\u0948",
         "empty.search.d": "\u0909\u0938 \u092a\u093e\u0920 \u0938\u0947 \u0915\u094b\u0908 \u0932\u0947\u092c\u0932, \u0928\u093e\u092e \u092f\u093e \u0909\u092a\u092f\u094b\u0917\u0915\u0930\u094d\u0924\u093e \u0928\u093e\u092e \u092e\u0947\u0932 \u0928\u0939\u0940\u0902 \u0916\u093e\u0924\u093e\u0964",
         "empty.search.t": "\u0915\u0941\u091b \u0928\u0939\u0940\u0902 \u092e\u093f\u0932\u093e",
         "empty.vault.d": "\u0936\u0941\u0930\u0942 \u0915\u0930\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u0905\u092a\u0928\u093e \u092a\u0939\u0932\u093e \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u091c\u094b\u0921\u093c\u0947\u0902\u0964",
@@ -22743,6 +22755,8 @@ WEB_CATALOGUES = {
         "empty.passwords.t": "Belum ada kata sandi",
         "empty.records.d": "Token API, kredensial basis data, kartu, identitas, lisensi, Wi-Fi, dan server disimpan di sini.",
         "empty.records.t": "Belum ada record",
+        "empty.records_type.d": "Belum ada catatan jenis ini. Tambahkan yang pertama dengan",
+        "empty.records_type.t": "Belum ada apa-apa di sini",
         "empty.search.d": "Tidak ada label, nama, atau username yang cocok.",
         "empty.search.t": "Tidak ditemukan",
         "empty.vault.d": "Tambahkan kata sandi pertama untuk memulai.",
@@ -23339,6 +23353,8 @@ WEB_CATALOGUES = {
         "empty.passwords.t": "\u30d1\u30b9\u30ef\u30fc\u30c9\u304c\u3042\u308a\u307e\u305b\u3093",
         "empty.records.d": "API \u30c8\u30fc\u30af\u30f3\u3001\u30c7\u30fc\u30bf\u30d9\u30fc\u30b9\u8a8d\u8a3c\u60c5\u5831\u3001\u30ab\u30fc\u30c9\u3001\u8eab\u5206\u8a3c\u660e\u66f8\u3001\u30e9\u30a4\u30bb\u30f3\u30b9\u3001Wi-Fi\u3001\u30b5\u30fc\u30d0\u30fc\u304c\u3053\u3053\u306b\u5165\u308a\u307e\u3059\u3002",
         "empty.records.t": "\u30ec\u30b3\u30fc\u30c9\u306f\u307e\u3060\u3042\u308a\u307e\u305b\u3093",
+        "empty.records_type.d": "\u3053\u306e\u7a2e\u985e\u306e\u8a18\u9332\u306f\u307e\u3060\u3042\u308a\u307e\u305b\u3093\u3002\u6700\u521d\u306e1\u4ef6\u3092\u8ffd\u52a0\uff1a",
+        "empty.records_type.t": "\u307e\u3060\u4f55\u3082\u3042\u308a\u307e\u305b\u3093",
         "empty.search.d": "\u4e00\u81f4\u3059\u308b\u30e9\u30d9\u30eb\u30fb\u540d\u524d\u30fb\u30e6\u30fc\u30b6\u30fc\u540d\u304c\u3042\u308a\u307e\u305b\u3093\u3002",
         "empty.search.t": "\u898b\u3064\u304b\u308a\u307e\u305b\u3093",
         "empty.vault.d": "\u6700\u521d\u306e\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u8ffd\u52a0\u3057\u3066\u59cb\u3081\u307e\u3057\u3087\u3046\u3002",
@@ -23935,6 +23951,8 @@ WEB_CATALOGUES = {
         "empty.passwords.t": "\uc544\uc9c1 \ube44\ubc00\ubc88\ud638\uac00 \uc5c6\uc2b5\ub2c8\ub2e4",
         "empty.records.d": "API \ud1a0\ud070, \ub370\uc774\ud130\ubca0\uc774\uc2a4 \uc790\uaca9 \uc99d\uba85, \uce74\ub4dc, \uc2e0\ubd84\uc99d, \ub77c\uc774\uc120\uc2a4, Wi-Fi, \uc11c\ubc84\uac00 \uc5ec\uae30\uc5d0 \uc800\uc7a5\ub429\ub2c8\ub2e4.",
         "empty.records.t": "\uc544\uc9c1 \ub808\ucf54\ub4dc\uac00 \uc5c6\uc2b5\ub2c8\ub2e4",
+        "empty.records_type.d": "\uc774 \uc720\ud615\uc758 \uae30\ub85d\uc774 \uc544\uc9c1 \uc5c6\uc2b5\ub2c8\ub2e4. \ub2e4\uc74c\uc73c\ub85c \uccab \ud56d\ubaa9\uc744 \ucd94\uac00\ud558\uc138\uc694:",
+        "empty.records_type.t": "\uc544\uc9c1 \uc5c6\uc2b5\ub2c8\ub2e4",
         "empty.search.d": "\uadf8 \ubb38\uc790\uc5f4\uacfc \uc77c\uce58\ud558\ub294 \uc774\ub984\ud45c, \uc774\ub984, \uc0ac\uc6a9\uc790 \uc774\ub984\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.",
         "empty.search.t": "\ucc3e\uc740 \uac83\uc774 \uc5c6\uc2b5\ub2c8\ub2e4",
         "empty.vault.d": "\uccab \ube44\ubc00\ubc88\ud638\ub97c \ucd94\uac00\ud574 \uc2dc\uc791\ud558\uc138\uc694.",
@@ -24531,6 +24549,8 @@ WEB_CATALOGUES = {
         "empty.passwords.t": "Nenhuma senha ainda",
         "empty.records.d": "Tokens de API, credenciais de banco de dados, cart\u00f5es, identidades, licen\u00e7as, Wi-Fi e servidores ficam aqui.",
         "empty.records.t": "Nenhum registro ainda",
+        "empty.records_type.d": "Ainda n\u00e3o h\u00e1 registros deste tipo. Adicione o primeiro com",
+        "empty.records_type.t": "Nada aqui ainda",
         "empty.search.d": "Nenhum r\u00f3tulo, nome ou usu\u00e1rio corresponde a esse texto.",
         "empty.search.t": "Nada encontrado",
         "empty.vault.d": "Adicione sua primeira senha para come\u00e7ar.",
@@ -25127,6 +25147,8 @@ WEB_CATALOGUES = {
         "empty.passwords.t": "\u041f\u0430\u0440\u043e\u043b\u0435\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442",
         "empty.records.d": "\u0417\u0434\u0435\u0441\u044c \u0445\u0440\u0430\u043d\u044f\u0442\u0441\u044f \u0442\u043e\u043a\u0435\u043d\u044b API, \u0434\u043e\u0441\u0442\u0443\u043f\u044b \u043a \u0431\u0430\u0437\u0430\u043c \u0434\u0430\u043d\u043d\u044b\u0445, \u043a\u0430\u0440\u0442\u044b, \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b, \u043b\u0438\u0446\u0435\u043d\u0437\u0438\u0438, Wi-Fi \u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u044b.",
         "empty.records.t": "\u0417\u0430\u043f\u0438\u0441\u0435\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442",
+        "empty.records_type.d": "\u0417\u0430\u043f\u0438\u0441\u0435\u0439 \u044d\u0442\u043e\u0433\u043e \u0442\u0438\u043f\u0430 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442. \u0414\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u043f\u0435\u0440\u0432\u0443\u044e \u0447\u0435\u0440\u0435\u0437",
+        "empty.records_type.t": "\u0417\u0434\u0435\u0441\u044c \u043f\u043e\u043a\u0430 \u043f\u0443\u0441\u0442\u043e",
         "empty.search.d": "\u041d\u0438 \u043e\u0434\u043d\u0430 \u043c\u0435\u0442\u043a\u0430, \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u0438\u043b\u0438 \u0438\u043c\u044f \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f \u043d\u0435 \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442 \u0441 \u044d\u0442\u0438\u043c \u0442\u0435\u043a\u0441\u0442\u043e\u043c.",
         "empty.search.t": "\u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e",
         "empty.vault.d": "\u0414\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u043f\u0435\u0440\u0432\u044b\u0439 \u043f\u0430\u0440\u043e\u043b\u044c, \u0447\u0442\u043e\u0431\u044b \u043d\u0430\u0447\u0430\u0442\u044c.",
@@ -25723,6 +25745,8 @@ WEB_CATALOGUES = {
         "empty.passwords.t": "\u5c1a\u65e0\u5bc6\u7801",
         "empty.records.d": "API \u4ee4\u724c\u3001\u6570\u636e\u5e93\u51ed\u636e\u3001\u94f6\u884c\u5361\u3001\u8eab\u4efd\u8bc1\u4ef6\u3001\u8bb8\u53ef\u8bc1\u3001Wi-Fi \u548c\u670d\u52a1\u5668\u90fd\u5b58\u653e\u5728\u8fd9\u91cc\u3002",
         "empty.records.t": "\u8fd8\u6ca1\u6709\u8bb0\u5f55",
+        "empty.records_type.d": "\u8fd8\u6ca1\u6709\u6b64\u7c7b\u578b\u7684\u8bb0\u5f55\u3002\u7528\u4ee5\u4e0b\u65b9\u5f0f\u6dfb\u52a0\u7b2c\u4e00\u6761\uff1a",
+        "empty.records_type.t": "\u8fd9\u91cc\u8fd8\u6ca1\u6709\u5185\u5bb9",
         "empty.search.d": "\u6ca1\u6709\u6807\u7b7e\u3001\u540d\u79f0\u6216\u7528\u6237\u540d\u4e0e\u8be5\u6587\u672c\u5339\u914d\u3002",
         "empty.search.t": "\u672a\u627e\u5230\u4efb\u4f55\u5185\u5bb9",
         "empty.vault.d": "\u6dfb\u52a0\u7b2c\u4e00\u4e2a\u5bc6\u7801\u5373\u53ef\u5f00\u59cb\u3002",
@@ -32208,8 +32232,16 @@ def _record_type_chips(active, counts):
 
 
 def build_records_page(plaintext, active_type="", counts=None):
-    """The list. One table for every type, because a record is a record."""
+    """The typed-record list.
+
+    With no type it is the combined list across every type, with the Type column
+    shown. With a type (a sub-entry under Records in the sidebar) it is that
+    type's own page: the type's name is the heading, Add goes straight to that
+    type's form rather than the picker, and the now-redundant Type column is
+    dropped -- so it reads as a dedicated page, not the generic list filtered.
+    """
     counts = counts or core.record_counts(plaintext)
+    show_type = not active_type
     rows = []
     parsed_rows = list(core.iter_records(plaintext, active_type))
     # Favourites first (roadmap 22), then vault order within each group, so a
@@ -32231,10 +32263,12 @@ def build_records_page(plaintext, active_type="", counts=None):
             if kind != core.FIELD_SECRET and values.get(name):
                 summary = values[name]
                 break
+        type_cell = ("" if not show_type else
+            f'<td><span class="nav-ico" aria-hidden="true">{_icon(record_type_icon(record_type), "icon icon-sm")}</span>'
+            f'<span data-i18n="record.type.{record_type}">{html.escape(record_type_label(record_type))}</span></td>')
         rows.append(f"""
         <tr data-row>
-          <td><span class="nav-ico" aria-hidden="true">{_icon(record_type_icon(record_type), "icon icon-sm")}</span>
-              <span data-i18n="record.type.{record_type}">{html.escape(record_type_label(record_type))}</span></td>
+          {type_cell}
           <td><a href="{href}">{shown}</a></td>
           <td>{"" if hidden else html.escape(summary[:60])}</td>
           <td>{html.escape(folder)}</td>
@@ -32251,26 +32285,45 @@ def build_records_page(plaintext, active_type="", counts=None):
             </form>
           </td>
         </tr>""")
+    ncols = 5 if show_type else 4
     if not rows:
-        rows.append(f"""
-        <tr><td colspan="5"><div class="empty">
-          <div class="empty-ico">{_icon("record", "icon icon-lg")}</div>
-          <div class="empty-t" data-i18n="empty.records.t">No records yet</div>
-          <div class="empty-d" data-i18n="empty.records.d">API tokens, database credentials, cards, identities, licences, Wi-Fi and servers live here.</div>
-        </div></td></tr>""")
-    headers = [("search.kind", "Type", ""), ("table.label", "Label", ""),
-               ("records.summary", "Detail", ""),
-               ("view.label.folder", "Folder", ""),
-               ("table.actions", "Actions", "act")]
-    body = list_page("nav.records", "Records", "page.records.desc",
+        if active_type:
+            empty = (f'<tr><td colspan="{ncols}"><div class="empty">'
+                     f'<div class="empty-ico">{_icon(record_type_icon(active_type), "icon icon-lg")}</div>'
+                     f'<div class="empty-t" data-i18n="empty.records_type.t">Nothing here yet</div>'
+                     f'<div class="empty-d"><span data-i18n="empty.records_type.d">No records of this type yet. Add the first with</span> '
+                     f'&ldquo;<span data-i18n="record.type.{active_type}">{html.escape(record_type_label(active_type))}</span>&rdquo;.</div>'
+                     f'</div></td></tr>')
+        else:
+            empty = (f'<tr><td colspan="{ncols}"><div class="empty">'
+                     f'<div class="empty-ico">{_icon("record", "icon icon-lg")}</div>'
+                     f'<div class="empty-t" data-i18n="empty.records.t">No records yet</div>'
+                     f'<div class="empty-d" data-i18n="empty.records.d">API tokens, database credentials, cards, identities, licences, Wi-Fi and servers live here.</div>'
+                     f'</div></td></tr>')
+        rows.append(empty)
+    headers = ([("search.kind", "Type", "")] if show_type else []) + [
+        ("table.label", "Label", ""),
+        ("records.summary", "Detail", ""),
+        ("view.label.folder", "Folder", ""),
+        ("table.actions", "Actions", "act")]
+    if active_type:
+        title_key = "record.type.%s" % active_type
+        title = record_type_label(active_type)
+        add_href = "/records-add?type=%s" % urllib.parse.quote(active_type)
+        page_title = record_type_label(active_type)
+    else:
+        title_key, title = "nav.records", "Records"
+        add_href = "/records-add"
+        page_title = "Records"
+    body = list_page(title_key, title, "page.records.desc",
                      "Typed records stored in the same encrypted vault.",
-                     "/records-add", "btn.add_record", "+ Add Record",
+                     add_href, "btn.add_record", "+ Add Record",
                      headers, "".join(rows))
     body = body.replace('<div class="card" data-searchable>',
                         _record_type_chips(active_type, counts)
                         + '<div class="card" data-searchable>', 1)
     return render_shell(body + RECORD_CONFIRM_SCRIPT, "records", VERSION,
-                        VAULT_PATH, title="Records", counts=counts,
+                        VAULT_PATH, title=page_title, counts=counts,
                         searchable=True, active_sub=active_type)
 
 

@@ -103,6 +103,8 @@
     "empty.passwords.t": "Nenhuma senha ainda",
     "empty.records.d": "Tokens de API, credenciais de banco de dados, cartões, identidades, licenças, Wi-Fi e servidores ficam aqui.",
     "empty.records.t": "Nenhum registro ainda",
+    "empty.records_type.d": "Ainda não há registros deste tipo. Adicione o primeiro com",
+    "empty.records_type.t": "Nada aqui ainda",
     "empty.search.d": "Nenhum rótulo, nome ou usuário corresponde a esse texto.",
     "empty.search.t": "Nada encontrado",
     "empty.vault.d": "Adicione sua primeira senha para começar.",

@@ -103,6 +103,8 @@
     "empty.passwords.t": "尚无密码",
     "empty.records.d": "API 令牌、数据库凭据、银行卡、身份证件、许可证、Wi-Fi 和服务器都存放在这里。",
     "empty.records.t": "还没有记录",
+    "empty.records_type.d": "还没有此类型的记录。用以下方式添加第一条：",
+    "empty.records_type.t": "这里还没有内容",
     "empty.search.d": "没有标签、名称或用户名与该文本匹配。",
     "empty.search.t": "未找到任何内容",
     "empty.vault.d": "添加第一个密码即可开始。",

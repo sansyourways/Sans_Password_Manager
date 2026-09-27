@@ -103,6 +103,8 @@
     "empty.passwords.t": "Aucun mot de passe pour l'instant",
     "empty.records.d": "Jetons d'API, identifiants de base de données, cartes, pièces d'identité, licences, Wi-Fi et serveurs vivent ici.",
     "empty.records.t": "Aucune fiche",
+    "empty.records_type.d": "Aucune fiche de ce type pour l’instant. Ajoutez la première avec",
+    "empty.records_type.t": "Rien ici pour l’instant",
     "empty.search.d": "Aucun libellé, nom ou identifiant ne correspond à ce texte.",
     "empty.search.t": "Aucun résultat",
     "empty.vault.d": "Ajoutez votre premier mot de passe pour commencer.",
