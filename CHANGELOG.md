@@ -7,7 +7,27 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
-## [5.9.0] - 2026-09-25
+## [5.10.0] - 2026-09-27
+
+Three security-review and audit-log enhancements from the backlog, in one
+release. No vault format change.
+
+### Added
+- **Insecure-URL (http) report (roadmap 17).** The security review now names the
+  password entries that carry a plain `http://` URL — the pages where autofill
+  is refused — so they can be moved to `https`. On-device; shown on the CLI
+  dashboard and the Dashboard's Security page.
+- **Weak-PIN / weak-code detection (roadmap 14).** The review flags card and
+  other typed records whose PIN is trivially weak — a repeated digit, a
+  sequential run, or a common code — without ever printing the value. On-device.
+- **Tamper-evident event log (roadmap 18).** Each line of the security-event log
+  is now chained to the one before it with an HMAC keyed by a per-vault key kept
+  in a `0600` sibling file. `spm events --verify` (and an integrity badge on the
+  Dashboard's Security Events page) recompute the chain, so any edit, insertion,
+  reordering or deletion of an entry is detected. The log stays plaintext and
+  outside the vault, so a failed unlock is still recorded; an attacker with full
+  local read of the key file can still forge, the same access that already reads
+  the vault beside it.
 
 Three high-priority enhancements from the audit backlog, in one release. No
 vault format change.

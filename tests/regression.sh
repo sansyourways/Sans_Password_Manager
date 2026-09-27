@@ -1364,6 +1364,35 @@ cmd_security_dashboard --twofa | grep -q '2FA available, not enabled:' \
 	|| { printf 'security dashboard did not run the 2FA check on request\n' >&2; exit 1; }
 printf '  security: on-device 2FA-availability audit flags uncovered 2FA-capable records\n'
 
+# 5.10.0: http-URL report (roadmap 17) and weak-PIN/code detection (roadmap 14),
+# both on-device and always-on. A password row with an http:// URL and a card
+# with a trivially weak PIN, through the core report and the shell dashboard.
+sec_plain="$TEST_ROOT/sec-http-pin.plain"
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$SPM_CORE_PATH" "$sec_plain" <<'PYSEC'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("c", sys.argv[1])
+core = importlib.util.module_from_spec(spec); spec.loader.exec_module(core)
+card = core.encode_record_payload("credit-card",
+    {"cardholder": "A", "number": "4111111111111111", "expiry": "2030-01",
+     "pin": "1234", "cvv": "999"})
+open(sys.argv[2], "w", encoding="utf-8").write(
+    "1\tGitHub\talice\tStr0ng!Pass99\tn\t2024-01-01T00:00:00Z\thttp://github.com\t\n"
+    "2\tBank\tbob\tAn0ther$ecret1\tn\t2024-01-01T00:00:00Z\thttps://bank.example\t\n"
+    + core.RECORD_TAG_PREFIX + "credit-card\t1\tCard\t" + card
+    + "\t2024-01-01T00:00:00Z\t\n")
+PYSEC
+core security-report "$sec_plain" | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+assert r["insecure"] == ["1"], ("insecure=%r" % r["insecure"])
+assert any(f["field"] == "pin" and f["type"] == "credit-card" for f in r["weak_pins"]), r["weak_pins"]
+' || { printf "http/weak-pin report is wrong\n" >&2; exit 1; }
+cmd_security_dashboard | grep -q 'Insecure (http) URLs:' \
+	|| { printf 'security dashboard is missing the http line\n' >&2; exit 1; }
+cmd_security_dashboard | grep -q 'Weak PINs/codes:' \
+	|| { printf 'security dashboard is missing the weak-PIN line\n' >&2; exit 1; }
+printf '  security: http URLs and trivially weak PINs are reported on-device\n'
+
 # 5.5.0: the extension's save-on-submit write path (roadmap 39) at the core CLI,
 # and the desktop launcher (roadmap 41). Plaintext fixtures; no vault disturbed.
 bs_plain="$TEST_ROOT/bridge.plain"
@@ -4148,9 +4177,12 @@ KEYS = {"records", "format", "scope", "reason"}
 seen = set()
 for number, line in enumerate(open(sys.argv[1], encoding="utf-8"), start=1):
     fields = line.rstrip("\n").split("\t")
-    if len(fields) != 4:
-        sys.exit("line %d has %d fields, not 4: %r" % (number, len(fields), line))
-    when, kind, outcome, detail = fields
+    # Four core fields, plus an optional tamper-evidence MAC (roadmap 18).
+    if len(fields) not in (4, 5):
+        sys.exit("line %d has %d fields, not 4 or 5: %r" % (number, len(fields), line))
+    if len(fields) == 5 and not re.fullmatch(r"[0-9a-f]{32}", fields[4]):
+        sys.exit("line %d has a malformed chain MAC: %r" % (number, fields[4]))
+    when, kind, outcome, detail = fields[:4]
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", when):
         sys.exit("line %d has a malformed timestamp: %r" % (number, when))
     if kind not in KINDS:
@@ -4203,6 +4235,37 @@ for event in events:
     assert set(event) == {"when", "kind", "outcome", "detail"}, event
 PYCLI
 printf '  events: a failed unlock is recorded and reported without opening the vault\n'
+
+# 5.10.0: the event log is hash-chained (roadmap 18). The shell wrapper reports
+# the live log as intact (read-only, so no writer can race it)...
+cmd_events --verify | grep -qi 'intact' \
+	|| { printf 'events --verify did not confirm an intact chain\n' >&2; exit 1; }
+# ...and tamper-detection is proven on a throwaway log with its own data dir, so
+# no concurrent writer or retention prune can restore it between edit and check.
+evt_root="$TEST_ROOT/evt-chain"; mkdir -p "$evt_root"
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$SPM_CORE_PATH" "$evt_root" <<'PYEVT'
+import importlib.util, os, sys
+core_path, data = sys.argv[1], sys.argv[2]
+vault = os.path.join(data, "vault.gpg")
+os.environ["SPM_DATA_DIR"] = data
+os.environ["SPM_VAULT_PATH"] = vault
+os.environ["SPM_EVENT_COALESCE"] = "0"
+spec = importlib.util.spec_from_file_location("evtcore", core_path)
+core = importlib.util.module_from_spec(spec); spec.loader.exec_module(core)
+for _ in range(5):
+    core.record_event("unlock", "ok", "scope=live", vault_path=vault)
+log = core.events_path(vault)
+if core.verify_events(vault)["status"] != "ok":
+    sys.exit("a fresh chain did not verify")
+lines = open(log, encoding="utf-8").read().splitlines()
+fields = lines[2].split("\t"); fields[0] = "1999-01-01T00:00:00Z"
+lines[2] = "\t".join(fields)
+open(log, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+result = core.verify_events(vault)
+if not (result["status"] == "broken" and result["broken_at"] == 3):
+    sys.exit("a tampered entry was not detected: %r" % result)
+PYEVT
+printf '  events: the log is hash-chained and a tampered entry is detected\n'
 
 printf 'Core regression: trusted core\n'
 SPM_CORE_DIR="$XDG_DATA_HOME/spm" ensure_core_script "$XDG_DATA_HOME/spm"

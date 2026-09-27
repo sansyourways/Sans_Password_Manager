@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.9.0"
+VERSION="5.10.0"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -5460,11 +5460,12 @@ cmd_doctor_json() {
 }
 
 cmd_events() {
-	local as_json=0 limit=50
+	local as_json=0 limit=50 verify=0
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
 			--json) as_json=1; shift ;;
 			--all) limit=0; shift ;;
+			--verify) verify=1; shift ;;
 			--limit)
 				[ "$#" -ge 2 ] || die "Missing value for --limit."
 				limit="$2"; shift 2 ;;
@@ -5472,6 +5473,28 @@ cmd_events() {
 		esac
 	done
 	printf '%s' "$limit" | grep -Eq '^[0-9]+$' || die "--limit takes a number."
+	if [ "$verify" -eq 1 ]; then
+		# Tamper-evidence check (roadmap 18): recompute the log's hash chain.
+		local report; report="$(core events-verify "$VAULT_FILE")"
+		if [ "$as_json" -eq 1 ]; then printf '%s\n' "$report"; return; fi
+		printf '%s' "$report" | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+status = r["status"]
+if status == "empty":
+    print("No security events recorded yet; nothing to verify.")
+elif status == "unkeyed":
+    print("Event log is present but has no chain key yet; nothing to verify.")
+elif status == "ok":
+    anchor = "from the first entry" if r["from_genesis"] else "from the oldest retained entry"
+    print("Event log intact: %d entrie(s) verify %s." % (r["checked"], anchor))
+else:
+    print("Event log TAMPERING DETECTED: the chain breaks at entry %d of %d."
+          % (r["broken_at"], r["checked"]))
+    sys.exit(3)
+'
+		return
+	fi
 	if [ "$as_json" -eq 1 ]; then
 		core events "$VAULT_FILE" "$limit"
 		return
@@ -6692,6 +6715,9 @@ print("Reused groups:", "; ".join(",".join(group) for group in audit["reused"]) 
 print("Older than %d days:" % audit["rotation_days"], ", ".join(audit["old"]) or "none")
 print("Incomplete IDs:", ", ".join(audit["incomplete"]) or "none")
 print("Malformed protected records:", ", ".join("authenticator:" + rid for rid in audit["malformed"]) or "none")
+print("Insecure (http) URLs:", ", ".join(audit.get("insecure", [])) or "none")
+print("Weak PINs/codes:", "; ".join("%s (%s %s)" % (f["id"], f["type"], f["field"])
+                                     for f in audit.get("weak_pins", [])) or "none")
 if audit["breach_status"] == "checked":
     findings = ", ".join("%s (%s sightings)" % (item["id"], item["count"])
                          for item in audit["breached"])
@@ -8374,6 +8400,7 @@ Main commands (CLI):
 Local-first 2.10 capabilities:
   ./spm.sh security [--breaches] [--account-breaches] [--twofa]
                                         → Local dashboard; opt-in breach + on-device 2FA-gap checks
+  ./spm.sh events [--verify]            → Security-event log; --verify checks its tamper-evident chain
   ./spm.sh history-list                 → List encrypted vault history
   ./spm.sh history-restore <snapshot>   → Restore after confirmation
   ./spm.sh backup-now [dir]             → Verified encrypted backup

@@ -1327,6 +1327,56 @@ def t_events_survive_a_damaged_line():
     eq(len(events), 1, "a damaged line took the whole log with it")
 
 
+def t_event_log_chain_detects_tampering():
+    # roadmap 18: the log is hash-chained, and verify_events recomputes it.
+    vault = fresh("evt-chain")
+    path = _events_env(vault)
+    os.environ["SPM_EVENT_COALESCE"] = "0"
+    try:
+        for _ in range(4):
+            core.record_event("unlock", "ok", "scope=live", vault_path=vault)
+    finally:
+        os.environ.pop("SPM_EVENT_COALESCE", None)
+    fresh_chain = core.verify_events(vault)
+    eq(fresh_chain["status"], "ok", "a fresh chain did not verify")
+    assert fresh_chain["from_genesis"], "an unpruned chain must verify from genesis"
+    # Editing a line's core breaks the chain at exactly that line.
+    lines = open(path, encoding="utf-8").read().splitlines()
+    parts = lines[1].split("\t"); parts[2] = "fail"; lines[1] = "\t".join(parts)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+    broken = core.verify_events(vault)
+    eq(broken["status"], "broken", "an edited line was not detected")
+    eq(broken["broken_at"], 2, "the wrong line was named as tampered")
+    # Removing the chain key is reported as unkeyed, never a false "broken".
+    os.remove(path + ".key")
+    eq(core.verify_events(vault)["status"], "unkeyed")
+
+
+def t_security_report_flags_http_and_weak_pins():
+    # roadmap 17 (http URL) and roadmap 14 (weak PIN on a typed record).
+    card = core.encode_record_payload("credit-card",
+        {"cardholder": "A", "number": "4111111111111111", "expiry": "2030-01",
+         "pin": "1234", "cvv": "999"})
+    plaintext = (
+        "1\tGitHub\talice\tStr0ng!Pass99\tnote\t2024-01-01T00:00:00Z\thttp://github.com\t\n"
+        "2\tBank\tbob\tAn0ther$ecret1\tnote\t2024-01-01T00:00:00Z\thttps://bank.example\t\n"
+        + core.RECORD_TAG_PREFIX + "credit-card\t1\tMy Card\t" + card
+        + "\t2024-01-01T00:00:00Z\t\n")
+    rep = core.security_report(plaintext)
+    eq(rep["insecure"], ["1"], "only the http:// record should be insecure")
+    flagged = [(f["type"], f["field"]) for f in rep["weak_pins"]]
+    assert ("credit-card", "pin") in flagged, flagged
+    # A weak PIN costs score; the check is always on (no flag needed).
+    assert rep["score"] < 100, rep["score"]
+    # Structural checks: repeated, sequential and common are weak; a random
+    # short code and a long card number are not.
+    assert core._is_weak_pin("0000") and core._is_weak_pin("1234")
+    assert core._is_weak_pin("4321") and core._is_weak_pin("111111")
+    assert not core._is_weak_pin("8391")
+    assert not core._is_weak_pin("4111111111111111"), "a card number is not a PIN"
+
+
 def _write_temp(text):
     fd, path = tempfile.mkstemp(dir=ROOT)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
