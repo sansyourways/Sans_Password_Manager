@@ -4236,24 +4236,35 @@ for event in events:
 PYCLI
 printf '  events: a failed unlock is recorded and reported without opening the vault\n'
 
-# 5.10.0: the event log is hash-chained (roadmap 18); --verify recomputes it and
-# a tampered line is caught.
+# 5.10.0: the event log is hash-chained (roadmap 18). The shell wrapper reports
+# the live log as intact (read-only, so no writer can race it)...
 cmd_events --verify | grep -qi 'intact' \
 	|| { printf 'events --verify did not confirm an intact chain\n' >&2; exit 1; }
-evlog="$(core events-path "$VAULT_FILE")"
-PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$evlog" <<'PYEV'
-import sys
-path = sys.argv[1]
-lines = open(path, encoding="utf-8").read().splitlines()
-fields = lines[0].split("\t"); fields[0] = "1999-01-01T00:00:00Z"
-lines[0] = "\t".join(fields)
-open(path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
-PYEV
-if cmd_events --verify >/dev/null 2>&1; then
-	printf 'events --verify passed on a tampered log\n' >&2; exit 1
-fi
-cmd_events --verify 2>&1 | grep -qi 'TAMPER' \
-	|| { printf 'events --verify did not report tampering\n' >&2; exit 1; }
+# ...and tamper-detection is proven on a throwaway log with its own data dir, so
+# no concurrent writer or retention prune can restore it between edit and check.
+evt_root="$TEST_ROOT/evt-chain"; mkdir -p "$evt_root"
+PYTHONPYCACHEPREFIX="$TEST_ROOT/pycache" python3 - "$SPM_CORE_PATH" "$evt_root" <<'PYEVT'
+import importlib.util, os, sys
+core_path, data = sys.argv[1], sys.argv[2]
+vault = os.path.join(data, "vault.gpg")
+os.environ["SPM_DATA_DIR"] = data
+os.environ["SPM_VAULT_PATH"] = vault
+os.environ["SPM_EVENT_COALESCE"] = "0"
+spec = importlib.util.spec_from_file_location("evtcore", core_path)
+core = importlib.util.module_from_spec(spec); spec.loader.exec_module(core)
+for _ in range(5):
+    core.record_event("unlock", "ok", "scope=live", vault_path=vault)
+log = core.events_path(vault)
+if core.verify_events(vault)["status"] != "ok":
+    sys.exit("a fresh chain did not verify")
+lines = open(log, encoding="utf-8").read().splitlines()
+fields = lines[2].split("\t"); fields[0] = "1999-01-01T00:00:00Z"
+lines[2] = "\t".join(fields)
+open(log, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+result = core.verify_events(vault)
+if not (result["status"] == "broken" and result["broken_at"] == 3):
+    sys.exit("a tampered entry was not detected: %r" % result)
+PYEVT
 printf '  events: the log is hash-chained and a tampered entry is detected\n'
 
 printf 'Core regression: trusted core\n'
