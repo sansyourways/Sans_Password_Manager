@@ -9,7 +9,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-VERSION="5.10.1"
+VERSION="5.10.2"
 
 # ----- Repo info for update check --------------------------------------------
 
@@ -19113,6 +19113,7 @@ WEB_CATALOGUES = {
         "btn.add_entry": "+ Add Entry",
         "btn.add_note": "+ Add Note",
         "btn.add_passphrase": "+ Add Passphrase",
+        "btn.add_prefix": "+ Add",
         "btn.add_record": "+ Add Record",
         "btn.copy_code": "Copy Code",
         "btn.copy_codes": "Copy Codes",
@@ -19377,6 +19378,7 @@ WEB_CATALOGUES = {
         "page.passphrases.desc": "API tokens and recovery phrases.",
         "page.passwords.desc": "Login credentials stored in your vault.",
         "page.records.desc": "Typed records stored in the same encrypted vault.",
+        "page.records_type.desc": "Records of this type, in the same encrypted vault.",
         "page.settings.desc": "Choose how the Dashboard looks and how this vault is unlocked.",
         "page.settings.title": "Settings",
         "page.unlock.desc": "Resume the idle lock with this device instead of your master password.",
@@ -19711,6 +19713,7 @@ WEB_CATALOGUES = {
         "btn.add_entry": "+ \u0625\u0636\u0627\u0641\u0629 \u0645\u062f\u062e\u0644",
         "btn.add_note": "+ \u0625\u0636\u0627\u0641\u0629 \u0645\u0644\u0627\u062d\u0638\u0629",
         "btn.add_passphrase": "+ \u0625\u0636\u0627\u0641\u0629 \u0639\u0628\u0627\u0631\u0629 \u0645\u0631\u0648\u0631",
+        "btn.add_prefix": "+ \u0625\u0636\u0627\u0641\u0629",
         "btn.add_record": "+ \u0625\u0636\u0627\u0641\u0629 \u0633\u062c\u0644",
         "btn.copy_code": "\u0627\u0646\u0633\u062e \u0627\u0644\u0631\u0645\u0632",
         "btn.copy_codes": "\u0627\u0646\u0633\u062e \u0627\u0644\u0631\u0645\u0648\u0632",
@@ -19975,6 +19978,7 @@ WEB_CATALOGUES = {
         "page.passphrases.desc": "\u0631\u0645\u0648\u0632 \u0648\u0627\u062c\u0647\u0627\u062a \u0627\u0644\u0628\u0631\u0645\u062c\u0629 \u0648\u0639\u0628\u0627\u0631\u0627\u062a \u0627\u0644\u0627\u0633\u062a\u0631\u062f\u0627\u062f.",
         "page.passwords.desc": "\u0628\u064a\u0627\u0646\u0627\u062a \u062a\u0633\u062c\u064a\u0644 \u0627\u0644\u062f\u062e\u0648\u0644 \u0627\u0644\u0645\u062d\u0641\u0648\u0638\u0629 \u0641\u064a \u062e\u0632\u0646\u062a\u0643.",
         "page.records.desc": "\u0633\u062c\u0644\u0627\u062a \u0645\u064f\u0635\u0646\u064e\u0651\u0641\u0629 \u0645\u062d\u0641\u0648\u0638\u0629 \u0641\u064a \u0627\u0644\u062e\u0632\u0646\u0629 \u0627\u0644\u0645\u0634\u0641\u0651\u0631\u0629 \u0646\u0641\u0633\u0647\u0627.",
+        "page.records_type.desc": "\u0633\u062c\u0644\u0627\u062a \u0645\u0646 \u0647\u0630\u0627 \u0627\u0644\u0646\u0648\u0639\u060c \u0641\u064a \u0627\u0644\u062e\u0632\u0646\u0629 \u0627\u0644\u0645\u0634\u0641\u0651\u0631\u0629 \u0646\u0641\u0633\u0647\u0627.",
         "page.settings.desc": "\u0627\u062e\u062a\u0631 \u0634\u0643\u0644 \u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645 \u0648\u0637\u0631\u064a\u0642\u0629 \u0641\u062a\u062d \u0642\u0641\u0644 \u0647\u0630\u0647 \u0627\u0644\u062e\u0632\u0646\u0629.",
         "page.settings.title": "\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a",
         "page.unlock.desc": "\u0627\u0633\u062a\u0623\u0646\u0641 \u0628\u0639\u062f \u0642\u0641\u0644 \u0627\u0644\u062e\u0645\u0648\u0644 \u0628\u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 \u0628\u062f\u0644\u064b\u0627 \u0645\u0646 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629.",
@@ -20309,6 +20313,7 @@ WEB_CATALOGUES = {
         "btn.add_entry": "+ Eintrag hinzuf\u00fcgen",
         "btn.add_note": "+ Notiz hinzuf\u00fcgen",
         "btn.add_passphrase": "+ Passphrase hinzuf\u00fcgen",
+        "btn.add_prefix": "+ Hinzuf\u00fcgen",
         "btn.add_record": "+ Datensatz",
         "btn.copy_code": "Code kopieren",
         "btn.copy_codes": "Codes kopieren",
@@ -20573,6 +20578,7 @@ WEB_CATALOGUES = {
         "page.passphrases.desc": "API-Token und Wiederherstellungsphrasen.",
         "page.passwords.desc": "Anmeldedaten, die in deinem Tresor liegen.",
         "page.records.desc": "Strukturierte Datens\u00e4tze im selben verschl\u00fcsselten Tresor.",
+        "page.records_type.desc": "Eintr\u00e4ge dieses Typs, im selben verschl\u00fcsselten Tresor.",
         "page.settings.desc": "Lege fest, wie das Dashboard aussieht und wie dieser Tresor entsperrt wird.",
         "page.settings.title": "Einstellungen",
         "page.unlock.desc": "Setze die Inaktivit\u00e4tssperre mit diesem Ger\u00e4t statt mit deinem Hauptpasswort fort.",
@@ -20907,6 +20913,7 @@ WEB_CATALOGUES = {
         "btn.add_entry": "+ A\u00f1adir entrada",
         "btn.add_note": "+ A\u00f1adir nota",
         "btn.add_passphrase": "+ A\u00f1adir frase de contrase\u00f1a",
+        "btn.add_prefix": "+ A\u00f1adir",
         "btn.add_record": "+ A\u00f1adir registro",
         "btn.copy_code": "Copiar el c\u00f3digo",
         "btn.copy_codes": "Copiar los c\u00f3digos",
@@ -21171,6 +21178,7 @@ WEB_CATALOGUES = {
         "page.passphrases.desc": "Tokens de API y frases de recuperaci\u00f3n.",
         "page.passwords.desc": "Credenciales de acceso guardadas en tu caja fuerte.",
         "page.records.desc": "Registros tipificados guardados en la misma caja fuerte cifrada.",
+        "page.records_type.desc": "Registros de este tipo, en la misma b\u00f3veda cifrada.",
         "page.settings.desc": "Elige el aspecto del panel y c\u00f3mo se desbloquea esta caja fuerte.",
         "page.settings.title": "Ajustes",
         "page.unlock.desc": "Reanuda el bloqueo por inactividad con este dispositivo en lugar de tu contrase\u00f1a maestra.",
@@ -21505,6 +21513,7 @@ WEB_CATALOGUES = {
         "btn.add_entry": "+ Ajouter une fiche",
         "btn.add_note": "+ Ajouter une note",
         "btn.add_passphrase": "+ Ajouter une phrase secr\u00e8te",
+        "btn.add_prefix": "+ Ajouter",
         "btn.add_record": "+ Ajouter une fiche",
         "btn.copy_code": "Copier le code",
         "btn.copy_codes": "Copier les codes",
@@ -21769,6 +21778,7 @@ WEB_CATALOGUES = {
         "page.passphrases.desc": "Jetons d'API et phrases de r\u00e9cup\u00e9ration.",
         "page.passwords.desc": "Identifiants de connexion conserv\u00e9s dans votre coffre.",
         "page.records.desc": "Fiches typ\u00e9es conserv\u00e9es dans le m\u00eame coffre chiffr\u00e9.",
+        "page.records_type.desc": "Fiches de ce type, dans le m\u00eame coffre chiffr\u00e9.",
         "page.settings.desc": "Choisissez l'apparence du tableau de bord et la fa\u00e7on dont ce coffre se d\u00e9verrouille.",
         "page.settings.title": "Param\u00e8tres",
         "page.unlock.desc": "Reprenez apr\u00e8s le verrouillage automatique avec cet appareil plut\u00f4t qu'avec votre mot de passe ma\u00eetre.",
@@ -22103,6 +22113,7 @@ WEB_CATALOGUES = {
         "btn.add_entry": "+ \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u091c\u094b\u0921\u093c\u0947\u0902",
         "btn.add_note": "+ \u0928\u094b\u091f \u091c\u094b\u0921\u093c\u0947\u0902",
         "btn.add_passphrase": "+ \u092a\u093e\u0938\u092b\u093c\u094d\u0930\u0947\u091c\u093c \u091c\u094b\u0921\u093c\u0947\u0902",
+        "btn.add_prefix": "+ \u091c\u094b\u0921\u093c\u0947\u0902",
         "btn.add_record": "+ \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u091c\u094b\u0921\u093c\u0947\u0902",
         "btn.copy_code": "\u0915\u094b\u0921 \u0915\u0949\u092a\u0940 \u0915\u0930\u0947\u0902",
         "btn.copy_codes": "\u0915\u094b\u0921 \u0915\u0949\u092a\u0940 \u0915\u0930\u0947\u0902",
@@ -22367,6 +22378,7 @@ WEB_CATALOGUES = {
         "page.passphrases.desc": "API \u091f\u094b\u0915\u0928 \u0914\u0930 \u0930\u093f\u0915\u0935\u0930\u0940 \u0935\u093e\u0915\u094d\u092f\u093e\u0902\u0936\u0964",
         "page.passwords.desc": "\u0906\u092a\u0915\u0940 \u0924\u093f\u091c\u094b\u0930\u0940 \u092e\u0947\u0902 \u0930\u0916\u0947 \u0932\u0949\u0917\u093f\u0928 \u0915\u094d\u0930\u0947\u0921\u0947\u0902\u0936\u093f\u092f\u0932\u0964",
         "page.records.desc": "\u0909\u0938\u0940 \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u0935\u0949\u0932\u094d\u091f \u092e\u0947\u0902 \u0930\u0916\u0947 \u091f\u093e\u0907\u092a \u0915\u093f\u090f \u0917\u090f \u0930\u093f\u0915\u0949\u0930\u094d\u0921\u0964",
+        "page.records_type.desc": "\u0907\u0938 \u092a\u094d\u0930\u0915\u093e\u0930 \u0915\u0947 \u0930\u093f\u0915\u0949\u0930\u094d\u0921, \u0909\u0938\u0940 \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u0935\u0949\u0932\u094d\u091f \u092e\u0947\u0902\u0964",
         "page.settings.desc": "\u0924\u092f \u0915\u0930\u0947\u0902 \u0915\u093f \u0921\u0948\u0936\u092c\u094b\u0930\u094d\u0921 \u0915\u0948\u0938\u093e \u0926\u093f\u0916\u0947 \u0914\u0930 \u092f\u0939 \u0924\u093f\u091c\u094b\u0930\u0940 \u0915\u0948\u0938\u0947 \u0905\u0928\u0932\u0949\u0915 \u0939\u094b\u0964",
         "page.settings.title": "\u0938\u0947\u091f\u093f\u0902\u0917",
         "page.unlock.desc": "\u0928\u093f\u0937\u094d\u0915\u094d\u0930\u093f\u092f\u0924\u093e \u0935\u093e\u0932\u0947 \u0932\u0949\u0915 \u0915\u094b \u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0915\u0947 \u092c\u091c\u093e\u092f \u0907\u0938\u0940 \u0921\u093f\u0935\u093e\u0907\u0938 \u0938\u0947 \u0916\u094b\u0932\u0915\u0930 \u0906\u0917\u0947 \u092c\u0922\u093c\u0947\u0902\u0964",
@@ -22701,6 +22713,7 @@ WEB_CATALOGUES = {
         "btn.add_entry": "+ Tambah Entri",
         "btn.add_note": "+ Tambah Catatan",
         "btn.add_passphrase": "+ Tambah Frasa Sandi",
+        "btn.add_prefix": "+ Tambah",
         "btn.add_record": "+ Tambah Record",
         "btn.copy_code": "Salin kode",
         "btn.copy_codes": "Salin kode",
@@ -22965,6 +22978,7 @@ WEB_CATALOGUES = {
         "page.passphrases.desc": "Token API dan frasa pemulihan.",
         "page.passwords.desc": "Kredensial login yang tersimpan di brankas Anda.",
         "page.records.desc": "Record bertipe yang disimpan di brankas terenkripsi yang sama.",
+        "page.records_type.desc": "Catatan jenis ini, di vault terenkripsi yang sama.",
         "page.settings.desc": "Pilih tampilan Dasbor dan cara membuka brankas ini.",
         "page.settings.title": "Pengaturan",
         "page.unlock.desc": "Lanjutkan sesi terkunci dengan perangkat ini, bukan kata sandi master.",
@@ -23299,6 +23313,7 @@ WEB_CATALOGUES = {
         "btn.add_entry": "+ \u30a8\u30f3\u30c8\u30ea\u8ffd\u52a0",
         "btn.add_note": "+ \u30ce\u30fc\u30c8\u8ffd\u52a0",
         "btn.add_passphrase": "+ \u30d1\u30b9\u30d5\u30ec\u30fc\u30ba\u8ffd\u52a0",
+        "btn.add_prefix": "+ \u8ffd\u52a0",
         "btn.add_record": "+ \u30ec\u30b3\u30fc\u30c9\u3092\u8ffd\u52a0",
         "btn.copy_code": "\u30b3\u30fc\u30c9\u3092\u30b3\u30d4\u30fc",
         "btn.copy_codes": "\u30b3\u30fc\u30c9\u3092\u30b3\u30d4\u30fc",
@@ -23563,6 +23578,7 @@ WEB_CATALOGUES = {
         "page.passphrases.desc": "API \u30c8\u30fc\u30af\u30f3\u3068\u5fa9\u65e7\u30d5\u30ec\u30fc\u30ba\u3002",
         "page.passwords.desc": "\u4fdd\u7ba1\u5eab\u306b\u4fdd\u5b58\u3055\u308c\u3066\u3044\u308b\u30ed\u30b0\u30a4\u30f3\u60c5\u5831\u3002",
         "page.records.desc": "\u540c\u3058\u6697\u53f7\u5316\u30dc\u30fc\u30eb\u30c8\u306b\u4fdd\u5b58\u3055\u308c\u308b\u578b\u4ed8\u304d\u30ec\u30b3\u30fc\u30c9\u3002",
+        "page.records_type.desc": "\u3053\u306e\u7a2e\u985e\u306e\u8a18\u9332\u3002\u540c\u3058\u6697\u53f7\u5316\u3055\u308c\u305f\u4fdd\u7ba1\u5eab\u5185\u306b\u3042\u308a\u307e\u3059\u3002",
         "page.settings.desc": "\u30c0\u30c3\u30b7\u30e5\u30dc\u30fc\u30c9\u306e\u8868\u793a\u3068\u4fdd\u7ba1\u5eab\u306e\u30ed\u30c3\u30af\u89e3\u9664\u65b9\u6cd5\u3092\u9078\u629e\u3057\u307e\u3059\u3002",
         "page.settings.title": "\u8a2d\u5b9a",
         "page.unlock.desc": "\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\u306e\u4ee3\u308f\u308a\u306b\u3001\u3053\u306e\u7aef\u672b\u3067\u30ed\u30c3\u30af\u3092\u89e3\u9664\u3057\u307e\u3059\u3002",
@@ -23897,6 +23913,7 @@ WEB_CATALOGUES = {
         "btn.add_entry": "+ \ud56d\ubaa9 \ucd94\uac00",
         "btn.add_note": "+ \uba54\ubaa8 \ucd94\uac00",
         "btn.add_passphrase": "+ \ud328\uc2a4\ud504\ub808\uc774\uc988 \ucd94\uac00",
+        "btn.add_prefix": "+ \ucd94\uac00",
         "btn.add_record": "+ \ub808\ucf54\ub4dc \ucd94\uac00",
         "btn.copy_code": "\ucf54\ub4dc \ubcf5\uc0ac",
         "btn.copy_codes": "\ucf54\ub4dc \ubcf5\uc0ac",
@@ -24161,6 +24178,7 @@ WEB_CATALOGUES = {
         "page.passphrases.desc": "API \ud1a0\ud070\uacfc \ubcf5\uad6c \ubb38\uad6c\uc785\ub2c8\ub2e4.",
         "page.passwords.desc": "\uae08\uace0\uc5d0 \ubcf4\uad00\ub41c \ub85c\uadf8\uc778 \uc790\uaca9 \uc99d\uba85\uc785\ub2c8\ub2e4.",
         "page.records.desc": "\uac19\uc740 \uc554\ud638\ud654 \ubcf4\uad00\ud568\uc5d0 \uc800\uc7a5\ub418\ub294 \uc720\ud615\ubcc4 \ub808\ucf54\ub4dc\uc785\ub2c8\ub2e4.",
+        "page.records_type.desc": "\uc774 \uc720\ud615\uc758 \uae30\ub85d\uc785\ub2c8\ub2e4. \uac19\uc740 \uc554\ud638\ud654\ub41c \ubcf4\uad00\uc18c\uc5d0 \uc788\uc2b5\ub2c8\ub2e4.",
         "page.settings.desc": "\ub300\uc2dc\ubcf4\ub4dc\uc758 \uac89\ubaa8\uc2b5\uacfc \uc774 \uae08\uace0\ub97c \uc7a0\uae08 \ud574\uc81c\ud558\ub294 \ubc29\uc2dd\uc744 \uace0\ub985\ub2c8\ub2e4.",
         "page.settings.title": "\uc124\uc815",
         "page.unlock.desc": "\ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638 \ub300\uc2e0 \uc774 \uae30\uae30\ub85c \uc790\ub3d9 \uc7a0\uae08\uc744 \ud574\uc81c\ud558\uace0 \uc774\uc5b4\uc11c \uc0ac\uc6a9\ud569\ub2c8\ub2e4.",
@@ -24495,6 +24513,7 @@ WEB_CATALOGUES = {
         "btn.add_entry": "+ Adicionar registro",
         "btn.add_note": "+ Adicionar nota",
         "btn.add_passphrase": "+ Adicionar frase secreta",
+        "btn.add_prefix": "+ Adicionar",
         "btn.add_record": "+ Adicionar registro",
         "btn.copy_code": "Copiar c\u00f3digo",
         "btn.copy_codes": "Copiar c\u00f3digos",
@@ -24759,6 +24778,7 @@ WEB_CATALOGUES = {
         "page.passphrases.desc": "Tokens de API e frases de recupera\u00e7\u00e3o.",
         "page.passwords.desc": "Credenciais de acesso guardadas no seu cofre.",
         "page.records.desc": "Registros tipados guardados no mesmo cofre criptografado.",
+        "page.records_type.desc": "Registros deste tipo, no mesmo cofre criptografado.",
         "page.settings.desc": "Escolha a apar\u00eancia do painel e como este cofre \u00e9 desbloqueado.",
         "page.settings.title": "Configura\u00e7\u00f5es",
         "page.unlock.desc": "Retome o bloqueio por inatividade com este dispositivo em vez da sua senha mestra.",
@@ -25093,6 +25113,7 @@ WEB_CATALOGUES = {
         "btn.add_entry": "+ \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u044c",
         "btn.add_note": "+ \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0437\u0430\u043c\u0435\u0442\u043a\u0443",
         "btn.add_passphrase": "+ \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043f\u0430\u0440\u043e\u043b\u044c\u043d\u0443\u044e \u0444\u0440\u0430\u0437\u0443",
+        "btn.add_prefix": "+ \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c",
         "btn.add_record": "+ \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u044c",
         "btn.copy_code": "\u0421\u043a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043a\u043e\u0434",
         "btn.copy_codes": "\u0421\u043a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043a\u043e\u0434\u044b",
@@ -25357,6 +25378,7 @@ WEB_CATALOGUES = {
         "page.passphrases.desc": "\u0422\u043e\u043a\u0435\u043d\u044b API \u0438 \u0444\u0440\u0430\u0437\u044b \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f.",
         "page.passwords.desc": "\u0423\u0447\u0451\u0442\u043d\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u0434\u043b\u044f \u0432\u0445\u043e\u0434\u0430, \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d\u043d\u044b\u0435 \u0432 \u0432\u0430\u0448\u0435\u043c \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435.",
         "page.records.desc": "\u0422\u0438\u043f\u0438\u0437\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u0432 \u0442\u043e\u043c \u0436\u0435 \u0437\u0430\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u043c \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435.",
+        "page.records_type.desc": "\u0417\u0430\u043f\u0438\u0441\u0438 \u044d\u0442\u043e\u0433\u043e \u0442\u0438\u043f\u0430, \u0432 \u0442\u043e\u043c \u0436\u0435 \u0437\u0430\u0448\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u043c \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435.",
         "page.settings.desc": "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435, \u043a\u0430\u043a \u0432\u044b\u0433\u043b\u044f\u0434\u0438\u0442 \u043f\u0430\u043d\u0435\u043b\u044c \u0438 \u043a\u0430\u043a \u0440\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u0443\u0435\u0442\u0441\u044f \u044d\u0442\u043e \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0435.",
         "page.settings.title": "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438",
         "page.unlock.desc": "\u0421\u043d\u0438\u043c\u0430\u0439\u0442\u0435 \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0443 \u043f\u043e \u0431\u0435\u0437\u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044e \u044d\u0442\u0438\u043c \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u043e\u043c, \u0430 \u043d\u0435 \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u0435\u043c.",
@@ -25691,6 +25713,7 @@ WEB_CATALOGUES = {
         "btn.add_entry": "+ \u6dfb\u52a0\u6761\u76ee",
         "btn.add_note": "+ \u6dfb\u52a0\u7b14\u8bb0",
         "btn.add_passphrase": "+ \u6dfb\u52a0\u53e3\u4ee4\u77ed\u8bed",
+        "btn.add_prefix": "+ \u6dfb\u52a0",
         "btn.add_record": "+ \u6dfb\u52a0\u8bb0\u5f55",
         "btn.copy_code": "\u590d\u5236\u9a8c\u8bc1\u7801",
         "btn.copy_codes": "\u590d\u5236\u5907\u7528\u7801",
@@ -25955,6 +25978,7 @@ WEB_CATALOGUES = {
         "page.passphrases.desc": "API \u4ee4\u724c\u4e0e\u6062\u590d\u77ed\u8bed\u3002",
         "page.passwords.desc": "\u4fdd\u5b58\u5728\u4f60\u5bc6\u7801\u5e93\u4e2d\u7684\u767b\u5f55\u51ed\u636e\u3002",
         "page.records.desc": "\u4fdd\u5b58\u5728\u540c\u4e00\u52a0\u5bc6\u4fdd\u9669\u5e93\u4e2d\u7684\u7ed3\u6784\u5316\u8bb0\u5f55\u3002",
+        "page.records_type.desc": "\u6b64\u7c7b\u578b\u7684\u8bb0\u5f55\uff0c\u4f4d\u4e8e\u540c\u4e00\u4e2a\u52a0\u5bc6\u4fdd\u9669\u5e93\u4e2d\u3002",
         "page.settings.desc": "\u9009\u62e9\u63a7\u5236\u53f0\u7684\u5916\u89c2\uff0c\u4ee5\u53ca\u8fd9\u4e2a\u5bc6\u7801\u5e93\u7684\u89e3\u9501\u65b9\u5f0f\u3002",
         "page.settings.title": "\u8bbe\u7f6e",
         "page.unlock.desc": "\u7528\u672c\u8bbe\u5907\u6062\u590d\u95f2\u7f6e\u9501\u5b9a\uff0c\u800c\u4e0d\u5fc5\u8f93\u5165\u4e3b\u5bc6\u7801\u3002",
@@ -32309,19 +32333,33 @@ def build_records_page(plaintext, active_type="", counts=None):
     if active_type:
         title_key = "record.type.%s" % active_type
         title = record_type_label(active_type)
+        desc_key, desc = "page.records_type.desc", "Records of this type, in the same encrypted vault."
         add_href = "/records-add?type=%s" % urllib.parse.quote(active_type)
         page_title = record_type_label(active_type)
     else:
         title_key, title = "nav.records", "Records"
+        desc_key, desc = "page.records.desc", "Typed records stored in the same encrypted vault."
         add_href = "/records-add"
         page_title = "Records"
-    body = list_page(title_key, title, "page.records.desc",
-                     "Typed records stored in the same encrypted vault.",
+    body = list_page(title_key, title, desc_key, desc,
                      add_href, "btn.add_record", "+ Add Record",
                      headers, "".join(rows))
-    body = body.replace('<div class="card" data-searchable>',
-                        _record_type_chips(active_type, counts)
-                        + '<div class="card" data-searchable>', 1)
+    if active_type:
+        # A dedicated page, like Passwords or Secure Notes -- not the Records
+        # list filtered. The Add button names the type, and the type-filter
+        # chips are gone (the sidebar sub-entries already navigate between
+        # types), so nothing on the page reads as "Records, filtered".
+        generic_add = ('<a class="btn btn-primary" href="%s" data-i18n="btn.add_record">+ Add Record</a>'
+                       % add_href)
+        typed_add = ('<a class="btn btn-primary" href="%s">'
+                     '<span data-i18n="btn.add_prefix">+ Add</span> '
+                     '<span data-i18n="record.type.%s">%s</span></a>'
+                     % (add_href, active_type, html.escape(record_type_label(active_type))))
+        body = body.replace(generic_add, typed_add, 1)
+    else:
+        body = body.replace('<div class="card" data-searchable>',
+                            _record_type_chips(active_type, counts)
+                            + '<div class="card" data-searchable>', 1)
     return render_shell(body + RECORD_CONFIRM_SCRIPT, "records", VERSION,
                         VAULT_PATH, title=page_title, counts=counts,
                         searchable=True, active_sub=active_type)

@@ -7244,10 +7244,25 @@ assert '/records-add?type=wifi' in one, \
     "the wifi sub-page's Add button does not go straight to the wifi form"
 assert 'data-i18n="search.kind"' not in one, \
     "the wifi sub-page still shows the redundant Type column"
-# The combined page keeps the Type column and the generic title.
+# It is a page of its own, not the Records list filtered: no type-filter chip
+# row (the sidebar sub-entries navigate between types), and the Add button names
+# the type rather than saying "+ Add Record". The chip row uses class="chip";
+# the sidebar sub-entries do not, so this distinguishes them from the nav.
+assert 'class="chip' not in one, \
+    "the wifi sub-page still shows the type-filter chip row"
+assert 'data-i18n="btn.add_prefix"' in one and 'data-i18n="record.type.wifi">' in one, \
+    "the wifi sub-page's Add button does not name the type"
+assert 'data-i18n="btn.add_record">+ Add Record</a>' not in one, \
+    "the wifi sub-page still shows the generic + Add Record button"
+# The combined page keeps the Type column, the generic title, the chip row and
+# the generic Add button.
 assert 'data-i18n="search.kind"' in listing, "the combined list dropped the Type column"
 assert '<h1 class="page-title" data-i18n="nav.records">' in listing, \
     "the combined list is not titled Records"
+assert 'class="chip' in listing and 'href="/records?type=wifi"' in listing, \
+    "the combined list lost its type-filter chip row"
+assert 'data-i18n="btn.add_record">+ Add Record</a>' in listing, \
+    "the combined list lost its generic Add button"
 
 # The search page says it looks "across every record type". Until typed records
 # were listed there it did not, and a wifi record could not be found by its own
