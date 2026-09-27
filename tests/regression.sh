@@ -4177,9 +4177,12 @@ KEYS = {"records", "format", "scope", "reason"}
 seen = set()
 for number, line in enumerate(open(sys.argv[1], encoding="utf-8"), start=1):
     fields = line.rstrip("\n").split("\t")
-    if len(fields) != 4:
-        sys.exit("line %d has %d fields, not 4: %r" % (number, len(fields), line))
-    when, kind, outcome, detail = fields
+    # Four core fields, plus an optional tamper-evidence MAC (roadmap 18).
+    if len(fields) not in (4, 5):
+        sys.exit("line %d has %d fields, not 4 or 5: %r" % (number, len(fields), line))
+    if len(fields) == 5 and not re.fullmatch(r"[0-9a-f]{32}", fields[4]):
+        sys.exit("line %d has a malformed chain MAC: %r" % (number, fields[4]))
+    when, kind, outcome, detail = fields[:4]
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", when):
         sys.exit("line %d has a malformed timestamp: %r" % (number, when))
     if kind not in KINDS:
