@@ -7,6 +7,19 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.10.2] - 2026-09-27
+
+### Fixed
+- **Each record-type page is now its own section, not the Records list filtered
+  (roadmap 1, follow-up).** 5.10.1 gave each type its own heading and Add-to-type
+  button but the page still carried the type-filter chip row ("All | Certificate
+  | Credit Card…") and the generic "Typed records…" subtitle, so it still read
+  as the Records list with a filter applied. A type page now drops the chip row
+  (the sidebar sub-entries already navigate between types), names its Add button
+  after the type ("+ Add Certificate"), and uses a subtitle scoped to the type.
+  The **Records → All page is unchanged** — it keeps the chips, the Type column
+  and the generic heading exactly as before.
+
 ## [5.10.1] - 2026-09-27
 
 ### Fixed
