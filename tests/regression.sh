@@ -7235,6 +7235,19 @@ for record_type, record_id in made:
 one = get("/records?type=wifi")
 assert "web wifi" in one, "the wifi filter hid the wifi record"
 assert "web server" not in one, "the wifi filter showed a server record"
+# A type sub-page (roadmap 1) is a dedicated page, not the generic list
+# filtered: the type's own name is the heading, Add goes straight to that
+# type's form, and the redundant Type column is dropped.
+assert '<h1 class="page-title" data-i18n="record.type.wifi">' in one, \
+    "the wifi sub-page is not titled with its own type name"
+assert '/records-add?type=wifi' in one, \
+    "the wifi sub-page's Add button does not go straight to the wifi form"
+assert 'data-i18n="search.kind"' not in one, \
+    "the wifi sub-page still shows the redundant Type column"
+# The combined page keeps the Type column and the generic title.
+assert 'data-i18n="search.kind"' in listing, "the combined list dropped the Type column"
+assert '<h1 class="page-title" data-i18n="nav.records">' in listing, \
+    "the combined list is not titled Records"
 
 # The search page says it looks "across every record type". Until typed records
 # were listed there it did not, and a wifi record could not be found by its own

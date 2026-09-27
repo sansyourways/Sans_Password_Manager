@@ -103,6 +103,8 @@
     "empty.passwords.t": "Belum ada kata sandi",
     "empty.records.d": "Token API, kredensial basis data, kartu, identitas, lisensi, Wi-Fi, dan server disimpan di sini.",
     "empty.records.t": "Belum ada record",
+    "empty.records_type.d": "Belum ada catatan jenis ini. Tambahkan yang pertama dengan",
+    "empty.records_type.t": "Belum ada apa-apa di sini",
     "empty.search.d": "Tidak ada label, nama, atau username yang cocok.",
     "empty.search.t": "Tidak ditemukan",
     "empty.vault.d": "Tambahkan kata sandi pertama untuk memulai.",

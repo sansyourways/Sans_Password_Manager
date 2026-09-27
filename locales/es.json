@@ -103,6 +103,8 @@
     "empty.passwords.t": "Aún no hay contraseñas",
     "empty.records.d": "Aquí viven tokens de API, credenciales de base de datos, tarjetas, identidades, licencias, Wi-Fi y servidores.",
     "empty.records.t": "Aún no hay registros",
+    "empty.records_type.d": "Aún no hay registros de este tipo. Añade el primero con",
+    "empty.records_type.t": "Aún no hay nada aquí",
     "empty.search.d": "Ninguna etiqueta, nombre o usuario coincide con ese texto.",
     "empty.search.t": "No se ha encontrado nada",
     "empty.vault.d": "Añade tu primera contraseña para empezar.",

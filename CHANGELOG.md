@@ -7,6 +7,21 @@ Keep-a-Changelog style format.
 
 ## [Unreleased]
 
+## [5.10.1] - 2026-09-27
+
+### Fixed
+- **Each record type now has a genuinely dedicated page (roadmap 1).** The
+  per-type entries under Records in the sidebar already filtered the list, but
+  every one still rendered as the generic "Records" page — same heading, the
+  same "+ Add Record" picker button, and a redundant Type column — so a Credit
+  Card or SSH Key sub-page looked identical to the combined list. Each type
+  page now takes the type's own name as its heading, its "+ Add" button goes
+  straight to that type's form instead of the picker, the Type column is
+  dropped (every row is that type), and the empty state points at adding the
+  first one. The combined "All" page is unchanged. (An earlier note called this
+  already-implemented; it was only half-done — the filtering worked, the
+  dedicated page did not.)
+
 ## [5.10.0] - 2026-09-27
 
 Three security-review and audit-log enhancements from the backlog, in one

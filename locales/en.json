@@ -103,6 +103,8 @@
     "empty.passwords.t": "No passwords yet",
     "empty.records.d": "API tokens, database credentials, cards, identities, licences, Wi-Fi and servers live here.",
     "empty.records.t": "No records yet",
+    "empty.records_type.d": "No records of this type yet. Add the first with",
+    "empty.records_type.t": "Nothing here yet",
     "empty.search.d": "No label, name or username matches that text.",
     "empty.search.t": "Nothing found",
     "empty.vault.d": "Add your first password to get started.",

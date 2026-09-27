@@ -103,6 +103,8 @@
     "empty.passwords.t": "パスワードがありません",
     "empty.records.d": "API トークン、データベース認証情報、カード、身分証明書、ライセンス、Wi-Fi、サーバーがここに入ります。",
     "empty.records.t": "レコードはまだありません",
+    "empty.records_type.d": "この種類の記録はまだありません。最初の1件を追加：",
+    "empty.records_type.t": "まだ何もありません",
     "empty.search.d": "一致するラベル・名前・ユーザー名がありません。",
     "empty.search.t": "見つかりません",
     "empty.vault.d": "最初のパスワードを追加して始めましょう。",
