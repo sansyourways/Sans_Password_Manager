@@ -21,7 +21,7 @@ administration, plus an optional local web interface for everyday browsing.
 There are no accounts, hosted APIs, subscriptions, analytics, or
 vendor-operated recovery services.
 
-Current release: **5.9.0**
+Current release: **5.10.0**
 
 ---
 
@@ -2156,6 +2156,7 @@ SPM records what was done to your vault, so you can notice what you did not do.
 spm events              # the last 50, newest last
 spm events --all        # everything kept
 spm events --json       # the same thing as a document
+spm events --verify     # recompute the tamper-evident hash chain
 ```
 
 ```text
@@ -2200,6 +2201,16 @@ into one would be the log understating the thing it is for.
 `spm events` never opens the vault and never asks for your master password, so
 it still answers when the vault will not open — which is the moment you most
 want to know how many attempts preceded that.
+
+Since 5.10.0 the log is **tamper-evident**: each line is chained to the one
+before it with an HMAC keyed by a per-vault key kept in a `0600` file beside the
+log. `spm events --verify` recomputes the chain and reports the first entry that
+does not match, so an edit, insertion, reordering or deletion is caught (a
+legitimate prune of the oldest lines re-anchors the chain rather than breaking
+it). The guarantee is honest about its limit: the log is plaintext, so anyone
+who can read the key file can still forge it — but that is the same local access
+that already reads the vault sitting next to it. The chain defeats edits,
+deletions and truncation by anything without the key.
 
 | Setting | Default | |
 |---|---|---|

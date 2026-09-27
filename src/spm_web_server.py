@@ -236,8 +236,13 @@ WEB_CATALOGUES = {
         "events.detail": "Detail",
         "events.empty": "Nothing recorded yet.",
         "events.empty_sub": "Unlocks, writes and master-password changes will appear here as they happen.",
+        "events.intact": "Log intact.",
+        "events.intact_d": "Every recorded entry is chained to the one before it, and the chain verifies.",
         "events.kind": "Event",
         "events.outcome": "Outcome",
+        "events.tampered": "Tampering detected.",
+        "events.tampered_d": "The log's hash chain breaks: an entry has been edited, inserted or removed.",
+        "events.unkeyed": "The tamper-evidence chain has no key yet; it starts protecting entries once the log has one.",
         "events.when": "When (UTC)",
         "expiring.col.days": "Days",
         "expiring.col.expires": "Expires",
@@ -530,6 +535,8 @@ WEB_CATALOGUES = {
         "security.entries_one": "entry",
         "security.incomplete": "Missing details",
         "security.incomplete_d": "No service name or no username.",
+        "security.insecure": "Insecure (http) URLs",
+        "security.insecure_d": "These entries carry a plain http:// URL. Autofill is refused there; move them to https.",
         "security.malformed": "Malformed authenticators",
         "security.malformed_d": "Missing a secret, or an algorithm SPM cannot generate codes for.",
         "security.none": "Nothing to fix here.",
@@ -551,6 +558,8 @@ WEB_CATALOGUES = {
         "security.twofa_optin": "On-device check against a bundled list of services that support 2FA. Nothing leaves this device.",
         "security.weak": "Weak passwords",
         "security.weak_d": "Shorter than 12 characters, or using fewer than three character classes.",
+        "security.weakpin": "Weak PINs and codes",
+        "security.weakpin_d": "Card and other typed records whose PIN is trivially weak (repeated, sequential, or a common code). The value is never shown.",
         "settings.confirm": "Confirm new master password",
         "settings.current": "Current master password",
         "settings.effect": "What this does",
@@ -823,8 +832,13 @@ WEB_CATALOGUES = {
         "events.detail": "\u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644",
         "events.empty": "\u0644\u0645 \u064a\u064f\u0633\u062c\u064e\u0651\u0644 \u0634\u064a\u0621 \u0628\u0639\u062f.",
         "events.empty_sub": "\u0633\u062a\u0638\u0647\u0631 \u0647\u0646\u0627 \u0639\u0645\u0644\u064a\u0627\u062a \u0641\u062a\u062d \u0627\u0644\u0642\u0641\u0644 \u0648\u0627\u0644\u0643\u062a\u0627\u0628\u0629 \u0648\u062a\u063a\u064a\u064a\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629 \u0641\u0648\u0631 \u062d\u062f\u0648\u062b\u0647\u0627.",
+        "events.intact": "\u0627\u0644\u0633\u062c\u0644 \u0633\u0644\u064a\u0645.",
+        "events.intact_d": "\u0643\u0644 \u0645\u064f\u062f\u062e\u064e\u0644 \u0645\u0631\u062a\u0628\u0637 \u0628\u0633\u0644\u0633\u0644\u0629 \u0628\u0627\u0644\u0630\u064a \u0642\u0628\u0644\u0647\u060c \u0648\u0627\u0644\u0633\u0644\u0633\u0644\u0629 \u062a\u062a\u062d\u0642\u0642.",
         "events.kind": "\u0627\u0644\u062d\u062f\u062b",
         "events.outcome": "\u0627\u0644\u0646\u062a\u064a\u062c\u0629",
+        "events.tampered": "\u062a\u0645 \u0627\u0643\u062a\u0634\u0627\u0641 \u0639\u0628\u062b.",
+        "events.tampered_d": "\u0627\u0646\u0643\u0633\u0631\u062a \u0633\u0644\u0633\u0644\u0629 \u062a\u062c\u0632\u0626\u0629 \u0627\u0644\u0633\u062c\u0644: \u062c\u0631\u0649 \u062a\u0639\u062f\u064a\u0644 \u0645\u064f\u062f\u062e\u064e\u0644 \u0623\u0648 \u0625\u062f\u0631\u0627\u062c\u0647 \u0623\u0648 \u0625\u0632\u0627\u0644\u062a\u0647.",
+        "events.unkeyed": "\u0633\u0644\u0633\u0644\u0629 \u0643\u0634\u0641 \u0627\u0644\u0639\u0628\u062b \u0644\u064a\u0633 \u0644\u0647\u0627 \u0645\u0641\u062a\u0627\u062d \u0628\u0639\u062f\u061b \u062a\u0628\u062f\u0623 \u0628\u062d\u0645\u0627\u064a\u0629 \u0627\u0644\u0645\u064f\u062f\u062e\u064e\u0644\u0627\u062a \u0628\u0645\u062c\u0631\u062f \u0627\u0645\u062a\u0644\u0627\u0643 \u0627\u0644\u0633\u062c\u0644 \u0645\u0641\u062a\u0627\u062d\u064b\u0627.",
         "events.when": "\u0627\u0644\u0648\u0642\u062a (UTC)",
         "expiring.col.days": "\u0623\u064a\u0627\u0645",
         "expiring.col.expires": "\u064a\u0646\u062a\u0647\u064a",
@@ -1117,6 +1131,8 @@ WEB_CATALOGUES = {
         "security.entries_one": "\u0645\u062f\u062e\u0644",
         "security.incomplete": "\u0628\u064a\u0627\u0646\u0627\u062a \u0646\u0627\u0642\u0635\u0629",
         "security.incomplete_d": "\u0644\u0627 \u064a\u0648\u062c\u062f \u0627\u0633\u0645 \u062e\u062f\u0645\u0629 \u0623\u0648 \u0644\u0627 \u064a\u0648\u062c\u062f \u0627\u0633\u0645 \u0645\u0633\u062a\u062e\u062f\u0645.",
+        "security.insecure": "\u0631\u0648\u0627\u0628\u0637 \u063a\u064a\u0631 \u0622\u0645\u0646\u0629 (http)",
+        "security.insecure_d": "\u062a\u062d\u0645\u0644 \u0647\u0630\u0647 \u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0631\u0627\u0628\u0637 http:// \u0639\u0627\u062f\u064a\u064b\u0627. \u064a\u064f\u0631\u0641\u0636 \u0627\u0644\u0645\u0644\u0621 \u0627\u0644\u062a\u0644\u0642\u0627\u0626\u064a \u0647\u0646\u0627\u0643\u061b \u0627\u0646\u0642\u0644\u0647\u0627 \u0625\u0644\u0649 https.",
         "security.malformed": "\u0623\u062f\u0648\u0627\u062a \u0645\u0635\u0627\u062f\u0642\u0629 \u063a\u064a\u0631 \u0633\u0644\u064a\u0645\u0629",
         "security.malformed_d": "\u064a\u0646\u0642\u0635\u0647\u0627 \u0627\u0644\u0633\u0631\u060c \u0623\u0648 \u062a\u0633\u062a\u062e\u062f\u0645 \u062e\u0648\u0627\u0631\u0632\u0645\u064a\u0629 \u0644\u0627 \u064a\u0633\u062a\u0637\u064a\u0639 SPM \u062a\u0648\u0644\u064a\u062f \u0631\u0645\u0648\u0632 \u0644\u0647\u0627.",
         "security.none": "\u0644\u0627 \u0634\u064a\u0621 \u0647\u0646\u0627 \u064a\u062d\u062a\u0627\u062c \u0625\u0644\u0649 \u0625\u0635\u0644\u0627\u062d.",
@@ -1138,6 +1154,8 @@ WEB_CATALOGUES = {
         "security.twofa_optin": "\u0641\u062d\u0635 \u0639\u0644\u0649 \u0627\u0644\u062c\u0647\u0627\u0632 \u0645\u0642\u0627\u0628\u0644 \u0642\u0627\u0626\u0645\u0629 \u0645\u064f\u0636\u0645\u0651\u0646\u0629 \u0628\u0627\u0644\u062e\u062f\u0645\u0627\u062a \u0627\u0644\u062a\u064a \u062a\u062f\u0639\u0645 \u0627\u0644\u0645\u0635\u0627\u062f\u0642\u0629 \u0627\u0644\u062b\u0646\u0627\u0626\u064a\u0629. \u0644\u0627 \u0634\u064a\u0621 \u064a\u063a\u0627\u062f\u0631 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632.",
         "security.weak": "\u0643\u0644\u0645\u0627\u062a \u0645\u0631\u0648\u0631 \u0636\u0639\u064a\u0641\u0629",
         "security.weak_d": "\u0623\u0642\u0635\u0631 \u0645\u0646 12 \u062d\u0631\u0641\u064b\u0627\u060c \u0623\u0648 \u062a\u0633\u062a\u062e\u062f\u0645 \u0623\u0642\u0644 \u0645\u0646 \u062b\u0644\u0627\u062b \u0641\u0626\u0627\u062a \u0645\u0646 \u0627\u0644\u0645\u062d\u0627\u0631\u0641.",
+        "security.weakpin": "\u0623\u0631\u0642\u0627\u0645 PIN \u0648\u0631\u0645\u0648\u0632 \u0636\u0639\u064a\u0641\u0629",
+        "security.weakpin_d": "\u0628\u0637\u0627\u0642\u0627\u062a \u0648\u0633\u062c\u0644\u0627\u062a \u0623\u062e\u0631\u0649 \u0628\u0631\u0642\u0645 PIN \u0636\u0639\u064a\u0641 \u062a\u0627\u0641\u0647 (\u0645\u062a\u0643\u0631\u0631 \u0623\u0648 \u0645\u062a\u0633\u0644\u0633\u0644 \u0623\u0648 \u0631\u0645\u0632 \u0634\u0627\u0626\u0639). \u0644\u0627 \u062a\u064f\u0639\u0631\u0636 \u0627\u0644\u0642\u064a\u0645\u0629 \u0623\u0628\u062f\u064b\u0627.",
         "settings.confirm": "\u0623\u0643\u0651\u062f \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629 \u0627\u0644\u062c\u062f\u064a\u062f\u0629",
         "settings.current": "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629 \u0627\u0644\u062d\u0627\u0644\u064a\u0629",
         "settings.effect": "\u0645\u0627\u0630\u0627 \u064a\u0641\u0639\u0644 \u0647\u0630\u0627",
@@ -1410,8 +1428,13 @@ WEB_CATALOGUES = {
         "events.detail": "Detail",
         "events.empty": "Noch nichts aufgezeichnet.",
         "events.empty_sub": "Entsperrungen, Schreibvorg\u00e4nge und \u00c4nderungen des Hauptpassworts erscheinen hier, sobald sie geschehen.",
+        "events.intact": "Protokoll intakt.",
+        "events.intact_d": "Jeder Eintrag ist mit dem vorherigen verkettet, und die Kette verifiziert.",
         "events.kind": "Ereignis",
         "events.outcome": "Ergebnis",
+        "events.tampered": "Manipulation erkannt.",
+        "events.tampered_d": "Die Hash-Kette des Protokolls ist gebrochen: ein Eintrag wurde ge\u00e4ndert, eingef\u00fcgt oder entfernt.",
+        "events.unkeyed": "Die Manipulationsschutz-Kette hat noch keinen Schl\u00fcssel; sie sch\u00fctzt Eintr\u00e4ge, sobald das Protokoll einen hat.",
         "events.when": "Wann (UTC)",
         "expiring.col.days": "Tage",
         "expiring.col.expires": "L\u00e4uft ab",
@@ -1704,6 +1727,8 @@ WEB_CATALOGUES = {
         "security.entries_one": "Eintrag",
         "security.incomplete": "Fehlende Angaben",
         "security.incomplete_d": "Kein Dienstname oder kein Benutzername.",
+        "security.insecure": "Unsichere (http-)URLs",
+        "security.insecure_d": "Diese Eintr\u00e4ge haben eine einfache http://-URL. Dort wird das Ausf\u00fcllen verweigert; verschiebe sie auf https.",
         "security.malformed": "Fehlerhafte Authentifikatoren",
         "security.malformed_d": "Ohne Geheimnis, oder mit einem Algorithmus, f\u00fcr den SPM keine Codes erzeugen kann.",
         "security.none": "Hier gibt es nichts zu beheben.",
@@ -1725,6 +1750,8 @@ WEB_CATALOGUES = {
         "security.twofa_optin": "Lokale Pr\u00fcfung anhand einer mitgelieferten Liste von Diensten mit 2FA-Unterst\u00fctzung. Nichts verl\u00e4sst dieses Ger\u00e4t.",
         "security.weak": "Schwache Passw\u00f6rter",
         "security.weak_d": "K\u00fcrzer als 12 Zeichen oder mit weniger als drei Zeichenklassen.",
+        "security.weakpin": "Schwache PINs und Codes",
+        "security.weakpin_d": "Karten und andere typisierte Eintr\u00e4ge mit einer trivial schwachen PIN (wiederholt, fortlaufend oder ein g\u00e4ngiger Code). Der Wert wird nie angezeigt.",
         "settings.confirm": "Neues Hauptpasswort best\u00e4tigen",
         "settings.current": "Aktuelles Hauptpasswort",
         "settings.effect": "Was dabei geschieht",
@@ -1997,8 +2024,13 @@ WEB_CATALOGUES = {
         "events.detail": "Detalle",
         "events.empty": "Todav\u00eda no hay nada registrado.",
         "events.empty_sub": "Los desbloqueos, las escrituras y los cambios de contrase\u00f1a maestra aparecer\u00e1n aqu\u00ed a medida que ocurran.",
+        "events.intact": "Registro intacto.",
+        "events.intact_d": "Cada entrada registrada est\u00e1 encadenada a la anterior, y la cadena se verifica.",
         "events.kind": "Evento",
         "events.outcome": "Resultado",
+        "events.tampered": "Manipulaci\u00f3n detectada.",
+        "events.tampered_d": "La cadena hash del registro se rompe: una entrada fue editada, insertada o eliminada.",
+        "events.unkeyed": "La cadena de evidencia de manipulaci\u00f3n a\u00fan no tiene clave; protege las entradas en cuanto el registro tenga una.",
         "events.when": "Cu\u00e1ndo (UTC)",
         "expiring.col.days": "D\u00edas",
         "expiring.col.expires": "Caduca",
@@ -2291,6 +2323,8 @@ WEB_CATALOGUES = {
         "security.entries_one": "entrada",
         "security.incomplete": "Faltan datos",
         "security.incomplete_d": "Sin nombre de servicio o sin usuario.",
+        "security.insecure": "URLs inseguras (http)",
+        "security.insecure_d": "Estas entradas tienen una URL http:// simple. Ah\u00ed se rechaza el autocompletado; mu\u00e9velas a https.",
         "security.malformed": "Autenticadores mal formados",
         "security.malformed_d": "Les falta el secreto, o usan un algoritmo con el que SPM no puede generar c\u00f3digos.",
         "security.none": "Aqu\u00ed no hay nada que corregir.",
@@ -2312,6 +2346,8 @@ WEB_CATALOGUES = {
         "security.twofa_optin": "Comprobaci\u00f3n en el dispositivo con una lista incluida de servicios que admiten 2FA. Nada sale de este dispositivo.",
         "security.weak": "Contrase\u00f1as d\u00e9biles",
         "security.weak_d": "De menos de 12 caracteres, o con menos de tres tipos de car\u00e1cter.",
+        "security.weakpin": "PIN y c\u00f3digos d\u00e9biles",
+        "security.weakpin_d": "Tarjetas y otros registros con un PIN trivialmente d\u00e9bil (repetido, secuencial o un c\u00f3digo com\u00fan). El valor nunca se muestra.",
         "settings.confirm": "Confirma la nueva contrase\u00f1a maestra",
         "settings.current": "Contrase\u00f1a maestra actual",
         "settings.effect": "Qu\u00e9 hace esto",
@@ -2584,8 +2620,13 @@ WEB_CATALOGUES = {
         "events.detail": "D\u00e9tail",
         "events.empty": "Rien n'a encore \u00e9t\u00e9 enregistr\u00e9.",
         "events.empty_sub": "Les d\u00e9verrouillages, les \u00e9critures et les changements de mot de passe ma\u00eetre appara\u00eetront ici au fil de l'eau.",
+        "events.intact": "Journal intact.",
+        "events.intact_d": "Chaque entr\u00e9e est cha\u00een\u00e9e \u00e0 la pr\u00e9c\u00e9dente, et la cha\u00eene se v\u00e9rifie.",
         "events.kind": "\u00c9v\u00e9nement",
         "events.outcome": "R\u00e9sultat",
+        "events.tampered": "Alt\u00e9ration d\u00e9tect\u00e9e.",
+        "events.tampered_d": "La cha\u00eene de hachage du journal est rompue : une entr\u00e9e a \u00e9t\u00e9 modifi\u00e9e, ins\u00e9r\u00e9e ou supprim\u00e9e.",
+        "events.unkeyed": "La cha\u00eene anti-alt\u00e9ration n'a pas encore de cl\u00e9 ; elle prot\u00e8ge les entr\u00e9es d\u00e8s que le journal en a une.",
         "events.when": "Quand (UTC)",
         "expiring.col.days": "Jours",
         "expiring.col.expires": "Expire",
@@ -2878,6 +2919,8 @@ WEB_CATALOGUES = {
         "security.entries_one": "entr\u00e9e",
         "security.incomplete": "Informations manquantes",
         "security.incomplete_d": "Pas de nom de service ou pas d'identifiant.",
+        "security.insecure": "URL non s\u00e9curis\u00e9es (http)",
+        "security.insecure_d": "Ces entr\u00e9es portent une URL http:// simple. Le remplissage y est refus\u00e9 ; d\u00e9placez-les vers https.",
         "security.malformed": "Authentificateurs mal form\u00e9s",
         "security.malformed_d": "Secret absent, ou algorithme avec lequel SPM ne peut pas g\u00e9n\u00e9rer de codes.",
         "security.none": "Rien \u00e0 corriger ici.",
@@ -2899,6 +2942,8 @@ WEB_CATALOGUES = {
         "security.twofa_optin": "V\u00e9rification sur l\u2019appareil \u00e0 partir d\u2019une liste int\u00e9gr\u00e9e de services prenant en charge la 2FA. Rien ne quitte cet appareil.",
         "security.weak": "Mots de passe faibles",
         "security.weak_d": "Moins de 12 caract\u00e8res, ou moins de trois classes de caract\u00e8res.",
+        "security.weakpin": "PIN et codes faibles",
+        "security.weakpin_d": "Cartes et autres fiches dont le PIN est trivialement faible (r\u00e9p\u00e9t\u00e9, s\u00e9quentiel ou un code courant). La valeur n'est jamais affich\u00e9e.",
         "settings.confirm": "Confirmez le nouveau mot de passe ma\u00eetre",
         "settings.current": "Mot de passe ma\u00eetre actuel",
         "settings.effect": "Ce que cela fait",
@@ -3171,8 +3216,13 @@ WEB_CATALOGUES = {
         "events.detail": "\u0935\u093f\u0935\u0930\u0923",
         "events.empty": "\u0905\u092d\u0940 \u0924\u0915 \u0915\u0941\u091b \u0926\u0930\u094d\u091c \u0928\u0939\u0940\u0902 \u0939\u0941\u0906\u0964",
         "events.empty_sub": "\u0905\u0928\u0932\u0949\u0915, \u092c\u0926\u0932\u093e\u0935 \u0914\u0930 \u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u092e\u0947\u0902 \u092a\u0930\u093f\u0935\u0930\u094d\u0924\u0928 \u091c\u0948\u0938\u0947-\u091c\u0948\u0938\u0947 \u0939\u094b\u0902\u0917\u0947, \u092f\u0939\u093e\u0901 \u0926\u093f\u0916\u0947\u0902\u0917\u0947\u0964",
+        "events.intact": "\u0932\u0949\u0917 \u0905\u0915\u094d\u0937\u0941\u0923\u094d\u0923\u0964",
+        "events.intact_d": "\u0939\u0930 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u092a\u093f\u091b\u0932\u0940 \u0938\u0947 \u0936\u0943\u0902\u0916\u0932\u093f\u0924 \u0939\u0948, \u0914\u0930 \u0936\u0943\u0902\u0916\u0932\u093e \u0938\u0924\u094d\u092f\u093e\u092a\u093f\u0924 \u0939\u094b\u0924\u0940 \u0939\u0948\u0964",
         "events.kind": "\u0918\u091f\u0928\u093e",
         "events.outcome": "\u092a\u0930\u093f\u0923\u093e\u092e",
+        "events.tampered": "\u091b\u0947\u0921\u093c\u091b\u093e\u0921\u093c \u092a\u093e\u0908 \u0917\u0908\u0964",
+        "events.tampered_d": "\u0932\u0949\u0917 \u0915\u0940 \u0939\u0948\u0936-\u0936\u0943\u0902\u0916\u0932\u093e \u091f\u0942\u091f \u0917\u0908 \u0939\u0948: \u0915\u094b\u0908 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f \u0938\u0902\u092a\u093e\u0926\u093f\u0924, \u091c\u094b\u0921\u093c\u0940 \u092f\u093e \u0939\u091f\u093e\u0908 \u0917\u0908 \u0939\u0948\u0964",
+        "events.unkeyed": "\u091b\u0947\u0921\u093c\u091b\u093e\u0921\u093c-\u0930\u094b\u0927\u0940 \u0936\u0943\u0902\u0916\u0932\u093e \u0915\u0947 \u092a\u093e\u0938 \u0905\u092d\u0940 \u0915\u0941\u0902\u091c\u0940 \u0928\u0939\u0940\u0902 \u0939\u0948; \u0932\u0949\u0917 \u0915\u094b \u0915\u0941\u0902\u091c\u0940 \u092e\u093f\u0932\u0924\u0947 \u0939\u0940 \u092f\u0939 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u094b\u0902 \u0915\u0940 \u0930\u0915\u094d\u0937\u093e \u0915\u0930\u0928\u0947 \u0932\u0917\u0924\u0940 \u0939\u0948\u0964",
         "events.when": "\u0915\u092c (UTC)",
         "expiring.col.days": "\u0926\u093f\u0928",
         "expiring.col.expires": "\u0938\u092e\u093e\u092a\u094d\u0924\u093f",
@@ -3465,6 +3515,8 @@ WEB_CATALOGUES = {
         "security.entries_one": "\u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f",
         "security.incomplete": "\u091c\u093e\u0928\u0915\u093e\u0930\u0940 \u0905\u0927\u0942\u0930\u0940",
         "security.incomplete_d": "\u0938\u0947\u0935\u093e \u0915\u093e \u0928\u093e\u092e \u0928\u0939\u0940\u0902 \u0939\u0948 \u092f\u093e \u0909\u092a\u092f\u094b\u0917\u0915\u0930\u094d\u0924\u093e \u0928\u093e\u092e \u0928\u0939\u0940\u0902 \u0939\u0948\u0964",
+        "security.insecure": "\u0905\u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 (http) URL",
+        "security.insecure_d": "\u0907\u0928 \u092a\u094d\u0930\u0935\u093f\u0937\u094d\u091f\u093f\u092f\u094b\u0902 \u092e\u0947\u0902 \u0938\u093e\u0926\u093e http:// URL \u0939\u0948\u0964 \u0935\u0939\u093e\u0901 \u0911\u091f\u094b\u092b\u093c\u093f\u0932 \u0905\u0938\u094d\u0935\u0940\u0915\u0943\u0924 \u0939\u0948; \u0907\u0928\u094d\u0939\u0947\u0902 https \u092a\u0930 \u0932\u0947 \u091c\u093e\u090f\u0901\u0964",
         "security.malformed": "\u0924\u094d\u0930\u0941\u091f\u093f\u092a\u0942\u0930\u094d\u0923 \u092a\u094d\u0930\u092e\u093e\u0923\u0915",
         "security.malformed_d": "\u0917\u094b\u092a\u0928\u0940\u092f \u092e\u093e\u0928 \u0928\u0939\u0940\u0902 \u0939\u0948, \u092f\u093e \u0910\u0938\u093e \u090f\u0932\u094d\u0917\u094b\u0930\u093f\u0926\u094d\u092e \u0939\u0948 \u091c\u093f\u0938\u0915\u0947 \u0932\u093f\u090f SPM \u0915\u094b\u0921 \u0928\u0939\u0940\u0902 \u092c\u0928\u093e \u0938\u0915\u0924\u093e\u0964",
         "security.none": "\u092f\u0939\u093e\u0901 \u0920\u0940\u0915 \u0915\u0930\u0928\u0947 \u0932\u093e\u092f\u0915 \u0915\u0941\u091b \u0928\u0939\u0940\u0902 \u0939\u0948\u0964",
@@ -3486,6 +3538,8 @@ WEB_CATALOGUES = {
         "security.twofa_optin": "2FA \u0938\u092e\u0930\u094d\u0925\u093f\u0924 \u0938\u0947\u0935\u093e\u0913\u0902 \u0915\u0940 \u0905\u0902\u0924\u0930\u094d\u0928\u093f\u0939\u093f\u0924 \u0938\u0942\u091a\u0940 \u0938\u0947 \u0921\u093f\u0935\u093e\u0907\u0938 \u092a\u0930 \u0939\u0940 \u091c\u093e\u0901\u091a\u0964 \u0907\u0938 \u0921\u093f\u0935\u093e\u0907\u0938 \u0938\u0947 \u0915\u0941\u091b \u092d\u0940 \u092c\u093e\u0939\u0930 \u0928\u0939\u0940\u0902 \u091c\u093e\u0924\u093e\u0964",
         "security.weak": "\u0915\u092e\u091c\u093c\u094b\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921",
         "security.weak_d": "12 \u0905\u0915\u094d\u0937\u0930\u094b\u0902 \u0938\u0947 \u091b\u094b\u091f\u0947, \u092f\u093e \u0924\u0940\u0928 \u0938\u0947 \u0915\u092e \u092a\u094d\u0930\u0915\u093e\u0930 \u0915\u0947 \u0905\u0915\u094d\u0937\u0930\u094b\u0902 \u0935\u093e\u0932\u0947\u0964",
+        "security.weakpin": "\u0915\u092e\u091c\u093c\u094b\u0930 PIN \u0914\u0930 \u0915\u094b\u0921",
+        "security.weakpin_d": "\u0910\u0938\u0947 \u0915\u093e\u0930\u094d\u0921 \u0906\u0926\u093f \u0930\u093f\u0915\u0949\u0930\u094d\u0921 \u091c\u093f\u0928\u0915\u093e PIN \u092c\u0939\u0941\u0924 \u0915\u092e\u091c\u093c\u094b\u0930 \u0939\u0948 (\u0926\u094b\u0939\u0930\u093e\u0935, \u0915\u094d\u0930\u092e\u093f\u0915, \u092f\u093e \u0938\u093e\u092e\u093e\u0928\u094d\u092f \u0915\u094b\u0921)\u0964 \u092e\u093e\u0928 \u0915\u092d\u0940 \u0928\u0939\u0940\u0902 \u0926\u093f\u0916\u093e\u092f\u093e \u091c\u093e\u0924\u093e\u0964",
         "settings.confirm": "\u0928\u090f \u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921 \u0915\u0940 \u092a\u0941\u0937\u094d\u091f\u093f \u0915\u0930\u0947\u0902",
         "settings.current": "\u092e\u094c\u091c\u0942\u0926\u093e \u092e\u093e\u0938\u094d\u091f\u0930 \u092a\u093e\u0938\u0935\u0930\u094d\u0921",
         "settings.effect": "\u0907\u0938\u0938\u0947 \u0915\u094d\u092f\u093e \u0939\u094b\u0917\u093e",
@@ -3758,8 +3812,13 @@ WEB_CATALOGUES = {
         "events.detail": "Rincian",
         "events.empty": "Belum ada yang tercatat.",
         "events.empty_sub": "Pembukaan, penulisan, dan perubahan kata sandi utama akan muncul di sini.",
+        "events.intact": "Log utuh.",
+        "events.intact_d": "Setiap entri terangkai ke entri sebelumnya, dan rangkaiannya terverifikasi.",
         "events.kind": "Peristiwa",
         "events.outcome": "Hasil",
+        "events.tampered": "Pengrusakan terdeteksi.",
+        "events.tampered_d": "Rangkaian hash log putus: sebuah entri telah diubah, disisipkan, atau dihapus.",
+        "events.unkeyed": "Rangkaian bukti-rusak belum punya kunci; ia mulai melindungi entri begitu log memilikinya.",
         "events.when": "Waktu (UTC)",
         "expiring.col.days": "Hari",
         "expiring.col.expires": "Kedaluwarsa",
@@ -4052,6 +4111,8 @@ WEB_CATALOGUES = {
         "security.entries_one": "entri",
         "security.incomplete": "Detail belum lengkap",
         "security.incomplete_d": "Tidak ada nama layanan atau username.",
+        "security.insecure": "URL tidak aman (http)",
+        "security.insecure_d": "Entri ini memakai URL http:// biasa. Pengisian otomatis ditolak di sana; pindahkan ke https.",
         "security.malformed": "Authenticator rusak",
         "security.malformed_d": "Secret hilang, atau algoritma tidak didukung SPM.",
         "security.none": "Tidak ada yang perlu diperbaiki.",
@@ -4073,6 +4134,8 @@ WEB_CATALOGUES = {
         "security.twofa_optin": "Pemeriksaan di perangkat terhadap daftar bawaan layanan yang mendukung 2FA. Tidak ada yang keluar dari perangkat ini.",
         "security.weak": "Password lemah",
         "security.weak_d": "Kurang dari 12 karakter, atau kurang dari tiga jenis karakter.",
+        "security.weakpin": "PIN dan kode lemah",
+        "security.weakpin_d": "Kartu dan catatan lain yang PIN-nya sangat lemah (berulang, berurutan, atau kode umum). Nilainya tidak pernah ditampilkan.",
         "settings.confirm": "Konfirmasi kata sandi utama baru",
         "settings.current": "Kata sandi utama saat ini",
         "settings.effect": "Yang akan terjadi",
@@ -4345,8 +4408,13 @@ WEB_CATALOGUES = {
         "events.detail": "\u8a73\u7d30",
         "events.empty": "\u307e\u3060\u8a18\u9332\u306f\u3042\u308a\u307e\u305b\u3093\u3002",
         "events.empty_sub": "\u30a2\u30f3\u30ed\u30c3\u30af\u3001\u66f8\u304d\u8fbc\u307f\u3001\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\u306e\u5909\u66f4\u304c\u3053\u3053\u306b\u8868\u793a\u3055\u308c\u307e\u3059\u3002",
+        "events.intact": "\u30ed\u30b0\u306f\u7121\u50b7\u3067\u3059\u3002",
+        "events.intact_d": "\u5404\u30a8\u30f3\u30c8\u30ea\u306f\u524d\u306e\u30a8\u30f3\u30c8\u30ea\u306b\u9023\u9396\u3057\u3066\u304a\u308a\u3001\u30c1\u30a7\u30fc\u30f3\u304c\u691c\u8a3c\u3055\u308c\u307e\u3057\u305f\u3002",
         "events.kind": "\u30a4\u30d9\u30f3\u30c8",
         "events.outcome": "\u7d50\u679c",
+        "events.tampered": "\u6539\u3056\u3093\u3092\u691c\u51fa\u3057\u307e\u3057\u305f\u3002",
+        "events.tampered_d": "\u30ed\u30b0\u306e\u30cf\u30c3\u30b7\u30e5\u30c1\u30a7\u30fc\u30f3\u304c\u5207\u308c\u3066\u3044\u307e\u3059\u3002\u30a8\u30f3\u30c8\u30ea\u304c\u7de8\u96c6\u30fb\u633f\u5165\u30fb\u524a\u9664\u3055\u308c\u307e\u3057\u305f\u3002",
+        "events.unkeyed": "\u6539\u3056\u3093\u691c\u77e5\u30c1\u30a7\u30fc\u30f3\u306b\u306f\u307e\u3060\u9375\u304c\u3042\u308a\u307e\u305b\u3093\u3002\u30ed\u30b0\u306b\u9375\u304c\u3067\u304d\u6b21\u7b2c\u3001\u30a8\u30f3\u30c8\u30ea\u3092\u4fdd\u8b77\u3057\u307e\u3059\u3002",
         "events.when": "\u65e5\u6642 (UTC)",
         "expiring.col.days": "\u65e5\u6570",
         "expiring.col.expires": "\u6709\u52b9\u671f\u9650",
@@ -4639,6 +4707,8 @@ WEB_CATALOGUES = {
         "security.entries_one": "\u4ef6",
         "security.incomplete": "\u60c5\u5831\u304c\u4e0d\u8db3",
         "security.incomplete_d": "\u30b5\u30fc\u30d3\u30b9\u540d\u307e\u305f\u306f\u30e6\u30fc\u30b6\u30fc\u540d\u304c\u3042\u308a\u307e\u305b\u3093\u3002",
+        "security.insecure": "\u5b89\u5168\u3067\u306a\u3044 (http) URL",
+        "security.insecure_d": "\u3053\u308c\u3089\u306e\u30a8\u30f3\u30c8\u30ea\u306f\u5e73\u6587\u306e http:// URL \u3092\u6301\u3061\u307e\u3059\u3002\u305d\u3053\u3067\u306f\u81ea\u52d5\u5165\u529b\u304c\u62d2\u5426\u3055\u308c\u307e\u3059\u3002https \u306b\u79fb\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
         "security.malformed": "\u4e0d\u6b63\u306a\u8a8d\u8a3c\u30a2\u30d7\u30ea",
         "security.malformed_d": "\u30b7\u30fc\u30af\u30ec\u30c3\u30c8\u304c\u7121\u3044\u304b\u3001SPM\u304c\u5bfe\u5fdc\u3057\u306a\u3044\u30a2\u30eb\u30b4\u30ea\u30ba\u30e0\u3067\u3059\u3002",
         "security.none": "\u4fee\u6b63\u3059\u3079\u304d\u9805\u76ee\u306f\u3042\u308a\u307e\u305b\u3093\u3002",
@@ -4660,6 +4730,8 @@ WEB_CATALOGUES = {
         "security.twofa_optin": "2FA \u5bfe\u5fdc\u30b5\u30fc\u30d3\u30b9\u306e\u5185\u8535\u30ea\u30b9\u30c8\u3068\u7aef\u672b\u5185\u3067\u7167\u5408\u3057\u307e\u3059\u3002\u3053\u306e\u7aef\u672b\u304b\u3089\u4f55\u3082\u9001\u4fe1\u3055\u308c\u307e\u305b\u3093\u3002",
         "security.weak": "\u5f31\u3044\u30d1\u30b9\u30ef\u30fc\u30c9",
         "security.weak_d": "12\u6587\u5b57\u672a\u6e80\u3001\u307e\u305f\u306f\u6587\u5b57\u7a2e\u304c3\u7a2e\u985e\u672a\u6e80\u3002",
+        "security.weakpin": "\u5f31\u3044 PIN\u30fb\u30b3\u30fc\u30c9",
+        "security.weakpin_d": "PIN \u304c\u5358\u7d14\u306b\u5f31\u3044\uff08\u7e70\u308a\u8fd4\u3057\u30fb\u9023\u756a\u30fb\u3088\u304f\u3042\u308b\u30b3\u30fc\u30c9\uff09\u30ab\u30fc\u30c9\u306a\u3069\u306e\u8a18\u9332\u3067\u3059\u3002\u5024\u306f\u8868\u793a\u3055\u308c\u307e\u305b\u3093\u3002",
         "settings.confirm": "\u65b0\u3057\u3044\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9\uff08\u78ba\u8a8d\uff09",
         "settings.current": "\u73fe\u5728\u306e\u30de\u30b9\u30bf\u30fc\u30d1\u30b9\u30ef\u30fc\u30c9",
         "settings.effect": "\u5b9f\u884c\u3055\u308c\u308b\u5185\u5bb9",
@@ -4932,8 +5004,13 @@ WEB_CATALOGUES = {
         "events.detail": "\uc138\ubd80 \uc815\ubcf4",
         "events.empty": "\uc544\uc9c1 \uae30\ub85d\ub41c \ub0b4\uc6a9\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.",
         "events.empty_sub": "\uc7a0\uae08 \ud574\uc81c, \uc4f0\uae30, \ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638 \ubcc0\uacbd\uc774 \uc77c\uc5b4\ub098\ub294 \ub300\ub85c \uc5ec\uae30\uc5d0 \ud45c\uc2dc\ub429\ub2c8\ub2e4.",
+        "events.intact": "\ub85c\uadf8 \ubb34\uacb0.",
+        "events.intact_d": "\ubaa8\ub4e0 \ud56d\ubaa9\uc774 \uc774\uc804 \ud56d\ubaa9\uc5d0 \uc5f0\uacb0\ub418\uc5b4 \uc788\uc73c\uba70 \uccb4\uc778\uc774 \uac80\uc99d\ub429\ub2c8\ub2e4.",
         "events.kind": "\uc774\ubca4\ud2b8",
         "events.outcome": "\uacb0\uacfc",
+        "events.tampered": "\ubcc0\uc870\uac00 \uac10\uc9c0\ub418\uc5c8\uc2b5\ub2c8\ub2e4.",
+        "events.tampered_d": "\ub85c\uadf8\uc758 \ud574\uc2dc \uccb4\uc778\uc774 \ub04a\uc5b4\uc84c\uc2b5\ub2c8\ub2e4. \ud56d\ubaa9\uc774 \ud3b8\uc9d1\u00b7\uc0bd\uc785\u00b7\uc0ad\uc81c\ub418\uc5c8\uc2b5\ub2c8\ub2e4.",
+        "events.unkeyed": "\ubcc0\uc870 \ubc29\uc9c0 \uccb4\uc778\uc5d0 \uc544\uc9c1 \ud0a4\uac00 \uc5c6\uc2b5\ub2c8\ub2e4. \ub85c\uadf8\uc5d0 \ud0a4\uac00 \uc0dd\uae30\uba74 \ud56d\ubaa9\uc744 \ubcf4\ud638\ud558\uae30 \uc2dc\uc791\ud569\ub2c8\ub2e4.",
         "events.when": "\uc2dc\uac01 (UTC)",
         "expiring.col.days": "\uc77c\uc218",
         "expiring.col.expires": "\ub9cc\ub8cc",
@@ -5226,6 +5303,8 @@ WEB_CATALOGUES = {
         "security.entries_one": "\uac1c \ud56d\ubaa9",
         "security.incomplete": "\uc815\ubcf4 \ub204\ub77d",
         "security.incomplete_d": "\uc11c\ube44\uc2a4 \uc774\ub984\uc774 \uc5c6\uac70\ub098 \uc0ac\uc6a9\uc790 \uc774\ub984\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "security.insecure": "\uc548\uc804\ud558\uc9c0 \uc54a\uc740 (http) URL",
+        "security.insecure_d": "\uc774 \ud56d\ubaa9\ub4e4\uc740 \uc77c\ubc18 http:// URL\uc744 \uac00\uc9d1\ub2c8\ub2e4. \uadf8\uacf3\uc5d0\uc11c\ub294 \uc790\ub3d9 \ucc44\uc6b0\uae30\uac00 \uac70\ubd80\ub429\ub2c8\ub2e4. https\ub85c \uc62e\uae30\uc138\uc694.",
         "security.malformed": "\ud615\uc2dd\uc774 \uc798\ubabb\ub41c \uc778\uc99d\uae30",
         "security.malformed_d": "\ube44\ubc00 \uac12\uc774 \uc5c6\uac70\ub098, SPM\uc774 \ucf54\ub4dc\ub97c \ub9cc\ub4e4 \uc218 \uc5c6\ub294 \uc54c\uace0\ub9ac\uc998\uc785\ub2c8\ub2e4.",
         "security.none": "\uc5ec\uae30\uc5d0\ub294 \uace0\uce60 \uac83\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.",
@@ -5247,6 +5326,8 @@ WEB_CATALOGUES = {
         "security.twofa_optin": "2FA\ub97c \uc9c0\uc6d0\ud558\ub294 \uc11c\ube44\uc2a4\uc758 \ub0b4\uc7a5 \ubaa9\ub85d\uacfc \uae30\uae30 \ub0b4\uc5d0\uc11c \ub300\uc870\ud569\ub2c8\ub2e4. \uc774 \uae30\uae30\uc5d0\uc11c \uc544\ubb34\uac83\ub3c4 \ub098\uac00\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
         "security.weak": "\ucde8\uc57d\ud55c \ube44\ubc00\ubc88\ud638",
         "security.weak_d": "12\uc790 \ubbf8\ub9cc\uc774\uac70\ub098, \uc0ac\uc6a9\ud55c \ubb38\uc790 \uc885\ub958\uac00 \uc138 \uac00\uc9c0 \ubbf8\ub9cc\uc785\ub2c8\ub2e4.",
+        "security.weakpin": "\ucde8\uc57d\ud55c PIN\u00b7\ucf54\ub4dc",
+        "security.weakpin_d": "PIN\uc774 \uc9c0\ub098\uce58\uac8c \ucde8\uc57d\ud55c(\ubc18\ubcf5\u00b7\uc5f0\uc18d\u00b7\ud754\ud55c \ucf54\ub4dc) \uce74\ub4dc \ub4f1\uc758 \uae30\ub85d\uc785\ub2c8\ub2e4. \uac12\uc740 \ud45c\uc2dc\ub418\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
         "settings.confirm": "\uc0c8 \ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638 \ud655\uc778",
         "settings.current": "\ud604\uc7ac \ub9c8\uc2a4\ud130 \ube44\ubc00\ubc88\ud638",
         "settings.effect": "\uc774 \uc791\uc5c5\uc774 \ud558\ub294 \uc77c",
@@ -5519,8 +5600,13 @@ WEB_CATALOGUES = {
         "events.detail": "Detalhe",
         "events.empty": "Nada registrado ainda.",
         "events.empty_sub": "Desbloqueios, grava\u00e7\u00f5es e mudan\u00e7as de senha mestra aparecer\u00e3o aqui conforme acontecerem.",
+        "events.intact": "Registro \u00edntegro.",
+        "events.intact_d": "Cada entrada registrada est\u00e1 encadeada \u00e0 anterior, e a cadeia \u00e9 verificada.",
         "events.kind": "Evento",
         "events.outcome": "Resultado",
+        "events.tampered": "Adultera\u00e7\u00e3o detectada.",
+        "events.tampered_d": "A cadeia de hash do registro se quebra: uma entrada foi editada, inserida ou removida.",
+        "events.unkeyed": "A cadeia de evid\u00eancia de adultera\u00e7\u00e3o ainda n\u00e3o tem chave; ela protege as entradas assim que o registro tiver uma.",
         "events.when": "Quando (UTC)",
         "expiring.col.days": "Dias",
         "expiring.col.expires": "Expira",
@@ -5813,6 +5899,8 @@ WEB_CATALOGUES = {
         "security.entries_one": "entrada",
         "security.incomplete": "Faltam informa\u00e7\u00f5es",
         "security.incomplete_d": "Sem nome de servi\u00e7o ou sem usu\u00e1rio.",
+        "security.insecure": "URLs inseguras (http)",
+        "security.insecure_d": "Estes registros t\u00eam uma URL http:// simples. O preenchimento \u00e9 recusado ali; mova-os para https.",
         "security.malformed": "Autenticadores malformados",
         "security.malformed_d": "Sem segredo, ou com um algoritmo para o qual o SPM n\u00e3o consegue gerar c\u00f3digos.",
         "security.none": "Nada a corrigir aqui.",
@@ -5834,6 +5922,8 @@ WEB_CATALOGUES = {
         "security.twofa_optin": "Verifica\u00e7\u00e3o no dispositivo com uma lista inclu\u00edda de servi\u00e7os que oferecem 2FA. Nada sai deste dispositivo.",
         "security.weak": "Senhas fracas",
         "security.weak_d": "Com menos de 12 caracteres, ou usando menos de tr\u00eas classes de caractere.",
+        "security.weakpin": "PINs e c\u00f3digos fracos",
+        "security.weakpin_d": "Cart\u00f5es e outros registros cujo PIN \u00e9 trivialmente fraco (repetido, sequencial ou um c\u00f3digo comum). O valor nunca \u00e9 mostrado.",
         "settings.confirm": "Confirme a nova senha mestra",
         "settings.current": "Senha mestra atual",
         "settings.effect": "O que isso faz",
@@ -6106,8 +6196,13 @@ WEB_CATALOGUES = {
         "events.detail": "\u041f\u043e\u0434\u0440\u043e\u0431\u043d\u043e\u0441\u0442\u0438",
         "events.empty": "\u041f\u043e\u043a\u0430 \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u0437\u0430\u043f\u0438\u0441\u0430\u043d\u043e.",
         "events.empty_sub": "\u0420\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0438, \u0437\u0430\u043f\u0438\u0441\u0438 \u0438 \u0441\u043c\u0435\u043d\u044b \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044f \u043f\u043e\u044f\u0432\u044f\u0442\u0441\u044f \u0437\u0434\u0435\u0441\u044c \u043f\u043e \u043c\u0435\u0440\u0435 \u0442\u043e\u0433\u043e, \u043a\u0430\u043a \u0431\u0443\u0434\u0443\u0442 \u043f\u0440\u043e\u0438\u0441\u0445\u043e\u0434\u0438\u0442\u044c.",
+        "events.intact": "\u0416\u0443\u0440\u043d\u0430\u043b \u0446\u0435\u043b.",
+        "events.intact_d": "\u041a\u0430\u0436\u0434\u0430\u044f \u0437\u0430\u043f\u0438\u0441\u044c \u0441\u0446\u0435\u043f\u043b\u0435\u043d\u0430 \u0441 \u043f\u0440\u0435\u0434\u044b\u0434\u0443\u0449\u0435\u0439, \u0438 \u0446\u0435\u043f\u043e\u0447\u043a\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u0435\u0442\u0441\u044f.",
         "events.kind": "\u0421\u043e\u0431\u044b\u0442\u0438\u0435",
         "events.outcome": "\u0420\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442",
+        "events.tampered": "\u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d\u043e \u0432\u043c\u0435\u0448\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432\u043e.",
+        "events.tampered_d": "\u0425\u0435\u0448-\u0446\u0435\u043f\u043e\u0447\u043a\u0430 \u0436\u0443\u0440\u043d\u0430\u043b\u0430 \u0440\u0430\u0437\u043e\u0440\u0432\u0430\u043d\u0430: \u0437\u0430\u043f\u0438\u0441\u044c \u0431\u044b\u043b\u0430 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0430, \u0432\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u0430 \u0438\u043b\u0438 \u0443\u0434\u0430\u043b\u0435\u043d\u0430.",
+        "events.unkeyed": "\u0423 \u0446\u0435\u043f\u043e\u0447\u043a\u0438 \u0437\u0430\u0449\u0438\u0442\u044b \u043e\u0442 \u043f\u043e\u0434\u0434\u0435\u043b\u043a\u0438 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442 \u043a\u043b\u044e\u0447\u0430; \u043e\u043d\u0430 \u043d\u0430\u0447\u0438\u043d\u0430\u0435\u0442 \u0437\u0430\u0449\u0438\u0449\u0430\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u0438, \u043a\u0430\u043a \u0442\u043e\u043b\u044c\u043a\u043e \u043e\u043d \u043f\u043e\u044f\u0432\u0438\u0442\u0441\u044f.",
         "events.when": "\u041a\u043e\u0433\u0434\u0430 (UTC)",
         "expiring.col.days": "\u0414\u043d\u0435\u0439",
         "expiring.col.expires": "\u0418\u0441\u0442\u0435\u043a\u0430\u0435\u0442",
@@ -6400,6 +6495,8 @@ WEB_CATALOGUES = {
         "security.entries_one": "\u0437\u0430\u043f\u0438\u0441\u044c",
         "security.incomplete": "\u041d\u0435 \u0445\u0432\u0430\u0442\u0430\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445",
         "security.incomplete_d": "\u041d\u0435\u0442 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u044f \u0441\u0435\u0440\u0432\u0438\u0441\u0430 \u0438\u043b\u0438 \u0438\u043c\u0435\u043d\u0438 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f.",
+        "security.insecure": "\u041d\u0435\u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u044b\u0435 URL (http)",
+        "security.insecure_d": "\u0423 \u044d\u0442\u0438\u0445 \u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u043f\u0440\u043e\u0441\u0442\u043e\u0439 http://-\u0430\u0434\u0440\u0435\u0441. \u0422\u0430\u043c \u0430\u0432\u0442\u043e\u0437\u0430\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435 \u0437\u0430\u043f\u0440\u0435\u0449\u0435\u043d\u043e; \u043f\u0435\u0440\u0435\u0432\u0435\u0434\u0438\u0442\u0435 \u0438\u0445 \u043d\u0430 https.",
         "security.malformed": "\u041d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0435 \u0430\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440\u044b",
         "security.malformed_d": "\u041d\u0435\u0442 \u0441\u0435\u043a\u0440\u0435\u0442\u0430 \u0438\u043b\u0438 \u0443\u043a\u0430\u0437\u0430\u043d \u0430\u043b\u0433\u043e\u0440\u0438\u0442\u043c, \u0434\u043b\u044f \u043a\u043e\u0442\u043e\u0440\u043e\u0433\u043e SPM \u043d\u0435 \u0443\u043c\u0435\u0435\u0442 \u0432\u044b\u0447\u0438\u0441\u043b\u044f\u0442\u044c \u043a\u043e\u0434\u044b.",
         "security.none": "\u0417\u0434\u0435\u0441\u044c \u043d\u0435\u0447\u0435\u0433\u043e \u0438\u0441\u043f\u0440\u0430\u0432\u043b\u044f\u0442\u044c.",
@@ -6421,6 +6518,8 @@ WEB_CATALOGUES = {
         "security.twofa_optin": "\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043d\u0430 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0435 \u043f\u043e \u0432\u0441\u0442\u0440\u043e\u0435\u043d\u043d\u043e\u043c\u0443 \u0441\u043f\u0438\u0441\u043a\u0443 \u0441\u0435\u0440\u0432\u0438\u0441\u043e\u0432 \u0441 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u043e\u0439 2FA. \u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043f\u043e\u043a\u0438\u0434\u0430\u0435\u0442 \u044d\u0442\u043e \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u043e.",
         "security.weak": "\u0421\u043b\u0430\u0431\u044b\u0435 \u043f\u0430\u0440\u043e\u043b\u0438",
         "security.weak_d": "\u041a\u043e\u0440\u043e\u0447\u0435 12 \u0441\u0438\u043c\u0432\u043e\u043b\u043e\u0432 \u0438\u043b\u0438 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u044e\u0442 \u043c\u0435\u043d\u044c\u0448\u0435 \u0442\u0440\u0451\u0445 \u043a\u043b\u0430\u0441\u0441\u043e\u0432 \u0441\u0438\u043c\u0432\u043e\u043b\u043e\u0432.",
+        "security.weakpin": "\u0421\u043b\u0430\u0431\u044b\u0435 PIN-\u043a\u043e\u0434\u044b \u0438 \u043a\u043e\u0434\u044b",
+        "security.weakpin_d": "\u041a\u0430\u0440\u0442\u044b \u0438 \u0434\u0440\u0443\u0433\u0438\u0435 \u0442\u0438\u043f\u0438\u0437\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u0441 \u0442\u0440\u0438\u0432\u0438\u0430\u043b\u044c\u043d\u043e \u0441\u043b\u0430\u0431\u044b\u043c PIN (\u043f\u043e\u0432\u0442\u043e\u0440, \u043f\u043e\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u0442\u0435\u043b\u044c\u043d\u043e\u0441\u0442\u044c \u0438\u043b\u0438 \u0440\u0430\u0441\u043f\u0440\u043e\u0441\u0442\u0440\u0430\u043d\u0451\u043d\u043d\u044b\u0439 \u043a\u043e\u0434). \u0417\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u043d\u0438\u043a\u043e\u0433\u0434\u0430 \u043d\u0435 \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442\u0441\u044f.",
         "settings.confirm": "\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u043d\u043e\u0432\u044b\u0439 \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044c",
         "settings.current": "\u0422\u0435\u043a\u0443\u0449\u0438\u0439 \u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044c",
         "settings.effect": "\u0427\u0442\u043e \u043f\u0440\u0438 \u044d\u0442\u043e\u043c \u043f\u0440\u043e\u0438\u0437\u043e\u0439\u0434\u0451\u0442",
@@ -6693,8 +6792,13 @@ WEB_CATALOGUES = {
         "events.detail": "\u8be6\u60c5",
         "events.empty": "\u5c1a\u65e0\u4efb\u4f55\u8bb0\u5f55\u3002",
         "events.empty_sub": "\u89e3\u9501\u3001\u5199\u5165\u4ee5\u53ca\u4e3b\u5bc6\u7801\u53d8\u66f4\u90fd\u4f1a\u5728\u53d1\u751f\u65f6\u663e\u793a\u5728\u8fd9\u91cc\u3002",
+        "events.intact": "\u65e5\u5fd7\u5b8c\u597d\u3002",
+        "events.intact_d": "\u6bcf\u6761\u8bb0\u5f55\u90fd\u4e0e\u524d\u4e00\u6761\u76f8\u94fe\uff0c\u94fe\u6761\u6821\u9a8c\u901a\u8fc7\u3002",
         "events.kind": "\u4e8b\u4ef6",
         "events.outcome": "\u7ed3\u679c",
+        "events.tampered": "\u68c0\u6d4b\u5230\u7be1\u6539\u3002",
+        "events.tampered_d": "\u65e5\u5fd7\u7684\u54c8\u5e0c\u94fe\u65ad\u88c2\uff1a\u67d0\u6761\u8bb0\u5f55\u88ab\u7f16\u8f91\u3001\u63d2\u5165\u6216\u5220\u9664\u3002",
+        "events.unkeyed": "\u9632\u7be1\u6539\u94fe\u8fd8\u6ca1\u6709\u5bc6\u94a5\uff1b\u4e00\u65e6\u65e5\u5fd7\u6709\u4e86\u5bc6\u94a5\uff0c\u5c31\u4f1a\u5f00\u59cb\u4fdd\u62a4\u8bb0\u5f55\u3002",
         "events.when": "\u65f6\u95f4\uff08UTC\uff09",
         "expiring.col.days": "\u5929\u6570",
         "expiring.col.expires": "\u5230\u671f",
@@ -6987,6 +7091,8 @@ WEB_CATALOGUES = {
         "security.entries_one": "\u4e2a\u6761\u76ee",
         "security.incomplete": "\u4fe1\u606f\u4e0d\u5b8c\u6574",
         "security.incomplete_d": "\u7f3a\u5c11\u670d\u52a1\u540d\u79f0\u6216\u7528\u6237\u540d\u3002",
+        "security.insecure": "\u4e0d\u5b89\u5168\u7684 (http) \u7f51\u5740",
+        "security.insecure_d": "\u8fd9\u4e9b\u6761\u76ee\u4f7f\u7528\u666e\u901a\u7684 http:// \u7f51\u5740\u3002\u90a3\u91cc\u4f1a\u62d2\u7edd\u81ea\u52a8\u586b\u5145\uff1b\u8bf7\u6539\u4e3a https\u3002",
         "security.malformed": "\u683c\u5f0f\u6709\u8bef\u7684\u9a8c\u8bc1\u5668",
         "security.malformed_d": "\u7f3a\u5c11\u5bc6\u94a5\uff0c\u6216\u4f7f\u7528\u4e86 SPM \u65e0\u6cd5\u751f\u6210\u9a8c\u8bc1\u7801\u7684\u7b97\u6cd5\u3002",
         "security.none": "\u8fd9\u91cc\u6ca1\u6709\u9700\u8981\u4fee\u590d\u7684\u95ee\u9898\u3002",
@@ -7008,6 +7114,8 @@ WEB_CATALOGUES = {
         "security.twofa_optin": "\u5728\u672c\u673a\u5bf9\u7167\u5185\u7f6e\u7684\u652f\u6301\u4e24\u6b65\u9a8c\u8bc1\u7684\u670d\u52a1\u5217\u8868\u8fdb\u884c\u68c0\u67e5\u3002\u4e0d\u4f1a\u79bb\u5f00\u672c\u8bbe\u5907\u3002",
         "security.weak": "\u5f31\u5bc6\u7801",
         "security.weak_d": "\u77ed\u4e8e 12 \u4e2a\u5b57\u7b26\uff0c\u6216\u4f7f\u7528\u7684\u5b57\u7b26\u7c7b\u522b\u5c11\u4e8e\u4e09\u79cd\u3002",
+        "security.weakpin": "\u5f31 PIN \u548c\u9a8c\u8bc1\u7801",
+        "security.weakpin_d": "PIN \u8fc7\u4e8e\u7b80\u5355\uff08\u91cd\u590d\u3001\u8fde\u7eed\u6216\u5e38\u89c1\u7801\uff09\u7684\u94f6\u884c\u5361\u7b49\u8bb0\u5f55\u3002\u7edd\u4e0d\u663e\u793a\u5176\u503c\u3002",
         "settings.confirm": "\u786e\u8ba4\u65b0\u7684\u4e3b\u5bc6\u7801",
         "settings.current": "\u5f53\u524d\u4e3b\u5bc6\u7801",
         "settings.effect": "\u6b64\u64cd\u4f5c\u4f1a\u505a\u4ec0\u4e48",
@@ -10031,6 +10139,26 @@ def security_page(audit, entries):
             'against a bundled list of services that support 2FA. Nothing leaves this device.</div>'
             '<a class="btn btn-ghost btn-sm" href="/security?twofa=1" '
             'data-i18n="security.twofa_check">Check for missing 2FA</a>')
+    # Weak PINs / codes on typed records (roadmap 14). Names the record and the
+    # field; the value never appears.
+    weak_pins = audit.get("weak_pins", [])
+    if weak_pins:
+        wrows = ""
+        for f in weak_pins:
+            rtype = _esc(f.get("type", ""))
+            rid = _esc(f.get("id", ""))
+            wrows += (
+                '<tr><td class="num">%s</td><td class="strong">%s</td>'
+                '<td class="muted">%s</td>'
+                '<td class="actions"><a class="btn btn-primary btn-sm" '
+                'href="/records-view?type=%s&amp;id=%s" '
+                'data-i18n="security.act_fix">Fix this entry</a></td></tr>'
+                % (rid, rtype, _esc(f.get("field", "")), rtype, rid))
+        weakpin_html = ('<div class="table-wrap"><table class="t"><tbody>'
+                        + wrows + '</tbody></table></div>')
+    else:
+        weakpin_html = ('<div class="hint" data-i18n="security.none">'
+                        'Nothing to fix here.</div>')
     days = audit["rotation_days"]
     return f"""
 <div class="page-head">
@@ -10069,6 +10197,13 @@ def security_page(audit, entries):
     {_finding(audit["malformed"], lookup, "security.malformed", "Malformed authenticators",
               "security.malformed_d", "Missing a secret, or an algorithm SPM cannot generate codes for.",
               "security.act_fix", "Fix this entry", anchor="malformed")}
+    {_finding(audit.get("insecure", []), lookup, "security.insecure", "Insecure (http) URLs",
+              "security.insecure_d", "These entries carry a plain http:// URL. Autofill is refused there; move them to https.",
+              "security.act_change", "Change URL", anchor="insecure")}
+    <div class="field" id="finding-weakpin"><label data-i18n="security.weakpin">Weak PINs and codes</label>
+      <div class="hint" data-i18n="security.weakpin_d">Card and other typed records whose PIN is trivially weak (repeated, sequential, or a common code). The value is never shown.</div>
+      {weakpin_html}
+    </div>
     <div class="field"><label data-i18n="security.breached">Known breaches</label>
       <div class="hint" data-i18n="security.breached_d">Matches in Pwned Passwords. Only five SHA-1 prefix characters leave this device.</div>
       {breach_html}
@@ -12609,7 +12744,7 @@ def transfer_page():
     return render_shell(content, "transfer", VERSION, VAULT_PATH, title="Export / Import")
 
 
-def events_page(events):
+def events_page(events, integrity=None):
     """The security log: what was done to this vault, and when.
 
     Deliberately carries no record identity. The log has none to show -- that
@@ -12679,6 +12814,26 @@ def events_page(events):
                    f'file; SPM cannot tell which apart, so it says so rather '
                    f'than guessing.</div>')
 
+    # Tamper-evidence badge (roadmap 18): the log is hash-chained, and this says
+    # whether the chain still verifies.
+    integrity_html = ""
+    status = (integrity or {}).get("status")
+    if status == "ok":
+        integrity_html = ('<div class="flash ok" style="display:block">'
+                          '<strong data-i18n="events.intact">Log intact.</strong> '
+                          '<span data-i18n="events.intact_d">Every recorded entry is '
+                          'chained to the one before it, and the chain verifies.</span></div>')
+    elif status == "broken":
+        integrity_html = (f'<div class="flash error" style="display:block">'
+                          f'<strong data-i18n="events.tampered">Tampering detected.</strong> '
+                          f'<span data-i18n="events.tampered_d">The log\'s hash chain '
+                          f'breaks: an entry has been edited, inserted or removed.</span> '
+                          f'(entry {_esc(str(integrity.get("broken_at", 0)))})</div>')
+    elif status == "unkeyed":
+        integrity_html = ('<div class="flash" style="display:block">'
+                          '<span data-i18n="events.unkeyed">The tamper-evidence chain '
+                          'has no key yet; it starts protecting entries once the log has one.</span></div>')
+
     content = f"""
 <div class="page-head">
   <div>
@@ -12688,6 +12843,7 @@ def events_page(events):
       secrets.</div>
   </div>
 </div>
+{integrity_html}
 {warning}
 {body}"""
     return render_shell(content, "events", VERSION, VAULT_PATH,
@@ -16252,7 +16408,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # reading most are the failed unlocks, and a page that needed the
             # vault open could not show them to someone who is locked out.
             events = list(reversed(core.read_events(VAULT_PATH, 500)))
-            self._send_html(200, events_page(events))
+            integrity = core.verify_events(VAULT_PATH)
+            self._send_html(200, events_page(events, integrity))
             return
 
         if path == "/history":

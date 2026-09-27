@@ -956,6 +956,16 @@ EVENT_REASONS = ("bad-master", "corrupt", "missing", "unreadable",
                  "enrolled", "forgotten", "bad-secret", "vault-replaced",
                  "enabled", "disabled", "rotated", "imported")
 EVENT_SCOPES = ("live", "other")
+# Tamper-evidence (roadmap 18). Each line is chained to the one before it with
+# an HMAC over (previous line's MAC || this line's fields), keyed by a per-vault
+# random key kept in a 0600 sibling file. `verify_events` recomputes the chain,
+# so any edit, reordering, insertion or deletion of a line by anything without
+# the key breaks it. Honest limitation: the log is plaintext beside the vault,
+# so an attacker with full local read of the key file can still forge -- the
+# same access that already lets them read the vault. The chain defeats naive
+# edits and deletions, and truncation from the newest end.
+EVENT_MAC_GENESIS = "spm-events-chain-v1"
+EVENT_MAC_LEN = 32  # hex chars kept from the HMAC-SHA256 digest
 
 
 # ----- record attributes: folders and custom fields --------------------------
@@ -3220,6 +3230,40 @@ def events_path(vault_path):
                         vault_scope_id(vault_path) + ".log")
 
 
+def _event_key(path):
+    """The per-vault event-log HMAC key (roadmap 18), created lazily.
+
+    Lives beside the log as `<log>.key`, 0600, 32 random bytes stored hex.
+    Returns the raw key bytes, or None if it cannot be read or created (in
+    which case the log is written unchained rather than not at all)."""
+    key_path = path + ".key"
+    try:
+        with open(key_path, "r", encoding="utf-8") as handle:
+            raw = handle.read().strip()
+        key = bytes.fromhex(raw)
+        if len(key) == 32:
+            return key
+    except (OSError, ValueError):
+        pass
+    try:
+        os.makedirs(os.path.dirname(key_path), mode=0o700, exist_ok=True)
+        key = os.urandom(32)
+        fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, key.hex().encode("ascii"))
+        finally:
+            os.close(fd)
+        return key
+    except OSError:
+        return None
+
+
+def _event_mac(key, prev_mac, core_line):
+    """The chain MAC for one core line (when\\tkind\\toutcome\\tdetail)."""
+    message = ((prev_mac or EVENT_MAC_GENESIS) + "\x1e" + core_line).encode("utf-8")
+    return hmac.new(key, message, hashlib.sha256).hexdigest()[:EVENT_MAC_LEN]
+
+
 def _event_retention():
     try:
         keep = int(os.environ.get("SPM_EVENT_RETENTION", ""))
@@ -3259,7 +3303,8 @@ def _coalesces(path, kind, outcome, detail, now):
     if not previous:
         return False
     fields = previous.split("\t")
-    if len(fields) != 4:
+    # A line is 4 core fields, or 5 once the chain MAC (roadmap 18) is appended.
+    if len(fields) not in (4, 5):
         return False
     if (fields[1], fields[2], fields[3]) != (kind, outcome, detail):
         return False
@@ -3332,6 +3377,15 @@ def record_event(kind, outcome="ok", detail="", vault_path=None):
         written = line.split("\t")
         if _coalesces(path, written[1], written[2], written[3], now):
             return False
+        # Chain this line to the previous one (roadmap 18). If the key cannot be
+        # obtained, the line is still written -- unchained -- because losing the
+        # event matters more than losing its tamper-evidence.
+        key = _event_key(path)
+        if key is not None:
+            previous = _last_event(path)
+            prev_fields = previous.split("\t") if previous else []
+            prev_mac = prev_fields[4] if len(prev_fields) >= 5 else EVENT_MAC_GENESIS
+            line = line + "\t" + _event_mac(key, prev_mac, line)
         handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         try:
             os.write(handle, (line + "\n").encode("utf-8"))
@@ -3355,6 +3409,20 @@ def _prune_events(path):
         return
     if len(lines) <= keep * 2:
         return
+    # The retained head is chained to a line we are about to drop, so record
+    # that dropped line's MAC as the chain anchor (roadmap 18). Without it the
+    # oldest retained line could not be told apart from a post-prune anchor, and
+    # verify_events would have to trust it blindly.
+    predecessor = lines[-keep - 1].rstrip("\n").split("\t")
+    anchor = predecessor[4] if len(predecessor) >= 5 else EVENT_MAC_GENESIS
+    try:
+        fd = os.open(path + ".anchor", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, anchor.encode("ascii", "ignore"))
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
     staged = path + ".tmp"
     with open(staged, "w", encoding="utf-8") as handle:
         handle.writelines(lines[-keep:])
@@ -3392,6 +3460,64 @@ def read_events(vault_path=None, limit=None):
     if limit and limit > 0:
         return out[-limit:]
     return out
+
+
+def verify_events(vault_path=None):
+    """Check the event log's hash chain (roadmap 18).
+
+    Returns {status, checked, broken_at, from_genesis}:
+    - "empty"   : no log yet.
+    - "unkeyed" : the chain key is missing, so nothing can be verified.
+    - "ok"      : every chained link is intact.
+    - "broken"  : a link failed; broken_at is the 1-based line number of the
+                  earliest edited, inserted or removed entry.
+    from_genesis is True only when the chain is intact all the way back to the
+    first line ever written; it is False after a legitimate prune (the anchor
+    MAC stands in for the dropped head) or across a pre-5.10.0 unchained line.
+    """
+    empty = {"status": "empty", "checked": 0, "broken_at": 0, "from_genesis": False}
+    target = vault_path or _audit_target()
+    if not target:
+        return empty
+    path = events_path(target)
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            lines = [ln for ln in handle.read().splitlines() if ln]
+    except OSError:
+        return empty
+    if not lines:
+        return empty
+    try:
+        with open(path + ".key", "r", encoding="utf-8") as handle:
+            key = bytes.fromhex(handle.read().strip())
+        if len(key) != 32:
+            raise ValueError
+    except (OSError, ValueError):
+        return {"status": "unkeyed", "checked": len(lines),
+                "broken_at": 0, "from_genesis": False}
+    try:
+        with open(path + ".anchor", "r", encoding="utf-8") as handle:
+            anchor = handle.read().strip() or EVENT_MAC_GENESIS
+    except OSError:
+        anchor = EVENT_MAC_GENESIS
+    from_genesis = anchor == EVENT_MAC_GENESIS
+    prev_mac = anchor
+    for i, line in enumerate(lines):
+        fields = line.split("\t")
+        core = "\t".join(fields[:4]) if len(fields) >= 4 else line
+        mac = fields[4] if len(fields) >= 5 else ""
+        if not mac:
+            # A line written before 5.10.0 carries no MAC and cannot be
+            # verified; it re-anchors the chain rather than failing it.
+            from_genesis = False
+            prev_mac = EVENT_MAC_GENESIS
+            continue
+        if mac != _event_mac(key, prev_mac, core):
+            return {"status": "broken", "checked": len(lines),
+                    "broken_at": i + 1, "from_genesis": False}
+        prev_mac = mac
+    return {"status": "ok", "checked": len(lines),
+            "broken_at": 0, "from_genesis": from_genesis}
 
 
 def _scope_of(vault_path):
@@ -6843,6 +6969,65 @@ def twofa_gap_findings(plaintext, catalogue=None):
     return findings
 
 
+def insecure_url_ids(plaintext):
+    """Password record ids whose URL is plain http:// (roadmap 17).
+
+    Autofill is already refused on http pages; this names the stored entries
+    that carry an insecure URL so they can be moved to https. On-device.
+    """
+    ids = []
+    rows, _ = _password_security_rows(plaintext)
+    for parts in rows:
+        url = (parts[6] if len(parts) > 6 else "").strip().lower()
+        if url.startswith("http://"):
+            ids.append(parts[0])
+    return ids
+
+
+# A small set of the most-guessed PINs, plus the structural checks below
+# (all-same, strictly sequential). Deliberately conservative: a value is only
+# ever flagged when it is a short all-digit code AND trivially weak, so a long
+# account number or a random code is never a false positive.
+COMMON_WEAK_PINS = frozenset({
+    "0000", "1111", "2222", "3333", "4444", "5555", "6666", "7777", "8888",
+    "9999", "1234", "4321", "1212", "2121", "1004", "2000", "1010", "1122",
+    "1313", "2001", "6969", "5150", "1231", "1230", "0007", "2580",
+    "000000", "123456", "654321", "111111", "121212", "112233",
+})
+
+
+def _is_weak_pin(value):
+    """True when a value is a short numeric PIN/code that is trivially weak."""
+    v = (value or "").strip().replace(" ", "").replace("-", "")
+    if not v.isdigit() or not (3 <= len(v) <= 8):
+        return False
+    if len(set(v)) == 1:                       # 0000, 111111
+        return True
+    if v in COMMON_WEAK_PINS:
+        return True
+    digits = [int(c) for c in v]
+    ascending = all(digits[i + 1] - digits[i] == 1 for i in range(len(digits) - 1))
+    descending = all(digits[i] - digits[i + 1] == 1 for i in range(len(digits) - 1))
+    return ascending or descending
+
+
+def weak_pin_findings(plaintext):
+    """[{id, type, field}] for typed records carrying a trivially weak PIN/code
+    (roadmap 14). Scans FIELD_SECRET fields whose name mentions a PIN across
+    every typed record; the value itself is never returned. On-device."""
+    findings = []
+    for _index, parsed in iter_records(plaintext):
+        record_type, record_id = parsed[0], parsed[1]
+        values = parsed[3] if len(parsed) > 3 else {}
+        if not isinstance(values, dict):
+            continue
+        for name, value in values.items():
+            if "pin" in (name or "").lower() and _is_weak_pin(value):
+                findings.append({"id": record_id, "type": record_type,
+                                 "field": name})
+    return findings
+
+
 def refresh_breach_catalogue(url, dest, timeout=10, opener=None):
     """Download an updated public breach-domain list to `dest` (roadmap 33).
 
@@ -6920,12 +7105,18 @@ def security_report(plaintext, rotation_days=365, check_breaches=False,
             pass
     reused = [ids for secret, ids in seen.items() if secret and len(ids) > 1]
     reused_flat = [record_id for ids in reused for record_id in ids]
+    # On-device, no network: an http:// URL on a password record (roadmap 17)
+    # and a trivially weak PIN/code on a typed record (roadmap 14).
+    insecure = insecure_url_ids(plaintext)
+    weak_pins = weak_pin_findings(plaintext)
     penalty = min(100, len(weak) * 12 + len(reused_flat) * 10
-                  + len(old) * 4 + len(incomplete) * 3 + len(malformed) * 8)
+                  + len(old) * 4 + len(incomplete) * 3 + len(malformed) * 8
+                  + len(insecure) * 3 + len(weak_pins) * 8)
     report = {
         "score": max(0, 100 - penalty), "passwords": len(rows),
         "weak": weak, "reused": reused, "reused_flat": reused_flat,
         "old": old, "incomplete": incomplete, "malformed": malformed,
+        "insecure": insecure, "weak_pins": weak_pins,
         "rotation_days": rotation_days, "breach_status": "not_checked",
         "breached": [], "account_status": "not_checked", "account_findings": [],
         "twofa_status": "not_checked", "twofa_findings": [],
@@ -8797,6 +8988,9 @@ def main(argv):
                 {"events": read_events(argv[2], limit)}, indent=2) + "\n")
         elif command == "events-path":
             sys.stdout.write(events_path(argv[2]) + "\n")
+        elif command == "events-verify":
+            # events-verify <vault> ; stdout: JSON chain-integrity report.
+            sys.stdout.write(json.dumps(verify_events(argv[2])) + "\n")
         elif command == "scope-id":
             sys.stdout.write(vault_scope_id(argv[2]))
         elif command == "current-version":
