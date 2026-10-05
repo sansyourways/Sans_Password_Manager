@@ -63,3 +63,6 @@ test.md
 # accidental `git add`.
 .nexus/
 SansBACKUP_DEC_25/
+
+# graphify knowledge-graph output (local, regenerable).
+graphify-out/
